@@ -3,14 +3,27 @@
   "$id": "https://example.local/crypto-portfolio-manager/decision.schema.json",
   "title": "Crypto Portfolio Decision",
   "type": "object",
-  "required": ["timestamp", "market_regime", "portfolio_value_usd", "recommendations"],
+  "required": ["timestamp", "market_regime"],
+  "anyOf": [
+    {"required": ["policy_version", "target_weights"]},
+    {"required": ["portfolio_value_usd", "recommendations"]}
+  ],
   "properties": {
     "timestamp": {"type": "string", "format": "date-time"},
+    "policy_version": {"type": "integer", "minimum": 1},
     "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
     "market_regime_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
     "portfolio_value_usd": {"type": "number", "minimum": 0},
     "stablecoin_weight": {"type": "number", "minimum": 0, "maximum": 1},
     "portfolio_drawdown": {"type": ["number", "null"], "minimum": -1, "maximum": 0},
+    "current_weights": {
+      "type": "object",
+      "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+    },
+    "target_weights": {
+      "type": "object",
+      "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+    },
     "config": {
       "type": "object",
       "properties": {
@@ -18,31 +31,31 @@
           "type": "array",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true,
-          "default": ["BTC", "ETH"]
+          "description": "Resolved from config/policy.json unless explicitly overridden."
         },
         "satellite_symbols": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true,
-          "default": ["SOL", "BNB", "LINK", "AAVE"]
+          "description": "Resolved from config/policy.json unless explicitly overridden."
         },
         "stable_symbols": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},
           "uniqueItems": true,
-          "default": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"]
+          "description": "Resolved from config/policy.json unless explicitly overridden."
         },
         "min_stablecoin_weight": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.1
+          "description": "Resolved from config/policy.json unless explicitly overridden."
         },
         "max_portfolio_drawdown": {
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 1,
-          "default": 0.2
+          "description": "Resolved from config/policy.json unless explicitly overridden."
         }
       },
       "additionalProperties": false
@@ -56,6 +69,28 @@
       },
       "additionalProperties": false
     },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "evidence.schema.json"},
+          {"type": "string", "minLength": 1}
+        ]
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "factor_scores": {"type": "object"},
+    "constraints_applied": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "risk_checks": {"type": "array"},
+    "actions": {"type": "array"},
+    "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
     "recommendations": {
       "type": "array",
       "items": {

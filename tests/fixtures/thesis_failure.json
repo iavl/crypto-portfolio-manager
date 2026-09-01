@@ -1,0 +1,6 @@
+{
+  "current_weights": {"BTC": 0.40, "SOL": 0.20, "USDT": 0.40},
+  "target_weights": {"BTC": 0.50, "SOL": 0.10, "USDT": 0.40},
+  "portfolio_value": 10000,
+  "thesis_broken": ["SOL"]
+}

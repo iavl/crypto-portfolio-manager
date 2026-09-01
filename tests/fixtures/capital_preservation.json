@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-09-01T00:00:00Z",
+  "regime_inputs": {
+    "btc_trend": "HEALTHY",
+    "volatility_state": "LOW",
+    "portfolio_drawdown_band": "NORMAL",
+    "flow_state": "NEUTRAL",
+    "breadth_state": "HEALTHY",
+    "systemic_event_risk": true
+  },
+  "positions": [
+    {"symbol": "BTC", "value_usd": 5000},
+    {"symbol": "ETH", "value_usd": 2000},
+    {"symbol": "SOL", "value_usd": 1000},
+    {"symbol": "USDC", "value_usd": 2000}
+  ],
+  "assessments": {
+    "SOL": {"score": 90, "confidence": "HIGH"}
+  }
+}

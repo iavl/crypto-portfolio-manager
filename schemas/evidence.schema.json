@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/evidence.schema.json",
+  "title": "Portfolio Evidence",
+  "type": "object",
+  "required": [
+    "id",
+    "asset",
+    "factor",
+    "source",
+    "observed_at",
+    "fetched_at",
+    "freshness",
+    "confidence"
+  ],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "asset": {"type": "string", "minLength": 1},
+    "factor": {"type": "string", "minLength": 1},
+    "source": {"type": "string", "minLength": 1},
+    "observed_at": {"type": "string", "minLength": 1},
+    "fetched_at": {"type": "string", "minLength": 1},
+    "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
+    "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+    "value": {},
+    "summary": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

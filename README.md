@@ -1,18 +1,47 @@
 # crypto-portfolio-manager
 
-A conservative-balanced, medium-term crypto portfolio management Skill for Codex / Agent Skills compatible environments.
+An AI-assisted, conservative-balanced crypto portfolio research Skill with a
+deterministic portfolio accounting, risk, allocation, and rebalance engine.
+It is spot-only and intended for a medium-term 6–12 month horizon.
 
 ## What it does
 
-- Reviews exchange portfolio screenshots or structured holdings.
-- Uses current market, trend, flow, on-chain, fundamental, and event data.
-- Treats BTC and ETH as the default core assets; the core list is configurable per snapshot.
-- Allows selective large-cap satellites such as SOL, BNB, LINK, and AAVE.
-- Uses a default 20% portfolio drawdown risk budget and a default 10% stablecoin/cash floor; both are configurable per snapshot.
-- Generates increase/reduce/hold/exit/no-trade decisions and staged execution zones.
-- Benchmarks against 100% BTC and 70% BTC / 30% ETH.
-- Supports append-oriented portfolio and decision history.
-- Never auto-executes trades.
+- Loads one canonical policy from `config/policy.json`.
+- Validates and classifies structured holdings deterministically.
+- Separates Agent research and bounded judgments from Python accounting and
+  portfolio mathematics.
+- Uses unitized NAV so deposits and withdrawals do not become investment
+  returns or losses.
+- Produces reproducible scoring, market-regime, target-allocation, risk-gate,
+  and rebalance results.
+- Preserves structured evidence, factor scores, and append-only decision
+  history.
+- Benchmarks portfolios over aligned periods against the configured BTC and
+  BTC/ETH benchmarks.
+
+## What it is not
+
+This is not an automatic trading bot, short-term trading system, leverage or
+margin system, futures/perpetuals system, or custodial exchange integration.
+It creates proposed actions and execution zones only; it never places real
+orders.
+
+## Architecture
+
+The flow is:
+
+```text
+Agent evidence and judgments
+        ↓
+policy → models → ledger/metrics → scoring → regime
+        ↓
+allocation → risk gate → rebalance → execution-plan validation
+        ↓
+Chinese report and optional append-only history
+```
+
+Market-data provider protocols are extension points only; this repository does
+not yet implement exchange or web-data integrations.
 
 ## Install
 
@@ -26,28 +55,40 @@ The Skill intentionally keeps data retrieval abstract in v1. The runtime should 
 python -m unittest discover -s tests -v
 ```
 
+On systems without a `python` alias, use `python3 -m unittest discover -s tests -v`.
+
 Normalize a structured snapshot:
 
 ```bash
 python scripts/portfolio_snapshot.py path/to/snapshot.json
 ```
 
-Optional per-snapshot configuration:
+Optional per-snapshot policy overrides:
 
 ```json
 {
-  "config": {
-    "core_symbols": ["BTC", "ETH"],
-    "satellite_symbols": ["SOL", "BNB", "LINK", "AAVE"],
-    "stable_symbols": ["USDT", "USDC"],
-    "min_stablecoin_weight": 0.10,
-    "max_portfolio_drawdown": 0.20
-  }
+  "timestamp": "2026-09-01T00:00:00Z",
+  "positions": [
+    {"symbol": "BTC", "value_usd": 8000},
+    {"symbol": "USDC", "value_usd": 2000}
+  ],
+  "config": {"min_stablecoin_weight": 0.10}
 }
 ```
 
-Omit `config`, or any individual field, to use the documented defaults. Symbol lists replace the defaults, must not overlap, and unlisted assets are classified as `other` unless a position explicitly provides `asset_type`.
+Omit `config`, or any individual field, to use the canonical policy. Symbol
+lists replace their policy groups, must not overlap, and an explicit position
+type is accepted only when it matches policy classification.
 
 ## Safety boundary
 
-This project creates portfolio analysis and proposed execution plans. It does not contain exchange trading credentials or automatic order execution.
+This project creates portfolio analysis and proposed execution plans. It does
+not contain exchange trading credentials or automatic order execution.
+
+## Privacy
+
+Real portfolio quantities, balances, cost basis, transaction history, and other
+financial data must be stored outside this Git repository. The default runtime
+location is `~/.local/share/crypto-portfolio-manager/`; set
+`CRYPTO_PORTFOLIO_DATA_DIR` to override it. Repository `data/` directories are
+reserved for fake fixtures and `.gitkeep` files.

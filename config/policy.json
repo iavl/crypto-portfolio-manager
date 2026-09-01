@@ -1,0 +1,59 @@
+{
+  "policy_version": 1,
+  "investment_horizon_months": {
+    "min": 6,
+    "max": 12
+  },
+  "universe": {
+    "core": ["BTC", "ETH"],
+    "satellites": ["SOL", "BNB", "LINK", "AAVE"],
+    "stable": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"]
+  },
+  "risk": {
+    "min_stablecoin_weight": 0.1,
+    "max_portfolio_drawdown": 0.2
+  },
+  "benchmarks": {
+    "primary": {"BTC": 1.0},
+    "secondary": {"BTC": 0.7, "ETH": 0.3}
+  },
+  "rebalance": {
+    "hold_below_pp": 3,
+    "watch_below_pp": 5,
+    "high_priority_above_pp": 10
+  },
+  "scoring_weights": {
+    "trend": 0.25,
+    "valuation": 0.2,
+    "fundamentals": 0.2,
+    "onchain": 0.1,
+    "capital_flows": 0.1,
+    "relative_strength_btc": 0.1,
+    "event_risk": 0.05
+  },
+  "regimes": {
+    "NORMAL": {
+      "stablecoin_target": 0.1,
+      "satellite_max": 0.25,
+      "core_risky_min": 0.5,
+      "single_asset_max": 0.5
+    },
+    "DEFENSIVE": {
+      "stablecoin_target": 0.25,
+      "satellite_max": 0.15,
+      "core_risky_min": 0.5,
+      "single_asset_max": 0.5
+    },
+    "CAPITAL_PRESERVATION": {
+      "stablecoin_target": 0.5,
+      "satellite_max": 0.05,
+      "core_risky_min": 0.0,
+      "single_asset_max": 0.4
+    }
+  },
+  "allocation": {
+    "satellite_min_score": 65,
+    "core_min_score": 50,
+    "low_confidence_satellite_weight": 0.0
+  }
+}

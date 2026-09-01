@@ -1,0 +1,7 @@
+{
+  "timestamp": "2026-09-01T00:00:00Z",
+  "positions": [
+    {"symbol": "BTC", "value_usd": 95},
+    {"symbol": "USDC", "value_usd": 5}
+  ]
+}

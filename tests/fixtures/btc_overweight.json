@@ -1,0 +1,5 @@
+{
+  "current_weights": {"BTC": 0.70, "USDC": 0.30},
+  "target_weights": {"BTC": 0.50, "USDC": 0.50},
+  "portfolio_value": 10000
+}

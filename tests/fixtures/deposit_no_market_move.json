@@ -1,0 +1,6 @@
+{
+  "snapshots": [
+    {"timestamp": "2026-09-01T00:00:00Z", "portfolio_value": 20000},
+    {"timestamp": "2026-09-02T00:00:00Z", "portfolio_value": 25000, "external_cash_flow": 5000}
+  ]
+}

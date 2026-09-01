@@ -1,0 +1,40 @@
+"""Minimal provider protocols; implementations must normalize their own output."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Mapping, Protocol, Sequence
+
+
+class MarketDataProvider(Protocol):
+    def prices(
+        self,
+        symbols: Sequence[str],
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
+        """Return normalized spot observations without portfolio-side effects."""
+
+
+class FundamentalDataProvider(Protocol):
+    def fundamentals(self, symbols: Sequence[str]) -> Mapping[str, Mapping[str, Any]]:
+        """Return normalized asset fundamental observations."""
+
+
+class OnchainDataProvider(Protocol):
+    def onchain(self, symbols: Sequence[str]) -> Mapping[str, Mapping[str, Any]]:
+        """Return normalized on-chain observations."""
+
+
+class EventDataProvider(Protocol):
+    def events(self, symbols: Sequence[str]) -> Mapping[str, Sequence[Mapping[str, Any]]]:
+        """Return normalized security, governance, and regulatory events."""
+
+
+__all__ = [
+    "EventDataProvider",
+    "FundamentalDataProvider",
+    "MarketDataProvider",
+    "OnchainDataProvider",
+]
