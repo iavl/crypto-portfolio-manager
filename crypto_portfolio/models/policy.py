@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -32,6 +32,7 @@ _TOP_LEVEL_FIELDS = {
     "scoring",
     "regimes",
     "allocation",
+    "execution",
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -50,6 +51,28 @@ _SCORING_FIELDS = {
     "medium_confidence_min_coverage",
     "minimum_investable_coverage",
 }
+_EXECUTION_FIELDS = {
+    "timeframe",
+    "preferred_history_days",
+    "minimum_history_days",
+    "max_fetched_age_days",
+    "moving_average_windows",
+    "atr_period",
+    "realized_volatility_windows",
+    "volatility_annualization_days",
+    "volume_average_window",
+    "swing_window",
+    "max_tranches",
+    "zone_half_width_atr",
+    "minimum_zone_separation_atr",
+    "volatility_atr_percent",
+    "confidence_deployment_factor",
+    "max_initial_tranche",
+    "tranche_templates",
+    "breakout",
+}
+_VOLATILITY_FIELDS = {"low_max", "normal_max", "high_max"}
+_BREAKOUT_FIELDS = {"minimum_relative_volume", "max_atr_extension", "max_initial_tranche"}
 _OVERRIDE_FIELDS = {
     "core_symbols",
     "satellite_symbols",
@@ -137,6 +160,7 @@ class Policy:
     scoring: Mapping[str, float]
     regimes: Mapping[str, RegimeLimits]
     allocation: Mapping[str, Any]
+    execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -203,6 +227,7 @@ class Policy:
                 for name, limits in self.regimes.items()
             },
             "allocation": dict(self.allocation),
+            **({"execution": dict(self.execution)} if self.execution else {}),
         }
 
     def legacy_config(self) -> dict[str, Any]:
@@ -261,11 +286,166 @@ def _check_overlaps(core: tuple[str, ...], satellites: tuple[str, ...], stable: 
             owners[symbol] = name
 
 
-def _parse_policy(data: Any) -> Policy:
+def _integer_list(value: Any, name: str, *, exact: tuple[int, ...] | None = None) -> list[int]:
+    if not isinstance(value, list) or not value:
+        raise PolicyError(f"{name} must be a non-empty list of integers")
+    result = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+            raise PolicyError(f"{name}[{index}] must be a positive integer")
+        result.append(item)
+    if result != sorted(set(result)):
+        raise PolicyError(f"{name} must be strictly increasing")
+    if exact is not None and tuple(result) != exact:
+        raise PolicyError(f"{name} must equal {list(exact)}")
+    return result
+
+
+def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("execution must be an object")
+    _unknown_fields(value, _EXECUTION_FIELDS, "execution")
+    if set(value) != _EXECUTION_FIELDS:
+        raise PolicyError("execution fields are incomplete")
+    timeframe = value["timeframe"]
+    if not isinstance(timeframe, str) or timeframe.strip().upper() != "1D":
+        raise PolicyError("execution.timeframe must be 1D")
+    preferred = _number(value["preferred_history_days"], "execution.preferred_history_days", minimum=1)
+    minimum = _number(value["minimum_history_days"], "execution.minimum_history_days", minimum=1)
+    if not preferred.is_integer() or not minimum.is_integer() or minimum > preferred:
+        raise PolicyError("execution history days must be ordered positive integers")
+    moving_average_windows = _integer_list(
+        value["moving_average_windows"],
+        "execution.moving_average_windows",
+        exact=(20, 50, 100, 200),
+    )
+    realized_windows = _integer_list(
+        value["realized_volatility_windows"],
+        "execution.realized_volatility_windows",
+        exact=(30, 90),
+    )
+    def positive_int(raw: Any, name: str) -> int:
+        number = _number(raw, name, minimum=1)
+        if not number.is_integer():
+            raise PolicyError(f"{name} must be a positive integer")
+        return int(number)
+
+    max_tranches = positive_int(value["max_tranches"], "execution.max_tranches")
+    if max_tranches > 3:
+        raise PolicyError("execution.max_tranches must be <= 3")
+    zone_half_width = _number(value["zone_half_width_atr"], "execution.zone_half_width_atr", minimum=0.0)
+    separation = _number(
+        value["minimum_zone_separation_atr"],
+        "execution.minimum_zone_separation_atr",
+        minimum=0.0,
+    )
+    if zone_half_width <= 0 or separation <= 0:
+        raise PolicyError("execution ATR zone settings must be > 0")
+
+    volatility = value["volatility_atr_percent"]
+    if not isinstance(volatility, dict):
+        raise PolicyError("execution.volatility_atr_percent must be an object")
+    _unknown_fields(volatility, _VOLATILITY_FIELDS, "execution.volatility_atr_percent")
+    if set(volatility) != _VOLATILITY_FIELDS:
+        raise PolicyError("execution.volatility_atr_percent fields are incomplete")
+    volatility_limits = {
+        key: _number(item, f"execution.volatility_atr_percent.{key}", minimum=0.0, maximum=1.0)
+        for key, item in volatility.items()
+    }
+    if not (
+        0 < volatility_limits["low_max"] < volatility_limits["normal_max"] < volatility_limits["high_max"]
+    ):
+        raise PolicyError("execution volatility thresholds must be strictly ordered and > 0")
+
+    max_initial = value["max_initial_tranche"]
+    if not isinstance(max_initial, dict) or set(max_initial) != set(_REGIMES):
+        raise PolicyError("execution.max_initial_tranche must contain all regimes")
+    max_initial_parsed = {key: _fraction(item, f"execution.max_initial_tranche.{key}", exclusive_minimum=True) for key, item in max_initial.items()}
+    if not (
+        max_initial_parsed["NORMAL"] >= max_initial_parsed["DEFENSIVE"] >= max_initial_parsed["CAPITAL_PRESERVATION"]
+    ):
+        raise PolicyError("execution.max_initial_tranche must not increase in worse regimes")
+
+    confidence_factor = value["confidence_deployment_factor"]
+    if not isinstance(confidence_factor, dict) or set(confidence_factor) != {"HIGH", "MEDIUM", "LOW"}:
+        raise PolicyError("execution.confidence_deployment_factor must contain HIGH, MEDIUM, and LOW")
+    parsed_confidence_factor = {
+        key: _fraction(item, f"execution.confidence_deployment_factor.{key}")
+        for key, item in confidence_factor.items()
+    }
+
+    templates = value["tranche_templates"]
+    template_names = {"NORMAL_LOW_VOL", "NORMAL_HIGH_VOL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
+    if not isinstance(templates, dict) or set(templates) != template_names:
+        raise PolicyError("execution.tranche_templates must contain the configured template names")
+    parsed_templates: dict[str, list[float]] = {}
+    for name, raw_template in templates.items():
+        if not isinstance(raw_template, list) or not 1 <= len(raw_template) <= max_tranches:
+            raise PolicyError(f"execution.tranche_templates.{name} must contain 1 to max_tranches fractions")
+        parsed_template = [_fraction(item, f"execution.tranche_templates.{name}[{index}]", exclusive_minimum=True) for index, item in enumerate(raw_template)]
+        if not math.isclose(sum(parsed_template), 1.0, abs_tol=1e-9):
+            raise PolicyError(f"execution.tranche_templates.{name} must sum to 1")
+        parsed_templates[name] = parsed_template
+
+    breakout = value["breakout"]
+    if not isinstance(breakout, dict):
+        raise PolicyError("execution.breakout must be an object")
+    _unknown_fields(breakout, _BREAKOUT_FIELDS, "execution.breakout")
+    if set(breakout) != _BREAKOUT_FIELDS:
+        raise PolicyError("execution.breakout fields are incomplete")
+    parsed_breakout = {
+        "minimum_relative_volume": _number(
+            breakout["minimum_relative_volume"],
+            "execution.breakout.minimum_relative_volume",
+            minimum=0.0,
+        ),
+        "max_atr_extension": _number(
+            breakout["max_atr_extension"],
+            "execution.breakout.max_atr_extension",
+            minimum=0.0,
+        ),
+        "max_initial_tranche": _fraction(
+            breakout["max_initial_tranche"],
+            "execution.breakout.max_initial_tranche",
+            exclusive_minimum=True,
+        ),
+    }
+    if parsed_breakout["minimum_relative_volume"] <= 0 or parsed_breakout["max_atr_extension"] <= 0:
+        raise PolicyError("execution breakout thresholds must be > 0")
+    return {
+        "timeframe": "1D",
+        "preferred_history_days": int(preferred),
+        "minimum_history_days": int(minimum),
+        "max_fetched_age_days": positive_int(value["max_fetched_age_days"], "execution.max_fetched_age_days"),
+        "moving_average_windows": moving_average_windows,
+        "atr_period": positive_int(value["atr_period"], "execution.atr_period"),
+        "realized_volatility_windows": realized_windows,
+        "volatility_annualization_days": positive_int(
+            value["volatility_annualization_days"],
+            "execution.volatility_annualization_days",
+        ),
+        "volume_average_window": positive_int(value["volume_average_window"], "execution.volume_average_window"),
+        "swing_window": positive_int(value["swing_window"], "execution.swing_window"),
+        "max_tranches": max_tranches,
+        "zone_half_width_atr": zone_half_width,
+        "minimum_zone_separation_atr": separation,
+        "volatility_atr_percent": volatility_limits,
+        "confidence_deployment_factor": parsed_confidence_factor,
+        "max_initial_tranche": max_initial_parsed,
+        "tranche_templates": parsed_templates,
+        "breakout": parsed_breakout,
+    }
+
+
+def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
     _unknown_fields(data, _TOP_LEVEL_FIELDS, "policy")
     missing = sorted(_TOP_LEVEL_FIELDS - set(data))
+    if allow_missing_execution and missing == ["execution"]:
+        missing = []
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(missing)}")
 
@@ -441,6 +621,7 @@ def _parse_policy(data: Any) -> Policy:
         scoring=parsed_scoring,
         regimes=parsed_regimes,
         allocation=parsed_allocation,
+        execution=_parse_execution(data.get("execution"), allow_missing=allow_missing_execution),
     )
 
 
@@ -458,7 +639,7 @@ def load_policy(
 
 def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
     """Parse an embedded resolved policy for historical-state replay."""
-    return _parse_policy(dict(data))
+    return _parse_policy(dict(data), allow_missing_execution=True)
 
 
 def resolve_policy(

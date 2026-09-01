@@ -5,8 +5,23 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping, Protocol, Sequence
 
+from ..models.market import OHLCVSeries
+
 
 class MarketDataProvider(Protocol):
+    def candles(
+        self,
+        symbol: str,
+        *,
+        timeframe: str = "1D",
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> OHLCVSeries:
+        """Return normalized OHLCV candles without portfolio-side effects."""
+
+    def spot_price(self, symbol: str) -> float:
+        """Return a normalized current spot observation."""
+
     def prices(
         self,
         symbols: Sequence[str],

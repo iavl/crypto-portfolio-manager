@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/execution-plan.schema.json",
+  "title": "Deterministic Crypto Execution Plan",
+  "type": "object",
+  "required": [
+    "execution_plan_version",
+    "symbol",
+    "action",
+    "approved_amount_usd",
+    "planned_amount_usd",
+    "unallocated_amount_usd",
+    "current_price",
+    "entry_mode",
+    "technical_confidence",
+    "tranches",
+    "invalidation",
+    "rationale",
+    "ohlcv_hash"
+  ],
+  "properties": {
+    "execution_plan_version": {"type": "integer", "minimum": 1},
+    "symbol": {"type": "string", "minLength": 1},
+    "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
+    "approved_amount_usd": {"type": "number", "minimum": 0},
+    "planned_amount_usd": {"type": "number", "minimum": 0},
+    "unallocated_amount_usd": {"type": "number", "minimum": 0},
+    "current_price": {"type": "number", "exclusiveMinimum": 0},
+    "entry_mode": {"type": "string", "enum": ["PULLBACK", "BREAKOUT", "MIXED", "WAIT"]},
+    "technical_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+    "tranches": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/tranche"}
+    },
+    "invalidation": {"type": ["object", "string", "null"]},
+    "rationale": {"type": "string"},
+    "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "ohlcv_metadata": {"type": ["object", "null"]}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "tranche": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "allocation_fraction",
+        "amount_usd",
+        "price_low",
+        "price_high",
+        "reference_price",
+        "estimated_quantity",
+        "rationale",
+        "structural_sources",
+        "zone_quality"
+      ],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1},
+        "allocation_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "amount_usd": {"type": "number", "exclusiveMinimum": 0},
+        "price_low": {"type": "number", "exclusiveMinimum": 0},
+        "price_high": {"type": "number", "exclusiveMinimum": 0},
+        "reference_price": {"type": "number", "exclusiveMinimum": 0},
+        "estimated_quantity": {"type": "number", "exclusiveMinimum": 0},
+        "rationale": {"type": "string"},
+        "structural_sources": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "zone_quality": {"type": "number", "minimum": 0, "maximum": 100}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -25,6 +25,8 @@ Trading:  advisory only; no automatic execution
 - Preserves evidence, factor scores, and append-only decision history.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.
 - Treats stablecoins and cash as one sleeve and permits `NO_TRADE`.
+- Stages an approved rebalance amount from completed OHLCV with deterministic
+  ATR-aware zones, confirmed swings, tranches, and `WAIT` handling.
 
 ## Safety / What It Is Not
 
@@ -34,6 +36,10 @@ orders and does not request exchange trading or withdrawal permissions.
 It is not a short-term trading bot, leveraged or margin system,
 futures/perpetuals system, or custodial exchange integration. Never provide
 private keys, seed phrases, or trading credentials.
+
+Portfolio allocation decides total USD exposure. The technical execution layer
+only decides how to stage that already-approved amount; it may deploy less and
+does not place orders.
 
 ## Requirements
 

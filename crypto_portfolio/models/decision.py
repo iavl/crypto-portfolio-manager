@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .evidence import AssetAssessment, Evidence, FactorScore
+from .execution import ExecutionPlan
 from .policy import policy_hash
 from .time import normalize_timestamp
 
@@ -56,6 +57,7 @@ class Decision:
     review_type: str = "SNAPSHOT_REVIEW"
     decision_id: str | None = None
     based_on_snapshot_id: str | None = None
+    execution_plans: Mapping[str, ExecutionPlan | Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -116,6 +118,19 @@ class Decision:
                 if not isinstance(value, str) or not value.strip():
                     raise ValueError(f"{field} must be a non-empty string or null")
                 object.__setattr__(self, field, value.strip())
+        if self.execution_plans is not None:
+            if not isinstance(self.execution_plans, Mapping):
+                raise ValueError("execution_plans must be an object or null")
+            parsed_plans: dict[str, ExecutionPlan] = {}
+            for symbol, value in self.execution_plans.items():
+                normalized_symbol = str(symbol).strip().upper()
+                if not normalized_symbol:
+                    raise ValueError("execution_plans contains an empty symbol")
+                plan = value if isinstance(value, ExecutionPlan) else ExecutionPlan.from_mapping(value)
+                if plan.symbol != normalized_symbol:
+                    raise ValueError(f"execution plan symbol {normalized_symbol} does not match mapping key")
+                parsed_plans[normalized_symbol] = plan
+            object.__setattr__(self, "execution_plans", parsed_plans)
         if self.policy_hash is not None:
             if not isinstance(self.policy_hash, str) or len(self.policy_hash) != 64:
                 raise ValueError("policy_hash must be a SHA-256 hex digest")
@@ -182,6 +197,7 @@ class Decision:
             review_type=data.get("review_type", "SNAPSHOT_REVIEW"),
             decision_id=data.get("decision_id"),
             based_on_snapshot_id=data.get("based_on_snapshot_id"),
+            execution_plans=data.get("execution_plans"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -214,6 +230,10 @@ class Decision:
             result["based_on_snapshot_id"] = self.based_on_snapshot_id
         if self.config is not None:
             result["config"] = dict(self.config)
+        if self.execution_plans is not None:
+            result["execution_plans"] = {
+                symbol: plan.as_dict() for symbol, plan in self.execution_plans.items()
+            }
         return result
 
 

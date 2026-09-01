@@ -79,6 +79,20 @@ python3 scripts/portfolio_snapshot.py portfolio.json
 The command validates and normalizes the snapshot only. It does not fetch live
 market data or produce a complete investment decision.
 
+## Staged execution data
+
+After the portfolio/rebalance engine approves an `INCREASE` amount, the Skill
+requests the current spot price and normalized completed `1D` OHLCV. Provide at
+least 120 completed daily candles and preferably 365; include volume when the
+source is consistent and reliable. `TechnicalSnapshot` computes MA20/50/100/200,
+30D/90D/180D returns, ATR14, realized volatility, relative volume, history
+drawdown, and confirmed swings before selecting ATR-aware support zones.
+
+The technical execution layer is downstream of allocation: it cannot increase
+the approved USD amount, can leave funds unallocated, and may return `WAIT`.
+Estimated quantities are approximate (`amount_usd / reference_price`) and
+invalidation is a review trigger, not an automatic stop order.
+
 Snapshot-level policy overrides may be supplied in the top-level `config`
 object. Omit `config`, or an individual field, to use the canonical policy:
 

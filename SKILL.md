@@ -24,9 +24,10 @@ judgment and user-facing decisions:
 - `references/output-template.md`
 
 The canonical policy controls asset groups, risk limits, benchmarks, scoring
-weights, regime envelopes, and rebalance thresholds. Python models and engine
-modules perform validation and mathematics; the Agent supplies current
-evidence, bounded qualitative judgments, explanations, and execution zones.
+weights, regime envelopes, rebalance thresholds, and technical execution
+constants. Python models and engine modules perform validation and mathematics;
+the Agent supplies current evidence, bounded qualitative judgments, and
+explanations.
 
 ## Ordered workflow
 
@@ -49,16 +50,35 @@ evidence, bounded qualitative judgments, explanations, and execution zones.
 15. Run the rebalance engine.
 16. Reconcile executable trade dollars.
 17. Evaluate `NO_TRADE` before proposing a transaction.
-18. Build structure-based execution zones only when required.
-19. Validate execution zones with `validate_execution_plan`.
+18. After a rebalance approves a trade amount, obtain current spot price and
+    normalized completed daily OHLCV.
+19. Build `TechnicalSnapshot`, run the deterministic entry planner, and validate
+    the resulting `ExecutionPlan` with `validate_execution_plan`.
 20. Produce the Chinese user-facing report using
     `references/output-template.md`.
-21. Persist only validated snapshots, decisions, and complete evidence. Never
+21. Persist only validated snapshots, decisions, execution plans, and complete
+    evidence. Never
     rewrite prior rationale or mark a trade executed without explicit
     confirmation or a trusted later read-only snapshot.
 
 When the user explicitly requests a dry run or no persistence, do not append
 runtime state.
+
+## Deterministic staged execution
+
+The portfolio engine remains authoritative for total USD exposure:
+
+```text
+rebalance approved amount -> completed daily OHLCV -> TechnicalSnapshot
+-> structural zones -> tranches and estimated quantities -> validated plan
+```
+
+Use at least 120 completed daily candles, preferably 365, plus current spot
+price and reliable volume where available. When adequate OHLCV exists, do not
+manually invent moving averages, ATR, swing levels, zone prices, tranche
+arithmetic, or estimated quantities. The technical engine may return `WAIT` or
+leave part of the approved amount unallocated, but it can never increase the
+approved amount or place an order.
 
 ## Accounting and missing data
 

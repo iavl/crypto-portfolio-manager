@@ -71,5 +71,46 @@
       "high_beta": 0.5,
       "high": 0.5
     }
+  },
+  "execution": {
+    "timeframe": "1D",
+    "preferred_history_days": 365,
+    "minimum_history_days": 120,
+    "max_fetched_age_days": 7,
+    "moving_average_windows": [20, 50, 100, 200],
+    "atr_period": 14,
+    "realized_volatility_windows": [30, 90],
+    "volatility_annualization_days": 365,
+    "volume_average_window": 20,
+    "swing_window": 5,
+    "max_tranches": 3,
+    "zone_half_width_atr": 0.25,
+    "minimum_zone_separation_atr": 0.75,
+    "volatility_atr_percent": {
+      "low_max": 0.03,
+      "normal_max": 0.06,
+      "high_max": 0.10
+    },
+    "confidence_deployment_factor": {
+      "HIGH": 1.0,
+      "MEDIUM": 0.70,
+      "LOW": 0.0
+    },
+    "max_initial_tranche": {
+      "NORMAL": 0.50,
+      "DEFENSIVE": 0.35,
+      "CAPITAL_PRESERVATION": 0.20
+    },
+    "tranche_templates": {
+      "NORMAL_LOW_VOL": [0.50, 0.30, 0.20],
+      "NORMAL_HIGH_VOL": [0.30, 0.35, 0.35],
+      "DEFENSIVE": [0.20, 0.30, 0.50],
+      "CAPITAL_PRESERVATION": [0.20, 0.30, 0.50]
+    },
+    "breakout": {
+      "minimum_relative_volume": 1.20,
+      "max_atr_extension": 2.00,
+      "max_initial_tranche": 0.20
+    }
   }
 }

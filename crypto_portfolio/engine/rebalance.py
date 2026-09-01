@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from ..models.execution import ExecutionPlan
 from ..models.policy import Policy, resolve_policy
 
 
@@ -320,8 +321,12 @@ def rebalance(
     )
 
 
-def validate_execution_plan(plan: Mapping[str, Any] | Iterable[Mapping[str, Any]]) -> bool:
+def validate_execution_plan(plan: ExecutionPlan | Mapping[str, Any] | Iterable[Mapping[str, Any]]) -> bool:
     """Validate staged execution zones without generating price zones."""
+    if isinstance(plan, ExecutionPlan) or (isinstance(plan, Mapping) and ({"tranches", "execution_plan_version"} & set(plan))):
+        from .execution import validate_execution_plan as validate_typed_execution_plan
+
+        return validate_typed_execution_plan(plan)
     zones = plan.get("execution_zones") if isinstance(plan, Mapping) else plan
     if not isinstance(zones, (list, tuple)) or not zones:
         raise ValueError("execution plan must contain a non-empty execution_zones list")

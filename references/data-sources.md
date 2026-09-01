@@ -44,6 +44,14 @@ Need:
 - preferably 1Y history for cycle/historical context;
 - volume and volatility when reliable.
 
+The execution layer consumes normalized `OHLCVSeries` data on the `1D`
+timeframe. Indicators use only completed candles; current spot is a separate
+observation. The preferred minimum is 120 completed candles and the preferred
+coverage is 365. Preserve source, fetched time, range, candle count, and the
+canonical SHA-256 OHLCV hash for replay.
+`ATR14` uses a simple mean of the latest 14 true ranges in v1, so replay does
+not depend on a library-specific Wilder-ATR convention.
+
 ### BTC market context
 
 Useful:
@@ -99,6 +107,10 @@ Use judgment, but default to:
 - token unlocks: current official/credible schedule.
 
 Always state when a key data series is materially stale.
+
+Use one consistent volume source across the lookback. If volume is unavailable,
+inconsistent, or explicitly marked unreliable, report `volume_state=UNKNOWN`
+and reduce technical confidence rather than treating it as zero.
 
 ## Missing data
 

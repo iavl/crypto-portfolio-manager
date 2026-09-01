@@ -76,7 +76,8 @@ Prefer staged entries when:
 
 Possible tranche structures are context-dependent, such as 30/35/35 or 25/35/40. These are examples, not fixed formulas.
 
-Choose zones using:
+Choose zones with the deterministic execution engine after rebalance approval,
+using:
 
 - support/resistance;
 - prior swing levels;
@@ -86,6 +87,10 @@ Choose zones using:
 - invalidation point.
 
 Avoid arbitrary “-5%, -10%, -15%” ladders without structural justification.
+The engine may deploy less than the approved amount or return `WAIT` when
+history, structure, volatility, or freshness is inadequate.
+The v1 `ATR14` is the simple mean of the most recent 14 true ranges; it is not
+silently substituted with Wilder smoothing.
 
 ## Rule 7 — Breakout/chase entries
 
@@ -98,7 +103,9 @@ Allowed only when evidence is unusually strong, such as:
 - no excessive parabolic extension;
 - fundamentals/flows support the move.
 
-Use a smaller initial tranche than a normal pullback entry and define invalidation clearly.
+Use a smaller policy-configured initial tranche than a normal pullback entry and
+define invalidation clearly. Breakout gates must be supplied by the caller;
+OHLCV cannot establish fundamentals or security status.
 
 ## Rule 8 — Reductions and profit-taking
 

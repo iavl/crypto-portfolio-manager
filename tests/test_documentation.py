@@ -24,6 +24,7 @@ class DocumentationTests(unittest.TestCase):
             "references/output-template.md",
             "crypto_portfolio",
             "schemas",
+            "schemas/execution-plan.schema.json",
             "scripts",
         )
         for relative_path in required_paths:

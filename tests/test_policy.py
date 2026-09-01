@@ -20,6 +20,24 @@ class PolicyTests(unittest.TestCase):
         changed = resolve_policy({"min_stablecoin_weight": 0.2})
         self.assertNotEqual(policy.canonical_hash, changed.canonical_hash)
 
+    def test_execution_policy_is_canonical_and_strict(self):
+        policy = load_policy()
+        self.assertEqual(policy.execution["moving_average_windows"], [20, 50, 100, 200])
+        self.assertEqual(policy.execution["minimum_history_days"], 120)
+        changed = json.loads(json.dumps(policy.as_dict()))
+        changed["execution"]["zone_half_width_atr"] = 0.5
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(changed), encoding="utf-8")
+            self.assertNotEqual(policy.canonical_hash, load_policy(path).canonical_hash)
+        invalid = json.loads(json.dumps(policy.as_dict()))
+        invalid["execution"]["moving_average_windows"] = [20, 50]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+
     def test_partial_override_is_explicit_and_uppercase(self):
         policy = resolve_policy({"core_symbols": [" alpha "]})
         self.assertEqual(policy.core_symbols, ("ALPHA",))

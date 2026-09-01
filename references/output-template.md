@@ -59,6 +59,21 @@ For each actual trade:
 
 For staged orders, give zones and tranche percentages, not false exact precision.
 
+For staged buys, use the validated execution plan:
+
+| Asset | Tranche | Price Zone | USD | Est. Qty | Structural Basis |
+|---|---:|---|---:|---:|---|
+| ETH | 1 | 结构区间 | 600U | ~0.157 ETH | MA50 + confirmed swing support |
+
+Label quantity as approximate and use the zone midpoint as the reference price.
+Also report:
+
+- Approved total;
+- Planned now;
+- Still unallocated;
+- Technical confidence;
+- Structured invalidation review trigger.
+
 If new capital is supplied, explicitly state:
 
 - available capital;
