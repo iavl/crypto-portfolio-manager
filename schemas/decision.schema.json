@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/decision.schema.json",
+  "title": "Crypto Portfolio Decision",
+  "type": "object",
+  "required": ["timestamp", "market_regime", "portfolio_value_usd", "recommendations"],
+  "properties": {
+    "timestamp": {"type": "string", "format": "date-time"},
+    "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
+    "market_regime_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+    "portfolio_value_usd": {"type": "number", "minimum": 0},
+    "stablecoin_weight": {"type": "number", "minimum": 0, "maximum": 1},
+    "portfolio_drawdown": {"type": ["number", "null"], "minimum": -1, "maximum": 0},
+    "benchmark": {
+      "type": "object",
+      "properties": {
+        "portfolio_return": {"type": ["number", "null"]},
+        "btc_return": {"type": ["number", "null"]},
+        "btc_eth_70_30_return": {"type": ["number", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "action", "current_weight", "target_weight", "status", "rationale"],
+        "properties": {
+          "symbol": {"type": "string"},
+          "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "confidence": {"type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", null]},
+          "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"]},
+          "current_weight": {"type": "number", "minimum": 0, "maximum": 1},
+          "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
+          "amount_usd": {"type": ["number", "null"]},
+          "execution_zones": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "required": ["allocation_fraction", "description"],
+              "properties": {
+                "allocation_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                "price_low": {"type": ["number", "null"], "minimum": 0},
+                "price_high": {"type": ["number", "null"], "minimum": 0},
+                "description": {"type": "string"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
+          "rationale": {"type": "string"},
+          "invalidation": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "data_quality_notes": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
