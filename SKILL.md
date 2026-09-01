@@ -57,6 +57,9 @@ evidence, bounded qualitative judgments, explanations, and execution zones.
     rewrite prior rationale or mark a trade executed without explicit
     confirmation or a trusted later read-only snapshot.
 
+When the user explicitly requests a dry run or no persistence, do not append
+runtime state.
+
 ## Accounting and missing data
 
 Use `crypto_portfolio.engine.ledger` for unitized NAV, cash-flow-adjusted
@@ -90,3 +93,7 @@ For a compatibility normalization check, run:
 ```bash
 python scripts/portfolio_snapshot.py path/to/fake-snapshot.json
 ```
+
+If no prior history exists, establish the baseline with an initial validated
+snapshot and current review; do not claim historical performance without
+sufficient history.
