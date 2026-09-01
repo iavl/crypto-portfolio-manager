@@ -11,8 +11,10 @@ class DocumentationTests(unittest.TestCase):
         skill = ROOT / "SKILL.md"
         self.assertTrue(skill.is_file())
         self.assertIn("name: crypto-portfolio-manager", skill.read_text(encoding="utf-8"))
+        self.assertIn("[Usage Guide](USAGE.md)", (ROOT / "README.md").read_text(encoding="utf-8"))
 
         required_paths = (
+            "USAGE.md",
             "config/policy.json",
             "references/investment-policy.md",
             "references/scoring-model.md",
