@@ -48,8 +48,8 @@ Do not use score alone. Start with a regime envelope from `risk-model.md`, then 
 
 A practical qualitative mapping:
 
-- BTC: baseline core allocation; highest sizing tolerance.
-- ETH: core allocation, but can be reduced when ETH/BTC and fundamentals are persistently weak.
+- Configured core assets: baseline core allocation and highest sizing tolerance for the selected risk tier.
+- Default core assets are BTC and ETH; BTC remains the benchmark even when the user changes the core list.
 - high-conviction satellite: meaningful but clearly smaller than core.
 - moderate satellite: small allocation.
 - low-confidence or weak satellite: 0% / exit.

@@ -6,7 +6,7 @@ Manage a crypto portfolio over approximately 6–12 months with three simultaneo
 
 1. Seek to outperform BTC over comparable periods.
 2. Increase long-term absolute return.
-3. Avoid large portfolio drawdowns, using approximately 20% as the portfolio drawdown risk budget.
+3. Avoid large portfolio drawdowns, using the configured portfolio drawdown risk budget (20% by default).
 
 These objectives can conflict. Capital preservation has priority when the risk model enters `CAPITAL_PRESERVATION`.
 
@@ -14,19 +14,21 @@ These objectives can conflict. Capital preservation has priority when the risk m
 
 ### Core
 
-- BTC
-- ETH
+- Default core assets: BTC and ETH.
+- The user may replace the core asset list in the snapshot `config`.
 
-BTC is the primary benchmark and default risk asset. ETH is the second core asset.
+BTC is the primary benchmark and default risk asset. The configured core list controls core classification and risk tiering; the benchmark remains BTC unless separately changed.
 
 ### Satellite / tactical large-cap universe
 
-Examples:
+Default examples:
 
 - SOL
 - BNB
 - LINK
 - AAVE
+
+The user may replace the satellite asset list in the snapshot `config`.
 
 This is not an automatic buy list. Any eligible asset may have 0% target weight.
 
@@ -42,14 +44,14 @@ This is not an automatic buy list. Any eligible asset may have 0% target weight.
 
 ## Stablecoins and cash
 
-- Minimum allocation: 10% of portfolio value.
+- Minimum allocation: the configured `min_stablecoin_weight` floor, 10% by default.
 - No fixed maximum.
 - Cash allocation should rise as aggregate risk/reward deteriorates.
 - Stablecoin issuer, depeg, custody, venue, and smart-contract risks must be considered; “stablecoin” does not mean risk-free.
 
 ## Core/satellite principle
 
-BTC + ETH should normally be the majority of risky assets.
+Configured core assets should normally be the majority of risky assets. With no custom configuration, this means BTC + ETH.
 
 Satellites are used only to seek additional expected return when the evidence justifies their higher volatility, drawdown, tokenomics, execution, regulatory, or protocol-specific risk.
 

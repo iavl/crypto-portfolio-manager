@@ -1,6 +1,6 @@
 ---
 name: crypto-portfolio-manager
-description: Use this skill when the user asks for medium- to long-term crypto portfolio review, position sizing, adding or reducing BTC/ETH/large-cap crypto positions, portfolio risk control, rebalancing, staged buy/sell plans, or analysis of an exchange portfolio screenshot. The strategy is spot-only, conservative-balanced, benchmarked primarily against BTC, and explicitly allows NO TRADE.
+description: Use this skill when the user asks for medium- to long-term crypto portfolio review, position sizing, adding or reducing core or large-cap crypto positions, portfolio risk control, rebalancing, staged buy/sell plans, or analysis of an exchange portfolio screenshot. The strategy is spot-only, conservative-balanced, benchmarked primarily against BTC, and explicitly allows NO TRADE.
 ---
 
 # Crypto Portfolio Manager
@@ -20,9 +20,9 @@ Key constraints:
 - Spot only. Never recommend futures, perpetuals, leverage, margin borrowing, or leveraged tokens.
 - Staking may be considered only when expected yield is meaningful and smart-contract, validator, slashing, custody, liquidity, depeg, lockup, and counterparty risks are assessed first.
 - Investment horizon: approximately 6–12 months.
-- Portfolio drawdown risk budget: approximately 20% at the **portfolio level**. This is a risk target, not a guaranteed loss ceiling.
-- Stablecoin/cash allocation must be at least 10% and has no fixed maximum.
-- BTC and ETH are core assets.
+- Portfolio drawdown risk budget defaults to approximately 20% at the **portfolio level**. This is a risk target, not a guaranteed loss ceiling, and may be overridden by user configuration.
+- Stablecoin/cash allocation defaults to at least 10% and has no fixed maximum; the minimum may be overridden by user configuration.
+- BTC and ETH are the default core assets; the core list may be overridden by user configuration.
 - Eligible satellites are large-cap, liquid assets with analyzable fundamentals, such as SOL, BNB, LINK, and AAVE. Small-cap speculative altcoins are excluded.
 - BTC is the default risk asset and primary benchmark. An altcoin should receive capital only when its expected risk/reward is materially better than simply holding BTC.
 - An allowed asset may have a 0% target weight.
@@ -33,6 +33,28 @@ Key constraints:
 - Avoid overtrading. Use the rebalance thresholds in `references/decision-rules.md`.
 - Never claim that a strategy can guarantee a maximum loss, profit, or outperformance.
 - Never execute a real trade. Produce an execution plan only.
+
+## User configuration
+
+A structured portfolio snapshot may include an optional top-level `config` object:
+
+```json
+{
+  "config": {
+    "core_symbols": ["BTC", "ETH"],
+    "satellite_symbols": ["SOL", "BNB", "LINK", "AAVE"],
+    "stable_symbols": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"],
+    "min_stablecoin_weight": 0.10,
+    "max_portfolio_drawdown": 0.20
+  }
+}
+```
+
+These are the defaults. Omit `config`, or any individual field, to use them. Lists replace their defaults rather than extending them; symbols are trimmed and matched case-insensitively, the three lists must not overlap, and an unlisted asset is `other`. A position's explicit `asset_type` takes precedence over automatic list classification.
+
+`min_stablecoin_weight` is a floor represented as a fraction from 0 to 1. `max_portfolio_drawdown` is a positive loss magnitude represented as a fraction from 0 to 1; a value of `0.20` means a 20% maximum drawdown budget, while measured drawdown remains negative.
+
+Configuration controls core/satellite/stable classification, aggregation, and risk tiering. BTC remains the primary benchmark and `70% BTC + 30% ETH` remains the secondary benchmark unless the user requests a separate benchmark change. Invalid configuration must stop processing with a clear error rather than silently using defaults.
 
 ## Required inputs
 
@@ -97,7 +119,7 @@ Default cadence: once every two weeks, plus event-triggered reviews.
 Re-evaluate:
 
 - market regime;
-- BTC and ETH core allocation;
+- configured core allocation;
 - all currently held satellites;
 - eligible alternative large-cap assets;
 - asset scores and confidence;
@@ -168,11 +190,11 @@ Use the market regime, asset score, risk tier, volatility, correlation, and BTC-
 
 Rules:
 
-- Stablecoin >= 10%.
-- BTC + ETH should normally comprise the majority of risky assets.
+- Stablecoin >= configured minimum (default 10%).
+- Configured core assets should normally comprise the majority of risky assets.
 - Satellites are optional, not mandatory.
 - Riskier satellites need a higher score and stronger BTC-relative case to receive capital.
-- AAVE or any other existing position receives no entitlement from being already held.
+- No existing position receives entitlement from being already held.
 - A single high score must not violate portfolio-level drawdown capacity.
 
 ### 5. Compare current vs target weights
@@ -210,7 +232,7 @@ Do not invent precision unsupported by market structure.
 
 Before finalizing, verify:
 
-- stablecoin floor is satisfied;
+- configured stablecoin floor is satisfied;
 - satellite concentration is reasonable;
 - expected portfolio risk is consistent with the current regime;
 - recommendation does not merely increase beta because prices recently rose;
@@ -227,7 +249,7 @@ When historical snapshots permit, report portfolio return vs both benchmarks ove
 
 ### 10. Record recommendation
 
-If the environment permits local writes, append a decision record under `data/decisions/` and a portfolio snapshot under `data/portfolio/` using the schemas in `schemas/`.
+If the environment permits local writes, append a decision record under `data/decisions/` and a portfolio snapshot under `data/portfolio/` using the schemas in `schemas/`; record the resolved `config` with the decision when available.
 
 Do not mark a recommended trade as executed unless the user explicitly confirms execution or a later read-only account snapshot unambiguously establishes it. Use `PENDING`, `CONFIRMED`, or `NOT_EXECUTED` status.
 

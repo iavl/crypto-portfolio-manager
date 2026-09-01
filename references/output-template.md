@@ -17,7 +17,7 @@ Include:
 
 - total portfolio value;
 - stablecoin share;
-- BTC + ETH core share;
+- configured core share;
 - satellite share;
 - current drawdown when known;
 - major concentration issue.
@@ -73,7 +73,7 @@ State:
 - stablecoin floor after recommendation;
 - whether portfolio risk is rising or falling;
 - key concentration/beta risk;
-- whether the portfolio appears consistent with the ~20% drawdown risk budget;
+- whether the portfolio appears consistent with the configured drawdown risk budget (20% by default);
 - note that the risk budget cannot guarantee a loss ceiling.
 
 ## 8. 什么情况会改变建议

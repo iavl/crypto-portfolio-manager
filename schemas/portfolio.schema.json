@@ -10,6 +10,42 @@
     "base_currency": {"type": "string", "default": "USD"},
     "reported_total_value": {"type": ["number", "null"], "minimum": 0},
     "portfolio_peak_value": {"type": ["number", "null"], "minimum": 0},
+    "config": {
+      "type": "object",
+      "properties": {
+        "core_symbols": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "default": ["BTC", "ETH"]
+        },
+        "satellite_symbols": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "default": ["SOL", "BNB", "LINK", "AAVE"]
+        },
+        "stable_symbols": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "default": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"]
+        },
+        "min_stablecoin_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1
+        },
+        "max_portfolio_drawdown": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "default": 0.2
+        }
+      },
+      "additionalProperties": false
+    },
     "positions": {
       "type": "array",
       "minItems": 1,

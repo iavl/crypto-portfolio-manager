@@ -6,10 +6,9 @@ A conservative-balanced, medium-term crypto portfolio management Skill for Codex
 
 - Reviews exchange portfolio screenshots or structured holdings.
 - Uses current market, trend, flow, on-chain, fundamental, and event data.
-- Treats BTC and ETH as core assets.
+- Treats BTC and ETH as the default core assets; the core list is configurable per snapshot.
 - Allows selective large-cap satellites such as SOL, BNB, LINK, and AAVE.
-- Controls risk at the portfolio level with an approximately 20% drawdown risk budget.
-- Keeps at least 10% in stablecoins/cash.
+- Uses a default 20% portfolio drawdown risk budget and a default 10% stablecoin/cash floor; both are configurable per snapshot.
 - Generates increase/reduce/hold/exit/no-trade decisions and staged execution zones.
 - Benchmarks against 100% BTC and 70% BTC / 30% ETH.
 - Supports append-oriented portfolio and decision history.
@@ -32,6 +31,22 @@ Normalize a structured snapshot:
 ```bash
 python scripts/portfolio_snapshot.py path/to/snapshot.json
 ```
+
+Optional per-snapshot configuration:
+
+```json
+{
+  "config": {
+    "core_symbols": ["BTC", "ETH"],
+    "satellite_symbols": ["SOL", "BNB", "LINK", "AAVE"],
+    "stable_symbols": ["USDT", "USDC"],
+    "min_stablecoin_weight": 0.10,
+    "max_portfolio_drawdown": 0.20
+  }
+}
+```
+
+Omit `config`, or any individual field, to use the documented defaults. Symbol lists replace the defaults, must not overlap, and unlisted assets are classified as `other` unless a position explicitly provides `asset_type`.
 
 ## Safety boundary
 

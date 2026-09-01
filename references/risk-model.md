@@ -2,7 +2,7 @@
 
 ## Core principle
 
-The approximately 20% maximum-loss preference applies to the **whole portfolio**, not each individual asset.
+The configured maximum-loss preference applies to the **whole portfolio**, not each individual asset. The default `max_portfolio_drawdown` is 20%.
 
 It is a risk budget / drawdown objective, not a guarantee. Crypto can gap, correlate toward 1 during stress, and exceed modeled losses.
 
@@ -22,10 +22,12 @@ Typical characteristics:
 
 Indicative allocation envelope, not a fixed target:
 
-- Stablecoin: 10–20%
-- BTC: 35–50%
-- ETH: 20–35%
+- Stablecoin: 10–20% by default, never below the configured minimum
+- BTC: 35–50% (default core allocation)
+- ETH: 20–35% (default core allocation)
 - Satellites combined: 10–25%
+
+The BTC/ETH rows are the default core allocation. If the user changes `core_symbols`, apply the core risk posture to the configured core group instead of treating BTC/ETH as mandatory holdings. In every regime, the stablecoin lower bound is the larger of the regime default and `min_stablecoin_weight`; if the configured floor exceeds the default upper bound, raise that upper bound to the floor because stablecoins have no fixed maximum.
 
 ### DEFENSIVE
 
@@ -41,7 +43,7 @@ Typical triggers include several of:
 
 Indicative envelope:
 
-- Stablecoin: 20–40%
+- Stablecoin: 20–40% by default, never below the configured minimum
 - BTC: 35–50%
 - ETH: 15–30%
 - Satellites combined: 0–15%
@@ -65,7 +67,7 @@ Typical triggers include:
 
 Indicative envelope:
 
-- Stablecoin: 40–80%+ when justified
+- Stablecoin: 40–80%+ when justified, never below the configured minimum
 - BTC: 15–40%
 - ETH: 0–20%
 - Satellites combined: 0–5%
@@ -91,15 +93,15 @@ A single extreme event can override this confirmation rule when it directly thre
 
 ## Drawdown guardrails
 
-When reliable historical portfolio values exist, calculate peak-to-current drawdown.
+When reliable historical portfolio values exist, calculate peak-to-current drawdown. Let `D` be the positive configured `max_portfolio_drawdown` fraction. Apply these response bands:
 
-Suggested response bands:
+- 0% to `-0.40D`: normal monitoring.
+- `-0.40D` to `-0.60D`: reassess risk concentration and weak satellites.
+- `-0.60D` to `-0.80D`: bias defensive; new risk requires strong evidence.
+- `-0.80D` to `-D`: capital preservation becomes primary; reduce avoidable high-beta risk.
+- below `-D`: treat as risk-budget breach; do not attempt to “win it back” with more beta.
 
-- 0% to -8%: normal monitoring.
-- -8% to -12%: reassess risk concentration and weak satellites.
-- -12% to -16%: bias defensive; new risk requires strong evidence.
-- -16% to -20%: capital preservation becomes primary; reduce avoidable high-beta risk.
-- below -20%: treat as risk-budget breach; do not attempt to “win it back” with more beta.
+With the default `D = 0.20`, these bands are 0%, -8%, -12%, -16%, and -20%.
 
 These are portfolio-level bands and should be interpreted alongside regime and volatility.
 
@@ -114,11 +116,11 @@ Sizing should decrease when:
 - confidence falls;
 - correlation with existing holdings is high;
 - event/tokenomics risk rises;
-- asset is a satellite rather than core.
+- asset is a configured satellite rather than core.
 
 Sizing may increase when:
 
-- asset is BTC/ETH core;
+- asset is a configured core asset;
 - score and confidence are high;
 - valuation is not excessively extended;
 - portfolio correlation/risk remains acceptable;
@@ -131,8 +133,8 @@ Before recommending a new target, perform a simple scenario stress test when dat
 At minimum consider:
 
 - BTC: severe but plausible medium-term decline;
-- ETH: larger decline than BTC;
-- satellites: materially larger decline than BTC;
+- configured core assets: larger decline than BTC where their risk profile warrants;
+- configured satellites: materially larger decline than BTC;
 - stablecoins: nominally stable but not risk-free.
 
 Do not present a stress test as a probability forecast. Its purpose is to expose hidden concentration and beta.
@@ -141,6 +143,6 @@ Do not present a stress test as a probability forecast. Its purpose is to expose
 
 When reducing risk, generally prefer:
 
-`weak/high-beta satellites -> stronger satellites -> ETH -> BTC -> stablecoin`
+`weak/high-beta configured satellites -> stronger configured satellites -> configured core assets -> stablecoin`
 
 This is a default hierarchy, not an absolute rule. A severe asset-specific event can make a core asset reduce faster than a satellite.
