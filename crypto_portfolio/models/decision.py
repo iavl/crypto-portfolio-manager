@@ -6,11 +6,14 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .evidence import AssetAssessment, Evidence
+from .evidence import AssetAssessment, Evidence, FactorScore
+from .policy import policy_hash
+from .time import normalize_timestamp
 
 
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _STATUSES = {"PENDING", "CONFIRMED", "NOT_EXECUTED"}
+_REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
 
 
 def _weights(value: Mapping[str, Any], field: str, *, require_sum: bool = True) -> dict[str, float]:
@@ -48,11 +51,16 @@ class Decision:
     status: str = "PENDING"
     constraints_applied: tuple[str, ...] = ()
     config: Mapping[str, Any] | None = None
+    policy_hash: str | None = None
+    resolved_policy: Mapping[str, Any] | None = None
+    review_type: str = "SNAPSHOT_REVIEW"
+    decision_id: str | None = None
+    based_on_snapshot_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.timestamp, str) or not self.timestamp.strip():
-            raise ValueError("timestamp must be a non-empty string")
-        object.__setattr__(self, "timestamp", self.timestamp.strip())
+        object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
+        if not isinstance(self.market_regime, str):
+            raise ValueError("market_regime must be a string")
         object.__setattr__(self, "market_regime", self.market_regime.upper())
         if self.market_regime not in _REGIMES:
             raise ValueError(f"market_regime must be one of {sorted(_REGIMES)}")
@@ -62,6 +70,8 @@ class Decision:
         object.__setattr__(self, "target_weights", _weights(self.target_weights, "target_weights"))
         if not self.current_weights or not self.target_weights:
             raise ValueError("current_weights and target_weights must be non-empty")
+        if not isinstance(self.factor_scores, Mapping) and self.factor_scores is not None:
+            raise ValueError("factor_scores must be an object or null")
         object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "risk_checks", tuple(self.risk_checks))
         object.__setattr__(self, "evidence", tuple(self.evidence))
@@ -75,16 +85,104 @@ class Decision:
                 raise ValueError("evidence must contain Evidence objects or IDs")
         if len(evidence_ids) != len(set(evidence_ids)):
             raise ValueError("decision evidence IDs must be unique")
-        object.__setattr__(self, "factor_scores", dict(self.factor_scores or {}))
+        parsed_factor_scores: dict[str, AssetAssessment] = {}
+        for symbol, value in (self.factor_scores or {}).items():
+            normalized_symbol = str(symbol).strip().upper()
+            assessment = AssetAssessment.from_mapping(normalized_symbol, value)
+            if assessment.symbol != normalized_symbol:
+                raise ValueError(f"factor score symbol {normalized_symbol} does not match assessment")
+            parsed_factor_scores[normalized_symbol] = assessment
+        object.__setattr__(self, "factor_scores", parsed_factor_scores)
         object.__setattr__(self, "constraints_applied", tuple(self.constraints_applied))
         if self.config is not None:
             if not isinstance(self.config, Mapping):
                 raise ValueError("config must be an object or null")
             object.__setattr__(self, "config", dict(self.config))
+        if not isinstance(self.status, str):
+            raise ValueError("status must be a string")
         status = self.status.upper()
         if status not in _STATUSES:
             raise ValueError(f"status must be one of {sorted(_STATUSES)}")
         object.__setattr__(self, "status", status)
+        if not isinstance(self.review_type, str):
+            raise ValueError("review_type must be a string")
+        review_type = self.review_type.upper()
+        if review_type not in _REVIEW_TYPES:
+            raise ValueError(f"review_type must be one of {sorted(_REVIEW_TYPES)}")
+        object.__setattr__(self, "review_type", review_type)
+        for field in ("decision_id", "based_on_snapshot_id"):
+            value = getattr(self, field)
+            if value is not None:
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"{field} must be a non-empty string or null")
+                object.__setattr__(self, field, value.strip())
+        if self.policy_hash is not None:
+            if not isinstance(self.policy_hash, str) or len(self.policy_hash) != 64:
+                raise ValueError("policy_hash must be a SHA-256 hex digest")
+            try:
+                int(self.policy_hash, 16)
+            except ValueError as exc:
+                raise ValueError("policy_hash must be a SHA-256 hex digest") from exc
+            object.__setattr__(self, "policy_hash", self.policy_hash.lower())
+        if self.resolved_policy is not None:
+            if not isinstance(self.resolved_policy, Mapping):
+                raise ValueError("resolved_policy must be an object or null")
+            object.__setattr__(self, "resolved_policy", dict(self.resolved_policy))
+            if self.resolved_policy.get("policy_version") != self.policy_version:
+                raise ValueError("resolved_policy policy_version must match decision policy_version")
+            if self.policy_hash is not None and policy_hash(self.resolved_policy) != self.policy_hash:
+                raise ValueError("policy_hash does not match resolved_policy")
+
+        evidence_by_id = {
+            item.id: item for item in self.evidence if isinstance(item, Evidence)
+        }
+        for symbol, assessment in self.factor_scores.items():
+            for factor, score in assessment.factor_scores.items():
+                if not isinstance(score, FactorScore):
+                    continue
+                for evidence_id in score.evidence_ids:
+                    evidence = evidence_by_id.get(evidence_id)
+                    if evidence is None:
+                        raise ValueError(f"factor {factor} references missing evidence {evidence_id}")
+                    if evidence.asset != symbol:
+                        raise ValueError(f"factor {factor} references evidence for wrong asset {evidence_id}")
+                    if evidence.factor != factor:
+                        raise ValueError(f"factor {factor} references evidence for wrong factor {evidence_id}")
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "Decision":
+        if not isinstance(value, Mapping):
+            raise ValueError("decision must be an object")
+        data = dict(value)
+        required = ("timestamp", "market_regime", "policy_version", "current_weights", "target_weights")
+        missing = [field for field in required if field not in data]
+        if missing:
+            raise ValueError(f"decision is missing fields: {', '.join(missing)}")
+        evidence = tuple(
+            Evidence(**item) if isinstance(item, Mapping) else item
+            for item in data.get("evidence", ())
+        )
+        data["evidence"] = evidence
+        data["factor_scores"] = data.get("factor_scores") or {}
+        return cls(
+            timestamp=data["timestamp"],
+            market_regime=data["market_regime"],
+            policy_version=data["policy_version"],
+            current_weights=data["current_weights"],
+            target_weights=data["target_weights"],
+            actions=tuple(data.get("actions", ())),
+            risk_checks=tuple(data.get("risk_checks", ())),
+            evidence=evidence,
+            factor_scores=data["factor_scores"],
+            status=data.get("status", "PENDING"),
+            constraints_applied=tuple(data.get("constraints_applied", ())),
+            config=data.get("config"),
+            policy_hash=data.get("policy_hash"),
+            resolved_policy=data.get("resolved_policy"),
+            review_type=data.get("review_type", "SNAPSHOT_REVIEW"),
+            decision_id=data.get("decision_id"),
+            based_on_snapshot_id=data.get("based_on_snapshot_id"),
+        )
 
     def as_dict(self) -> dict[str, Any]:
         evidence = [item.as_dict() if isinstance(item, Evidence) else item for item in self.evidence]
@@ -104,10 +202,51 @@ class Decision:
                 for symbol, value in self.factor_scores.items()
             },
             "status": self.status,
+            "review_type": self.review_type,
         }
+        if self.policy_hash is not None:
+            result["policy_hash"] = self.policy_hash
+        if self.resolved_policy is not None:
+            result["resolved_policy"] = dict(self.resolved_policy)
+        if self.decision_id is not None:
+            result["decision_id"] = self.decision_id
+        if self.based_on_snapshot_id is not None:
+            result["based_on_snapshot_id"] = self.based_on_snapshot_id
         if self.config is not None:
             result["config"] = dict(self.config)
         return result
 
 
-__all__ = ["Decision"]
+@dataclass(frozen=True)
+class DecisionStatusEvent:
+    decision_id: str
+    timestamp: str
+    status: str
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision_id, str) or not self.decision_id.strip():
+            raise ValueError("decision_id must be a non-empty string")
+        object.__setattr__(self, "decision_id", self.decision_id.strip())
+        object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
+        status = self.status.upper()
+        if status not in _STATUSES:
+            raise ValueError(f"status must be one of {sorted(_STATUSES)}")
+        object.__setattr__(self, "status", status)
+        if self.reason is not None:
+            if not isinstance(self.reason, str) or not self.reason.strip():
+                raise ValueError("reason must be a non-empty string or null")
+            object.__setattr__(self, "reason", self.reason.strip())
+
+    def as_dict(self) -> dict[str, Any]:
+        result = {
+            "decision_id": self.decision_id,
+            "timestamp": self.timestamp,
+            "status": self.status,
+        }
+        if self.reason is not None:
+            result["reason"] = self.reason
+        return result
+
+
+__all__ = ["Decision", "DecisionStatusEvent"]

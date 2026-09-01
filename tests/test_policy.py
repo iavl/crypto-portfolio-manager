@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from crypto_portfolio.models.policy import PolicyError, load_policy, resolve_policy
+from crypto_portfolio.models.policy import PolicyError, load_policy, policy_hash, resolve_policy
 
 
 class PolicyTests(unittest.TestCase):
@@ -13,6 +13,12 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
         self.assertEqual(policy.classify(" usdc "), "stablecoin")
         self.assertEqual(policy.classify("USD"), "cash")
+
+    def test_policy_hash_is_canonical_and_changes_with_policy(self):
+        policy = load_policy()
+        self.assertEqual(policy.canonical_hash, policy_hash(policy))
+        changed = resolve_policy({"min_stablecoin_weight": 0.2})
+        self.assertNotEqual(policy.canonical_hash, changed.canonical_hash)
 
     def test_partial_override_is_explicit_and_uppercase(self):
         policy = resolve_policy({"core_symbols": [" alpha "]})

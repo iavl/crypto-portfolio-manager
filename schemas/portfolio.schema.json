@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/crypto-portfolio-manager/portfolio.schema.json",
-  "title": "Crypto Portfolio Snapshot",
+  "title": "Crypto Portfolio Input (compatibility contract)",
   "type": "object",
   "required": ["timestamp", "base_currency", "positions"],
   "properties": {
@@ -60,7 +60,6 @@
           "quantity": {"type": ["number", "null"], "minimum": 0},
           "value_usd": {"type": "number", "minimum": 0},
           "displayed_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-          "computed_weight": {"type": "number", "minimum": 0, "maximum": 1},
           "cost_basis_usd": {"type": ["number", "null"], "minimum": 0},
           "asset_type_hint": {
             "type": ["string", "null"],

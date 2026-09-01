@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from ..models.time import normalize_timestamp, parse_timestamp
+
 
 def _finite(value: Any, field: str, *, minimum: float | None = None) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -22,23 +24,25 @@ def _finite(value: Any, field: str, *, minimum: float | None = None) -> float:
 class PortfolioSnapshot:
     timestamp: str
     portfolio_value: float
-    external_cash_flow: float = 0.0
+    external_cash_flow: float | ExternalCashFlow = 0.0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.timestamp, str) or not self.timestamp.strip():
-            raise ValueError("timestamp must be a non-empty string")
-        object.__setattr__(self, "timestamp", self.timestamp.strip())
+        object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
         object.__setattr__(
             self,
             "portfolio_value",
             _finite(self.portfolio_value, "portfolio_value", minimum=0),
         )
-        cash_flow = (
-            self.external_cash_flow.amount
-            if isinstance(self.external_cash_flow, ExternalCashFlow)
-            else self.external_cash_flow
-        )
-        object.__setattr__(self, "external_cash_flow", _finite(cash_flow, "external_cash_flow"))
+        if isinstance(self.external_cash_flow, ExternalCashFlow):
+            if parse_timestamp(self.external_cash_flow.timestamp) > parse_timestamp(self.timestamp):
+                raise ValueError("cash flow timestamp must be <= its snapshot timestamp")
+            object.__setattr__(self, "external_cash_flow", self.external_cash_flow)
+        else:
+            object.__setattr__(
+                self,
+                "external_cash_flow",
+                _finite(self.external_cash_flow, "external_cash_flow"),
+            )
 
 
 @dataclass(frozen=True)
@@ -48,9 +52,7 @@ class ExternalCashFlow:
     description: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.timestamp, str) or not self.timestamp.strip():
-            raise ValueError("cash flow timestamp must be a non-empty string")
-        object.__setattr__(self, "timestamp", self.timestamp.strip())
+        object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp, "cash flow timestamp"))
         object.__setattr__(self, "amount", _finite(self.amount, "cash flow amount"))
         if self.description is not None and not isinstance(self.description, str):
             raise ValueError("cash flow description must be a string or null")
@@ -67,8 +69,7 @@ class NAVState:
     max_drawdown: float = 0.0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.timestamp, str) or not self.timestamp.strip():
-            raise ValueError("timestamp must be a non-empty string")
+        object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
         for field in ("portfolio_value", "units", "nav_per_unit"):
             _finite(getattr(self, field), field, minimum=0)
         _finite(self.external_cash_flow, "external_cash_flow")
@@ -91,12 +92,12 @@ def _coerce_snapshot(value: PortfolioSnapshot | Mapping[str, Any] | Any) -> Port
         else:
             raise ValueError("snapshot is missing portfolio_value")
         cash_flow = value.get("external_cash_flow", 0.0)
-        if isinstance(cash_flow, ExternalCashFlow):
-            cash_flow = cash_flow.amount
+        if isinstance(cash_flow, Mapping):
+            cash_flow = ExternalCashFlow(**cash_flow)
         return PortfolioSnapshot(
             timestamp=value.get("timestamp", ""),
             portfolio_value=portfolio_value,
-            external_cash_flow=value.get("external_cash_flow", 0.0),
+            external_cash_flow=cash_flow,
         )
     if hasattr(value, "timestamp") and hasattr(value, "total_value_usd"):
         return PortfolioSnapshot(
@@ -114,10 +115,18 @@ def build_nav_history(
     if not snapshots:
         raise ValueError("at least one snapshot is required")
     values = [_coerce_snapshot(snapshot) for snapshot in snapshots]
-    if any(current.timestamp <= previous.timestamp for previous, current in zip(values, values[1:])):
+    if any(
+        parse_timestamp(current.timestamp) <= parse_timestamp(previous.timestamp)
+        for previous, current in zip(values, values[1:])
+    ):
         raise ValueError("snapshot timestamps must be strictly increasing")
     if values[0].portfolio_value <= 0:
         raise ValueError("initial portfolio_value must be > 0")
+
+    first_flow = values[0].external_cash_flow
+    first_amount = first_flow.amount if isinstance(first_flow, ExternalCashFlow) else first_flow
+    if first_amount != 0:
+        raise ValueError("initial snapshot external_cash_flow must be 0")
 
     units = values[0].portfolio_value
     nav = 1.0
@@ -127,7 +136,7 @@ def build_nav_history(
         NAVState(
             timestamp=values[0].timestamp,
             portfolio_value=values[0].portfolio_value,
-            external_cash_flow=values[0].external_cash_flow,
+            external_cash_flow=first_amount,
             units=units,
             nav_per_unit=nav,
             current_drawdown=0.0,
@@ -135,7 +144,18 @@ def build_nav_history(
         )
     ]
     for snapshot in values[1:]:
-        units += snapshot.external_cash_flow / nav
+        flow = snapshot.external_cash_flow
+        flow_amount = flow.amount if isinstance(flow, ExternalCashFlow) else flow
+        if isinstance(flow, ExternalCashFlow):
+            if parse_timestamp(flow.timestamp) > parse_timestamp(snapshot.timestamp):
+                raise ValueError("cash flow timestamp must be <= its snapshot timestamp")
+        pre_flow_value = snapshot.portfolio_value - flow_amount
+        if pre_flow_value <= 0 or not math.isfinite(pre_flow_value):
+            raise ValueError("cash flow must leave a positive pre-flow portfolio value")
+        pre_flow_nav = pre_flow_value / units
+        if pre_flow_nav <= 0 or not math.isfinite(pre_flow_nav):
+            raise ValueError("cash flow must have a positive pre-flow NAV")
+        units += flow_amount / pre_flow_nav
         if units <= 0:
             raise ValueError("external cash flow leaves no positive NAV units")
         if snapshot.portfolio_value < 0:
@@ -150,7 +170,7 @@ def build_nav_history(
             NAVState(
                 timestamp=snapshot.timestamp,
                 portfolio_value=snapshot.portfolio_value,
-                external_cash_flow=snapshot.external_cash_flow,
+                external_cash_flow=flow_amount,
                 units=units,
                 nav_per_unit=nav,
                 current_drawdown=drawdown,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -69,6 +70,25 @@ def _drawdown_level(value: str | float, policy: Policy) -> tuple[bool, bool, str
     if state in _UNKNOWN:
         return False, False, "portfolio drawdown band is unavailable"
     return False, False, f"portfolio drawdown band is {state}"
+
+
+def _drawdown_floor(value: str | float, policy: Policy) -> str:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        drawdown = float(value)
+        if not math.isfinite(drawdown):
+            raise ValueError("portfolio_drawdown_band must be finite")
+        budget = policy.max_portfolio_drawdown
+        if drawdown <= -0.8 * budget:
+            return "CAPITAL_PRESERVATION"
+        if drawdown <= -0.6 * budget:
+            return "DEFENSIVE"
+        return "NORMAL"
+    state = _state(value)
+    if state in {"CAPITAL_PRESERVATION", "BREACH", "SEVERE"}:
+        return "CAPITAL_PRESERVATION"
+    if state in {"DEFENSIVE", "ELEVATED", "HIGH"}:
+        return "DEFENSIVE"
+    return "NORMAL"
 
 
 def determine_regime(
@@ -145,6 +165,11 @@ def determine_regime(
         regime = "DEFENSIVE"
     else:
         regime = "NORMAL"
+    floors = {"NORMAL": 0, "DEFENSIVE": 1, "CAPITAL_PRESERVATION": 2}
+    regime = max(
+        (regime, _drawdown_floor(inputs.portfolio_drawdown_band, resolved)),
+        key=lambda name: floors[name],
+    )
     confidence = "LOW" if unknown >= 3 else "MEDIUM" if unknown else "HIGH"
     if not reasons:
         reasons.append("no confirmed risk-off combination")

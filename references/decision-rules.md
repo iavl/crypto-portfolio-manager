@@ -13,6 +13,14 @@ Before proposing any transaction, explicitly test whether `NO TRADE` is superior
 
 The user asking “what should I buy?” does not imply that capital must be deployed.
 
+Stablecoins and cash are treated as one portfolio sleeve. Preserve the current
+stable composition when changing the sleeve size; do not generate
+stablecoin-to-stablecoin conversion solely to select one settlement symbol.
+
+For historical performance, an external cash flow attached to a snapshot is
+applied immediately before that snapshot valuation. The primary benchmark is
+100% BTC buy-and-hold and the secondary benchmark is 70/30 BTC/ETH buy-and-hold.
+
 ## Rule 2 — Minimum rebalance thresholds
 
 Use absolute portfolio-weight deviation:

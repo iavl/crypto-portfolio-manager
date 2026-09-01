@@ -100,6 +100,10 @@ For assets without relevant ETF products, use credible proxies such as:
 
 If no reliable flow metric exists, mark this factor unavailable and renormalize.
 
+Missing BTC-relative evidence for a satellite is not positive evidence. The
+allocation engine treats that case as `HOLD_ONLY`: existing exposure may be
+preserved, but incomplete comparison data cannot justify new risk.
+
 ## Relative strength vs BTC — 10%
 
 This factor enforces the user's objective of outperforming BTC.
@@ -167,6 +171,11 @@ Assign one of:
 - inadequate liquidity/fundamental information.
 
 A high score with LOW confidence must be capped to a smaller target weight or `WATCH/WAIT`.
+
+Confidence is also capped by weighted data coverage. The canonical thresholds
+are 90% for possible `HIGH`, 70% for possible `MEDIUM`, and 60% minimum
+investable coverage. Below the minimum, confidence is `LOW`; critical data
+incompleteness also forces `LOW`. Unknown factor keys are validation errors.
 
 ## Suggested interpretation
 

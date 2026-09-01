@@ -106,6 +106,10 @@ def portfolio_weighted_return(weights: Mapping[str, float], returns: Mapping[str
     total_weight = 0.0
     result = 0.0
     for symbol, raw_weight in weights.items():
+        if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
+            raise ValueError(f"weight for {symbol!r} must be a number")
+        if isinstance(returns[symbol], bool) or not isinstance(returns[symbol], (int, float)):
+            raise ValueError(f"return for {symbol!r} must be a number")
         weight = float(raw_weight)
         value = float(returns[symbol])
         if not math.isfinite(weight) or weight < 0:
@@ -118,6 +122,8 @@ def portfolio_weighted_return(weights: Mapping[str, float], returns: Mapping[str
         result += weight * value
     if total_weight <= 0:
         raise ValueError("portfolio weight must be > 0")
+    if not math.isclose(total_weight, 1.0, abs_tol=1e-9):
+        raise ValueError("portfolio weights must sum to 1")
     return result
 
 

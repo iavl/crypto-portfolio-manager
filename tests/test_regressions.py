@@ -53,7 +53,7 @@ class RegressionFixtureTests(unittest.TestCase):
         missing = fixture("missing_factor_data.json")
         score = score_factors(missing["factor_scores"], confidence=missing["confidence"])
         self.assertEqual(score.missing_factors, ("fundamentals", "onchain", "capital_flows", "relative_strength_btc", "event_risk"))
-        self.assertEqual(score.confidence, "MEDIUM")
+        self.assertEqual(score.confidence, "LOW")
 
     def test_thesis_failure_fixture_exits(self):
         data = fixture("thesis_failure.json")

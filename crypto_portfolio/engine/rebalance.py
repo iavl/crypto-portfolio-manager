@@ -31,6 +31,16 @@ def _weights(value: Mapping[str, Any], field: str) -> dict[str, float]:
     return result
 
 
+def _truthy_flag(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (0, "", "FALSE", "false", None):
+        return False
+    if value in (1, "TRUE", "true"):
+        return True
+    raise ValueError(f"{field} values must be boolean")
+
+
 @dataclass(frozen=True)
 class RebalanceAction:
     symbol: str
@@ -56,6 +66,11 @@ class RebalanceAction:
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{field} must be finite and >= 0")
             object.__setattr__(self, field, value)
+        executable = {"INCREASE", "REDUCE", "EXIT"}
+        if action in executable and self.amount_usd <= 0:
+            raise ValueError(f"{action} requires a positive executable amount")
+        if action not in executable and self.amount_usd != 0:
+            raise ValueError(f"{action} must have zero executable amount")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +88,8 @@ class RebalanceAction:
 class RebalanceResult:
     actions: tuple[RebalanceAction, ...]
     decision: str
+    post_cash_total: float = 0.0
+    reconciliation: Mapping[str, float | bool] | None = None
 
     @property
     def no_trade(self) -> bool:
@@ -92,28 +109,57 @@ class RebalanceResult:
             "decision": self.decision,
             "no_trade": self.no_trade,
             "actions": [action.as_dict() for action in self.actions],
+            "post_cash_total": self.post_cash_total,
+            "reconciliation": dict(self.reconciliation or {}),
         }
 
 
-def _cash_repairs(
-    underweights: Iterable[tuple[str, float]],
-    target: Mapping[str, float],
-    current: Mapping[str, float],
-    portfolio_value: float,
-    new_cash: float,
+def _stable_target_weights(
+    current: Mapping[str, float], target: Mapping[str, float], stable_symbols: Iterable[str]
 ) -> dict[str, float]:
-    remaining = new_cash
-    total_after_cash = portfolio_value + new_cash
-    repairs: dict[str, float] = {}
-    for symbol, _ in sorted(underweights, key=lambda item: (-item[1], item[0])):
-        needed = max(
-            0.0,
-            target.get(symbol, 0.0) * total_after_cash - current.get(symbol, 0.0) * portfolio_value,
-        )
-        amount = min(remaining, needed)
-        repairs[symbol] = amount
-        remaining -= amount
-    return repairs
+    symbols = tuple(stable_symbols)
+    target_total = sum(target.get(symbol, 0.0) for symbol in symbols)
+    current_by_symbol = {
+        symbol: current.get(symbol, 0.0) for symbol in symbols if current.get(symbol, 0.0) > 0
+    }
+    if not current_by_symbol:
+        selected = next((symbol for symbol in symbols if target.get(symbol, 0.0) > 0), symbols[0])
+        return {selected: target_total}
+    current_total = sum(current_by_symbol.values())
+    return {
+        symbol: target_total * weight / current_total
+        for symbol, weight in current_by_symbol.items()
+    }
+
+
+def reconcile_trade_dollars(
+    actions: Iterable[RebalanceAction],
+    new_cash_available: float = 0.0,
+    stable_symbols: Iterable[str] = (),
+) -> dict[str, float | bool]:
+    """Reconcile executable risky-asset buys and sells into stable/cash change."""
+    new_cash = float(new_cash_available)
+    if not math.isfinite(new_cash) or new_cash < 0:
+        raise ValueError("new_cash_available must be finite and >= 0")
+    stable = {str(symbol).strip().upper() for symbol in stable_symbols}
+    sells = sum(
+        action.amount_usd
+        for action in actions
+        if action.action in {"REDUCE", "EXIT"} and action.symbol not in stable
+    )
+    buys = sum(
+        action.amount_usd
+        for action in actions
+        if action.action == "INCREASE" and action.symbol not in stable
+    )
+    residual = new_cash + sells - buys
+    return {
+        "external_new_cash": new_cash,
+        "planned_sells": sells,
+        "planned_buys": buys,
+        "residual_stablecoin_change": residual,
+        "balanced": math.isfinite(residual),
+    }
 
 
 def recommend_rebalance(
@@ -138,22 +184,39 @@ def recommend_rebalance(
         raise ValueError("new_cash_available must be finite and >= 0")
 
     if isinstance(thesis_broken, Mapping):
-        broken = {str(symbol).strip().upper() for symbol, value in thesis_broken.items() if value}
+        broken = {
+            str(symbol).strip().upper()
+            for symbol, value in thesis_broken.items()
+            if _truthy_flag(value, "thesis_broken")
+        }
     else:
         broken = {str(symbol).strip().upper() for symbol in (thesis_broken or ())}
-    symbols = sorted(set(current) | set(target))
-    deviations = [(symbol, abs(target.get(symbol, 0.0) - current.get(symbol, 0.0))) for symbol in symbols]
-    repairs = _cash_repairs(
-        [item for item in deviations if target.get(item[0], 0.0) > current.get(item[0], 0.0)],
-        target,
-        current,
-        portfolio_value,
-        new_cash_available,
+
+    current_total = sum(current.values())
+    if current_total > 1.0 + 1e-9:
+        raise ValueError("current_weights must sum to no more than 1")
+    post_cash_total = portfolio_value + new_cash_available
+    if post_cash_total <= 0:
+        raise ValueError("portfolio_value plus new_cash_available must be > 0")
+    stable_symbols = tuple(resolved.stable_symbols)
+    stable_target = _stable_target_weights(current, target, stable_symbols)
+    effective_current: dict[str, float] = {
+        symbol: weight * portfolio_value for symbol, weight in current.items()
+    }
+    stable_symbol = next(
+        (symbol for symbol in stable_symbols if current.get(symbol, 0.0) > 0),
+        next(iter(stable_target)),
     )
-    actions: list[RebalanceAction] = []
+    unallocated = max(0.0, 1.0 - current_total) * portfolio_value
+    effective_current[stable_symbol] = effective_current.get(stable_symbol, 0.0) + unallocated + new_cash_available
+    effective_target = {symbol: weight for symbol, weight in target.items() if symbol not in stable_symbols}
+    effective_target.update(stable_target)
+    symbols = sorted(set(effective_current) | set(effective_target) | broken)
+    candidates: list[dict[str, Any]] = []
     for symbol in symbols:
-        current_weight = current.get(symbol, 0.0)
-        target_weight = target.get(symbol, 0.0)
+        current_amount = effective_current.get(symbol, 0.0)
+        current_weight = current_amount / post_cash_total
+        target_weight = effective_target.get(symbol, 0.0)
         difference = target_weight - current_weight
         deviation_pp = abs(difference) * 100.0
         small_target_watch = (
@@ -162,50 +225,80 @@ def recommend_rebalance(
             and difference != 0
             and abs(difference) / target_weight >= 0.5
         )
-        amount = 0.0
-        if symbol in broken and current_weight > 0:
+        if symbol in broken and current.get(symbol, 0.0) > 0:
             action = "EXIT"
             priority = "HIGH"
-            amount = current_weight * portfolio_value
+            amount = current.get(symbol, 0.0) * portfolio_value
             rationale = "investment thesis is marked broken"
         elif small_target_watch:
             action = "WAIT"
             priority = "WATCH"
-            amount = repairs.get(symbol, 0.0)
+            amount = 0.0
             rationale = "small target has a material relative deviation"
         elif deviation_pp < resolved.rebalance["hold_below_pp"]:
             action = "HOLD"
             priority = "LOW"
+            amount = 0.0
             rationale = f"deviation {deviation_pp:.2f}pp is below the hold threshold"
         elif deviation_pp <= resolved.rebalance["watch_below_pp"]:
             action = "WAIT"
             priority = "WATCH"
-            amount = repairs.get(symbol, 0.0)
+            amount = 0.0
             rationale = f"deviation {deviation_pp:.2f}pp is in the watch band"
         elif difference > 0:
             action = "INCREASE"
             priority = "HIGH" if deviation_pp > resolved.rebalance["high_priority_above_pp"] else "NORMAL"
-            amount = repairs.get(symbol, difference * portfolio_value)
+            amount = difference * post_cash_total
             rationale = "underweight exceeds the active rebalance threshold"
         else:
             action = "EXIT" if target_weight == 0 else "REDUCE"
             priority = "HIGH" if deviation_pp > resolved.rebalance["high_priority_above_pp"] else "NORMAL"
-            amount = (current_weight - target_weight) * portfolio_value
+            amount = -difference * post_cash_total
             rationale = "overweight exceeds the active rebalance threshold"
-        actions.append(
-            RebalanceAction(
-                symbol=symbol,
-                action=action,
-                current_weight=current_weight,
-                target_weight=target_weight,
-                amount_usd=max(0.0, amount),
-                priority=priority,
-                rationale=rationale,
-            )
+        candidates.append({
+            "symbol": symbol,
+            "action": action,
+            "current_weight": current_weight,
+            "target_weight": target_weight,
+            "amount": max(0.0, amount),
+            "priority": priority,
+            "rationale": rationale,
+        })
+
+    available_funding = sum(
+        item["amount"] for item in candidates if item["action"] in {"REDUCE", "EXIT"}
+    )
+    for item in sorted(
+        (item for item in candidates if item["action"] == "INCREASE"),
+        key=lambda value: (-value["amount"], value["symbol"]),
+    ):
+        item["amount"] = min(item["amount"], available_funding)
+        available_funding -= item["amount"]
+        if item["amount"] <= 1e-9:
+            item["action"] = "WAIT"
+            item["priority"] = "WATCH"
+            item["rationale"] = "underweight is not funded by available cash or executable sales"
+
+    actions = [
+        RebalanceAction(
+            symbol=item["symbol"],
+            action=item["action"],
+            current_weight=item["current_weight"],
+            target_weight=item["target_weight"],
+            amount_usd=item["amount"] if item["action"] in {"INCREASE", "REDUCE", "EXIT"} else 0.0,
+            priority=item["priority"],
+            rationale=item["rationale"],
         )
+        for item in candidates
+    ]
     active = {"INCREASE", "REDUCE", "EXIT"}
     decision = "REBALANCE" if any(action.action in active for action in actions) else "NO_TRADE"
-    return RebalanceResult(tuple(actions), decision)
+    return RebalanceResult(
+        tuple(actions),
+        decision,
+        post_cash_total,
+        reconcile_trade_dollars(actions, new_cash_available, stable_symbols),
+    )
 
 
 def rebalance(
@@ -266,6 +359,7 @@ __all__ = [
     "RebalanceAction",
     "RebalanceResult",
     "rebalance",
+    "reconcile_trade_dollars",
     "recommend_rebalance",
     "validate_execution_plan",
 ]

@@ -105,6 +105,12 @@ With the default `D = 0.20`, these bands are 0%, -8%, -12%, -16%, and -20%.
 
 These are portfolio-level bands and should be interpreted alongside regime and volatility.
 
+The deterministic regime engine applies a floor from these bands: drawdown at
+or below `-0.60D` cannot remain `NORMAL`, drawdown at or below `-0.80D` cannot
+remain below `CAPITAL_PRESERVATION`, and drawdown below `-D` is a risk-budget
+breach. Allocation and the risk gate both require the stable sleeve to be at
+least the larger of the global minimum and the selected regime target.
+
 ## Concentration and volatility
 
 Dynamic single-asset limits are preferred over fixed caps.

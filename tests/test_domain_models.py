@@ -48,6 +48,11 @@ class DomainModelTests(unittest.TestCase):
         self.assertEqual(assessment.as_dict()["factor_scores"]["capital_flows"]["evidence_ids"], ["btc-flow-1"])
         self.assertEqual(evidence.as_dict()["asset"], "BTC")
 
+    def test_thesis_broken_is_typed_and_serialized(self):
+        assessment = AssetAssessment("SOL", {}, thesis_broken=True)
+        self.assertTrue(assessment.thesis_broken)
+        self.assertTrue(assessment.as_dict()["thesis_broken"])
+
     def test_decision_rejects_invalid_weights_and_preserves_evidence(self):
         evidence = Evidence(
             "e-1", "BTC", "trend", "example", "2026-09-01", "2026-09-01", "CURRENT", "HIGH"
@@ -65,6 +70,39 @@ class DomainModelTests(unittest.TestCase):
         self.assertEqual(result["policy_version"], 1)
         with self.assertRaises(ValueError):
             Decision("2026-09-01", "NORMAL", 1, {"BTC": math.nan}, {"BTC": 1.0})
+
+    def test_factor_score_evidence_references_are_integral(self):
+        evidence = Evidence(
+            "e-1", "BTC", "trend", "example", "2026-09-01", "2026-09-01", "CURRENT", "HIGH"
+        )
+        with self.assertRaisesRegex(ValueError, "missing evidence"):
+            Decision(
+                "2026-09-01",
+                "NORMAL",
+                1,
+                {"BTC": 1.0},
+                {"BTC": 1.0},
+                evidence=(evidence,),
+                factor_scores={
+                    "BTC": AssetAssessment(
+                        "BTC", {"trend": FactorScore("trend", 80, ("missing",))}
+                    )
+                },
+            )
+        with self.assertRaisesRegex(ValueError, "wrong asset"):
+            Decision(
+                "2026-09-01",
+                "NORMAL",
+                1,
+                {"BTC": 1.0},
+                {"BTC": 1.0},
+                evidence=(Evidence("e-2", "ETH", "trend", "example", "2026-09-01", "2026-09-01", "CURRENT", "HIGH"),),
+                factor_scores={
+                    "BTC": AssetAssessment(
+                        "BTC", {"trend": FactorScore("trend", 80, ("e-2",))}
+                    )
+                },
+            )
 
 
 if __name__ == "__main__":

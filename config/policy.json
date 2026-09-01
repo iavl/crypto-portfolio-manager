@@ -31,6 +31,11 @@
     "relative_strength_btc": 0.1,
     "event_risk": 0.05
   },
+  "scoring": {
+    "high_confidence_min_coverage": 0.9,
+    "medium_confidence_min_coverage": 0.7,
+    "minimum_investable_coverage": 0.6
+  },
   "regimes": {
     "NORMAL": {
       "stablecoin_target": 0.1,
@@ -53,7 +58,18 @@
   },
   "allocation": {
     "satellite_min_score": 65,
+    "satellite_full_score": 85,
     "core_min_score": 50,
-    "low_confidence_satellite_weight": 0.0
+    "low_confidence_satellite_weight": 0.0,
+    "confidence_multipliers": {
+      "HIGH": 1.0,
+      "MEDIUM": 0.5,
+      "LOW": 0.0
+    },
+    "risk_multipliers": {
+      "normal": 1.0,
+      "high_beta": 0.5,
+      "high": 0.5
+    }
   }
 }

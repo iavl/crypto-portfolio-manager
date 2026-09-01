@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .time import normalize_timestamp
+
 
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
@@ -51,6 +53,8 @@ class Evidence:
         for field in ("id", "factor", "source", "observed_at", "fetched_at"):
             object.__setattr__(self, field, _text(getattr(self, field), field))
         object.__setattr__(self, "asset", _text(self.asset, "asset").upper())
+        object.__setattr__(self, "observed_at", normalize_timestamp(self.observed_at, "observed_at"))
+        object.__setattr__(self, "fetched_at", normalize_timestamp(self.fetched_at, "fetched_at"))
         object.__setattr__(self, "freshness", _text(self.freshness, "freshness").upper())
         if self.freshness not in _FRESHNESS:
             raise ValueError(f"freshness must be one of {sorted(_FRESHNESS)}")
@@ -112,6 +116,8 @@ class AssetAssessment:
     relative_strength_vs_btc: float | str | None = None
     severe_event: bool = False
     risk_tier: str = "normal"
+    thesis_broken: bool = False
+    critical_data_complete: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "symbol").upper())
@@ -126,6 +132,15 @@ class AssetAssessment:
                 if value.factor != factor:
                     raise ValueError(f"factor score key {factor!r} does not match {value.factor!r}")
                 parsed[factor] = value
+            elif isinstance(value, Mapping):
+                factor_name = value.get("factor", factor)
+                if factor_name != factor or "score" not in value:
+                    raise ValueError(f"factor score key {factor!r} is malformed")
+                parsed[factor] = FactorScore(
+                    factor,
+                    value["score"],
+                    tuple(value.get("evidence_ids", ())),
+                )
             else:
                 parsed[factor] = FactorScore(factor, value)
         object.__setattr__(self, "factor_scores", parsed)
@@ -147,7 +162,23 @@ class AssetAssessment:
             object.__setattr__(self, "relative_strength_vs_btc", value)
         if not isinstance(self.severe_event, bool):
             raise ValueError("severe_event must be boolean")
+        if not isinstance(self.thesis_broken, bool):
+            raise ValueError("thesis_broken must be boolean")
+        if not isinstance(self.critical_data_complete, bool):
+            raise ValueError("critical_data_complete must be boolean")
         object.__setattr__(self, "risk_tier", _text(self.risk_tier, "risk_tier").lower())
+
+    @classmethod
+    def from_mapping(
+        cls, symbol: str, value: Mapping[str, Any] | "AssetAssessment"
+    ) -> "AssetAssessment":
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, Mapping):
+            raise ValueError(f"assessment {symbol} must be an object")
+        data = dict(value)
+        data.setdefault("symbol", symbol)
+        return cls(**data)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -161,6 +192,8 @@ class AssetAssessment:
             "asset_type": self.asset_type,
             "relative_strength_vs_btc": self.relative_strength_vs_btc,
             "severe_event": self.severe_event,
+            "thesis_broken": self.thesis_broken,
+            "critical_data_complete": self.critical_data_complete,
             "risk_tier": self.risk_tier,
         }
 

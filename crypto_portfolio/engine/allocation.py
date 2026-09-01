@@ -15,12 +15,14 @@ class AllocationResult:
     target_weights: Mapping[str, float]
     allocation_reasons: tuple[str, ...]
     constraints_applied: tuple[str, ...]
+    stable_sleeve_target: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "target_weights": dict(self.target_weights),
             "allocation_reasons": list(self.allocation_reasons),
             "constraints_applied": list(self.constraints_applied),
+            "stable_sleeve_target": self.stable_sleeve_target,
         }
 
 
@@ -70,16 +72,54 @@ def _confidence(value: Any) -> str:
     return result
 
 
-def _relative_case_is_acceptable(value: Any) -> bool:
+def _relative_eligibility(value: Any) -> str:
     if value is None:
-        return True
+        return "HOLD_ONLY"
     if isinstance(value, str):
-        return value.upper() not in {"WEAK", "NEGATIVE", "BEARISH", "UNDERPERFORM"}
+        state = value.strip().upper()
+        if state in {"", "UNKNOWN", "UNAVAILABLE", "MISSING", "N/A"}:
+            return "HOLD_ONLY"
+        return "INELIGIBLE" if state in {"WEAK", "NEGATIVE", "BEARISH", "UNDERPERFORM"} else "ELIGIBLE"
     try:
         value = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError("relative_strength_vs_btc must be numeric or a known state") from exc
-    return math.isfinite(value) and value >= 0
+    if not math.isfinite(value):
+        raise ValueError("relative_strength_vs_btc must be finite")
+    return "ELIGIBLE" if value >= 0 else "INELIGIBLE"
+
+
+def _relative_multiplier(value: Any) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return 0.5 + min(1.0, max(0.0, float(value))) * 0.5
+    return 1.0 if str(value).strip().upper() in {"STRONG", "OUTPERFORM", "POSITIVE", "HEALTHY"} else 0.75
+
+
+def satellite_eligibility(
+    assessment: AssetAssessment | Mapping[str, Any] | None,
+    policy: Policy | None = None,
+) -> str:
+    """Return ELIGIBLE, HOLD_ONLY, or INELIGIBLE for a satellite assessment."""
+    resolved = policy or resolve_policy()
+    score = _score(assessment, "satellite") if assessment is not None else 50.0
+    relative = (
+        _field(
+            assessment,
+            "relative_strength_vs_btc",
+            _field(assessment, "relative_strength", None),
+        )
+        if assessment is not None
+        else None
+    )
+    if score < resolved.allocation["satellite_min_score"]:
+        return "INELIGIBLE"
+    if _flag(_field(assessment, "severe_event", False), "severe_event") or _flag(
+        _field(assessment, "thesis_broken", False), "thesis_broken"
+    ):
+        return "INELIGIBLE"
+    if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
+        return "HOLD_ONLY"
+    return _relative_eligibility(relative)
 
 
 def _bounded_allocate(
@@ -87,7 +127,7 @@ def _bounded_allocate(
 ) -> tuple[dict[str, float], float]:
     result: dict[str, float] = {}
     active = {symbol: weight for symbol, weight in raw.items() if weight > 0}
-    remaining = budget
+    remaining = min(budget, sum(active.values()))
     while active and remaining > 1e-12:
         total_raw = sum(active.values())
         capped = [symbol for symbol, weight in active.items() if remaining * weight / total_raw > cap]
@@ -101,6 +141,20 @@ def _bounded_allocate(
             remaining -= cap
             del active[symbol]
     return result, max(0.0, remaining)
+
+
+def _stable_targets(
+    stable_symbols: tuple[str, ...], target: float, current_weights: Mapping[str, float]
+) -> dict[str, float]:
+    current = {
+        symbol: max(0.0, float(current_weights.get(symbol, 0.0)))
+        for symbol in stable_symbols
+        if float(current_weights.get(symbol, 0.0)) > 0
+    }
+    if current:
+        total = sum(current.values())
+        return {symbol: target * weight / total for symbol, weight in current.items()}
+    return {stable_symbols[0]: target}
 
 
 def _assessment_symbols(
@@ -127,11 +181,22 @@ def build_target_allocation(
         raise ValueError("policy must define at least one stable symbol")
     assessments = assessments or {}
     current_weights = current_weights or {}
-    current_symbols = {str(symbol).strip().upper() for symbol in current_weights}
-    stable_symbol = next(
-        (symbol for symbol in resolved.stable_symbols if symbol in current_symbols),
-        resolved.stable_symbols[0],
-    )
+    normalized_current_weights: dict[str, float] = {}
+    for raw_symbol, raw_weight in current_weights.items():
+        if not isinstance(raw_symbol, str) or not raw_symbol.strip():
+            raise ValueError("current_weights contains an invalid symbol")
+        if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
+            raise ValueError("current_weights must contain numbers")
+        weight = float(raw_weight)
+        symbol = raw_symbol.strip().upper()
+        if symbol in normalized_current_weights:
+            raise ValueError(f"current_weights contains duplicate symbol {symbol}")
+        normalized_current_weights[symbol] = weight
+    current_weights = normalized_current_weights
+    if any(not math.isfinite(weight) or weight < 0 or weight > 1 for weight in current_weights.values()):
+        raise ValueError("current_weights must contain finite values in [0, 1]")
+    if sum(current_weights.values()) > 1.0 + 1e-9:
+        raise ValueError("current_weights must sum to no more than 1")
 
     stable_target = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
     risky_budget = 1.0 - stable_target
@@ -148,6 +213,7 @@ def build_target_allocation(
     ]
 
     satellite_raw: dict[str, float] = {}
+    satellite_hold: dict[str, float] = {}
     core_raw: dict[str, float] = {}
     for symbol in candidates:
         asset_type = resolved.classify(symbol)
@@ -178,43 +244,57 @@ def build_target_allocation(
             else None
         )
         if asset_type == "satellite":
-            eligible = (
-                score >= resolved.allocation["satellite_min_score"]
-                and not severe_event
-                and not thesis_broken
-                and _relative_case_is_acceptable(relative)
-            )
-            if eligible:
-                confidence_multiplier = (
-                    1.0
-                    if confidence == "HIGH"
-                    else 0.5
-                    if confidence == "MEDIUM"
-                    else resolved.allocation["low_confidence_satellite_weight"]
+            relative_status = satellite_eligibility(assessment, resolved)
+            if relative_status == "HOLD_ONLY":
+                if current_weights.get(symbol, 0.0) > 0:
+                    satellite_hold[symbol] = current_weights[symbol]
+                reasons.append(f"{symbol} is HOLD_ONLY because BTC-relative evidence is incomplete")
+            elif relative_status == "ELIGIBLE":
+                score_strength = min(
+                    1.0,
+                    max(0.0, (score - resolved.allocation["satellite_min_score"]) / (
+                        resolved.allocation["satellite_full_score"]
+                        - resolved.allocation["satellite_min_score"]
+                    )),
                 )
-                risk_multiplier = {"high": 0.5, "high_beta": 0.5, "high-beta": 0.5}.get(risk_tier, 1.0)
-                if confidence_multiplier > 0:
-                    satellite_raw[symbol] = (
-                        max(1.0, score - resolved.allocation["satellite_min_score"] + 1.0)
-                        * confidence_multiplier
-                        * risk_multiplier
-                    )
-                else:
+                confidence_multiplier = resolved.allocation["confidence_multipliers"][confidence]
+                risk_multipliers = resolved.allocation["risk_multipliers"]
+                risk_multiplier = risk_multipliers.get(
+                    risk_tier, risk_multipliers.get(risk_tier.replace("-", "_"), 1.0)
+                )
+                satellite_raw[symbol] = (
+                    satellite_cap
+                    * score_strength
+                    * confidence_multiplier
+                    * risk_multiplier
+                    * _relative_multiplier(relative)
+                )
+                if confidence_multiplier == 0:
                     reasons.append(f"{symbol} receives 0% satellite target because confidence is LOW")
             else:
                 reasons.append(f"{symbol} receives 0% satellite target because eligibility failed")
         elif asset_type == "core" and not severe_event and not thesis_broken:
             core_raw[symbol] = max(score, resolved.allocation["core_min_score"])
 
-    satellite_budget = satellite_cap if satellite_raw else 0.0
-    satellite_weights, residual_satellite = _bounded_allocate(
-        satellite_raw, satellite_budget, limits.single_asset_max
+    held_satellite_weights, _ = _bounded_allocate(
+        satellite_hold, satellite_cap, limits.single_asset_max
     )
-    core_budget = risky_budget - satellite_budget + residual_satellite
+    eligible_satellite_budget = max(0.0, satellite_cap - sum(held_satellite_weights.values()))
+    satellite_weights, _ = _bounded_allocate(
+        satellite_raw, eligible_satellite_budget, limits.single_asset_max
+    )
+    satellite_weights = {
+        symbol: held_satellite_weights.get(symbol, 0.0) + satellite_weights.get(symbol, 0.0)
+        for symbol in set(held_satellite_weights) | set(satellite_weights)
+    }
+    actual_satellite_weight = sum(satellite_weights.values())
+    core_budget = risky_budget - actual_satellite_weight
     core_weights, residual_core = _bounded_allocate(core_raw, core_budget, limits.single_asset_max)
     stable_target += residual_core
 
-    target: dict[str, float] = {stable_symbol: stable_target}
+    target: dict[str, float] = _stable_targets(
+        resolved.stable_symbols, stable_target, current_weights
+    )
     for symbol, weight in core_weights.items():
         target[symbol] = weight
     for symbol, weight in satellite_weights.items():
@@ -223,9 +303,11 @@ def build_target_allocation(
     total = sum(target.values())
     if total <= 0 or not math.isfinite(total):
         raise ValueError("allocation produced an invalid total")
+    stable_symbol = next(iter(_stable_targets(resolved.stable_symbols, 1.0, current_weights)))
     if not math.isclose(total, 1.0, abs_tol=1e-9):
         target[stable_symbol] = target.get(stable_symbol, 0.0) + 1.0 - total
-    if target[stable_symbol] < resolved.min_stablecoin_weight - 1e-9:
+    stable_weight = sum(target.get(symbol, 0.0) for symbol in resolved.stable_symbols)
+    if stable_weight < resolved.min_stablecoin_weight - 1e-9:
         raise ValueError("allocation cannot satisfy the stablecoin floor")
     if any(weight < -1e-9 or not math.isfinite(weight) for weight in target.values()):
         raise ValueError("allocation produced an invalid weight")
@@ -233,7 +315,7 @@ def build_target_allocation(
     reasons.append("satellites are optional and receive capital only after score/confidence/risk gates")
     if current_weights:
         reasons.append("current weights are inputs for later rebalance decisions, not allocation entitlement")
-    return AllocationResult(target, tuple(reasons), tuple(constraints))
+    return AllocationResult(target, tuple(reasons), tuple(constraints), stable_target)
 
 
 def allocate(
@@ -245,4 +327,4 @@ def allocate(
     return build_target_allocation(policy, regime, assessments, current_weights)
 
 
-__all__ = ["AllocationResult", "allocate", "build_target_allocation"]
+__all__ = ["AllocationResult", "allocate", "build_target_allocation", "satellite_eligibility"]

@@ -71,7 +71,7 @@ def _weights(value: Mapping[str, Any]) -> dict[str, float]:
 
 def _assessment(value: Any) -> tuple[str, bool, str]:
     if isinstance(value, AssetAssessment):
-        return value.confidence, value.severe_event, value.risk_tier
+        return value.confidence, value.severe_event or value.thesis_broken, value.risk_tier
     if isinstance(value, Mapping):
         confidence = str(value.get("confidence", "LOW")).upper()
         if confidence not in {"HIGH", "MEDIUM", "LOW"}:
@@ -107,18 +107,19 @@ def run_risk_gate(
     if not math.isclose(total, 1.0, abs_tol=1e-9):
         violations.append(RiskViolation("ERROR", "TOTAL_NOT_ONE", "target weights must sum to 1"))
 
+    regime_name = regime.regime if hasattr(regime, "regime") else str(regime).upper()
+    limits = resolved.regime(regime_name)
     stable_weight = sum(weights.get(symbol, 0.0) for symbol in resolved.stable_symbols)
-    if stable_weight + 1e-9 < resolved.min_stablecoin_weight:
+    required_stable = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
+    if stable_weight + 1e-9 < required_stable:
         violations.append(
             RiskViolation(
                 "ERROR",
                 "STABLECOIN_FLOOR",
-                f"stablecoin weight {stable_weight:.2%} is below {resolved.min_stablecoin_weight:.2%}",
+                f"stablecoin weight {stable_weight:.2%} is below required {required_stable:.2%}",
             )
         )
 
-    regime_name = regime.regime if hasattr(regime, "regime") else str(regime).upper()
-    limits = resolved.regime(regime_name)
     satellite_weight = sum(weights.get(symbol, 0.0) for symbol in resolved.satellite_symbols)
     if satellite_weight > limits.satellite_max + 1e-9:
         violations.append(
@@ -146,7 +147,7 @@ def run_risk_gate(
     if core_weight + 1e-9 < required_core:
         violations.append(
             RiskViolation(
-                "WARNING",
+                "ERROR",
                 "CORE_MINIMUM",
                 f"core weight {core_weight:.2%} is below the regime minimum {required_core:.2%}",
             )

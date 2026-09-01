@@ -11,13 +11,18 @@ It is spot-only and intended for a medium-term 6–12 month horizon.
 - Separates Agent research and bounded judgments from Python accounting and
   portfolio mathematics.
 - Uses unitized NAV so deposits and withdrawals do not become investment
-  returns or losses.
+  returns or losses; a flow attached to a snapshot occurs immediately before
+  that snapshot valuation.
 - Produces reproducible scoring, market-regime, target-allocation, risk-gate,
   and rebalance results.
 - Preserves structured evidence, factor scores, and append-only decision
   history.
-- Benchmarks portfolios over aligned periods against the configured BTC and
-  BTC/ETH benchmarks.
+- Benchmarks portfolios over aligned periods against 100% BTC buy-and-hold and
+  70/30 BTC/ETH buy-and-hold.
+- Treats stablecoins and cash as one sleeve, preserving existing composition
+  instead of creating mechanical stablecoin-to-stablecoin trades.
+- Loads historical NAV and decision context before a new review; full reviews
+  are due every 14 days and event reviews may override that cadence.
 
 ## What it is not
 
@@ -40,6 +45,10 @@ allocation → risk gate → rebalance → execution-plan validation
 Chinese report and optional append-only history
 ```
 
+Persisted snapshots and decisions include a canonical policy hash and the
+resolved policy so historical results remain reproducible. Input and
+normalized-output contracts are separate under `schemas/`.
+
 Market-data provider protocols are extension points only; this repository does
 not yet implement exchange or web-data integrations.
 
@@ -50,6 +59,12 @@ Place the whole `crypto-portfolio-manager` directory in a Skill location support
 The Skill intentionally keeps data retrieval abstract in v1. The runtime should use its current web/data tools. A future CLI/API layer can provide exchange read-only adapters and dedicated market-data connectors without rewriting the policy layer.
 
 ## Local checks
+
+Install development checks once:
+
+```bash
+python3 -m pip install ".[dev]"
+```
 
 ```bash
 python -m unittest discover -s tests -v

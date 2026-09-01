@@ -1,131 +1,66 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/crypto-portfolio-manager/decision.schema.json",
-  "title": "Crypto Portfolio Decision",
+  "title": "Persisted Crypto Portfolio Decision",
   "type": "object",
-  "required": ["timestamp", "market_regime"],
-  "anyOf": [
-    {"required": ["policy_version", "target_weights"]},
-    {"required": ["portfolio_value_usd", "recommendations"]}
-  ],
+  "required": ["decision_id", "timestamp", "market_regime", "policy_version", "policy_hash", "resolved_policy", "current_weights", "target_weights", "actions", "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "review_type"],
   "properties": {
+    "decision_id": {"type": "string", "minLength": 1},
+    "based_on_snapshot_id": {"type": ["string", "null"], "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
-    "policy_version": {"type": "integer", "minimum": 1},
     "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "market_regime_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-    "portfolio_value_usd": {"type": "number", "minimum": 0},
-    "stablecoin_weight": {"type": "number", "minimum": 0, "maximum": 1},
-    "portfolio_drawdown": {"type": ["number", "null"], "minimum": -1, "maximum": 0},
-    "current_weights": {
-      "type": "object",
-      "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
-    },
-    "target_weights": {
-      "type": "object",
-      "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
-    },
-    "config": {
-      "type": "object",
-      "properties": {
-        "core_symbols": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "uniqueItems": true,
-          "description": "Resolved from config/policy.json unless explicitly overridden."
-        },
-        "satellite_symbols": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "uniqueItems": true,
-          "description": "Resolved from config/policy.json unless explicitly overridden."
-        },
-        "stable_symbols": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "uniqueItems": true,
-          "description": "Resolved from config/policy.json unless explicitly overridden."
-        },
-        "min_stablecoin_weight": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Resolved from config/policy.json unless explicitly overridden."
-        },
-        "max_portfolio_drawdown": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "maximum": 1,
-          "description": "Resolved from config/policy.json unless explicitly overridden."
-        }
-      },
-      "additionalProperties": false
-    },
-    "benchmark": {
-      "type": "object",
-      "properties": {
-        "portfolio_return": {"type": ["number", "null"]},
-        "btc_return": {"type": ["number", "null"]},
-        "btc_eth_70_30_return": {"type": ["number", "null"]}
-      },
-      "additionalProperties": false
-    },
+    "policy_version": {"type": "integer", "minimum": 1},
+    "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "resolved_policy": {"type": "object"},
+    "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "actions": {"type": "array"},
+    "risk_checks": {"type": "array"},
+    "constraints_applied": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "evidence": {
       "type": "array",
       "items": {
-        "oneOf": [
-          {"$ref": "evidence.schema.json"},
-          {"type": "string", "minLength": 1}
-        ]
-      }
-    },
-    "evidence_ids": {
-      "type": "array",
-      "items": {"type": "string", "minLength": 1},
-      "uniqueItems": true
-    },
-    "factor_scores": {"type": "object"},
-    "constraints_applied": {
-      "type": "array",
-      "items": {"type": "string", "minLength": 1}
-    },
-    "risk_checks": {"type": "array"},
-    "actions": {"type": "array"},
-    "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
-    "recommendations": {
-      "type": "array",
-      "items": {
         "type": "object",
-        "required": ["symbol", "action", "current_weight", "target_weight", "status", "rationale"],
+        "required": ["id", "asset", "factor", "source", "observed_at", "fetched_at", "freshness", "confidence"],
         "properties": {
-          "symbol": {"type": "string"},
-          "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-          "confidence": {"type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", null]},
-          "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"]},
-          "current_weight": {"type": "number", "minimum": 0, "maximum": 1},
-          "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
-          "amount_usd": {"type": ["number", "null"]},
-          "execution_zones": {
-            "type": ["array", "null"],
-            "items": {
-              "type": "object",
-              "required": ["allocation_fraction", "description"],
-              "properties": {
-                "allocation_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-                "price_low": {"type": ["number", "null"], "minimum": 0},
-                "price_high": {"type": ["number", "null"], "minimum": 0},
-                "description": {"type": "string"}
-              },
-              "additionalProperties": false
-            }
-          },
-          "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
-          "rationale": {"type": "string"},
-          "invalidation": {"type": ["string", "null"]}
+          "id": {"type": "string", "minLength": 1},
+          "asset": {"type": "string", "minLength": 1},
+          "factor": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "fetched_at": {"type": "string", "format": "date-time"},
+          "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
+          "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+          "value": {},
+          "summary": {"type": ["string", "null"]}
         },
         "additionalProperties": false
       }
     },
-    "data_quality_notes": {"type": ["string", "null"]}
+    "evidence_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "factor_scores": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["symbol", "factor_scores", "weighted_score", "confidence", "asset_type", "relative_strength_vs_btc", "severe_event", "thesis_broken", "critical_data_complete", "risk_tier"],
+        "properties": {
+          "symbol": {"type": "string", "minLength": 1},
+          "factor_scores": {"type": "object"},
+          "weighted_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+          "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
+          "relative_strength_vs_btc": {"type": ["number", "string", "null"]},
+          "severe_event": {"type": "boolean"},
+          "thesis_broken": {"type": "boolean"},
+          "critical_data_complete": {"type": "boolean"},
+          "risk_tier": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
+    "review_type": {"type": "string", "enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
+    "config": {"type": ["object", "null"]}
   },
   "additionalProperties": false
 }

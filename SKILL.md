@@ -30,49 +30,53 @@ evidence, bounded qualitative judgments, explanations, and execution zones.
 
 ## Ordered workflow
 
-1. Extract or load the portfolio from a screenshot, holdings input, or a
-   runtime snapshot.
-2. Load the canonical policy and apply only explicit snapshot overrides.
-3. Validate and normalize the snapshot with the domain models. Classification
-   comes from policy; a supplied asset type is only a validated hint.
-4. Obtain current price, trend, flow, fundamental, on-chain, and event
-   evidence. Preserve source, timestamps, freshness, and confidence.
-5. Build `Evidence`, `FactorScore`, and `AssetAssessment` records. Never
-   fabricate unavailable data.
-6. Run `crypto_portfolio.engine.scoring` for weighted scores and missing-factor
-   renormalization.
-7. Run `crypto_portfolio.engine.regime` for `NORMAL`, `DEFENSIVE`, or
-   `CAPITAL_PRESERVATION`.
-8. Run `crypto_portfolio.engine.allocation` for deterministic target weights.
-9. Run `crypto_portfolio.engine.risk` and stop on `ERROR` violations.
-10. Run `crypto_portfolio.engine.rebalance` with current weights, target
-    weights, portfolio value, and available new cash.
-11. Evaluate `NO_TRADE` before proposing a transaction. Avoid turnover below
-    the configured thresholds and do not treat existing holdings as entitled
-    to remain.
-12. If a trade is justified, propose structure-based price zones and tranche
-    fractions; do not invent exact prices or mechanical percentage ladders.
-13. Validate the proposed execution plan with
-    `validate_execution_plan`.
-14. Produce the Chinese user-facing report using
-    `references/output-template.md`, retaining English tickers and metric
-    names.
-15. When history is enabled, append the validated snapshot and decision to
-    JSONL state. Do not rewrite prior rationale or mark a trade executed
-    without explicit confirmation or a trusted later read-only snapshot.
+1. Parse the current portfolio.
+2. Load the canonical policy.
+3. Validate the snapshot and apply only explicit policy overrides.
+4. Load historical snapshots, decisions, and the previous thesis before
+   fetching new evidence when local history is available.
+5. Build cash-flow-aware NAV and drawdown history.
+6. Select `SNAPSHOT_REVIEW`, `FULL_REVIEW`, or `EVENT_REVIEW`; recommend a
+   `FULL_REVIEW` when at least 14 days have passed since the last one.
+7. Fetch current price, trend, flow, fundamental, on-chain, and event evidence.
+8. Validate evidence completeness and preserve provenance.
+9. Build `Evidence`, `FactorScore`, and `AssetAssessment` records.
+10. Run deterministic scoring and missing-factor coverage checks.
+11. Run the regime engine.
+12. Run the allocation engine.
+13. Run the risk gate and stop on `ERROR` violations.
+14. Recalculate post-new-cash economic weights.
+15. Run the rebalance engine.
+16. Reconcile executable trade dollars.
+17. Evaluate `NO_TRADE` before proposing a transaction.
+18. Build structure-based execution zones only when required.
+19. Validate execution zones with `validate_execution_plan`.
+20. Produce the Chinese user-facing report using
+    `references/output-template.md`.
+21. Persist only validated snapshots, decisions, and complete evidence. Never
+    rewrite prior rationale or mark a trade executed without explicit
+    confirmation or a trusted later read-only snapshot.
 
 ## Accounting and missing data
 
 Use `crypto_portfolio.engine.ledger` for unitized NAV, cash-flow-adjusted
-return, current drawdown, and maximum drawdown. Deposits and withdrawals must
-change units, not investment NAV. Portfolio return calculations must fail
-explicitly when a held asset's required return is missing. Benchmark periods
-and cash-flow treatment must match the portfolio period.
+return, current drawdown, and maximum drawdown. An external cash flow attached
+to a snapshot occurs immediately before that snapshot valuation; the ledger
+backs out the flow at the pre-flow NAV. Deposits and withdrawals change units,
+not investment NAV. The primary benchmark is 100% BTC buy-and-hold; the
+secondary benchmark is 70/30 BTC/ETH buy-and-hold with flows allocated 70/30.
+Benchmark periods and cash-flow treatment must match the portfolio period.
+
+Stablecoins and cash are one allocation sleeve. Preserve their existing
+composition where possible and do not create stablecoin-to-stablecoin trades
+merely to satisfy a preferred symbol.
 
 Critical missing data—current price, recent trend history, portfolio value, or
 an unresolved material security event—precludes a high-conviction entry.
 Missing non-critical scoring factors may be removed and renormalized by the
-scoring engine, with reduced confidence.
+scoring engine, but confidence is capped by actual coverage. Unknown factor
+keys fail validation, and missing BTC-relative evidence makes a satellite
+`HOLD_ONLY` rather than positive evidence for a new allocation.
 
 ## Runtime data boundary
 

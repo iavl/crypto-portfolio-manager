@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from datetime import date, timedelta
 from typing import Any
 
 from .ledger import PortfolioSnapshot, build_nav_history, nav_return
@@ -83,7 +84,7 @@ def benchmark_return_with_cash_flows(
     timestamps: Sequence[str] | None = None,
     policy: Policy | None = None,
 ) -> float:
-    """Apply each external flow before the corresponding benchmark period return."""
+    """Calculate a buy-and-hold benchmark with flows at period end."""
     if len(period_returns_by_asset) != len(cash_flows):
         raise ValueError("period returns and cash flows must have equal lengths")
     initial_value = _finite(initial_value, "initial_value")
@@ -91,22 +92,54 @@ def benchmark_return_with_cash_flows(
         raise ValueError("initial_value must be > 0")
     if timestamps is not None and len(timestamps) != len(period_returns_by_asset) + 1:
         raise ValueError("timestamps must contain one more item than period returns")
+    resolved = policy or resolve_policy()
+    selected = dict(weights) if weights is not None else resolved.benchmarks["primary"]
+    normalized_weights = {
+        str(symbol).strip().upper(): _finite(weight, f"weight for {symbol}")
+        for symbol, weight in selected.items()
+    }
+    if not normalized_weights or any(weight < 0 for weight in normalized_weights.values()):
+        raise ValueError("benchmark weights must be non-negative")
+    if not math.isclose(sum(normalized_weights.values()), 1.0, abs_tol=1e-9):
+        raise ValueError("benchmark weights must sum to 1")
+    components = {
+        symbol: initial_value * weight for symbol, weight in normalized_weights.items()
+    }
     value = initial_value
     snapshots = [
         PortfolioSnapshot(
-            timestamp=timestamps[0] if timestamps else "000000000000",
+            timestamp=timestamps[0] if timestamps else "2000-01-01T00:00:00Z",
             portfolio_value=value,
         )
     ]
     for index, (asset_returns, cash_flow) in enumerate(zip(period_returns_by_asset, cash_flows)):
         flow = _finite(cash_flow, f"cash_flows[{index}]")
-        period_return = benchmark_return(asset_returns, weights, policy=policy)
-        value = (value + flow) * (1.0 + period_return)
-        if value <= 0:
+        normalized_returns = {
+            str(symbol).strip().upper(): _finite(raw_return, f"return for {symbol}")
+            for symbol, raw_return in asset_returns.items()
+        }
+        missing = sorted(set(normalized_weights) - set(normalized_returns))
+        if missing:
+            raise ValueError(f"missing returns for held assets: {', '.join(missing)}")
+        for symbol in normalized_weights:
+            period_return = normalized_returns[symbol]
+            if period_return < -1:
+                raise ValueError(f"return for {symbol!r} must be >= -1")
+            components[symbol] *= 1.0 + period_return
+        pre_flow_value = sum(components.values())
+        value = pre_flow_value + flow
+        if value <= 0 or not math.isfinite(value):
             raise ValueError("benchmark value must remain > 0")
+        for symbol, weight in normalized_weights.items():
+            components[symbol] += flow * weight
         snapshots.append(
             PortfolioSnapshot(
-                timestamp=timestamps[index + 1] if timestamps else str(index + 1).zfill(12),
+                timestamp=(
+                    timestamps[index + 1]
+                    if timestamps
+                    else (date(2000, 1, 1) + timedelta(days=index + 1)).isoformat()
+                    + "T00:00:00Z"
+                ),
                 portfolio_value=value,
                 external_cash_flow=flow,
             )
@@ -118,6 +151,7 @@ def benchmark_return_from_prices(
     prices_by_asset: Mapping[str, Sequence[float]],
     weights: Mapping[str, float] | None = None,
     *,
+    benchmark: str | None = None,
     cash_flows: Sequence[float] | None = None,
     timestamps: Sequence[str] | None = None,
     policy: Policy | None = None,
@@ -136,10 +170,18 @@ def benchmark_return_from_prices(
         {symbol: values[index] for symbol, values in series.items()}
         for index in range(count)
     ]
+    selected_weights = weights
+    if benchmark is not None:
+        if weights is not None:
+            raise ValueError("provide either weights or benchmark, not both")
+        resolved = policy or resolve_policy()
+        selected_weights = resolved.benchmarks.get(benchmark)
+        if selected_weights is None:
+            raise ValueError(f"unknown benchmark: {benchmark}")
     return benchmark_return_with_cash_flows(
         periods,
         flows,
-        weights,
+        selected_weights,
         timestamps=timestamps,
         policy=policy,
     )

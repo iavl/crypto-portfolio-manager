@@ -4,3 +4,9 @@ version = "0.1.0"
 description = "Deterministic, cash-flow-aware crypto portfolio analysis engine"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "jsonschema>=4.20,<5",
+    "ruff>=0.6,<1",
+]

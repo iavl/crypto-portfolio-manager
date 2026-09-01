@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ _TOP_LEVEL_FIELDS = {
     "benchmarks",
     "rebalance",
     "scoring_weights",
+    "scoring",
     "regimes",
     "allocation",
 }
@@ -37,8 +39,16 @@ _HORIZON_FIELDS = {"min", "max"}
 _REBALANCE_FIELDS = {"hold_below_pp", "watch_below_pp", "high_priority_above_pp"}
 _ALLOCATION_FIELDS = {
     "satellite_min_score",
+    "satellite_full_score",
     "core_min_score",
     "low_confidence_satellite_weight",
+    "confidence_multipliers",
+    "risk_multipliers",
+}
+_SCORING_FIELDS = {
+    "high_confidence_min_coverage",
+    "medium_confidence_min_coverage",
+    "minimum_investable_coverage",
 }
 _OVERRIDE_FIELDS = {
     "core_symbols",
@@ -124,8 +134,9 @@ class Policy:
     benchmarks: Mapping[str, Mapping[str, float]]
     rebalance: Mapping[str, float]
     scoring_weights: Mapping[str, float]
+    scoring: Mapping[str, float]
     regimes: Mapping[str, RegimeLimits]
-    allocation: Mapping[str, float]
+    allocation: Mapping[str, Any]
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -138,6 +149,10 @@ class Policy:
     @property
     def stable(self) -> tuple[str, ...]:
         return self.stable_symbols
+
+    @property
+    def canonical_hash(self) -> str:
+        return policy_hash(self)
 
     def classify(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -177,6 +192,7 @@ class Policy:
             "benchmarks": {name: dict(weights) for name, weights in self.benchmarks.items()},
             "rebalance": dict(self.rebalance),
             "scoring_weights": dict(self.scoring_weights),
+            "scoring": dict(self.scoring),
             "regimes": {
                 name: {
                     "stablecoin_target": limits.stablecoin_target,
@@ -325,6 +341,22 @@ def _parse_policy(data: Any) -> Policy:
     if not math.isclose(sum(parsed_scores.values()), 1.0, abs_tol=1e-9):
         raise PolicyError("scoring_weights must sum to 1")
 
+    scoring = data["scoring"]
+    if not isinstance(scoring, dict):
+        raise PolicyError("scoring must be an object")
+    _unknown_fields(scoring, _SCORING_FIELDS, "scoring")
+    if set(scoring) != _SCORING_FIELDS:
+        raise PolicyError("scoring fields are incomplete")
+    parsed_scoring = {
+        key: _fraction(value, f"scoring.{key}") for key, value in scoring.items()
+    }
+    if not (
+        parsed_scoring["minimum_investable_coverage"]
+        <= parsed_scoring["medium_confidence_min_coverage"]
+        <= parsed_scoring["high_confidence_min_coverage"]
+    ):
+        raise PolicyError("scoring coverage thresholds must be ordered")
+
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
         raise PolicyError("regimes must be an object")
@@ -351,9 +383,30 @@ def _parse_policy(data: Any) -> Policy:
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
     if set(allocation) != _ALLOCATION_FIELDS:
         raise PolicyError("allocation fields are incomplete")
+    confidence_multipliers = allocation["confidence_multipliers"]
+    if not isinstance(confidence_multipliers, dict):
+        raise PolicyError("allocation.confidence_multipliers must be an object")
+    if set(confidence_multipliers) != {"HIGH", "MEDIUM", "LOW"}:
+        raise PolicyError("allocation.confidence_multipliers must contain HIGH, MEDIUM, and LOW")
+    parsed_confidence_multipliers = {
+        key: _fraction(value, f"allocation.confidence_multipliers.{key}")
+        for key, value in confidence_multipliers.items()
+    }
+    risk_multipliers = allocation["risk_multipliers"]
+    if not isinstance(risk_multipliers, dict):
+        raise PolicyError("allocation.risk_multipliers must be an object")
+    if set(risk_multipliers) != {"normal", "high_beta", "high"}:
+        raise PolicyError("allocation.risk_multipliers must contain normal, high_beta, and high")
+    parsed_risk_multipliers = {
+        key: _fraction(value, f"allocation.risk_multipliers.{key}")
+        for key, value in risk_multipliers.items()
+    }
     parsed_allocation = {
         "satellite_min_score": _number(
             allocation["satellite_min_score"], "allocation.satellite_min_score", minimum=0, maximum=100
+        ),
+        "satellite_full_score": _number(
+            allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100
         ),
         "core_min_score": _number(
             allocation["core_min_score"], "allocation.core_min_score", minimum=0, maximum=100
@@ -362,7 +415,11 @@ def _parse_policy(data: Any) -> Policy:
             allocation["low_confidence_satellite_weight"],
             "allocation.low_confidence_satellite_weight",
         ),
+        "confidence_multipliers": parsed_confidence_multipliers,
+        "risk_multipliers": parsed_risk_multipliers,
     }
+    if parsed_allocation["satellite_full_score"] <= parsed_allocation["satellite_min_score"]:
+        raise PolicyError("allocation.satellite_full_score must exceed satellite_min_score")
 
     return Policy(
         policy_version=version,
@@ -381,6 +438,7 @@ def _parse_policy(data: Any) -> Policy:
         benchmarks=parsed_benchmarks,
         rebalance=parsed_rebalance,
         scoring_weights=parsed_scores,
+        scoring=parsed_scoring,
         regimes=parsed_regimes,
         allocation=parsed_allocation,
     )
@@ -398,10 +456,30 @@ def load_policy(
     return _parse_policy(data).with_overrides(overrides)
 
 
+def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
+    """Parse an embedded resolved policy for historical-state replay."""
+    return _parse_policy(dict(data))
+
+
 def resolve_policy(
     overrides: Mapping[str, Any] | None = None, *, path: str | Path | None = None
 ) -> Policy:
     return load_policy(path, overrides)
 
 
-__all__ = ["Policy", "PolicyError", "RegimeLimits", "load_policy", "resolve_policy"]
+def policy_hash(policy: Policy | Mapping[str, Any]) -> str:
+    """Return the SHA-256 digest of a policy's canonical JSON representation."""
+    value = policy.as_dict() if isinstance(policy, Policy) else dict(policy)
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+__all__ = [
+    "Policy",
+    "PolicyError",
+    "RegimeLimits",
+    "load_policy",
+    "policy_hash",
+    "policy_from_mapping",
+    "resolve_policy",
+]

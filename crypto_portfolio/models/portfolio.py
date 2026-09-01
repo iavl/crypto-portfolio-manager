@@ -6,7 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .policy import Policy, resolve_policy
+from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
+from .time import normalize_timestamp
 
 
 ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
@@ -99,11 +100,15 @@ class PortfolioSnapshot:
     policy_version: int | None = None
     source: str | None = None
     portfolio_peak_value: float | None = None
+    policy_hash: str | None = None
+    resolved_policy: Mapping[str, Any] | None = None
+    snapshot_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.timestamp, str) or not self.timestamp.strip():
-            raise ValueError("timestamp must be a non-empty string")
-        object.__setattr__(self, "timestamp", self.timestamp.strip())
+        if self.timestamp == _LEGACY_TIMESTAMP:
+            object.__setattr__(self, "timestamp", _LEGACY_TIMESTAMP)
+        else:
+            object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
         positions = tuple(self.positions)
         if not positions:
             raise ValueError("positions must be a non-empty sequence")
@@ -140,6 +145,26 @@ class PortfolioSnapshot:
             "portfolio_peak_value",
             _optional_number(self.portfolio_peak_value, "portfolio_peak_value", minimum=0),
         )
+        if self.policy_hash is not None:
+            if not isinstance(self.policy_hash, str) or len(self.policy_hash) != 64:
+                raise ValueError("policy_hash must be a SHA-256 hex digest")
+            try:
+                int(self.policy_hash, 16)
+            except ValueError as exc:
+                raise ValueError("policy_hash must be a SHA-256 hex digest") from exc
+            object.__setattr__(self, "policy_hash", self.policy_hash.lower())
+        if self.resolved_policy is not None:
+            if not isinstance(self.resolved_policy, Mapping):
+                raise ValueError("resolved_policy must be an object or null")
+            object.__setattr__(self, "resolved_policy", dict(self.resolved_policy))
+            if self.resolved_policy.get("policy_version") != self.policy_version:
+                raise ValueError("resolved_policy policy_version must match snapshot policy_version")
+            if self.policy_hash is not None and policy_hash(self.resolved_policy) != self.policy_hash:
+                raise ValueError("policy_hash does not match resolved_policy")
+        if self.snapshot_id is not None:
+            if not isinstance(self.snapshot_id, str) or not self.snapshot_id.strip():
+                raise ValueError("snapshot_id must be a non-empty string or null")
+            object.__setattr__(self, "snapshot_id", self.snapshot_id.strip())
 
     @property
     def total_value_usd(self) -> float:
@@ -159,6 +184,9 @@ class PortfolioSnapshot:
             "policy_version": self.policy_version,
             "external_cash_flow": self.external_cash_flow,
             "total_value": self.total_value,
+            "policy_hash": self.policy_hash,
+            "resolved_policy": self.resolved_policy,
+            "snapshot_id": self.snapshot_id,
             "positions": [position.as_dict() for position in self.positions],
         }
 
@@ -201,7 +229,12 @@ def snapshot_from_mapping(
 ) -> tuple[PortfolioSnapshot, Policy, list[str]]:
     if not isinstance(data, Mapping):
         raise ValueError("snapshot must be an object")
-    resolved_policy = policy or resolve_policy(data.get("config"))
+    if policy is not None:
+        resolved_policy = policy
+    elif data.get("resolved_policy") is not None:
+        resolved_policy = policy_from_mapping(data["resolved_policy"])
+    else:
+        resolved_policy = resolve_policy(data.get("config"))
     raw_positions = data.get("positions")
     if not isinstance(raw_positions, list) or not raw_positions:
         raise ValueError("positions must be a non-empty list")
@@ -211,19 +244,29 @@ def snapshot_from_mapping(
     )
     timestamp = data.get("timestamp")
     legacy_timestamp = timestamp is None
+    expected_policy_version = resolved_policy.policy_version
+    supplied_policy_version = data.get("policy_version", expected_policy_version)
+    if supplied_policy_version != expected_policy_version:
+        raise ValueError(
+            f"snapshot policy_version {supplied_policy_version!r} does not match resolved policy "
+            f"version {expected_policy_version}"
+        )
+    expected_policy_hash = policy_hash(resolved_policy)
+    supplied_policy_hash = data.get("policy_hash", expected_policy_hash)
+    if supplied_policy_hash != expected_policy_hash:
+        raise ValueError("snapshot policy_hash does not match resolved policy")
     snapshot = PortfolioSnapshot(
         timestamp=_LEGACY_TIMESTAMP if legacy_timestamp else timestamp,
         positions=positions,
         base_currency=data.get("base_currency", "USD"),
         external_cash_flow=data.get("external_cash_flow", 0.0),
         total_value=data.get("total_value", data.get("reported_total_value")),
-        policy_version=(
-            resolved_policy.policy_version
-            if "policy_version" not in data
-            else data["policy_version"]
-        ),
+        policy_version=supplied_policy_version,
         source=data.get("source"),
         portfolio_peak_value=data.get("portfolio_peak_value"),
+        policy_hash=expected_policy_hash,
+        resolved_policy=resolved_policy.as_dict(),
+        snapshot_id=data.get("snapshot_id"),
     )
     total = snapshot.total_value_usd
     if total <= 0:
