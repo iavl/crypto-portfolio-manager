@@ -23,7 +23,7 @@ Key constraints:
 - Portfolio drawdown risk budget: approximately 20% at the **portfolio level**. This is a risk target, not a guaranteed loss ceiling.
 - Stablecoin/cash allocation must be at least 10% and has no fixed maximum.
 - BTC and ETH are core assets.
-- Eligible satellites are large-cap, liquid assets with analyzable fundamentals, such as SOL, BNB, LINK, and ARB. Small-cap speculative altcoins are excluded.
+- Eligible satellites are large-cap, liquid assets with analyzable fundamentals, such as SOL, BNB, LINK, and AAVE. Small-cap speculative altcoins are excluded.
 - BTC is the default risk asset and primary benchmark. An altcoin should receive capital only when its expected risk/reward is materially better than simply holding BTC.
 - An allowed asset may have a 0% target weight.
 - The skill may recommend fully exiting an existing position when its thesis, relative attractiveness, or risk profile no longer justifies holding it.
@@ -172,7 +172,7 @@ Rules:
 - BTC + ETH should normally comprise the majority of risky assets.
 - Satellites are optional, not mandatory.
 - Riskier satellites need a higher score and stronger BTC-relative case to receive capital.
-- ARB or any other existing position receives no entitlement from being already held.
+- AAVE or any other existing position receives no entitlement from being already held.
 - A single high score must not violate portfolio-level drawdown capacity.
 
 ### 5. Compare current vs target weights

@@ -18,7 +18,7 @@ from typing import Any
 
 STABLE_SYMBOLS = {"USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"}
 CORE_SYMBOLS = {"BTC", "ETH"}
-DEFAULT_SATELLITES = {"SOL", "BNB", "LINK", "ARB"}
+DEFAULT_SATELLITES = {"SOL", "BNB", "LINK", "AAVE"}
 
 
 def classify(symbol: str) -> str:

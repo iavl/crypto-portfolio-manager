@@ -93,7 +93,7 @@ State:
 
 End with one unambiguous sentence such as:
 
-> 本轮执行建议：ETH 分三档增持 1,500U；BTC 持有；ARB 减持 800U；剩余 2,700U 保持为稳定币。
+> 本轮执行建议：ETH 分三档增持 1,500U；BTC 持有；AAVE 减持 800U；剩余 2,700U 保持为稳定币。
 
 or:
 

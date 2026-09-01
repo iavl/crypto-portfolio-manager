@@ -26,7 +26,7 @@ Examples:
 - SOL
 - BNB
 - LINK
-- ARB
+- AAVE
 
 This is not an automatic buy list. Any eligible asset may have 0% target weight.
 

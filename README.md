@@ -7,7 +7,7 @@ A conservative-balanced, medium-term crypto portfolio management Skill for Codex
 - Reviews exchange portfolio screenshots or structured holdings.
 - Uses current market, trend, flow, on-chain, fundamental, and event data.
 - Treats BTC and ETH as core assets.
-- Allows selective large-cap satellites such as SOL, BNB, LINK, and ARB.
+- Allows selective large-cap satellites such as SOL, BNB, LINK, and AAVE.
 - Controls risk at the portfolio level with an approximately 20% drawdown risk budget.
 - Keeps at least 10% in stablecoins/cash.
 - Generates increase/reduce/hold/exit/no-trade decisions and staged execution zones.
