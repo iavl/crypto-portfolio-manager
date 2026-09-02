@@ -145,6 +145,7 @@ class CollectionReporter:
     observation_path: str | None = None
     event_path: str | None = None
     weights: Mapping[str, float] | None = None
+    routing: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         self.stream = self.stream or sys.stderr
@@ -171,7 +172,18 @@ class CollectionReporter:
         print(format_collection_event(event, observation, previous), file=self.stream)
 
     def summary(self) -> dict[str, Any]:
-        return collection_summary(self.events, weights=self.weights)
+        result = collection_summary(self.events, weights=self.weights)
+        if self.routing is not None:
+            from .model_routing import routing_metadata
+
+            result["routing_metadata"] = routing_metadata(self.routing)
+        return result
+
+    def record_result(self, result: Any, previous: MetricObservation | None = None) -> None:
+        from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result
+
+        normalized = result if isinstance(result, NormalizedMetricResult) else normalize_metric_result(result)
+        self.record(normalized.event, normalized.observation, previous)
 
     def print_summary(self) -> dict[str, Any]:
         result = self.summary()

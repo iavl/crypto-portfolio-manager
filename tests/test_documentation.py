@@ -29,6 +29,13 @@ class DocumentationTests(unittest.TestCase):
             "schemas/metric-observation.schema.json",
             "schemas/collection-event.schema.json",
             "schemas/volume-profile.schema.json",
+            "config/model-routing.json",
+            "references/model-routing.md",
+            "schemas/metric-collection-plan.schema.json",
+            "schemas/factor-packet.schema.json",
+            "schemas/decision-review-packet.schema.json",
+            "schemas/report-packet.schema.json",
+            "schemas/factor-judgment.schema.json",
             "scripts",
         )
         for relative_path in required_paths:

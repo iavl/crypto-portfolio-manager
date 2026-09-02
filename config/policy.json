@@ -36,6 +36,33 @@
     "medium_confidence_min_coverage": 0.7,
     "minimum_investable_coverage": 0.6
   },
+  "factor_rules": {
+    "trend": {
+      "base_score": 50,
+      "price_ma_points": 6,
+      "alignment_points": 12,
+      "return_points": 6,
+      "drawdown_points": 6,
+      "support_points": 5,
+      "volume_points": 5,
+      "drawdown_tolerance": 0.25,
+      "extension_threshold_atr": 2,
+      "extension_penalty": 10
+    },
+    "relative_strength": {
+      "positive_threshold": 0.05,
+      "negative_threshold": -0.05,
+      "horizon_weights": {
+        "30d": 0.2,
+        "90d": 0.4,
+        "180d": 0.4
+      }
+    },
+    "flows": {
+      "positive_threshold": 0,
+      "negative_threshold": 0
+    }
+  },
   "regimes": {
     "NORMAL": {
       "stablecoin_target": 0.1,

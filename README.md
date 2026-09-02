@@ -22,6 +22,9 @@ Trading:  advisory only; no automatic execution
 - Validates holdings against the canonical `config/policy.json` policy.
 - Performs cash-flow-aware NAV, risk, allocation, benchmark, and rebalance
   calculations.
+- Uses a Python-first pipeline: registry-driven metric plans, normalized
+  observations, deterministic Facts, and compact immutable review/report
+  packets.
 - Preserves evidence, factor scores, and append-only decision history.
 - Persists decision-relevant `MetricObservation` history and collection
   failures for compact current-vs-previous trend comparisons.
@@ -33,6 +36,8 @@ Trading:  advisory only; no automatic execution
   OHLCV with calendar coverage checks, deterministic ATR-aware zones, confirmed
   swings, Volume Profile POC/value area/HVN context, tranches, and `WAIT`
   handling.
+- Routes Luna stages through `LUNA_MAX` only; Terra handles bounded semantic
+  interpretation/report prose and Sol is conditional for high-impact review.
 
 ## Safety / What It Is Not
 
@@ -57,7 +62,8 @@ the matching rebalance approval, may stage less, and does not place orders.
 
 Normal Skill use does not require installing Python packages. The repository
 has no runtime Python dependencies; `jsonschema` and `ruff` are development
-dependencies only.
+dependencies only. Logical stage routing is configured in
+`config/model-routing.json`.
 
 ## Install
 

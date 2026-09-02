@@ -1,5 +1,10 @@
 # User-facing Output Template
 
+The report is rendered from a finalized immutable `ReportPacket`. Numeric
+scores, weights, actions, approved amounts, execution zones, historical
+changes, and risk flags are authoritative Python outputs. The report model may
+explain them in Chinese but must not recompute, alter, or invent them.
+
 Default language: Chinese. Keep asset tickers and metric names in English.
 
 ## 1. 结论

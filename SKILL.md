@@ -22,12 +22,30 @@ judgment and user-facing decisions:
 - `references/decision-rules.md`
 - `references/data-sources.md`
 - `references/output-template.md`
+- `references/model-routing.md`
 
 The canonical policy controls asset groups, risk limits, benchmarks, scoring
 weights, regime envelopes, rebalance thresholds, and technical execution
-constants. Python models and engine modules perform validation and mathematics;
+constants and deterministic factor thresholds. Python models and engine modules perform validation and mathematics;
 the Agent supplies current evidence, bounded qualitative judgments, and
 explanations.
+
+## Python-first model boundaries
+
+Before delegating work to an LLM, first determine whether the result can be
+derived deterministically from structured data. If yes, Python MUST produce it;
+if no, the LLM may perform bounded semantic judgment. Python owns deterministic validation, metric plans, history,
+technical indicators, facts, scoring, regime, allocation, risk, rebalance,
+and execution arithmetic. LLM stages receive compact structured packets and
+may only provide bounded semantic judgment or explanation. They must not
+recompute or alter Python outputs. Deterministic financial calculations belong
+to Python, and LLM must never silently override deterministic engine outputs.
+
+Every Luna-assigned stage uses `LUNA_MAX` only. Terra handles bounded normal
+semantic interpretation and report prose. Sol is conditional and reserved for
+major event/thesis-risk analysis or a high-impact final critique. Logical
+routing is recorded in `config/model-routing.json`; runtime model IDs are not
+hard-coded here.
 
 ## Binance screenshot intake
 
@@ -67,16 +85,18 @@ display data, so the engine uses value ÷ quantity and records a note.
 5. Build cash-flow-aware NAV and drawdown history.
 6. Select `SNAPSHOT_REVIEW`, `FULL_REVIEW`, or `EVENT_REVIEW`; recommend a
    `FULL_REVIEW` when at least 14 days have passed since the last one.
-7. Define and fetch current price, trend, flow, fundamental, on-chain, and
-   event metrics; emit a visible `Data Collection Log` for every requested
-   metric, including `FAILED`, `STALE`, `CONFLICT`, and `NOT_APPLICABLE`.
+7. Let Python build the validated metric collection plan, then use `LUNA_MAX`
+   only to retrieve/extract those requested observations. Emit a visible `Data
+   Collection Log` for every requested metric, including `FAILED`, `STALE`,
+   `CONFLICT`, and `NOT_APPLICABLE`.
 8. Validate evidence completeness, preserve provenance, and persist successful
    normalized `MetricObservation` records plus every `CollectionEvent`.
    Never silently omit a requested metric; retain its status and scoring effect.
 9. Compare current observations with previous observations and build
    `Evidence`, `FactorScore`, and `AssetAssessment` records. Keep complete
    Evidence embedded in the Decision.
-10. Run deterministic scoring and missing-factor coverage checks; publish the
+10. Build deterministic Facts and compact factor packets, then run
+    deterministic scoring and missing-factor coverage checks; publish the
     collection summary with weighted coverage and resulting confidence.
 11. Run the regime engine.
 12. Run the allocation engine.
@@ -97,8 +117,8 @@ display data, so the engine uses value ÷ quantity and records a note.
 20. Bind the plan to exactly one matching approved `RebalanceAction`, create
     `execution_technical` evidence, and cache normalized OHLCV and Volume
     Profile artifacts by hash before persistence.
-21. Produce the Chinese user-facing report using
-    `references/output-template.md`. Every normal review shows Position P&L
+21. Build a finalized immutable ReportPacket and produce the Chinese
+    user-facing report using `references/output-template.md`. Every normal review shows Position P&L
     when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
     `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
     return. `FULL_REVIEW` also compares the prior/current return by asset in
@@ -247,3 +267,7 @@ python scripts/portfolio_snapshot.py path/to/fake-snapshot.json
 If no prior history exists, establish the baseline with an initial validated
 snapshot and current review; do not claim historical performance without
 sufficient history.
+
+The report writer uses only finalized packet values. It must not recalculate
+scores, weights, amounts, zones, or missing evidence, and it must not persist
+private model reasoning.

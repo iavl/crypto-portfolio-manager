@@ -1,5 +1,19 @@
 # Asset Scoring Model
 
+## Deterministic ownership
+
+Python is authoritative for metric applicability, historical changes,
+technical trend, relative strength versus BTC, numeric flow state, weighted
+factor arithmetic, coverage, and confidence caps. Terra may interpret
+Valuation/Fundamental/On-chain Facts where asset-specific semantics are needed,
+but it receives structured current/previous values and must not recalculate
+their deltas or the weighted score. A score is an input to portfolio
+construction, never a direct trade signal.
+
+Deterministic threshold inputs for the technical trend, BTC-relative, and
+numeric-flow factors live under `factor_rules` in `config/policy.json`, so
+changing them is explicit, hashable, and replayable with the resolved policy.
+
 ## Purpose
 
 Create a repeatable 0–100 measure of portfolio attractiveness. The score is not a forecast and must not directly map to a trade without the portfolio risk model.

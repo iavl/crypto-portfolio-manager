@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/factor-packet.schema.json",
+  "title": "Compact asset factor packet",
+  "type": "object",
+  "required": ["symbol", "coverage"],
+  "properties": {
+    "symbol": {"type": "string", "minLength": 1},
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "trend_facts": {"$ref": "#/$defs/facts"},
+    "valuation_facts": {"$ref": "#/$defs/facts"},
+    "fundamental_facts": {"$ref": "#/$defs/facts"},
+    "onchain_facts": {"$ref": "#/$defs/facts"},
+    "flow_facts": {"$ref": "#/$defs/facts"},
+    "relative_strength_facts": {"$ref": "#/$defs/facts"},
+    "event_facts": {"$ref": "#/$defs/facts"},
+    "previous_assessment": {"type": "object"},
+    "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "facts": {
+      "type": "object",
+      "required": ["symbol", "current", "previous", "changes", "trends", "coverage", "freshness", "source_ids", "data_quality_flags"],
+      "properties": {
+        "symbol": {"type": "string", "minLength": 1},
+        "current": {"type": "object"},
+        "previous": {"type": "object"},
+        "changes": {"type": "object"},
+        "trends": {"type": "object"},
+        "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "freshness": {"enum": ["CURRENT", "STALE", "UNKNOWN"]},
+        "source_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "data_quality_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/factor-judgment.schema.json",
+  "title": "Bounded semantic factor judgment",
+  "type": "object",
+  "required": ["factor", "score", "confidence", "supporting_evidence_ids", "contrary_evidence_ids", "trend", "summary"],
+  "properties": {
+    "factor": {"type": "string", "minLength": 1},
+    "score": {"type": "number", "minimum": 0, "maximum": 100},
+    "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+    "supporting_evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "contrary_evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "trend": {"enum": ["IMPROVING", "STABLE", "DETERIORATING", "MIXED", "UNKNOWN", "NEUTRAL"]},
+    "summary": {"type": "string"}
+  },
+  "additionalProperties": false
+}

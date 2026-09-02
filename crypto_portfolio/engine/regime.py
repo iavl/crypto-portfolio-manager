@@ -26,6 +26,16 @@ class RegimeInputs:
     breadth_state: str = "UNKNOWN"
     systemic_event_risk: bool | str = False
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "btc_trend": self.btc_trend,
+            "volatility_state": self.volatility_state,
+            "portfolio_drawdown_band": self.portfolio_drawdown_band,
+            "flow_state": self.flow_state,
+            "breadth_state": self.breadth_state,
+            "systemic_event_risk": self.systemic_event_risk,
+        }
+
 
 @dataclass(frozen=True)
 class RegimeResult:

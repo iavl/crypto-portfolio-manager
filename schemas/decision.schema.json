@@ -62,6 +62,7 @@
     "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
     "review_type": {"type": "string", "enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
     "config": {"type": ["object", "null"]},
+    "routing_metadata": {"type": ["object", "null"]},
     "execution_plans": {"type": ["object", "null"], "additionalProperties": {"$ref": "#/$defs/executionPlan"}}
   },
   "additionalProperties": false,

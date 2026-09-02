@@ -19,6 +19,7 @@
     "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
     "decision_id": {"type": ["string", "null"], "minLength": 1},
     "review_type": {"type": ["string", "null"], "enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW", null]},
+    "summary": {"type": ["string", "null"], "minLength": 1},
     "metadata": {"type": ["object", "null"]},
     "supersedes_observation_id": {"type": ["string", "null"], "minLength": 1},
     "revision_reason": {"type": ["string", "null"], "minLength": 1}

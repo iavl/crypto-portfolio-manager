@@ -56,6 +56,8 @@ def _extract(value: Any, factor: str) -> float | None:
         return value.score
     if isinstance(value, Mapping) and "score" in value:
         return _score(value["score"], f"factor {factor}.score")
+    if hasattr(value, "score") and not isinstance(value, (str, bytes, int, float, bool)):
+        return _score(value.score, f"factor {factor}.score")
     return _score(value, f"factor {factor}.score")
 
 

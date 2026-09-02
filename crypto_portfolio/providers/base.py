@@ -47,9 +47,15 @@ class EventDataProvider(Protocol):
         """Return normalized security, governance, and regulatory events."""
 
 
+class MetricDataProvider(Protocol):
+    def collect(self, collection_plan: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
+        """Return one structured result for each requested metric."""
+
+
 __all__ = [
     "EventDataProvider",
     "FundamentalDataProvider",
     "MarketDataProvider",
+    "MetricDataProvider",
     "OnchainDataProvider",
 ]

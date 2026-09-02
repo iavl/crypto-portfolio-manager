@@ -43,6 +43,23 @@ The review uses portfolio input, available history, current evidence, scoring,
 market regime, allocation, risk checks, and rebalance analysis before producing
 a validated Chinese report.
 
+The model boundary is Python-first:
+
+```text
+LUNA_MAX extraction/collection
+→ Python validation, history, and deterministic Facts
+→ Terra bounded semantic factor judgment
+→ Python score/regime/allocation/risk/rebalance/execution
+→ conditional Sol high-impact critique
+→ Terra report from immutable finalized values
+```
+
+Python builds the metric collection plan from `crypto_portfolio/metrics_registry.py`;
+a model does not invent metric keys. Raw webpages, raw OHLCV, full metric
+history, and private reasoning are not forwarded to downstream packets.
+Luna-family stages must use `LUNA_MAX`; see `config/model-routing.json` for
+logical routing.
+
 ## Provide Portfolio Input
 
 ### Screenshot
@@ -76,6 +93,11 @@ cross-check tolerance is the larger of $0.05 or 0.5% of the expected value.
 Material mismatches require verification before a snapshot is persisted. If visible
 rows do not reconcile with the reported total, the result is explicitly
 partial and visible weights are not presented as full-portfolio weights.
+
+Successful external observations are normalized and appended to metric history
+before Python derives current/previous values, absolute and percentage changes,
+elapsed time, and trend labels. Terra receives these compact Facts rather than
+re-reading source pages.
 
 For cost-bearing rows, the normalized result includes `current_price_usd`,
 `average_cost_price_usd`, `cost_basis_usd`, `unrealized_pnl_usd`,
@@ -368,6 +390,11 @@ the latest/previous unrealized return and percentage-point change. Metric
 history is queried through `metric_series()`, `latest_metric()`,
 `previous_metric()`, and `compare_latest_metric()`; failed/stale/conflicting
 attempts remain visible in `collection-events.jsonl`.
+
+`AssetFactorPacket`, `DecisionReviewPacket`, and `ReportPacket` keep semantic
+stages compact. The final ReportPacket is immutable: report generation may
+explain its scores, weights, actions, amounts, zones, and risk flags but cannot
+change them.
 
 On the first review, there may be no prior snapshot, decision, or NAV history.
 The Skill establishes a validated baseline and does not fabricate historical

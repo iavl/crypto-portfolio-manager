@@ -13,6 +13,7 @@ from .time import normalize_timestamp
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
+_PRIVATE_REASONING_FIELDS = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
 
 
 def _text(value: Any, field: str) -> str:
@@ -71,6 +72,8 @@ class Evidence:
             if not isinstance(self.metadata, Mapping):
                 raise ValueError("evidence.metadata must be an object or null")
             metadata = dict(self.metadata)
+            if any(str(key).strip().lower() in _PRIVATE_REASONING_FIELDS for key in metadata):
+                raise ValueError("evidence.metadata must not contain private reasoning")
             try:
                 json.dumps(metadata, ensure_ascii=False, allow_nan=False)
             except (TypeError, ValueError) as exc:
@@ -153,6 +156,14 @@ class AssetAssessment:
                     factor,
                     value["score"],
                     tuple(value.get("evidence_ids", ())),
+                )
+            elif hasattr(value, "score"):
+                parsed[factor] = FactorScore(
+                    factor,
+                    value.score,
+                    tuple(
+                        getattr(value, "supporting_evidence_ids", ())
+                    ) + tuple(getattr(value, "contrary_evidence_ids", ())),
                 )
             else:
                 parsed[factor] = FactorScore(factor, value)

@@ -30,6 +30,7 @@ _TOP_LEVEL_FIELDS = {
     "rebalance",
     "scoring_weights",
     "scoring",
+    "factor_rules",
     "regimes",
     "allocation",
     "execution",
@@ -52,6 +53,21 @@ _SCORING_FIELDS = {
     "medium_confidence_min_coverage",
     "minimum_investable_coverage",
 }
+_FACTOR_RULE_FIELDS = {"trend", "relative_strength", "flows"}
+_TREND_RULE_FIELDS = {
+    "base_score",
+    "price_ma_points",
+    "alignment_points",
+    "return_points",
+    "drawdown_points",
+    "support_points",
+    "volume_points",
+    "drawdown_tolerance",
+    "extension_threshold_atr",
+    "extension_penalty",
+}
+_RELATIVE_RULE_FIELDS = {"positive_threshold", "negative_threshold", "horizon_weights"}
+_FLOW_RULE_FIELDS = {"positive_threshold", "negative_threshold"}
 _EXECUTION_FIELDS = {
     "timeframe",
     "preferred_history_days",
@@ -196,6 +212,7 @@ class Policy:
         default_factory=frozenset, repr=False, compare=False
     )
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    factor_rules: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -265,6 +282,11 @@ class Policy:
         }
         if self.volume_profile:
             result["volume_profile"] = dict(self.volume_profile)
+        if self.factor_rules:
+            result["factor_rules"] = {
+                name: dict(value) if isinstance(value, Mapping) else value
+                for name, value in self.factor_rules.items()
+            }
         if self.execution:
             execution = dict(self.execution)
             for field in self._execution_omitted_fields:
@@ -599,11 +621,81 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
     }
 
 
+def _parse_factor_rules(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("factor_rules must be an object")
+    _unknown_fields(value, _FACTOR_RULE_FIELDS, "factor_rules")
+    if set(value) != _FACTOR_RULE_FIELDS:
+        raise PolicyError("factor_rules must contain trend, relative_strength, and flows")
+
+    trend = value["trend"]
+    if not isinstance(trend, dict):
+        raise PolicyError("factor_rules.trend must be an object")
+    _unknown_fields(trend, _TREND_RULE_FIELDS, "factor_rules.trend")
+    if set(trend) != _TREND_RULE_FIELDS:
+        raise PolicyError("factor_rules.trend fields are incomplete")
+    parsed_trend = {
+        key: _number(item, f"factor_rules.trend.{key}", minimum=0.0)
+        for key, item in trend.items()
+    }
+    parsed_trend["base_score"] = _number(
+        trend["base_score"], "factor_rules.trend.base_score", minimum=0.0, maximum=100.0
+    )
+    parsed_trend["drawdown_tolerance"] = _number(
+        trend["drawdown_tolerance"],
+        "factor_rules.trend.drawdown_tolerance",
+        minimum=0.0,
+        maximum=1.0,
+    )
+    if parsed_trend["extension_threshold_atr"] <= 0:
+        raise PolicyError("factor_rules.trend.extension_threshold_atr must be > 0")
+
+    relative = value["relative_strength"]
+    if not isinstance(relative, dict):
+        raise PolicyError("factor_rules.relative_strength must be an object")
+    _unknown_fields(relative, _RELATIVE_RULE_FIELDS, "factor_rules.relative_strength")
+    if set(relative) != _RELATIVE_RULE_FIELDS:
+        raise PolicyError("factor_rules.relative_strength fields are incomplete")
+    positive = _number(relative["positive_threshold"], "factor_rules.relative_strength.positive_threshold")
+    negative = _number(relative["negative_threshold"], "factor_rules.relative_strength.negative_threshold")
+    if negative > positive or negative > 0 or positive < 0:
+        raise PolicyError("relative-strength thresholds must satisfy negative <= 0 <= positive")
+    horizon_weights = _weighted_map(relative["horizon_weights"], "factor_rules.relative_strength.horizon_weights")
+    if set(horizon_weights) != {"30d", "90d", "180d"}:
+        raise PolicyError("factor_rules.relative_strength.horizon_weights must contain 30d, 90d, and 180d")
+
+    flows = value["flows"]
+    if not isinstance(flows, dict):
+        raise PolicyError("factor_rules.flows must be an object")
+    _unknown_fields(flows, _FLOW_RULE_FIELDS, "factor_rules.flows")
+    if set(flows) != _FLOW_RULE_FIELDS:
+        raise PolicyError("factor_rules.flows fields are incomplete")
+    flow_positive = _number(flows["positive_threshold"], "factor_rules.flows.positive_threshold")
+    flow_negative = _number(flows["negative_threshold"], "factor_rules.flows.negative_threshold")
+    if flow_negative > flow_positive or flow_negative > 0 or flow_positive < 0:
+        raise PolicyError("flow thresholds must satisfy negative <= 0 <= positive")
+    return {
+        "trend": parsed_trend,
+        "relative_strength": {
+            "positive_threshold": positive,
+            "negative_threshold": negative,
+            "horizon_weights": horizon_weights,
+        },
+        "flows": {
+            "positive_threshold": flow_positive,
+            "negative_threshold": flow_negative,
+        },
+    }
+
+
 def _parse_policy(
     data: Any,
     *,
     allow_missing_execution: bool = False,
     allow_missing_volume_profile: bool = False,
+    allow_missing_factor_rules: bool = False,
 ) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
@@ -613,6 +705,8 @@ def _parse_policy(
         missing.discard("execution")
     if allow_missing_volume_profile:
         missing.discard("volume_profile")
+    if allow_missing_factor_rules:
+        missing.discard("factor_rules")
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -704,6 +798,10 @@ def _parse_policy(
     ):
         raise PolicyError("scoring coverage thresholds must be ordered")
 
+    parsed_factor_rules = _parse_factor_rules(
+        data.get("factor_rules"), allow_missing=allow_missing_factor_rules
+    )
+
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
         raise PolicyError("regimes must be an object")
@@ -794,6 +892,7 @@ def _parse_policy(
         allocation=parsed_allocation,
         volume_profile=parsed_volume_profile,
         execution=parsed_execution,
+        factor_rules=parsed_factor_rules,
     )
     raw_execution = data.get("execution")
     omitted = (
@@ -804,6 +903,8 @@ def _parse_policy(
     object.__setattr__(policy, "_execution_omitted_fields", omitted)
     if "volume_profile" not in data:
         object.__setattr__(policy, "volume_profile", {})
+    if "factor_rules" not in data:
+        object.__setattr__(policy, "factor_rules", {})
     return policy
 
 
@@ -825,6 +926,7 @@ def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
         dict(data),
         allow_missing_execution=True,
         allow_missing_volume_profile=True,
+        allow_missing_factor_rules=True,
     )
 
 

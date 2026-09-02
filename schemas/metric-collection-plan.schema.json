@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/metric-collection-plan.schema.json",
+  "title": "Deterministic metric collection plan",
+  "type": "object",
+  "required": ["review_type", "assets", "requests", "critical_metric_keys", "discovery_required_assets", "collector_model"],
+  "properties": {
+    "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
+    "assets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "collector_model": {"const": "LUNA_MAX"},
+    "critical_metric_keys": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "discovery_required_assets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness", "trend_enabled", "can_reuse", "cached_observation_id", "reason"],
+        "properties": {
+          "asset": {"type": "string", "minLength": 1},
+          "metric_key": {"type": "string", "minLength": 1},
+          "factor": {"type": "string", "minLength": 1},
+          "value_type": {"enum": ["number", "string"]},
+          "unit": {"type": ["string", "null"]},
+          "critical": {"type": "boolean"},
+          "freshness": {"type": ["string", "number"]},
+          "trend_enabled": {"type": "boolean"},
+          "can_reuse": {"type": "boolean"},
+          "cached_observation_id": {"type": ["string", "null"]},
+          "reason": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

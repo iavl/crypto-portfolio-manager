@@ -57,6 +57,21 @@ Do not put deterministic mathematics in prompts or subjective interpretation
 in accounting functions. Keep the core reusable by the Skill, CLI, API, and
 tests.
 
+Before delegating work to an LLM, determine whether the result can be derived
+deterministically from structured data. If yes, Python MUST produce it; if no,
+the LLM may perform bounded semantic judgment. LLMs must never recompute or
+override deterministic financial results already produced by Python.
+
+Deterministic financial calculations belong to Python. LLM must never silently
+override deterministic engine outputs. Luna-family usage supports exactly one
+target: `LUNA_MAX`. Model changes must not alter portfolio risk authority. Do
+not store private chain-of-thought.
+
+Luna-family usage has exactly one supported target: `LUNA_MAX`. Do not store
+chain-of-thought, private scratchpads, or hidden reasoning in runtime state.
+Model routing must not alter the portfolio allocation, risk, rebalance, or
+execution authority held by Python.
+
 LLM/Agent work may research evidence, interpret market structure, assess
 fundamentals/governance/security, assign bounded factor judgments, explain
 decisions, and identify uncertainty. Code must perform valuation, weights,

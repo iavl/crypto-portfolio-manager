@@ -1,5 +1,10 @@
 # Portfolio Risk Model
 
+Python builds the structured `RegimeInputs` (BTC trend, volatility, flow,
+breadth, and cash-flow-aware drawdown) before the deterministic regime engine.
+Semantic event risk may override the normal confirmation path, but no model
+may replace the portfolio-level risk authority.
+
 ## Core principle
 
 The configured maximum-loss preference applies to the **whole portfolio**, not each individual asset. The default `max_portfolio_drawdown` is 20%.

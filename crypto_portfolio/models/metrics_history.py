@@ -9,13 +9,14 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..metrics_registry import metric_definition, normalize_metric_key
-from .time import normalize_timestamp
+from .time import normalize_timestamp, parse_timestamp
 
 
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"}
 _REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
+_PRIVATE_REASONING_FIELDS = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
 
 
 def _text(value: Any, field: str) -> str:
@@ -95,6 +96,7 @@ class MetricObservation:
     metadata: Mapping[str, Any] | None = None
     supersedes_observation_id: str | None = None
     revision_reason: str | None = None
+    summary: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observation_id", _text(self.observation_id, "observation_id"))
@@ -102,7 +104,7 @@ class MetricObservation:
         key = normalize_metric_key(self.metric_key)
         definition = metric_definition(key)
         object.__setattr__(self, "metric_key", key)
-        factor = _text(self.factor, "factor")
+        factor = _text(self.factor, "factor").lower()
         if factor != definition.factor:
             raise ValueError(f"metric {key} must use factor {definition.factor}")
         object.__setattr__(self, "factor", factor)
@@ -113,10 +115,17 @@ class MetricObservation:
             if definition.expected_type == "string" and not isinstance(value, str):
                 raise ValueError(f"metric {key} value must be a string")
         object.__setattr__(self, "value", value)
-        object.__setattr__(self, "unit", _optional_text(self.unit, "unit"))
+        unit = _optional_text(self.unit, "unit")
+        if unit is not None and definition.unit is not None and unit.upper() != definition.unit.upper():
+            raise ValueError(f"metric {key} must use unit {definition.unit}")
+        if unit is not None and definition.unit is not None:
+            unit = definition.unit
+        object.__setattr__(self, "unit", unit)
         object.__setattr__(self, "period", _optional_text(self.period, "period"))
         object.__setattr__(self, "observed_at", normalize_timestamp(self.observed_at, "observed_at"))
         object.__setattr__(self, "fetched_at", normalize_timestamp(self.fetched_at, "fetched_at"))
+        if parse_timestamp(self.fetched_at) < parse_timestamp(self.observed_at):
+            raise ValueError("fetched_at must be at or after observed_at")
         object.__setattr__(self, "source", _text(self.source, "source"))
         freshness = _text(self.freshness, "freshness").upper()
         if freshness not in _FRESHNESS:
@@ -133,10 +142,13 @@ class MetricObservation:
             if review_type not in _REVIEW_TYPES:
                 raise ValueError(f"review_type must be one of {sorted(_REVIEW_TYPES)}")
         object.__setattr__(self, "review_type", review_type)
+        object.__setattr__(self, "summary", _optional_text(self.summary, "summary"))
         if self.metadata is not None:
             if not isinstance(self.metadata, Mapping):
                 raise ValueError("metadata must be an object or null")
             metadata = dict(self.metadata)
+            if any(str(key).strip().lower() in _PRIVATE_REASONING_FIELDS for key in metadata):
+                raise ValueError("metadata must not contain private reasoning")
             try:
                 json.dumps(metadata, ensure_ascii=False, allow_nan=False)
             except (TypeError, ValueError) as exc:
@@ -158,7 +170,7 @@ class MetricObservation:
         allowed = {
             "observation_id", "asset", "metric_key", "factor", "value", "unit", "period",
             "observed_at", "fetched_at", "source", "freshness", "confidence", "decision_id",
-            "review_type", "metadata", "supersedes_observation_id", "revision_reason",
+            "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -190,7 +202,7 @@ class MetricObservation:
             "freshness": self.freshness,
             "confidence": self.confidence,
         }
-        for field in ("decision_id", "review_type", "metadata", "supersedes_observation_id", "revision_reason"):
+        for field in ("decision_id", "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason"):
             value = getattr(self, field)
             if value is not None:
                 result[field] = dict(value) if field == "metadata" else value
@@ -225,6 +237,7 @@ class MetricObservation:
             freshness=self.freshness,
             confidence=self.confidence,
             value=self.value,
+            summary=self.summary,
             metadata=metadata,
         )
 

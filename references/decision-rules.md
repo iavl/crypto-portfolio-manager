@@ -1,5 +1,11 @@
 # Decision and Rebalancing Rules
 
+All arithmetic in the decision chain is Python-owned. The registry and Facts
+layer provide structured evidence to bounded semantic judgment; resulting
+scores do not bypass Python regime, portfolio-level risk, stablecoin, target,
+rebalance, or `NO_TRADE` constraints. The report consumes finalized packet
+values and cannot change them.
+
 ## Rule 1 — No-trade is first-class
 
 Before proposing any transaction, explicitly test whether `NO TRADE` is superior after accounting for:

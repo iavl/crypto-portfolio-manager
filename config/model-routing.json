@@ -1,0 +1,29 @@
+{
+  "routing_policy_version": 1,
+  "mode": "AUTO",
+  "luna_policy": "LUNA_MAX_ONLY",
+  "stages": {
+    "screenshot_extraction": "LUNA_MAX",
+    "metric_collection": "LUNA_MAX",
+    "normal_source_retrieval": "LUNA_MAX",
+    "source_conflict_resolution": "TERRA",
+    "factor_semantic_analysis": "TERRA",
+    "report_generation": "TERRA",
+    "major_event_analysis": "SOL",
+    "high_impact_final_review": "SOL",
+    "history": "PYTHON",
+    "facts": "PYTHON",
+    "metrics_math": "PYTHON",
+    "technical": "PYTHON",
+    "scoring_math": "PYTHON",
+    "regime": "PYTHON",
+    "allocation": "PYTHON",
+    "risk": "PYTHON",
+    "rebalance": "PYTHON",
+    "execution": "PYTHON"
+  },
+  "sol_thresholds": {
+    "material_reduce_pp": 5,
+    "material_target_change_pp": 10
+  }
+}

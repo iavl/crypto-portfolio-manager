@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/report-packet.schema.json",
+  "title": "Final report packet",
+  "type": "object",
+  "required": ["review_type", "market_regime", "scores", "current_weights", "target_weights", "actions", "approved_amounts", "execution_zones", "historical_changes", "risk_flags", "critical_missing_data", "data_quality"],
+  "properties": {
+    "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
+    "market_regime": {"enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
+    "scores": {"type": "object"},
+    "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "actions": {"type": "array"},
+    "approved_amounts": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
+    "execution_zones": {"type": "object"},
+    "historical_changes": {"type": "object"},
+    "risk_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "sol_review": {"type": ["object", "null"]},
+    "critical_missing_data": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "data_quality": {"type": "object"}
+  },
+  "additionalProperties": false
+}

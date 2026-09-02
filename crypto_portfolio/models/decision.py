@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -58,6 +59,7 @@ class Decision:
     decision_id: str | None = None
     based_on_snapshot_id: str | None = None
     execution_plans: Mapping[str, ExecutionPlan | Mapping[str, Any]] | None = None
+    routing_metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -220,6 +222,28 @@ class Decision:
                 raise ValueError(
                     "each execution plan with a technical summary must have one matching execution_technical evidence record"
                 )
+        if self.routing_metadata is not None:
+            if not isinstance(self.routing_metadata, Mapping):
+                raise ValueError("routing_metadata must be an object or null")
+            metadata = dict(self.routing_metadata)
+            forbidden = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
+            if any(str(key).strip().lower() in forbidden for key in metadata):
+                raise ValueError("routing_metadata must not contain private reasoning")
+            stages_used = metadata.get("stages_used")
+            if stages_used is not None:
+                if not isinstance(stages_used, Mapping):
+                    raise ValueError("routing_metadata.stages_used must be an object")
+                from ..model_routing import validate_stage_model
+
+                for stage, model in stages_used.items():
+                    validate_stage_model(stage, model)
+            if "sol_review_performed" in metadata and not isinstance(metadata["sol_review_performed"], bool):
+                raise ValueError("routing_metadata.sol_review_performed must be boolean")
+            try:
+                json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("routing_metadata must be JSON serializable and finite") from exc
+            object.__setattr__(self, "routing_metadata", metadata)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "Decision":
@@ -255,6 +279,7 @@ class Decision:
             decision_id=data.get("decision_id"),
             based_on_snapshot_id=data.get("based_on_snapshot_id"),
             execution_plans=data.get("execution_plans"),
+            routing_metadata=data.get("routing_metadata"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -291,6 +316,8 @@ class Decision:
             result["execution_plans"] = {
                 symbol: plan.as_dict() for symbol, plan in self.execution_plans.items()
             }
+        if self.routing_metadata is not None:
+            result["routing_metadata"] = dict(self.routing_metadata)
         return result
 
 

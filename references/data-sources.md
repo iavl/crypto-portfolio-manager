@@ -1,5 +1,11 @@
 # Data Source Policy
 
+Collection is registry-driven. Python selects applicable metrics and freshness
+requirements; `LUNA_MAX` retrieves only those requests and returns normalized
+observations with source and timestamps. Python validates units, timestamps,
+freshness, conflicts, and history. Downstream semantic stages consume the
+normalized records/Facts rather than repeatedly reading raw webpages.
+
 ## Principle
 
 Current portfolio recommendations require current data. Prefer authoritative primary sources and triangulate material claims.

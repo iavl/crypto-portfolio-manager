@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/model-routing.schema.json",
+  "title": "Logical model routing policy",
+  "type": "object",
+  "required": ["routing_policy_version", "mode", "luna_policy", "stages"],
+  "properties": {
+    "routing_policy_version": {"type": "integer", "minimum": 1},
+    "mode": {"enum": ["AUTO", "MANUAL"]},
+    "luna_policy": {"const": "LUNA_MAX_ONLY"},
+    "stages": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"enum": ["LUNA_MAX", "TERRA", "SOL", "PYTHON"]}
+    },
+    "sol_thresholds": {
+      "type": "object",
+      "required": ["material_reduce_pp", "material_target_change_pp"],
+      "properties": {
+        "material_reduce_pp": {"type": "number", "exclusiveMinimum": 0},
+        "material_target_change_pp": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

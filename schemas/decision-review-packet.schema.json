@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/decision-review-packet.schema.json",
+  "title": "Compact decision review packet",
+  "type": "object",
+  "required": ["review_type", "market_regime", "current_weights", "target_weights", "assets"],
+  "properties": {
+    "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
+    "market_regime": {"enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
+    "portfolio_drawdown": {"type": ["number", "null"], "maximum": 0},
+    "risk_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "previous_target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+    "assets": {"type": "array", "items": {"$ref": "#/$defs/asset"}},
+    "execution_summary": {"type": "object"},
+    "critical_missing_data": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "major_conflicts": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "major_event_risk": {"type": "boolean"},
+    "risk_budget_breach": {"type": "boolean"},
+    "risk_escalation": {"type": "boolean"},
+    "recommendation_reversal": {"type": "boolean"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "required": ["symbol", "factor_scores", "score", "confidence", "current_weight", "target_weight", "action", "approved_amount_usd"],
+      "properties": {
+        "symbol": {"type": "string", "minLength": 1},
+        "factor_scores": {"type": "object"},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+        "previous_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "key_facts": {"type": "object"},
+        "historical_changes": {"type": "object"},
+        "current_weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "action": {"enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
+        "approved_amount_usd": {"type": "number", "minimum": 0},
+        "supporting_evidence_ids": {"type": "array"},
+        "contrary_evidence_ids": {"type": "array"},
+        "thesis_broken": {"type": "boolean"},
+        "severe_event": {"type": "boolean"},
+        "portfolio_constraint": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
