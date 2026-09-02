@@ -66,9 +66,9 @@
         "screenshot_extraction": "luna_max",
         "metric_collection": "luna_max",
         "normal_source_retrieval": "luna_max",
-        "source_conflict_resolution": "terra_medium",
-        "factor_semantic_analysis": "terra_medium",
-        "report_generation": "terra_low",
+        "source_conflict_resolution": "luna_max",
+        "factor_semantic_analysis": "luna_max",
+        "report_generation": "luna_max",
         "major_event_analysis": "sol_high",
         "high_impact_final_review": "sol_medium",
         "history": "python",
@@ -87,7 +87,7 @@
       "extends": "balanced",
       "description": "Prefer cheaper non-decision routing where safe.",
       "stages": {
-        "source_conflict_resolution": "terra_low",
+        "source_conflict_resolution": "luna_max",
         "report_generation": "luna_max"
       }
     },
