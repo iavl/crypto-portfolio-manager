@@ -55,12 +55,70 @@ Separate fact from judgment.
 
 ## 4. 单币评估
 
-Suggested table:
+先给出概览表：
 
 | Asset | Score | Confidence | Trend | Fundamentals | vs BTC | Thesis |
 |---|---:|---|---|---|---|---|
 
-Keep the thesis concise and identify the strongest positive and negative factor.
+Then use this decision chain for every risk-bearing asset with an explicit
+`HOLD`, `WAIT`, `INCREASE`, `REDUCE`, or `EXIT`, and for each major asset even
+when its action is unchanged:
+
+```text
+Evidence → Factor Score → Weighted Score/Confidence → Market Regime
+→ Target Allocation → Risk Gate → Current vs Target → Rebalance Threshold
+→ Action
+```
+
+For each such asset, include:
+
+### ETH — HOLD
+
+```text
+Asset Score: 73.4
+Data coverage: 90%
+Confidence: HIGH
+```
+
+| Factor | Policy weight / effective weight | Score | Key evidence | Effect |
+|---|---:|---:|---|---|
+| trend | 25% / 27.8% | 82 | evidence ID, source, observed time, concise fact | ++ |
+| valuation | 20% / 22.2% | 61 | ... | + |
+| fundamentals | 20% / 22.2% | 78 | ... | ++ |
+| onchain | 10% / 11.1% | 70 | ... | + |
+| capital_flows | 10% / 11.1% | 66 | ... | + |
+| relative_strength_btc | 10% / 11.1% | 54 | ... | - |
+| event_risk | 5% / 5.6% | 85 | ... | + |
+
+Use the canonical factor names from `config/policy.json`. Show the policy
+weight and the renormalized effective weight when factors are missing. Every
+key evidence statement must come from a matching persisted `Evidence` record
+and identify its evidence ID, source, and observed time; never fill a failed,
+stale, or conflicting metric with an invented value.
+
+Below the factor table, include this compact decision bridge:
+
+- **支持证据**：the strongest positive factors and their evidence.
+- **反对证据 / 风险**：the strongest negative, missing, stale, or conflicting
+  factors and their effect on confidence.
+- **组合层面约束**：current weight, target weight, deviation, active
+  rebalance threshold, regime envelope, stablecoin floor, concentration, and
+  funding/turnover constraints that matter.
+- **为什么是这个 Action**：explain why the chain ends in `HOLD`/`WAIT`,
+  `INCREASE`, `REDUCE`, or `EXIT`, rather than mapping the score directly to a
+  trade. If a high score still produces `HOLD`, state the deviation and
+  threshold explicitly and explain any retained stablecoin optionality or
+  turnover concern.
+- **什么会改变建议**：link to the concrete invalidation/catalyst in section
+  8.
+
+For a satellite, also state the BTC opportunity cost: relative performance,
+relative risk/volatility, current satellite exposure, applicable regime cap,
+and why the incremental risk is or is not better than allocating the same
+capital to BTC. For `NO_TRADE`, provide the same evidence-to-decision bridge
+at portfolio level, including regime, stablecoin, risk-gate, threshold, and
+funding reasons. Stablecoin/cash rows use the stable-sleeve evidence and
+constraints instead of fabricated asset-specific factors.
 
 ## 5. 当前仓位 vs 目标仓位
 
@@ -121,11 +179,18 @@ List 2–5 concrete invalidation/catalyst conditions.
 State:
 
 - analysis timestamp;
+- the compact `Data Collection Summary`: requested metrics, counts for each
+  status, critical failures, weighted evidence coverage, and decision
+  confidence;
 - missing or stale factors;
 - score confidence impact;
 - any conflicting data;
 - screenshot cross-check status and material mismatches;
 - whether visible rows reconcile with the reported total.
+
+The detailed `Data Collection Log` is shown during evidence acquisition. The
+final report must still list every `FAILED`, `STALE`, or `CONFLICT` metric and
+its scoring/decision effect; do not silently omit collection failures.
 
 For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
 show the change in percentage points when both cost bases are usable. For

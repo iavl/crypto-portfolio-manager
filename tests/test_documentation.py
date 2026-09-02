@@ -38,6 +38,20 @@ class DocumentationTests(unittest.TestCase):
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
         self.assertIn("Python 3.11 or newer", (ROOT / "README.md").read_text(encoding="utf-8"))
 
+    def test_evidence_collection_and_decision_chain_are_documented(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
+        self.assertIn("Data Collection Log", skill)
+        self.assertIn("Never silently omit", skill)
+        for status in ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"):
+            with self.subTest(status=status):
+                self.assertIn(status, skill)
+        self.assertIn("CRITICAL DATA FAILURE", skill)
+        self.assertIn("Evidence → Factor Score", template)
+        self.assertIn("Policy weight / effective weight", template)
+        self.assertIn("NO_TRADE", template)
+        self.assertIn("Data Collection Summary", template)
+
 
 if __name__ == "__main__":
     unittest.main()

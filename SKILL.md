@@ -66,10 +66,14 @@ display data, so the engine uses value ÷ quantity and records a note.
 5. Build cash-flow-aware NAV and drawdown history.
 6. Select `SNAPSHOT_REVIEW`, `FULL_REVIEW`, or `EVENT_REVIEW`; recommend a
    `FULL_REVIEW` when at least 14 days have passed since the last one.
-7. Fetch current price, trend, flow, fundamental, on-chain, and event evidence.
-8. Validate evidence completeness and preserve provenance.
+7. Fetch current price, trend, flow, fundamental, on-chain, and event evidence;
+   emit a visible `Data Collection Log` for each requested decision-relevant
+   metric.
+8. Validate evidence completeness and preserve provenance. Never silently omit
+   a requested metric: record its collection status and scoring effect.
 9. Build `Evidence`, `FactorScore`, and `AssetAssessment` records.
-10. Run deterministic scoring and missing-factor coverage checks.
+10. Run deterministic scoring and missing-factor coverage checks; publish the
+    collection summary with weighted coverage and resulting confidence.
 11. Run the regime engine.
 12. Run the allocation engine.
 13. Run the risk gate and stop on `ERROR` violations.
@@ -100,6 +104,66 @@ display data, so the engine uses value ÷ quantity and records a note.
 
 When the user explicitly requests a dry run or no persistence, do not append
 runtime state.
+
+## Visible evidence collection
+
+During workflow steps 7–10, show a compact `Data Collection Log` to the user as
+metrics complete, either one entry at a time or in short batches. This is
+mandatory execution telemetry, not an internal note. Log every requested
+decision-relevant metric, including failures and metrics that do not apply; do
+not dump every raw candle or data row.
+
+Use these exact statuses:
+
+```text
+SUCCESS | FAILED | STALE | CONFLICT | NOT_APPLICABLE
+```
+
+Use this format:
+
+```text
+[DATA] <asset/scope> <metric> <STATUS> <value or short summary>
+       source: <source or N/A>
+       observed_at: <UTC timestamp or N/A>
+       fetched_at: <UTC timestamp or N/A>
+       reason: <required for FAILED/STALE/CONFLICT/NOT_APPLICABLE>
+       scoring_effect: <coverage, confidence, or entry effect>
+```
+
+Use `NOT_APPLICABLE` when a metric is not meaningful for the asset (for
+example, TVL for BTC), and `FAILED` when an applicable metric has no
+sufficiently current and reliable result. `STALE` and `CONFLICT` must state
+which data is old or disagreeing. A critical failure—current price, recent
+trend history, portfolio value, or unresolved material security status—must
+say `CRITICAL DATA FAILURE` and `high-conviction trade blocked`.
+
+At minimum, request and log these applicable metrics:
+
+- Market context: BTC spot price, MA50/MA100/MA200, 30D/90D trend,
+  drawdown, volatility, dominance/breadth, stablecoin liquidity trend,
+  relevant ETF or other capital flows, and major current events.
+- Each held or considered risk asset: current price, 30D/90D/180D return,
+  MA50/MA100/MA200, drawdown/historical position, asset-appropriate
+  fundamentals, on-chain activity, capital flow, 1M/3M/6M performance versus
+  BTC, token unlock/supply events, and security/governance/regulatory events.
+
+After collection, show a compact summary and use weighted scoring coverage—not
+the raw number of log lines—as `Overall evidence coverage`:
+
+```text
+Data Collection Summary
+Requested metrics: <N>
+SUCCESS: <N>  STALE: <N>  FAILED: <N>
+CONFLICT: <N>  NOT_APPLICABLE: <N>
+Critical failures: <N>
+Overall evidence coverage: <percent>
+Decision confidence: <HIGH|MEDIUM|LOW>
+```
+
+Collection statuses are presentation telemetry. They do not replace the
+validated `Evidence` records or change the persistent `freshness` contract;
+carry source, observed/fetched timestamps, value/summary, confidence, and
+factor links into the canonical records.
 
 ## Deterministic staged execution
 
