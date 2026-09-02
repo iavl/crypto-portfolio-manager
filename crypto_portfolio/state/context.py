@@ -8,6 +8,8 @@ from typing import Any
 
 from ..engine.ledger import PortfolioSnapshot as LedgerSnapshot
 from ..engine.ledger import build_nav_history
+from ..engine.position_pnl import calculate_portfolio_position_performance
+from ..models.performance import PositionPerformance
 from ..models.decision import Decision
 from ..models.portfolio import snapshot_from_mapping
 from ..models.time import parse_timestamp
@@ -53,6 +55,75 @@ def previous_asset_assessment(
     return None
 
 
+def _position_performance_records(
+    path: str | Path | None = None,
+) -> dict[str, list[tuple[str | None, PositionPerformance]]]:
+    records = []
+    for index, record in enumerate(read_snapshots(path)):
+        snapshot, _, _ = snapshot_from_mapping(record)
+        timestamp = None if snapshot.timestamp == "UNSPECIFIED" else snapshot.timestamp
+        records.append((timestamp, index, calculate_portfolio_position_performance(snapshot)))
+    records.sort(
+        key=lambda item: (
+            item[0] is None,
+            parse_timestamp(item[0]) if item[0] is not None else None,
+            item[1],
+        )
+    )
+    result: dict[str, list[tuple[str | None, PositionPerformance]]] = {}
+    for timestamp, _, summary in records:
+        for position in summary.positions:
+            result.setdefault(position.symbol, []).append((timestamp, position))
+    return result
+
+
+def latest_position_performance(
+    symbol: str,
+    path: str | Path | None = None,
+) -> PositionPerformance | None:
+    normalized = symbol.strip().upper()
+    history = _position_performance_records(path).get(normalized, [])
+    return history[-1][1] if history else None
+
+
+def position_performance_history(
+    symbol: str,
+    path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    normalized = symbol.strip().upper()
+    return [
+        {"timestamp": timestamp, **performance.as_dict()}
+        for timestamp, performance in _position_performance_records(path).get(normalized, [])
+    ]
+
+
+def build_position_pnl_context(
+    path: str | Path | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for symbol, records in _position_performance_records(path).items():
+        history = [
+            {"timestamp": timestamp, **performance.as_dict()}
+            for timestamp, performance in records
+        ]
+        latest = history[-1]
+        previous = history[-2] if len(history) > 1 else None
+        latest_return = latest["unrealized_return_pct"]
+        previous_return = previous["unrealized_return_pct"] if previous else None
+        change_pp = (
+            (latest_return - previous_return) * 100
+            if latest_return is not None and previous_return is not None
+            else None
+        )
+        context[symbol] = {
+            "latest": latest,
+            "previous": previous,
+            "unrealized_return_change_pp": change_pp,
+            "history": history,
+        }
+    return context
+
+
 def last_full_review(path: str | Path | None = None) -> dict[str, Any] | None:
     reviews = [
         record
@@ -83,6 +154,7 @@ def build_history_context(
     if decision is not None:
         parsed_decision = Decision.from_mapping(decision)
         previous_assessments = dict(parsed_decision.factor_scores)
+    position_pnl = build_position_pnl_context(snapshot_path)
     return {
         "latest_snapshot": snapshot,
         "latest_decision": decision,
@@ -95,14 +167,18 @@ def build_history_context(
         "previous_assessments": previous_assessments,
         "last_full_review": full_review,
         "full_review_due": full_review_due,
+        "position_pnl": position_pnl,
     }
 
 
 __all__ = [
     "build_history_context",
+    "build_position_pnl_context",
     "last_full_review",
     "latest_decision",
+    "latest_position_performance",
     "latest_snapshot",
+    "position_performance_history",
     "portfolio_nav_history",
     "previous_asset_assessment",
 ]

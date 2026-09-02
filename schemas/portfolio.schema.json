@@ -59,6 +59,9 @@
           "symbol": {"type": "string", "minLength": 1},
           "quantity": {"type": ["number", "null"], "minimum": 0},
           "value_usd": {"type": "number", "minimum": 0},
+          "current_price_usd": {"type": ["number", "null"], "minimum": 0},
+          "average_cost_price_usd": {"type": ["number", "null"], "minimum": 0},
+          "exchange_unrealized_pnl_usd": {"type": ["number", "null"]},
           "displayed_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
           "cost_basis_usd": {"type": ["number", "null"], "minimum": 0},
           "asset_type_hint": {

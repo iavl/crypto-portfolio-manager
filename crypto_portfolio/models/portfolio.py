@@ -43,6 +43,9 @@ class Position:
     cost_basis_usd: float | None = None
     resolved_asset_type: str = "other"
     asset_type_hint: str | None = None
+    current_price_usd: float | None = None
+    average_cost_price_usd: float | None = None
+    exchange_unrealized_pnl_usd: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or not self.symbol.strip():
@@ -69,6 +72,32 @@ class Position:
         )
         object.__setattr__(
             self,
+            "current_price_usd",
+            _optional_number(
+                self.current_price_usd,
+                f"position {self.symbol}.current_price_usd",
+                minimum=0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "average_cost_price_usd",
+            _optional_number(
+                self.average_cost_price_usd,
+                f"position {self.symbol}.average_cost_price_usd",
+                minimum=0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "exchange_unrealized_pnl_usd",
+            _optional_number(
+                self.exchange_unrealized_pnl_usd,
+                f"position {self.symbol}.exchange_unrealized_pnl_usd",
+            ),
+        )
+        object.__setattr__(
+            self,
             "resolved_asset_type",
             _asset_type(self.resolved_asset_type, f"position {self.symbol}.resolved_asset_type"),
         )
@@ -85,6 +114,9 @@ class Position:
             "quantity": self.quantity,
             "value_usd": self.value_usd,
             "cost_basis_usd": self.cost_basis_usd,
+            "current_price_usd": self.current_price_usd,
+            "average_cost_price_usd": self.average_cost_price_usd,
+            "exchange_unrealized_pnl_usd": self.exchange_unrealized_pnl_usd,
             "asset_type": self.resolved_asset_type,
             **({"asset_type_hint": self.asset_type_hint} if self.asset_type_hint else {}),
         }
@@ -221,6 +253,9 @@ def _position_from_mapping(raw: Mapping[str, Any], policy: Policy, index: int) -
         cost_basis_usd=raw.get("cost_basis_usd"),
         resolved_asset_type=resolved,
         asset_type_hint=hint,
+        current_price_usd=raw.get("current_price_usd"),
+        average_cost_price_usd=raw.get("average_cost_price_usd"),
+        exchange_unrealized_pnl_usd=raw.get("exchange_unrealized_pnl_usd"),
     )
 
 
@@ -255,12 +290,15 @@ def snapshot_from_mapping(
     supplied_policy_hash = data.get("policy_hash", expected_policy_hash)
     if supplied_policy_hash != expected_policy_hash:
         raise ValueError("snapshot policy_hash does not match resolved policy")
+    reported_total_value = data.get("total_value")
+    if reported_total_value is None:
+        reported_total_value = data.get("reported_total_value")
     snapshot = PortfolioSnapshot(
         timestamp=_LEGACY_TIMESTAMP if legacy_timestamp else timestamp,
         positions=positions,
         base_currency=data.get("base_currency", "USD"),
         external_cash_flow=data.get("external_cash_flow", 0.0),
-        total_value=data.get("total_value", data.get("reported_total_value")),
+        total_value=reported_total_value,
         policy_version=supplied_policy_version,
         source=data.get("source"),
         portfolio_peak_value=data.get("portfolio_peak_value"),
@@ -275,7 +313,9 @@ def snapshot_from_mapping(
     warnings: list[str] = []
     if legacy_timestamp:
         warnings.append("timestamp is missing; legacy normalization cannot be used for ordered history")
-    reported_total = data.get("reported_total_value", data.get("total_value"))
+    reported_total = data.get("reported_total_value")
+    if reported_total is None:
+        reported_total = data.get("total_value")
     if reported_total is not None:
         reported_total = _number(reported_total, "reported_total_value", minimum=0)
         if reported_total > 0:
@@ -331,13 +371,17 @@ def snapshot_from_mapping(
 def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None) -> dict[str, Any]:
     snapshot, resolved_policy, warnings = snapshot_from_mapping(data, policy=policy)
     total = snapshot.total_value_usd
+    from ..engine.position_pnl import (
+        calculate_portfolio_position_performance,
+        position_performance_record,
+    )
+
+    performance = calculate_portfolio_position_performance(snapshot)
     positions = [
-        {
-            **position.as_dict(),
-            "computed_weight": position.value_usd / total,
-        }
-        for position in snapshot.positions
+        position_performance_record(position, position_result)
+        for position, position_result in zip(snapshot.positions, performance.positions)
     ]
+    warnings.extend(performance.validation_notes)
     values = {
         "stablecoin": {"stablecoin", "cash"},
         "core": {"core"},
@@ -360,17 +404,40 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
     ):
         drawdown = total / snapshot.portfolio_peak_value - 1.0
 
+    reported_total = snapshot.total_value
+    visible_coverage = None
+    if reported_total is not None and reported_total > 0:
+        visible_coverage = total / reported_total
+        if visible_coverage < 0.99:
+            warnings.append(
+                f"visible position value covers only {visible_coverage:.2%} of reported total"
+            )
+        elif visible_coverage > 1.01:
+            warnings.append(
+                f"visible position value exceeds reported total by {visible_coverage - 1:.2%}"
+            )
+
     return {
         "config": resolved_policy.legacy_config(),
         "policy_version": resolved_policy.policy_version,
         "timestamp": None if snapshot.timestamp == _LEGACY_TIMESTAMP else snapshot.timestamp,
+        "source": snapshot.source,
         "base_currency": snapshot.base_currency,
         "total_value_usd": total,
+        "reported_total_value_usd": reported_total,
+        "visible_positions_value_usd": total,
+        "visible_value_coverage_ratio": visible_coverage,
         "stablecoin_weight": weights["stablecoin"],
         "core_weight": weights["core"],
         "satellite_weight": weights["satellite"],
         "portfolio_drawdown": drawdown,
         "external_cash_flow": snapshot.external_cash_flow,
+        "cost_known_current_value_usd": performance.cost_known_current_value_usd,
+        "cost_known_cost_basis_usd": performance.cost_known_cost_basis_usd,
+        "total_unrealized_pnl_known_usd": performance.total_unrealized_pnl_known_usd,
+        "aggregate_unrealized_return_pct": performance.aggregate_unrealized_return_pct,
+        "pnl_value_coverage_ratio": performance.pnl_value_coverage_ratio,
+        "position_performance": performance.as_dict(),
         "positions": positions,
         "warnings": warnings,
     }

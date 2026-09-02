@@ -47,9 +47,41 @@ a validated Chinese report.
 
 ### Screenshot
 
-Screenshots are the primary end-user input. Provide an exchange portfolio
-view, asset balances, or a total portfolio value when available. The Agent
-extracts holdings and validates them before analysis.
+Screenshots are the primary end-user input. For the standard Binance wallet
+overview workflow:
+
+1. Open the wallet overview and set display currency to USD.
+2. Ensure the screenshot shows `资产`, `数量`, `资产价格 / 成本价`, and
+   `浮动盈亏`, plus the reported total when available.
+3. Upload the screenshot and invoke `$crypto-portfolio-manager`.
+4. The Agent extracts each visible row; Python validates and calculates cost
+   basis, unrealized P&L, return, and portfolio weight.
+
+In the fixed row layout, the top number in `资产价格 / 成本价` is current
+price and the bottom number is average cost. The top number in `数量` is
+quantity and the bottom number is current value. A `--` cost price or floating
+P&L is unknown, not zero. A displayed `$0.00` price with positive value is
+handled using current value ÷ quantity and marked as rounded display data.
+
+The normalizer checks these identities:
+
+```text
+quantity × current price ≈ current value
+quantity × average cost ≈ cost basis
+current value − cost basis ≈ Binance floating P&L
+```
+
+Small display-rounding differences are retained as warnings. The default
+cross-check tolerance is the larger of $0.05 or 0.5% of the expected value.
+Material mismatches require verification before a snapshot is persisted. If visible
+rows do not reconcile with the reported total, the result is explicitly
+partial and visible weights are not presented as full-portfolio weights.
+
+For cost-bearing rows, the normalized result includes `current_price_usd`,
+`average_cost_price_usd`, `cost_basis_usd`, `unrealized_pnl_usd`,
+`unrealized_return_pct`, `pnl_status`, and validation notes. Stablecoin rows
+without cost data still count toward portfolio value and the stable sleeve but
+show null Position P&L fields.
 
 If a screenshot value is unclear, provide the value separately or expect the
 Skill to ask for clarification. It must not silently guess material amounts.
@@ -78,6 +110,39 @@ python3 scripts/portfolio_snapshot.py portfolio.json
 
 The command validates and normalizes the snapshot only. It does not fetch live
 market data or produce a complete investment decision.
+
+Example synthetic Position P&L input:
+
+```json
+{
+  "timestamp": "2026-09-01T12:00:00Z",
+  "positions": [
+    {
+      "symbol": "AAA",
+      "quantity": 2,
+      "value_usd": 180,
+      "current_price_usd": 90,
+      "average_cost_price_usd": 100,
+      "exchange_unrealized_pnl_usd": -20
+    },
+    {
+      "symbol": "USDT",
+      "quantity": 100,
+      "value_usd": 100,
+      "current_price_usd": 1,
+      "average_cost_price_usd": null,
+      "exchange_unrealized_pnl_usd": null
+    }
+  ]
+}
+```
+
+The engine calculates `cost_basis_usd = quantity × average_cost_price_usd`,
+`unrealized_pnl_usd = current value − cost basis`, and
+`unrealized_return_pct = unrealized P&L ÷ cost basis`. The aggregate return is
+total known-cost P&L ÷ total known cost basis, never an average of asset
+returns. `pnl_value_coverage_ratio` states what share of portfolio value has
+usable cost data.
 
 ## Staged execution data
 
@@ -143,6 +208,9 @@ $crypto-portfolio-manager
 做一次 SNAPSHOT_REVIEW。
 读取历史仓位和上一轮决策，并结合当前市场情况判断是否需要调仓。
 只有当风险收益比足够明显时才建议交易。
+
+请在报告中包含当前持仓的 Position P&L 表格、成本数据覆盖率；`--` 成本
+仓位显示为未知，不要显示为 0%。
 ```
 
 ### New capital allocation
@@ -174,6 +242,8 @@ $crypto-portfolio-manager
 对比上一次完整复盘：
 - Portfolio NAV
 - Drawdown
+- Position P&L and cost-data coverage
+- previous/current unrealized return by asset and percentage-point change
 - BTC benchmark
 - previous target weights
 - previous asset scores
@@ -216,6 +286,10 @@ decision 或其他历史状态。
 
 Dry-run and no-persistence requests still use validation and risk controls, but
 do not append snapshots, decisions, or status events.
+
+The snapshot normalizer and Position P&L engine still run during a dry run, so
+the report can show calculated values and cross-check warnings without writing
+them to `snapshots.jsonl`.
 
 ## How Current Data Is Used
 
@@ -274,7 +348,10 @@ Current state files are:
 
 History supports comparison with previous holdings, cash-flow-aware NAV and
 drawdown, previous targets/actions/theses, and full-review timing. Records are
-append-only; previous rationales are not rewritten.
+append-only; previous rationales are not rewritten. Position history is
+available through `latest_position_performance()`,
+`position_performance_history()`, and `build_position_pnl_context()`, including
+the latest/previous unrealized return and percentage-point change.
 
 On the first review, there may be no prior snapshot, decision, or NAV history.
 The Skill establishes a validated baseline and does not fabricate historical
@@ -334,3 +411,11 @@ ls ~/.local/share/crypto-portfolio-manager
 
 If `CRYPTO_PORTFOLIO_DATA_DIR` is set, inspect that directory instead of the
 default path.
+
+## Position P&L limitations
+
+Position P&L describes the current remaining position against its current
+cost-basis observation. It does not calculate realized P&L from sales, tax lots,
+historical fees, lifetime return, or a Binance trading-history import. Cost
+basis is context for reporting and risk discussion, not a buy signal or a
+sunk-cost anchor.

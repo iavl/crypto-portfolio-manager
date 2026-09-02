@@ -29,13 +29,40 @@ constants. Python models and engine modules perform validation and mathematics;
 the Agent supplies current evidence, bounded qualitative judgments, and
 explanations.
 
+## Binance screenshot intake
+
+When the user provides the standard Binance wallet-overview screenshot, do
+these steps before portfolio analysis:
+
+1. Inspect the visible asset rows and reported total.
+2. Extract each visible row's symbol, quantity, current value, current price,
+   average cost price, and displayed floating P&L.
+3. Treat `--` as `null`; never convert an unknown cost or P&L to zero.
+4. Require Binance display currency to be USD. Do not put CNY values in
+   `*_usd` fields.
+5. Pass the extracted fields to the deterministic snapshot normalizer and
+   Position P&L engine. Do not calculate P&L manually in the report.
+6. Check quantity × price, quantity × average cost, and value − cost against
+   the visible values. Clarify material mismatches before persistence.
+7. Assess visible-value coverage against the reported total; do not treat
+   visible rows as the whole portfolio when the screenshot is partial.
+8. Continue the review and include the Position P&L table and known-cost
+   coverage summary in the Chinese output.
+
+The Binance row convention is: the top number in `资产价格 / 成本价` is the
+current price and the bottom number is average cost; the top number in
+`数量` is quantity and the bottom number is current position value. A
+displayed `$0.00` current price with positive quantity and value is rounded
+display data, so the engine uses value ÷ quantity and records a note.
+
 ## Ordered workflow
 
 1. Parse the current portfolio.
 2. Load the canonical policy.
 3. Validate the snapshot and apply only explicit policy overrides.
 4. Load historical snapshots, decisions, and the previous thesis before
-   fetching new evidence when local history is available.
+   fetching new evidence when local history is available. Use the structured
+   Position P&L history context for latest/previous asset returns.
 5. Build cash-flow-aware NAV and drawdown history.
 6. Select `SNAPSHOT_REVIEW`, `FULL_REVIEW`, or `EVENT_REVIEW`; recommend a
    `FULL_REVIEW` when at least 14 days have passed since the last one.
@@ -60,7 +87,12 @@ explanations.
     `execution_technical` evidence, and cache the normalized OHLCV by hash
     before persistence.
 21. Produce the Chinese user-facing report using
-    `references/output-template.md`.
+    `references/output-template.md`. Every normal review shows Position P&L
+    when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
+    `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
+    return. `FULL_REVIEW` also compares the prior/current return by asset in
+    percentage points; `SNAPSHOT_REVIEW` shows the current table without
+    treating cost basis as a buy signal.
 22. Persist only validated snapshots, decisions, execution plans, and complete
     evidence. Never
     rewrite prior rationale or mark a trade executed without explicit

@@ -87,6 +87,38 @@ class SchemaValidationTests(unittest.TestCase):
             )
             self.validate("decision.schema.json", read_decisions(decision_path)[0])
 
+    def test_position_pnl_fields_validate_against_all_portfolio_contracts(self):
+        value = {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "base_currency": "USD",
+            "reported_total_value": 300,
+            "positions": [
+                {
+                    "symbol": "AAA",
+                    "quantity": 2,
+                    "value_usd": 180,
+                    "current_price_usd": 90,
+                    "average_cost_price_usd": 100,
+                    "exchange_unrealized_pnl_usd": -20,
+                },
+                {
+                    "symbol": "USDT",
+                    "quantity": 100,
+                    "value_usd": 100,
+                    "current_price_usd": 1,
+                    "average_cost_price_usd": None,
+                    "exchange_unrealized_pnl_usd": None,
+                },
+            ],
+        }
+        self.validate("portfolio-input.schema.json", value)
+        self.validate("portfolio.schema.json", value)
+        self.validate("portfolio-normalized.schema.json", normalize_snapshot(value))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshots.jsonl"
+            append_snapshot(value, path)
+            self.validate("portfolio-record.schema.json", read_snapshots(path)[0])
+
     def test_market_observations_validate_against_market_schema(self):
         spot = SpotPrice("ETH", 100, "2026-09-01T00:00:00Z", "exchange")
         series = OHLCVSeries(

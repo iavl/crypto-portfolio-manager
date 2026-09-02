@@ -25,6 +25,8 @@ Trading:  advisory only; no automatic execution
 - Preserves evidence, factor scores, and append-only decision history.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.
 - Treats stablecoins and cash as one sleeve and permits `NO_TRADE`.
+- Imports structured fields from Binance wallet screenshots and deterministically
+  calculates per-position cost basis, unrealized P&L, return, and coverage.
 - Stages an approved rebalance amount from timestamped spot data and completed
   OHLCV with calendar coverage checks, deterministic ATR-aware zones, confirmed
   swings, tranches, and `WAIT` handling.
@@ -111,6 +113,12 @@ description. Use the explicit invocation when discovery must be guaranteed.
 Start with the [Usage Guide](USAGE.md) for screenshot/JSON input, review types,
 copyable prompts, dry runs, external data, and local history.
 
+For the standard Binance workflow, set the wallet overview display currency to
+USD, capture the asset/quantity/price-cost/floating-P&L columns, and upload the
+screenshot. The Agent extracts visible fields; Python calculates all derived
+P&L values. Rows showing `--` remain unknown, and a partial screenshot is
+reported as partial rather than treated as the full portfolio.
+
 ## Runtime Data and Privacy
 
 Runtime history is outside the Git checkout by default:
@@ -125,6 +133,8 @@ adapters. Never commit real balances, quantities, cost basis, transaction
 history, account identifiers, credentials, private keys, or seed phrases.
 Content-addressed public OHLCV replay data is stored under
 `market-data/sha256/<ohlcv_hash>.json` in that same runtime directory.
+Position P&L is unrealized performance for the remaining position only; this
+feature does not claim realized P&L, fees, tax lots, or lifetime return.
 
 ## Development
 

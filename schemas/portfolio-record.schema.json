@@ -14,6 +14,9 @@
     "resolved_policy": {"type": "object"},
     "external_cash_flow": {"type": "number"},
     "total_value": {"type": ["number", "null"], "minimum": 0},
+    "reported_total_value_usd": {"type": ["number", "null"], "minimum": 0},
+    "visible_positions_value_usd": {"type": "number", "minimum": 0},
+    "visible_value_coverage_ratio": {"type": ["number", "null"], "minimum": 0},
     "portfolio_peak_value": {"type": ["number", "null"], "minimum": 0},
     "positions": {
       "type": "array",
@@ -25,7 +28,42 @@
           "symbol": {"type": "string", "minLength": 1},
           "quantity": {"type": ["number", "null"], "minimum": 0},
           "value_usd": {"type": "number", "minimum": 0},
+          "current_price_usd": {"type": ["number", "null"], "minimum": 0},
+          "average_cost_price_usd": {"type": ["number", "null"], "minimum": 0},
+          "exchange_unrealized_pnl_usd": {"type": ["number", "null"]},
           "cost_basis_usd": {"type": ["number", "null"], "minimum": 0},
+          "unrealized_pnl_usd": {"type": ["number", "null"]},
+          "unrealized_return_pct": {"type": ["number", "null"]},
+          "pnl_status": {
+            "type": "string",
+            "enum": ["AVAILABLE", "COST_UNKNOWN", "ZERO_COST", "INSUFFICIENT_DATA", "CROSSCHECK_WARNING", "MATERIAL_MISMATCH"]
+          },
+          "validation_status": {
+            "type": "string",
+            "enum": ["PASS", "ROUNDING_WARNING", "MATERIAL_MISMATCH", "INSUFFICIENT_DATA"]
+          },
+          "validation_notes": {"type": "array", "items": {"type": "string"}},
+          "computed_weight": {"type": "number", "minimum": 0, "maximum": 1},
+          "displayed_current_price_usd": {"type": ["number", "null"], "minimum": 0},
+          "displayed_average_cost_price_usd": {"type": ["number", "null"], "minimum": 0},
+          "performance": {
+            "type": "object",
+            "required": ["unrealized_pnl_usd", "unrealized_return_pct", "pnl_status"],
+            "properties": {
+              "unrealized_pnl_usd": {"type": ["number", "null"]},
+              "unrealized_return_pct": {"type": ["number", "null"]},
+              "pnl_status": {
+                "type": "string",
+                "enum": ["AVAILABLE", "COST_UNKNOWN", "ZERO_COST", "INSUFFICIENT_DATA", "CROSSCHECK_WARNING", "MATERIAL_MISMATCH"]
+              },
+              "validation_status": {
+                "type": "string",
+                "enum": ["PASS", "ROUNDING_WARNING", "MATERIAL_MISMATCH", "INSUFFICIENT_DATA"]
+              },
+              "validation_notes": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          },
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
           "asset_type_hint": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]}
         },

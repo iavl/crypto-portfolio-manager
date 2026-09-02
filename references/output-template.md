@@ -22,6 +22,25 @@ Include:
 - current drawdown when known;
 - major concentration issue.
 
+When position cost data is available, also include:
+
+### 当前持仓收益
+
+| 资产 | 数量 | 当前价 | 平均成本 | 当前价值 | 持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+
+Rows with unknown cost show `--` for cost, unrealized P&L, and Position
+return. Stablecoin/cash rows still contribute to portfolio value and the
+stable sleeve. Below the table, report:
+
+- 已知成本仓位的未实现盈亏;
+- 已知成本仓位的加权未实现收益率;
+- 成本数据覆盖率 (`pnl_value_coverage_ratio`);
+- reported total and visible-value coverage when the screenshot is partial.
+
+Position unrealized return is not Portfolio NAV Return and must not be called
+`总收益`.
+
 ## 3. 市场状态
 
 Explain the regime using only the most decision-relevant evidence:
@@ -104,7 +123,14 @@ State:
 - analysis timestamp;
 - missing or stale factors;
 - score confidence impact;
-- any conflicting data.
+- any conflicting data;
+- screenshot cross-check status and material mismatches;
+- whether visible rows reconcile with the reported total.
+
+For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
+show the change in percentage points when both cost bases are usable. For
+`SNAPSHOT_REVIEW`, always show the current table when cost observations are
+present.
 
 ## 10. Final action line
 

@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..engine.position_pnl import (
+    calculate_portfolio_position_performance,
+    position_performance_record,
+)
 from ..models.policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from ..models.portfolio import PortfolioSnapshot, snapshot_from_mapping
 from ..models.time import parse_timestamp
@@ -50,7 +54,28 @@ def _validated_snapshot(
     expected_hash = policy_hash(resolved)
     if model.policy_hash is not None and model.policy_hash != expected_hash:
         raise ValueError("snapshot policy_hash does not match resolved policy")
+    performance = calculate_portfolio_position_performance(model)
+    material = [
+        position.symbol
+        for position in performance.positions
+        if position.validation_status == "MATERIAL_MISMATCH"
+    ]
+    if material:
+        raise ValueError(
+            "material position P&L mismatch requires verification: " + ", ".join(material)
+        )
     record = model.as_dict()
+    record["positions"] = [
+        position_performance_record(position, result)
+        for position, result in zip(model.positions, performance.positions)
+    ]
+    record["reported_total_value_usd"] = model.total_value
+    record["visible_positions_value_usd"] = model.total_value_usd
+    record["visible_value_coverage_ratio"] = (
+        model.total_value_usd / model.total_value
+        if model.total_value is not None and model.total_value > 0
+        else None
+    )
     record["policy_hash"] = expected_hash
     record["resolved_policy"] = resolved.as_dict()
     return record, resolved
