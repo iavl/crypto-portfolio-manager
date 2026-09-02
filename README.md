@@ -8,6 +8,8 @@ allocation, benchmark, and rebalance calculations.
 Detailed review workflows, input examples, history behavior, and
 troubleshooting are in the [Usage Guide](USAGE.md).
 
+For architecture and implementation details, see [How It Works](HOW_IT_WORKS.md).
+
 ## At a Glance
 
 ```text

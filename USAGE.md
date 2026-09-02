@@ -1,5 +1,7 @@
 # crypto-portfolio-manager Usage Guide
 
+For architecture and implementation details, see [How It Works](HOW_IT_WORKS.md).
+
 This guide covers the normal user workflow after the Skill is installed. For
 installation, updates, and uninstalling, see the [README](README.md).
 
