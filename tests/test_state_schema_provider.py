@@ -117,7 +117,7 @@ class StateSchemaProviderTests(unittest.TestCase):
         for filename in (
             "portfolio.schema.json", "decision.schema.json", "evidence.schema.json",
             "execution-plan.schema.json", "market.schema.json", "metric-observation.schema.json",
-            "collection-event.schema.json", "volume-profile.schema.json",
+            "collection-event.schema.json", "volume-profile.schema.json", "model-routing.schema.json",
         ):
             data = json.loads((Path(__file__).parents[1] / "schemas" / filename).read_text())
             self.assertEqual(data["type"], "object")

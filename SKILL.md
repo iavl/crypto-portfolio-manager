@@ -45,7 +45,12 @@ Every Luna-assigned stage uses `LUNA_MAX` only. Terra handles bounded normal
 semantic interpretation and report prose. Sol is conditional and reserved for
 major event/thesis-risk analysis or a high-impact final critique. Logical
 routing is recorded in `config/model-routing.json`; runtime model IDs are not
-hard-coded here.
+hard-coded here. Load the effective model/reasoning profile before any
+LLM-owned stage, honoring the default, explicit profile, and run override.
+Keep requested and effective routes distinct. If runtime capabilities do not
+permit per-stage switching, use the configured fallback and say so; never
+claim a host-level model switch that did not happen. Python-owned stages stay
+Python under every profile.
 
 ## Binance screenshot intake
 

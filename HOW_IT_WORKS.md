@@ -90,11 +90,27 @@ retained, but a public page may change after it was read.
 
 ## Model Routing
 
-`config/model-routing.json` stores logical stage names rather than hard-coded
-runtime IDs. `crypto_portfolio/model_routing.py` rejects any Luna-family value
-other than exactly `LUNA_MAX`; collection plans enforce the same value.
+`config/model-routing.json` is a v2 configuration of named model presets,
+explicit reasoning efforts, and profiles. The repository default is
+`balanced`; `efficient`, `quality`, and `session_compatible` are built in.
+Profiles can inherit one parent, and a user-local override can add presets or
+change selected stages without editing the repository file.
 
-The current logical mapping is:
+Routing follows this boundary:
+
+```text
+repository defaults -> selected profile -> run override
+-> requested StageRoute -> RuntimeCapabilities -> effective StageRoute
+```
+
+`crypto_portfolio.model_routing` keeps the requested preset/model/effort
+separate from the effective host route. Host capabilities are injected rather
+than guessed. A runtime that cannot select a model per stage falls back to
+`CURRENT_SESSION / inherit` and records the reason; it never pretends that a
+Terra or Luna switch occurred. The default adapter is conservative because
+this package does not own host-level dispatch.
+
+The logical stage owners remain:
 
 | Logical owner | Configured stages |
 |---|---|
@@ -103,10 +119,12 @@ The current logical mapping is:
 | `SOL` | `major_event_analysis`, `high_impact_final_review` |
 | `PYTHON` | `history`, `facts`, `metrics_math`, `technical`, `scoring_math`, `regime`, `allocation`, `risk`, `rebalance`, `execution` |
 
-Routing metadata can be attached to a decision. It records the stages used,
-escalations, and whether Sol performed a review; it does not store private
-model reasoning. See [references/model-routing.md](references/model-routing.md)
-for the human-readable routing policy.
+Every Luna-family preset must use `max`. Python-owned stages reject LLM
+presets, and collection plans continue to require logical `LUNA_MAX`.
+Routing metadata records profile, runtime, configuration hash, and each
+requested/effective route without prompts or private reasoning. Inspect it
+with `python3 scripts/model_routing.py --show-effective`; see
+[references/model-routing.md](references/model-routing.md) for the policy.
 
 ## 1. Portfolio Intake and Normalization
 
@@ -157,7 +175,7 @@ not make cost basis a buy signal.
 execution policy. It contains the universe, benchmarks, stable/drawdown
 limits, scoring and regime rules, rebalance thresholds, Volume Profile
 settings, and technical constants. `config/model-routing.json` contains stage
-ownership and Sol thresholds.
+presets, profiles, runtime fallback, stage ownership, and Sol thresholds.
 
 `models.policy.resolve_policy()` loads and validates the canonical policy.
 `Policy.classify()` applies one resolved classification to each symbol:

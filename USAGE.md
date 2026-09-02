@@ -62,6 +62,52 @@ history, and private reasoning are not forwarded to downstream packets.
 Luna-family stages must use `LUNA_MAX`; see `config/model-routing.json` for
 logical routing.
 
+## Choose a Model Profile
+
+The default requires no configuration and uses `balanced`. Choose another
+profile before a run:
+
+```bash
+# Prefer cheaper non-decision routing
+export CRYPTO_PORTFOLIO_MODEL_PROFILE=efficient
+
+# Use more reasoning for semantic and high-impact review stages
+export CRYPTO_PORTFOLIO_MODEL_PROFILE=quality
+
+# Use the current session model for every LLM-owned stage
+export CRYPTO_PORTFOLIO_MODEL_PROFILE=session_compatible
+```
+
+Inspect the selected profile without network access:
+
+```bash
+python3 scripts/model_routing.py --validate
+python3 scripts/model_routing.py --list-profiles
+python3 scripts/model_routing.py --show-effective
+```
+
+For a user-only customization, create
+`~/.config/crypto-portfolio-manager/model-routing.json` (or set
+`CRYPTO_PORTFOLIO_MODEL_CONFIG`) with an override such as:
+
+```json
+{
+  "active_profile": "my_profile",
+  "profiles": {
+    "my_profile": {
+      "extends": "balanced",
+      "stages": {"report_generation": "terra_medium"}
+    }
+  }
+}
+```
+
+Profile selection precedence is explicit run-level selection, then
+`CRYPTO_PORTFOLIO_MODEL_PROFILE`, local `active_profile`, and the repository
+default. A runtime such as standard ChatGPT may not expose per-stage model or
+reasoning controls; in that case the resolver uses `CURRENT_SESSION / inherit`
+and records the fallback rather than claiming a model switch.
+
 ## Provide Portfolio Input
 
 ### Screenshot

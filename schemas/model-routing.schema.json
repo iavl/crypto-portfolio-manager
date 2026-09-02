@@ -1,17 +1,107 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/crypto-portfolio-manager/model-routing.schema.json",
-  "title": "Logical model routing policy",
+  "title": "Model routing policy",
   "type": "object",
-  "required": ["routing_policy_version", "mode", "luna_policy", "stages"],
-  "properties": {
-    "routing_policy_version": {"type": "integer", "minimum": 1},
-    "mode": {"enum": ["AUTO", "MANUAL"]},
-    "luna_policy": {"const": "LUNA_MAX_ONLY"},
-    "stages": {
+  "oneOf": [
+    {"$ref": "#/$defs/v1"},
+    {"$ref": "#/$defs/v2"}
+  ],
+  "$defs": {
+    "v1": {
       "type": "object",
-      "minProperties": 1,
-      "additionalProperties": {"enum": ["LUNA_MAX", "TERRA", "SOL", "PYTHON"]}
+      "required": ["routing_policy_version", "mode", "luna_policy", "stages"],
+      "properties": {
+        "routing_policy_version": {"const": 1},
+        "mode": {"enum": ["AUTO", "MANUAL"]},
+        "luna_policy": {"const": "LUNA_MAX_ONLY"},
+        "stages": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"enum": ["LUNA_MAX", "TERRA", "SOL", "PYTHON"]}
+        },
+        "sol_thresholds": {"$ref": "#/$defs/sol_thresholds"}
+      },
+      "additionalProperties": false
+    },
+    "v2": {
+      "type": "object",
+      "required": [
+        "routing_policy_version",
+        "runtime",
+        "default_profile",
+        "luna_policy",
+        "models",
+        "profiles",
+        "runtime_fallback",
+        "sol_thresholds"
+      ],
+      "properties": {
+        "routing_policy_version": {"const": 2},
+        "runtime": {"enum": ["AUTO", "CODEX", "CHATGPT", "OPENAI_API", "GENERIC"]},
+        "default_profile": {"type": "string", "minLength": 1},
+        "active_profile": {"type": "string", "minLength": 1},
+        "luna_policy": {"const": "LUNA_MAX_ONLY"},
+        "models": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"$ref": "#/$defs/model"}
+        },
+        "profiles": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"$ref": "#/$defs/profile"}
+        },
+        "run_overrides": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "runtime_fallback": {"$ref": "#/$defs/runtime_fallback"},
+        "sol_thresholds": {"$ref": "#/$defs/sol_thresholds"}
+      },
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "family", "model", "reasoning_effort"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "family": {"type": "string", "minLength": 1},
+        "model": {"type": ["string", "null"]},
+        "reasoning_effort": {
+          "type": ["string", "null"],
+          "enum": ["inherit", "none", "low", "medium", "high", "xhigh", "max", null]
+        },
+        "supported_reasoning_efforts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["inherit", "none", "low", "medium", "high", "xhigh", "max"]}
+        }
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "required": ["stages"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "extends": {"type": "string", "minLength": 1},
+        "stages": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime_fallback": {
+      "type": "object",
+      "required": ["unavailable_model", "unsupported_reasoning", "log_fallback"],
+      "properties": {
+        "unavailable_model": {"type": "string", "minLength": 1},
+        "unsupported_reasoning": {"type": "string", "minLength": 1},
+        "log_fallback": {"type": "boolean"}
+      },
+      "additionalProperties": false
     },
     "sol_thresholds": {
       "type": "object",
@@ -22,6 +112,5 @@
       },
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  }
 }

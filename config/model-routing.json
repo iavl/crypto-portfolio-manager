@@ -1,26 +1,135 @@
 {
-  "routing_policy_version": 1,
-  "mode": "AUTO",
+  "routing_policy_version": 2,
+  "runtime": "AUTO",
+  "default_profile": "balanced",
   "luna_policy": "LUNA_MAX_ONLY",
-  "stages": {
-    "screenshot_extraction": "LUNA_MAX",
-    "metric_collection": "LUNA_MAX",
-    "normal_source_retrieval": "LUNA_MAX",
-    "source_conflict_resolution": "TERRA",
-    "factor_semantic_analysis": "TERRA",
-    "report_generation": "TERRA",
-    "major_event_analysis": "SOL",
-    "high_impact_final_review": "SOL",
-    "history": "PYTHON",
-    "facts": "PYTHON",
-    "metrics_math": "PYTHON",
-    "technical": "PYTHON",
-    "scoring_math": "PYTHON",
-    "regime": "PYTHON",
-    "allocation": "PYTHON",
-    "risk": "PYTHON",
-    "rebalance": "PYTHON",
-    "execution": "PYTHON"
+  "models": {
+    "luna_max": {
+      "provider": "openai",
+      "family": "LUNA",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "max"
+    },
+    "terra_low": {
+      "provider": "openai",
+      "family": "TERRA",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "low"
+    },
+    "terra_medium": {
+      "provider": "openai",
+      "family": "TERRA",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "medium"
+    },
+    "terra_high": {
+      "provider": "openai",
+      "family": "TERRA",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "high"
+    },
+    "sol_medium": {
+      "provider": "openai",
+      "family": "SOL",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "medium"
+    },
+    "sol_high": {
+      "provider": "openai",
+      "family": "SOL",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high"
+    },
+    "sol_xhigh": {
+      "provider": "openai",
+      "family": "SOL",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "xhigh"
+    },
+    "current_session": {
+      "provider": "runtime",
+      "family": "CURRENT_SESSION",
+      "model": "CURRENT_SESSION",
+      "reasoning_effort": "inherit"
+    },
+    "python": {
+      "provider": "local",
+      "family": "PYTHON",
+      "model": null,
+      "reasoning_effort": null
+    }
+  },
+  "profiles": {
+    "balanced": {
+      "description": "Recommended balance of quality, cost, and review safety.",
+      "stages": {
+        "screenshot_extraction": "luna_max",
+        "metric_collection": "luna_max",
+        "normal_source_retrieval": "luna_max",
+        "source_conflict_resolution": "terra_medium",
+        "factor_semantic_analysis": "terra_medium",
+        "report_generation": "terra_low",
+        "major_event_analysis": "sol_high",
+        "high_impact_final_review": "sol_medium",
+        "history": "python",
+        "facts": "python",
+        "metrics_math": "python",
+        "technical": "python",
+        "scoring_math": "python",
+        "regime": "python",
+        "allocation": "python",
+        "risk": "python",
+        "rebalance": "python",
+        "execution": "python"
+      }
+    },
+    "efficient": {
+      "extends": "balanced",
+      "description": "Prefer cheaper non-decision routing where safe.",
+      "stages": {
+        "source_conflict_resolution": "terra_low",
+        "report_generation": "luna_max"
+      }
+    },
+    "quality": {
+      "extends": "balanced",
+      "description": "Use more reasoning on semantic/high-impact stages.",
+      "stages": {
+        "source_conflict_resolution": "terra_high",
+        "factor_semantic_analysis": "terra_high",
+        "report_generation": "terra_medium",
+        "major_event_analysis": "sol_xhigh",
+        "high_impact_final_review": "sol_high"
+      }
+    },
+    "session_compatible": {
+      "description": "Use the current session model for all LLM-owned stages.",
+      "stages": {
+        "screenshot_extraction": "current_session",
+        "metric_collection": "current_session",
+        "normal_source_retrieval": "current_session",
+        "source_conflict_resolution": "current_session",
+        "factor_semantic_analysis": "current_session",
+        "report_generation": "current_session",
+        "major_event_analysis": "current_session",
+        "high_impact_final_review": "current_session",
+        "history": "python",
+        "facts": "python",
+        "metrics_math": "python",
+        "technical": "python",
+        "scoring_math": "python",
+        "regime": "python",
+        "allocation": "python",
+        "risk": "python",
+        "rebalance": "python",
+        "execution": "python"
+      }
+    }
+  },
+  "runtime_fallback": {
+    "unavailable_model": "current_session",
+    "unsupported_reasoning": "inherit",
+    "log_fallback": true
   },
   "sol_thresholds": {
     "material_reduce_pp": 5,

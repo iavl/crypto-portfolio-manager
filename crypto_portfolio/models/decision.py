@@ -227,16 +227,73 @@ class Decision:
                 raise ValueError("routing_metadata must be an object or null")
             metadata = dict(self.routing_metadata)
             forbidden = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
-            if any(str(key).strip().lower() in forbidden for key in metadata):
+            def contains_private_reasoning(value: Any) -> bool:
+                if isinstance(value, Mapping):
+                    return any(
+                        str(key).strip().lower() in forbidden
+                        or contains_private_reasoning(item)
+                        for key, item in value.items()
+                    )
+                if isinstance(value, (tuple, list)):
+                    return any(contains_private_reasoning(item) for item in value)
+                return False
+
+            if contains_private_reasoning(metadata):
                 raise ValueError("routing_metadata must not contain private reasoning")
+            routing_version = metadata.get("routing_policy_version", 1)
+            if isinstance(routing_version, bool) or not isinstance(routing_version, int) or routing_version < 1:
+                raise ValueError("routing_metadata.routing_policy_version must be a positive integer")
             stages_used = metadata.get("stages_used")
             if stages_used is not None:
                 if not isinstance(stages_used, Mapping):
                     raise ValueError("routing_metadata.stages_used must be an object")
-                from ..model_routing import validate_stage_model
+                if routing_version < 2:
+                    from ..model_routing import validate_stage_model
 
-                for stage, model in stages_used.items():
-                    validate_stage_model(stage, model)
+                    for stage, model in stages_used.items():
+                        validate_stage_model(stage, model)
+                elif any(
+                    not isinstance(stage, str)
+                    or not stage.strip()
+                    or not isinstance(model, str)
+                    or not model.strip()
+                    for stage, model in stages_used.items()
+                ):
+                    raise ValueError("routing_metadata.stages_used must map stages to non-empty strings")
+            stages = metadata.get("stages")
+            if stages is not None:
+                if not isinstance(stages, Mapping):
+                    raise ValueError("routing_metadata.stages must be an object")
+                route_fields = {
+                    "requested_preset",
+                    "requested_model",
+                    "requested_reasoning_effort",
+                    "effective_model",
+                    "effective_reasoning_effort",
+                    "runtime",
+                    "fallback_used",
+                    "fallback_reason",
+                }
+                for stage, route in stages.items():
+                    if not isinstance(route, Mapping):
+                        raise ValueError(f"routing_metadata.stages.{stage} must be an object")
+                    missing = route_fields - set(route)
+                    if missing:
+                        raise ValueError(
+                            f"routing_metadata.stages.{stage} is missing fields: {', '.join(sorted(missing))}"
+                        )
+                    if not isinstance(route["fallback_used"], bool):
+                        raise ValueError(
+                            f"routing_metadata.stages.{stage}.fallback_used must be boolean"
+                        )
+                    if route["fallback_used"] and not route["fallback_reason"]:
+                        raise ValueError(
+                            f"routing_metadata.stages.{stage}.fallback_reason is required"
+                        )
+                    if not route["fallback_used"] and route["fallback_reason"] is not None:
+                        raise ValueError(
+                            f"routing_metadata.stages.{stage}.fallback_reason must be null"
+                        )
             if "sol_review_performed" in metadata and not isinstance(metadata["sol_review_performed"], bool):
                 raise ValueError("routing_metadata.sol_review_performed must be boolean")
             try:

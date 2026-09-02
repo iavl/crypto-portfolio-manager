@@ -10,6 +10,9 @@ troubleshooting are in the [Usage Guide](USAGE.md).
 
 For architecture and implementation details, see [How It Works](HOW_IT_WORKS.md).
 
+Model/reasoning profiles use safe defaults and runtime-aware fallback; see the
+[routing reference](references/model-routing.md).
+
 ## At a Glance
 
 ```text
@@ -38,8 +41,8 @@ Trading:  advisory only; no automatic execution
   OHLCV with calendar coverage checks, deterministic ATR-aware zones, confirmed
   swings, Volume Profile POC/value area/HVN context, tranches, and `WAIT`
   handling.
-- Routes Luna stages through `LUNA_MAX` only; Terra handles bounded semantic
-  interpretation/report prose and Sol is conditional for high-impact review.
+- Configurable model/reasoning profiles use safe defaults and runtime-aware
+  fallback; Luna stages remain `LUNA_MAX` only.
 
 ## Safety / What It Is Not
 
