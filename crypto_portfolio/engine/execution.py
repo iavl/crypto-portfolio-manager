@@ -1,7 +1,7 @@
 """Public deterministic execution-planning façade and validation."""
 
 from .rebalance import validate_execution_plan as _legacy_validate_execution_plan
-from .entry import build_entry_plan
+from .entry import build_entry_plan, build_execution_evidence
 from ..models.execution import ExecutionPlan
 from ..models.market import TechnicalSnapshot
 from typing import Any, Iterable, Mapping
@@ -16,6 +16,8 @@ def validate_typed_execution_plan(plan: ExecutionPlan | Mapping[str, Any]) -> bo
             raise ValueError("pullback tranche zones must descend from nearest to deepest support")
         if any(tranche.price_high > model.current_price + 1e-9 for tranche in model.tranches):
             raise ValueError("pullback tranche zones must not be above current price")
+    if model.entry_mode == "BREAKOUT" and model.tranches:
+        raise ValueError("BREAKOUT plans are disabled until breakout/retest structure is implemented")
     for tranche in model.tranches:
         if not tranche.structural_sources:
             raise ValueError("each tranche must retain structural_sources")
@@ -52,4 +54,10 @@ def build_execution_plan(
     return plan
 
 
-__all__ = ["build_execution_plan", "build_entry_plan", "validate_execution_plan", "validate_typed_execution_plan"]
+__all__ = [
+    "build_entry_plan",
+    "build_execution_plan",
+    "build_execution_evidence",
+    "validate_execution_plan",
+    "validate_typed_execution_plan",
+]

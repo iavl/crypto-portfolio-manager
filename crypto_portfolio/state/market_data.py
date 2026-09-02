@@ -1,0 +1,89 @@
+"""Immutable local cache for normalized public OHLCV observations."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Mapping
+
+from ..models.market import OHLCVSeries
+from .snapshots import runtime_data_dir
+
+
+def _validate_hash(value: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise ValueError("ohlcv_hash must be a SHA-256 hex digest")
+    result = value.lower()
+    if any(character not in "0123456789abcdef" for character in result):
+        raise ValueError("ohlcv_hash must be a SHA-256 hex digest")
+    return result
+
+
+def default_market_data_dir() -> Path:
+    return runtime_data_dir() / "market-data" / "sha256"
+
+
+def market_data_path(ohlcv_hash: str, directory: str | Path | None = None) -> Path:
+    return Path(directory or default_market_data_dir()) / f"{_validate_hash(ohlcv_hash)}.json"
+
+
+def cache_ohlcv(
+    series: OHLCVSeries | Mapping[str, Any], directory: str | Path | None = None
+) -> Path:
+    if isinstance(series, Mapping):
+        series = OHLCVSeries.from_mapping(series)
+    if not isinstance(series, OHLCVSeries):
+        raise ValueError("series must be an OHLCVSeries")
+    destination = market_data_path(series.ohlcv_hash, directory)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        series.as_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    if destination.exists():
+        existing = load_ohlcv(series.ohlcv_hash, directory)
+        if existing.as_dict() != series.as_dict():
+            raise ValueError("content-addressed OHLCV entry is immutable")
+        return destination
+    try:
+        with destination.open("x", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        existing = load_ohlcv(series.ohlcv_hash, directory)
+        if existing.as_dict() != series.as_dict():
+            raise ValueError("content-addressed OHLCV entry is immutable")
+    return destination
+
+
+def load_ohlcv(
+    ohlcv_hash: str, directory: str | Path | None = None
+) -> OHLCVSeries:
+    path = market_data_path(ohlcv_hash, directory)
+    try:
+        data: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"unable to load cached OHLCV {path}: {exc}") from exc
+    try:
+        series = OHLCVSeries.from_mapping(data)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"cached OHLCV {path} is invalid: {exc}") from exc
+    if series.ohlcv_hash != _validate_hash(ohlcv_hash):
+        raise ValueError("cached OHLCV content does not match requested hash")
+    return series
+
+
+cache_ohlcv_series = cache_ohlcv
+load_ohlcv_by_hash = load_ohlcv
+
+
+__all__ = [
+    "cache_ohlcv",
+    "cache_ohlcv_series",
+    "default_market_data_dir",
+    "load_ohlcv",
+    "load_ohlcv_by_hash",
+    "market_data_path",
+]

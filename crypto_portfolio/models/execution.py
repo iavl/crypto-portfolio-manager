@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Mapping
+
+from .time import normalize_timestamp
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
-_ENTRY_MODES = {"PULLBACK", "BREAKOUT", "MIXED", "WAIT"}
+_ENTRY_MODES = {"PULLBACK", "BREAKOUT", "WAIT"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 
 
@@ -97,6 +100,12 @@ class PriceZone:
     def from_mapping(cls, value: Mapping[str, Any]) -> "PriceZone":
         if not isinstance(value, Mapping):
             raise ValueError("price zone must be an object")
+        unknown = set(value) - {"low", "high", "midpoint", "kind", "strength", "sources"}
+        if unknown:
+            raise ValueError(f"price zone contains unknown fields: {', '.join(sorted(unknown))}")
+        missing = [field for field in ("low", "high") if field not in value]
+        if missing:
+            raise ValueError(f"price zone is missing fields: {', '.join(missing)}")
         return cls(
             low=value["low"],
             high=value["high"],
@@ -105,6 +114,53 @@ class PriceZone:
             strength=value.get("strength", 0.0),
             sources=value.get("sources", ()),
         )
+
+
+@dataclass(frozen=True)
+class Invalidation:
+    kind: str
+    trigger: str
+    reference_price: float
+    review_only: bool = True
+    automatic_order: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", _text(self.kind, "invalidation.kind").upper())
+        object.__setattr__(self, "trigger", _text(self.trigger, "invalidation.trigger"))
+        reference_price = _number(self.reference_price, "invalidation.reference_price", minimum=0.0)
+        if reference_price <= 0:
+            raise ValueError("invalidation.reference_price must be > 0")
+        if self.review_only is not True:
+            raise ValueError("invalidation.review_only must be true")
+        if self.automatic_order is not False:
+            raise ValueError("invalidation.automatic_order must be false")
+        object.__setattr__(self, "reference_price", reference_price)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "Invalidation":
+        if not isinstance(value, Mapping):
+            raise ValueError("invalidation must be an object")
+        allowed = {"kind", "trigger", "reference_price", "review_only", "automatic_order"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"invalidation contains unknown fields: {', '.join(sorted(unknown))}")
+        required = {"kind", "trigger", "reference_price", "review_only", "automatic_order"}
+        missing = required - set(value)
+        if missing:
+            raise ValueError(f"invalidation is missing fields: {', '.join(sorted(missing))}")
+        return cls(**{field: value[field] for field in required})
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "trigger": self.trigger,
+            "reference_price": self.reference_price,
+            "review_only": self.review_only,
+            "automatic_order": self.automatic_order,
+        }
+
+    def __getitem__(self, key: str) -> Any:
+        return self.as_dict()[key]
 
 
 @dataclass(frozen=True)
@@ -144,6 +200,9 @@ class ExecutionTranche:
         quality = _number(self.zone_quality, "tranche zone_quality", minimum=0.0)
         if quality > 100:
             raise ValueError("tranche zone_quality must be <= 100")
+        structural_sources = _sources(self.structural_sources, "tranche structural_sources")
+        if not structural_sources:
+            raise ValueError("tranche structural_sources must not be empty")
         object.__setattr__(self, "allocation_fraction", fraction)
         object.__setattr__(self, "amount_usd", amount)
         object.__setattr__(self, "price_low", low)
@@ -151,7 +210,7 @@ class ExecutionTranche:
         object.__setattr__(self, "reference_price", reference)
         object.__setattr__(self, "estimated_quantity", quantity)
         object.__setattr__(self, "rationale", rationale)
-        object.__setattr__(self, "structural_sources", _sources(self.structural_sources, "tranche structural_sources"))
+        object.__setattr__(self, "structural_sources", structural_sources)
         object.__setattr__(self, "zone_quality", quality)
 
     def as_dict(self) -> dict[str, Any]:
@@ -172,19 +231,23 @@ class ExecutionTranche:
     def from_mapping(cls, value: Mapping[str, Any]) -> "ExecutionTranche":
         if not isinstance(value, Mapping):
             raise ValueError("execution tranche must be an object")
+        allowed = {
+            "sequence", "allocation_fraction", "amount_usd", "price_low", "price_high",
+            "reference_price", "estimated_quantity", "rationale", "structural_sources",
+            "zone_quality",
+        }
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"execution tranche contains unknown fields: {', '.join(sorted(unknown))}")
         required = (
             "sequence", "allocation_fraction", "amount_usd", "price_low", "price_high",
-            "reference_price", "estimated_quantity",
+            "reference_price", "estimated_quantity", "rationale", "structural_sources",
+            "zone_quality",
         )
         missing = [field for field in required if field not in value]
         if missing:
             raise ValueError(f"execution tranche is missing fields: {', '.join(missing)}")
-        return cls(
-            **{field: value[field] for field in required},
-            rationale=value.get("rationale", ""),
-            structural_sources=value.get("structural_sources", ()),
-            zone_quality=value.get("zone_quality", 0.0),
-        )
+        return cls(**{field: value[field] for field in required})
 
 
 @dataclass(frozen=True)
@@ -199,10 +262,11 @@ class ExecutionPlan:
     entry_mode: str
     technical_confidence: str
     tranches: tuple[ExecutionTranche, ...] = ()
-    invalidation: Mapping[str, Any] | str | None = None
+    invalidation: Invalidation | Mapping[str, Any] | str | None = None
     rationale: str = ""
     ohlcv_hash: str | None = None
     ohlcv_metadata: Mapping[str, Any] | None = None
+    technical_summary: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.execution_plan_version, bool) or not isinstance(self.execution_plan_version, int) or self.execution_plan_version < 1:
@@ -260,19 +324,174 @@ class ExecutionPlan:
         if self.ohlcv_metadata is not None:
             if not isinstance(self.ohlcv_metadata, Mapping):
                 raise ValueError("ohlcv_metadata must be an object or null")
-            object.__setattr__(self, "ohlcv_metadata", dict(self.ohlcv_metadata))
-            metadata_hash = self.ohlcv_metadata.get("ohlcv_hash")
-            if metadata_hash is not None and self.ohlcv_hash and metadata_hash != self.ohlcv_hash:
-                raise ValueError("ohlcv_metadata ohlcv_hash does not match plan ohlcv_hash")
-            metadata_symbol = self.ohlcv_metadata.get("symbol")
-            if metadata_symbol is not None and str(metadata_symbol).strip().upper() != self.symbol:
+            metadata = dict(self.ohlcv_metadata)
+            allowed_metadata = {
+                "symbol", "source", "timeframe", "start_timestamp", "end_timestamp", "candle_count",
+                "fetched_at", "ohlcv_hash", "calendar_span_days", "missing_day_count", "coverage_ratio",
+                "max_gap_days", "observation_lag_days", "latest_completed_candle_date",
+                "expected_latest_completed_date", "as_of", "venue", "market", "quote_currency",
+            }
+            unknown_metadata = set(metadata) - allowed_metadata
+            if unknown_metadata:
+                raise ValueError(
+                    f"ohlcv_metadata contains unknown fields: {', '.join(sorted(unknown_metadata))}"
+                )
+            required_metadata = {
+                "symbol", "source", "timeframe", "start_timestamp", "end_timestamp",
+                "candle_count", "fetched_at", "ohlcv_hash",
+            }
+            missing_metadata = required_metadata - set(metadata)
+            if missing_metadata:
+                raise ValueError(
+                    f"ohlcv_metadata is missing fields: {', '.join(sorted(missing_metadata))}"
+                )
+            if not isinstance(metadata["symbol"], str) or metadata["symbol"].strip().upper() != self.symbol:
                 raise ValueError("ohlcv_metadata symbol does not match plan symbol")
+            metadata["symbol"] = metadata["symbol"].strip().upper()
+            if not isinstance(metadata["source"], str) or not metadata["source"].strip():
+                raise ValueError("ohlcv_metadata source must be a non-empty string")
+            metadata["source"] = metadata["source"].strip()
+            if str(metadata["timeframe"]).strip().upper() != "1D":
+                raise ValueError("ohlcv_metadata timeframe must be 1D")
+            metadata["timeframe"] = "1D"
+            for field in ("start_timestamp", "end_timestamp"):
+                metadata[field] = normalize_timestamp(metadata[field], f"ohlcv_metadata.{field}")
+            if metadata["fetched_at"] is not None:
+                metadata["fetched_at"] = normalize_timestamp(metadata["fetched_at"], "ohlcv_metadata.fetched_at")
+            for field in ("as_of",):
+                if field in metadata:
+                    metadata[field] = normalize_timestamp(metadata[field], f"ohlcv_metadata.{field}")
+            for field in ("latest_completed_candle_date", "expected_latest_completed_date"):
+                if field in metadata:
+                    value = metadata[field]
+                    if not isinstance(value, str):
+                        raise ValueError(f"ohlcv_metadata {field} must be a date")
+                    try:
+                        metadata[field] = date.fromisoformat(value).isoformat()
+                    except ValueError as exc:
+                        raise ValueError(f"ohlcv_metadata {field} must be a date") from exc
+            for field in ("venue", "market", "quote_currency"):
+                if field in metadata and metadata[field] is not None:
+                    metadata[field] = _text(metadata[field], f"ohlcv_metadata.{field}")
+            count = metadata["candle_count"]
+            if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                raise ValueError("ohlcv_metadata candle_count must be a positive integer")
+            for field in ("calendar_span_days", "missing_day_count", "max_gap_days", "observation_lag_days"):
+                if field in metadata:
+                    value = metadata[field]
+                    minimum = 1 if field == "calendar_span_days" else 0
+                    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                        raise ValueError(f"ohlcv_metadata {field} is invalid")
+            if "coverage_ratio" in metadata:
+                ratio = _number(metadata["coverage_ratio"], "ohlcv_metadata.coverage_ratio", minimum=0.0)
+                if ratio > 1:
+                    raise ValueError("ohlcv_metadata coverage_ratio must be <= 1")
+                metadata["coverage_ratio"] = ratio
+            metadata_hash = metadata.get("ohlcv_hash")
+            if metadata_hash is not None:
+                metadata_hash = _hash(metadata_hash, "ohlcv_metadata.ohlcv_hash")
+                metadata["ohlcv_hash"] = metadata_hash
+            if self.ohlcv_hash and metadata_hash != self.ohlcv_hash:
+                raise ValueError("ohlcv_metadata ohlcv_hash does not match plan ohlcv_hash")
+            object.__setattr__(self, "ohlcv_metadata", metadata)
         if self.invalidation is not None and not isinstance(self.invalidation, (str, Mapping)):
-            raise ValueError("invalidation must be a string, object, or null")
+            if not isinstance(self.invalidation, Invalidation):
+                raise ValueError("invalidation must be a typed object, string, or null")
         if isinstance(self.invalidation, str):
             object.__setattr__(self, "invalidation", _text(self.invalidation, "invalidation"))
         elif isinstance(self.invalidation, Mapping):
-            object.__setattr__(self, "invalidation", dict(self.invalidation))
+            object.__setattr__(self, "invalidation", Invalidation.from_mapping(self.invalidation))
+        if self.execution_plan_version >= 2 and self.technical_summary is None:
+            raise ValueError("execution plan version 2 requires technical_summary")
+        if self.technical_summary is not None:
+            if not isinstance(self.technical_summary, Mapping):
+                raise ValueError("technical_summary must be an object or null")
+            summary = dict(self.technical_summary)
+            allowed_summary = {
+                "summary_version", "symbol", "spot_price", "spot_observed_at", "spot_source",
+                "spot_fetched_at", "spot_venue", "spot_market", "spot_quote_currency", "ma20",
+                "ma50", "ma100", "ma200", "atr14", "atr_percent", "return_30d", "return_90d",
+                "return_180d", "realized_vol_30d", "realized_vol_90d", "relative_volume",
+                "trend_state", "data_confidence", "setup_quality", "data_quality",
+                "data_quality_flags", "selected_zones", "ohlcv_hash",
+            }
+            unknown_summary = set(summary) - allowed_summary
+            if unknown_summary:
+                raise ValueError(
+                    f"technical_summary contains unknown fields: {', '.join(sorted(unknown_summary))}"
+                )
+            required_summary = {
+                "summary_version", "symbol", "spot_price", "spot_observed_at",
+                "spot_source", "data_confidence", "setup_quality", "selected_zones",
+                "ohlcv_hash",
+            }
+            missing_summary = required_summary - set(summary)
+            if missing_summary:
+                raise ValueError(
+                    f"technical_summary is missing fields: {', '.join(sorted(missing_summary))}"
+                )
+            if (
+                isinstance(summary["summary_version"], bool)
+                or not isinstance(summary["summary_version"], int)
+                or summary["summary_version"] != 1
+            ):
+                raise ValueError("technical_summary summary_version must be 1")
+            if not isinstance(summary["symbol"], str) or summary["symbol"].strip().upper() != self.symbol:
+                raise ValueError("technical_summary symbol does not match plan symbol")
+            summary["symbol"] = self.symbol
+            spot = _number(summary["spot_price"], "technical_summary.spot_price", minimum=0.0)
+            if spot <= 0:
+                raise ValueError("technical_summary.spot_price must be > 0")
+            summary["spot_price"] = spot
+            summary["spot_observed_at"] = normalize_timestamp(
+                summary["spot_observed_at"], "technical_summary.spot_observed_at"
+            )
+            if not isinstance(summary["spot_source"], str) or not summary["spot_source"].strip():
+                raise ValueError("technical_summary spot_source must be a non-empty string")
+            summary["spot_source"] = summary["spot_source"].strip()
+            if str(summary["data_confidence"]).strip().upper() not in _CONFIDENCE:
+                raise ValueError("technical_summary data_confidence is unsupported")
+            summary["data_confidence"] = summary["data_confidence"].strip().upper()
+            quality = _number(summary["setup_quality"], "technical_summary.setup_quality", minimum=0.0)
+            if quality > 100:
+                raise ValueError("technical_summary.setup_quality must be <= 100")
+            summary["setup_quality"] = quality
+            if not isinstance(summary["selected_zones"], list):
+                raise ValueError("technical_summary selected_zones must be a list")
+            summary["selected_zones"] = [
+                (zone if isinstance(zone, PriceZone) else PriceZone.from_mapping(zone)).as_dict()
+                for zone in summary["selected_zones"]
+            ]
+            positive_metrics = {"ma20", "ma50", "ma100", "ma200", "atr14"}
+            for field in (
+                "ma20", "ma50", "ma100", "ma200", "atr14", "atr_percent",
+                "return_30d", "return_90d", "return_180d", "realized_vol_30d",
+                "realized_vol_90d", "relative_volume",
+            ):
+                if field in summary and summary[field] is not None:
+                    minimum = 0.0 if field not in {"return_30d", "return_90d", "return_180d"} else -1.0
+                    summary[field] = _number(summary[field], f"technical_summary.{field}", minimum=minimum)
+                    if field in positive_metrics and summary[field] <= 0:
+                        raise ValueError(f"technical_summary.{field} must be > 0")
+            if summary.get("spot_fetched_at") is not None:
+                summary["spot_fetched_at"] = normalize_timestamp(
+                    summary["spot_fetched_at"], "technical_summary.spot_fetched_at"
+                )
+            if summary.get("data_quality_flags") is not None:
+                if not isinstance(summary["data_quality_flags"], list):
+                    raise ValueError("technical_summary data_quality_flags must be a list")
+                flags = tuple(_text(item, "technical_summary.data_quality_flags") for item in summary["data_quality_flags"])
+                if len(flags) != len(set(flags)):
+                    raise ValueError("technical_summary data_quality_flags must be unique")
+                summary["data_quality_flags"] = list(flags)
+            for field in ("spot_venue", "spot_market", "spot_quote_currency", "trend_state", "data_quality"):
+                if field in summary and summary[field] is not None:
+                    summary[field] = _text(summary[field], f"technical_summary.{field}")
+            if summary["ohlcv_hash"] is not None:
+                summary["ohlcv_hash"] = _hash(summary["ohlcv_hash"], "technical_summary.ohlcv_hash")
+            if self.ohlcv_hash and summary["ohlcv_hash"] != self.ohlcv_hash:
+                raise ValueError("technical_summary ohlcv_hash does not match plan ohlcv_hash")
+            object.__setattr__(self, "technical_summary", summary)
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -292,16 +511,29 @@ class ExecutionPlan:
         }
         if self.ohlcv_metadata is not None:
             result["ohlcv_metadata"] = dict(self.ohlcv_metadata)
+        if self.technical_summary is not None:
+            result["technical_summary"] = dict(self.technical_summary)
+        if isinstance(self.invalidation, Invalidation):
+            result["invalidation"] = self.invalidation.as_dict()
         return result
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ExecutionPlan":
         if not isinstance(value, Mapping):
             raise ValueError("execution plan must be an object")
+        allowed = {
+            "execution_plan_version", "symbol", "action", "approved_amount_usd",
+            "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
+            "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
+            "ohlcv_metadata", "technical_summary",
+        }
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"execution plan contains unknown fields: {', '.join(sorted(unknown))}")
         required = (
             "execution_plan_version", "symbol", "action", "approved_amount_usd",
             "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
-            "technical_confidence",
+            "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
         )
         missing = [field for field in required if field not in value]
         if missing:
@@ -310,16 +542,21 @@ class ExecutionPlan:
         if not isinstance(raw_tranches, (list, tuple)):
             raise ValueError("execution plan tranches must be a list")
         return cls(
-            **{field: value[field] for field in required},
+            **{
+                field: value[field]
+                for field in required
+                if field not in {"tranches", "invalidation", "rationale", "ohlcv_hash"}
+            },
             tranches=tuple(
                 item if isinstance(item, ExecutionTranche) else ExecutionTranche.from_mapping(item)
                 for item in raw_tranches
             ),
-            invalidation=value.get("invalidation"),
-            rationale=value.get("rationale", ""),
-            ohlcv_hash=value.get("ohlcv_hash"),
+            invalidation=value["invalidation"],
+            rationale=value["rationale"],
+            ohlcv_hash=value["ohlcv_hash"],
             ohlcv_metadata=value.get("ohlcv_metadata"),
+            technical_summary=value.get("technical_summary"),
         )
 
 
-__all__ = ["ExecutionPlan", "ExecutionTranche", "PriceZone"]
+__all__ = ["ExecutionPlan", "ExecutionTranche", "Invalidation", "PriceZone"]

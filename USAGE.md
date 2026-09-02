@@ -82,16 +82,35 @@ market data or produce a complete investment decision.
 ## Staged execution data
 
 After the portfolio/rebalance engine approves an `INCREASE` amount, the Skill
-requests the current spot price and normalized completed `1D` OHLCV. Provide at
-least 120 completed daily candles and preferably 365; include volume when the
-source is consistent and reliable. `TechnicalSnapshot` computes MA20/50/100/200,
-30D/90D/180D returns, ATR14, realized volatility, relative volume, history
-drawdown, and confirmed swings before selecting ATR-aware support zones.
+requests a timestamped `SpotPrice` and normalized completed `1D` OHLCV. Provide
+at least 120 completed daily candles and preferably 365; include volume when
+the source is consistent and reliable. `TechnicalSnapshot` computes
+MA20/50/100/200, calendar-based 30D/90D/180D returns, ATR14, realized
+volatility, relative volume, history drawdown, and confirmed swings before
+selecting ATR-aware support zones.
+
+`SpotPrice.observed_at` defines the decision time when `as_of` is omitted.
+Historical replay rejects a bare float spot price and any spot observed after
+`as_of`. `fetched_at` records retrieval time and may be later than a historical
+`as_of`; market freshness is determined from the latest observed completed
+candle, not from retrieval time. Duplicate UTC dates and large daily coverage
+gaps produce low confidence or `WAIT`.
 
 The technical execution layer is downstream of allocation: it cannot increase
 the approved USD amount, can leave funds unallocated, and may return `WAIT`.
-Estimated quantities are approximate (`amount_usd / reference_price`) and
-invalidation is a review trigger, not an automatic stop order.
+An `ExecutionPlan` is persisted only when its `INCREASE` amount matches one
+approved `RebalanceAction`; its `execution_technical` evidence retains the
+spot observation, technical summary, and OHLCV hash. Estimated quantities are
+approximate (`amount_usd / reference_price`) and invalidation is a review
+trigger, not an automatic stop order. `planned_amount_usd` is staged capacity,
+not dollars already filled.
+
+v1 generates pullback plans only. `BREAKOUT` returns `WAIT` until a real
+breakout/retest planner exists, and `MIXED` is rejected.
+
+Exact normalized OHLCV can be cached and replayed without network access from
+`~/.local/share/crypto-portfolio-manager/market-data/sha256/<ohlcv_hash>.json`
+(or the configured `CRYPTO_PORTFOLIO_DATA_DIR`).
 
 Snapshot-level policy overrides may be supplied in the top-level `config`
 object. Omit `config`, or an individual field, to use the canonical policy:
@@ -247,9 +266,10 @@ Current state files are:
 ```text
 ~/.local/share/crypto-portfolio-manager/
 ├── portfolio/snapshots.jsonl
-└── decisions/
-    ├── decisions.jsonl
-    └── status-events.jsonl
+├── decisions/
+│   ├── decisions.jsonl
+│   └── status-events.jsonl
+└── market-data/sha256/<ohlcv_hash>.json
 ```
 
 History supports comparison with previous holdings, cash-flow-aware NAV and

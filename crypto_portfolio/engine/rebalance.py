@@ -63,15 +63,24 @@ class RebalanceAction:
             raise ValueError(f"action must be one of {sorted(_ACTIONS)}")
         object.__setattr__(self, "action", action)
         for field in ("current_weight", "target_weight", "amount_usd"):
-            value = float(getattr(self, field))
+            raw_value = getattr(self, field)
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                raise ValueError(f"{field} must be a number")
+            value = float(raw_value)
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{field} must be finite and >= 0")
+            if field != "amount_usd" and value > 1:
+                raise ValueError(f"{field} must be <= 1")
             object.__setattr__(self, field, value)
         executable = {"INCREASE", "REDUCE", "EXIT"}
         if action in executable and self.amount_usd <= 0:
             raise ValueError(f"{action} requires a positive executable amount")
         if action not in executable and self.amount_usd != 0:
             raise ValueError(f"{action} must have zero executable amount")
+        if not isinstance(self.priority, str) or not self.priority.strip():
+            raise ValueError("priority must be a non-empty string")
+        if not isinstance(self.rationale, str):
+            raise ValueError("rationale must be a string")
 
     def as_dict(self) -> dict[str, Any]:
         return {

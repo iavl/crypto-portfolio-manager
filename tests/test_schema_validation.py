@@ -7,6 +7,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from crypto_portfolio.models.decision import Decision
 from crypto_portfolio.models.evidence import AssetAssessment, Evidence, FactorScore
+from crypto_portfolio.models.market import Candle, OHLCVSeries, SpotPrice
 from crypto_portfolio.models.portfolio import normalize_snapshot
 from crypto_portfolio.state.decisions import append_decision, read_decisions
 from crypto_portfolio.state.snapshots import append_snapshot, read_snapshots
@@ -85,6 +86,17 @@ class SchemaValidationTests(unittest.TestCase):
                 decision_path,
             )
             self.validate("decision.schema.json", read_decisions(decision_path)[0])
+
+    def test_market_observations_validate_against_market_schema(self):
+        spot = SpotPrice("ETH", 100, "2026-09-01T00:00:00Z", "exchange")
+        series = OHLCVSeries(
+            "ETH",
+            "1D",
+            (Candle("2026-08-31", 99, 101, 98, 100, 10),),
+            source="exchange",
+        )
+        self.validate("market.schema.json", spot.as_dict())
+        self.validate("market.schema.json", series.as_dict())
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from crypto_portfolio.models.policy import PolicyError, load_policy, policy_hash, resolve_policy
+from crypto_portfolio.models.policy import PolicyError, load_policy, policy_from_mapping, policy_hash, resolve_policy
 
 
 class PolicyTests(unittest.TestCase):
@@ -37,6 +37,48 @@ class PolicyTests(unittest.TestCase):
             path.write_text(json.dumps(invalid), encoding="utf-8")
             with self.assertRaises(PolicyError):
                 load_policy(path)
+
+    def test_execution_safety_constraints_are_monotonic(self):
+        policy = load_policy()
+        self.assertGreaterEqual(
+            policy.execution["confidence_deployment_factor"]["HIGH"],
+            policy.execution["confidence_deployment_factor"]["MEDIUM"],
+        )
+        self.assertGreaterEqual(
+            policy.execution["confidence_deployment_factor"]["MEDIUM"],
+            policy.execution["confidence_deployment_factor"]["LOW"],
+        )
+        self.assertLessEqual(
+            policy.execution["breakout"]["max_initial_tranche"],
+            policy.execution["max_initial_tranche"]["NORMAL"],
+        )
+        invalid = json.loads(json.dumps(policy.as_dict()))
+        invalid["execution"]["confidence_deployment_factor"] = {"HIGH": 0.2, "MEDIUM": 0.5, "LOW": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+        invalid = json.loads(json.dumps(policy.as_dict()))
+        invalid["execution"]["breakout"]["max_initial_tranche"] = 0.6
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+
+    def test_old_resolved_execution_policy_remains_hash_stable(self):
+        policy = load_policy()
+        legacy = json.loads(json.dumps(policy.as_dict()))
+        for field in (
+            "maximum_daily_candle_lag_days", "minimum_daily_coverage_ratio",
+            "maximum_daily_gap_days", "maximum_zone_span_atr",
+            "maximum_spot_close_gap_atr", "zone_quality",
+        ):
+            legacy["execution"].pop(field)
+        parsed = policy_from_mapping(legacy)
+        self.assertEqual(parsed.as_dict(), legacy)
+        self.assertEqual(policy_hash(parsed), policy_hash(legacy))
 
     def test_partial_override_is_explicit_and_uppercase(self):
         policy = resolve_policy({"core_symbols": [" alpha "]})

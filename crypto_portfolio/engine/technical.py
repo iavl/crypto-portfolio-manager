@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 from ..models.execution import PriceZone
-from ..models.market import Candle, OHLCVSeries, SwingPoint, TechnicalSnapshot
+from ..models.market import Candle, OHLCVSeries, SpotPrice, SwingPoint, TechnicalSnapshot
 from ..models.policy import Policy, resolve_policy
-from ..models.time import parse_timestamp
+from ..models.time import normalize_timestamp, parse_timestamp
 from .metrics import annualized_volatility, moving_average as _moving_average, simple_return
 
 
@@ -78,6 +78,58 @@ def canonical_ohlcv_hash(series: OHLCVSeries | Mapping[str, Any]) -> str:
     return series.ohlcv_hash
 
 
+def expected_latest_completed_date(as_of: str | datetime) -> date:
+    """Return the latest UTC date whose daily candle should be complete."""
+    raw = as_of.isoformat() if isinstance(as_of, datetime) else as_of
+    timestamp = parse_timestamp(normalize_timestamp(raw, "as_of"))
+    return timestamp.date() - timedelta(days=1)
+
+
+def daily_coverage(
+    candles: Sequence[Candle] | Iterable[Candle],
+    *,
+    as_of: str | datetime | None = None,
+) -> dict[str, int | float | str]:
+    """Measure calendar coverage of completed daily candles."""
+    values = completed_candles(candles, as_of=as_of)
+    if not values:
+        raise ValueError("at least one completed candle is required")
+    dates = [parse_timestamp(candle.timestamp).date() for candle in values]
+    span = (dates[-1] - dates[0]).days + 1
+    gaps = [(right - left).days - 1 for left, right in zip(dates, dates[1:])]
+    count = len(values)
+    return {
+        "candle_count": count,
+        "calendar_span_days": span,
+        "missing_day_count": span - count,
+        "coverage_ratio": count / span,
+        "max_gap_days": max(gaps, default=0),
+        "latest_completed_date": dates[-1].isoformat(),
+    }
+
+
+def _calendar_window(candles: Sequence[Candle], days: int) -> list[float] | None:
+    days = _positive_int(days, "days")
+    by_date = {parse_timestamp(candle.timestamp).date(): candle.close for candle in candles}
+    latest = parse_timestamp(candles[-1].timestamp).date()
+    start = latest - timedelta(days=days)
+    if any(day not in by_date for day in (start + timedelta(days=index) for index in range(days + 1))):
+        return None
+    return [by_date[start + timedelta(days=index)] for index in range(days + 1)]
+
+
+def calendar_lookback_return(candles: Sequence[Candle], days: int) -> float | None:
+    window = _calendar_window(candles, days)
+    return None if window is None else simple_return(window[0], window[-1])
+
+
+def calendar_realized_volatility(
+    candles: Sequence[Candle], window: int, *, annualization_days: int = 365
+) -> float | None:
+    prices = _calendar_window(candles, window)
+    return None if prices is None else annualized_volatility(prices, annualization_days)
+
+
 def lookback_return(prices: Sequence[float] | Sequence[Candle], days: int) -> float | None:
     """Return the close-to-close return over ``days`` completed candles."""
     days = _positive_int(days, "days")
@@ -115,7 +167,9 @@ def true_ranges(candles: Sequence[Candle]) -> list[float]:
 def average_true_range(candles: Sequence[Candle], period: int = 14) -> float | None:
     period = _positive_int(period, "period")
     values = _candle_values(candles)
-    if len(values) < period:
+    # The first candle has no previous close, so it cannot contribute a fully
+    # defined true range to the ATR window.
+    if len(values) <= period:
         return None
     return sum(true_ranges(values)[-period:]) / period
 
@@ -233,8 +287,6 @@ def _level_strength(source: str, strength: float) -> float:
         "MA200": 55.0,
         "SWING_LOW": strength,
         "SWING_HIGH": strength,
-        "BREAKOUT_RETEST": 60.0,
-        "ATR_PULLBACK": 20.0,
     }.get(source, strength)
     return min(100.0, max(0.0, base))
 
@@ -248,6 +300,7 @@ def build_structural_zones(
     kind: str = "SUPPORT",
     zone_half_width_atr: float = 0.25,
     minimum_zone_separation_atr: float = 0.75,
+    maximum_zone_span_atr: float = 1.0,
 ) -> tuple[PriceZone, ...]:
     """Build and ATR-cluster structural support or resistance zones."""
     current = _number(current_price, "current_price", minimum=0.0)
@@ -264,6 +317,9 @@ def build_structural_zones(
     )
     if width_factor <= 0 or separation_factor <= 0:
         raise ValueError("ATR zone settings must be > 0")
+    span_factor = _number(maximum_zone_span_atr, "maximum_zone_span_atr", minimum=0.0)
+    if span_factor <= 0:
+        raise ValueError("maximum_zone_span_atr must be > 0")
     zone_kind = str(kind).strip().upper()
     if zone_kind not in {"SUPPORT", "RESISTANCE"}:
         raise ValueError("kind must be SUPPORT or RESISTANCE")
@@ -279,6 +335,8 @@ def build_structural_zones(
             continue
         if zone_kind == "RESISTANCE" and level < current - atr_number * width_factor:
             continue
+        if level - atr_number * width_factor <= 0:
+            continue
         levels.append((level, source_name, _level_strength(source_name, 0.0)))
     for point in swing_points:
         if not isinstance(point, SwingPoint):
@@ -289,16 +347,23 @@ def build_structural_zones(
             continue
         if zone_kind == "RESISTANCE" and point.price < current - atr_number * width_factor:
             continue
+        if point.price - atr_number * width_factor <= 0:
+            continue
         levels.append((point.price, f"SWING_{point.kind}", _level_strength(f"SWING_{point.kind}", point.strength)))
     if not levels:
         return ()
 
     width = atr_number * width_factor
     threshold = atr_number * separation_factor
+    maximum_span = atr_number * span_factor
     levels.sort(key=lambda item: item[0])
     clusters: list[list[tuple[float, str, float]]] = []
     for level in levels:
-        if not clusters or level[0] - clusters[-1][-1][0] > threshold:
+        if (
+            not clusters
+            or level[0] - clusters[-1][-1][0] > threshold
+            or level[0] - clusters[-1][0][0] > maximum_span
+        ):
             clusters.append([level])
         else:
             clusters[-1].append(level)
@@ -306,6 +371,8 @@ def build_structural_zones(
     for cluster in clusters:
         low = min(level - width for level, _, _ in cluster)
         high = max(level + width for level, _, _ in cluster)
+        if low <= 0:
+            continue
         if zone_kind == "SUPPORT":
             high = min(high, current)
             if low >= high:
@@ -369,27 +436,62 @@ def _volume_state(relative: float | None, supportive_min: float) -> str:
     return "NEUTRAL"
 
 
-def _technical_confidence(
-    history_days: int,
-    preferred_days: int,
-    minimum_days: int,
-    relative: float | None,
-    atr_value: float | None,
+def _setup_quality(
     zones: Sequence[PriceZone],
-) -> tuple[str, str]:
-    if history_days < minimum_days:
-        return "LOW", "INSUFFICIENT_HISTORY"
-    if atr_value is None or not zones:
-        return "LOW" if history_days < preferred_days else "MEDIUM", "REDUCED_STRUCTURE"
-    if history_days >= preferred_days and relative is not None:
-        return "HIGH", "FULL"
-    return "MEDIUM", "REDUCED" if history_days < preferred_days else "VOLUME_UNKNOWN"
+    current_price: float,
+    atr_value: float | None,
+    *,
+    volume_state: str = "UNKNOWN",
+) -> float:
+    if atr_value is None or atr_value <= 0 or not zones:
+        return 0.0
+    best = 0.0
+    for zone in zones:
+        distance_atr = max(0.0, (current_price - zone.midpoint) / atr_value)
+        confluence = min(35.0, 18.0 + 9.0 * max(0, len(zone.sources) - 1))
+        proximity = max(0.0, 22.0 - min(22.0, distance_atr * 4.0))
+        source_bonus = min(
+            25.0,
+            max(
+                (
+                    {
+                        "SWING_LOW": 20.0,
+                        "MA50": 18.0,
+                        "MA100": 20.0,
+                        "MA200": 22.0,
+                        "MA20": 10.0,
+                    }.get(source, 0.0)
+                    for source in zone.sources
+                ),
+                default=0.0,
+            ),
+        )
+        volume_bonus = 10.0 if volume_state == "SUPPORTIVE" else 0.0
+        best = max(best, min(100.0, zone.strength * 0.20 + confluence + proximity + source_bonus + volume_bonus))
+    return best
+
+
+def _quality_label(flags: Sequence[str], *, full: bool) -> str:
+    if "DATA_CONFLICT" in flags:
+        return "DATA_CONFLICT"
+    if "STALE_MARKET_DATA" in flags:
+        return "STALE_MARKET_DATA"
+    if "STALE_RETRIEVAL" in flags:
+        return "STALE_RETRIEVAL"
+    if "INSUFFICIENT_HISTORY" in flags:
+        return "INSUFFICIENT_HISTORY"
+    if "LARGE_CADENCE_GAP" in flags:
+        return "INSUFFICIENT_COVERAGE"
+    if "UNKNOWN_PROVENANCE" in flags:
+        return "UNKNOWN_PROVENANCE"
+    return "FULL" if full else "REDUCED"
 
 
 def build_technical_snapshot(
     series: OHLCVSeries | Mapping[str, Any],
-    current_spot_price: float | None = None,
+    spot: SpotPrice | Mapping[str, Any] | float | None = None,
     *,
+    current_spot_price: float | None = None,
     spot_price: float | None = None,
     as_of: str | datetime | None = None,
     policy: Policy | None = None,
@@ -401,26 +503,62 @@ def build_technical_snapshot(
         series = OHLCVSeries.from_mapping(series)
     if not isinstance(series, OHLCVSeries):
         raise ValueError("series must be an OHLCVSeries or mapping")
-    if current_spot_price is not None and spot_price is not None:
-        raise ValueError("provide only one of current_spot_price and spot_price")
-    current = current_spot_price if current_spot_price is not None else spot_price
-    if current is None:
-        raise ValueError("current_spot_price is required")
-    current = _number(current, "current_spot_price", minimum=0.0)
-    if current <= 0:
-        raise ValueError("current_spot_price must be > 0")
-    config = dict(execution_config or (policy or resolve_policy()).execution)
+    if not isinstance(volume_reliable, bool):
+        raise ValueError("volume_reliable must be boolean")
+    supplied_legacy_spot = False
+    supplied_spot = spot
+    if current_spot_price is not None or spot_price is not None:
+        if supplied_spot is not None or (current_spot_price is not None and spot_price is not None):
+            raise ValueError("provide one spot observation")
+        supplied_spot = current_spot_price if current_spot_price is not None else spot_price
+    if isinstance(supplied_spot, Mapping):
+        supplied_spot = SpotPrice.from_mapping(supplied_spot)
+    elif supplied_spot is not None and not isinstance(supplied_spot, SpotPrice):
+        if as_of is not None:
+            raise ValueError("historical replay requires a timestamped SpotPrice")
+        supplied_legacy_spot = True
+        supplied_spot = _number(supplied_spot, "current_spot_price", minimum=0.0)
+    if supplied_spot is None:
+        raise ValueError("a timestamped SpotPrice is required")
+    if not isinstance(supplied_spot, SpotPrice):
+        last_timestamp = parse_timestamp(series.candles[-1].timestamp)
+        legacy_as_of = normalize_timestamp((last_timestamp + timedelta(days=1)).isoformat(), "as_of")
+        supplied_spot = SpotPrice(
+            series.symbol,
+            supplied_spot,
+            legacy_as_of,
+            series.source,
+            series.fetched_at,
+        )
+    if supplied_spot.symbol != series.symbol:
+        raise ValueError("spot.symbol must match series.symbol")
+    config = dict((policy or resolve_policy()).execution)
+    if execution_config is not None:
+        config.update(execution_config)
     if not config:
         raise ValueError("execution configuration is required")
+    as_of_was_omitted = as_of is None
     if as_of is None:
-        last_timestamp = parse_timestamp(series.candles[-1].timestamp)
-        as_of_value = last_timestamp + timedelta(days=1)
+        as_of_value = supplied_spot.observed_at
     else:
-        as_of_value = as_of
-    candles = completed_candles(series, as_of=as_of_value)
+        raw_as_of = as_of.isoformat() if isinstance(as_of, datetime) else as_of
+        as_of_value = normalize_timestamp(raw_as_of, "as_of")
+    as_of_timestamp = parse_timestamp(as_of_value)
+    if parse_timestamp(supplied_spot.observed_at) > as_of_timestamp:
+        raise ValueError("spot.observed_at must be no later than as_of")
+    candles = completed_candles(series, as_of=as_of_timestamp)
     if not candles:
         raise ValueError("no completed candles are available as of the requested timestamp")
-    used_series = OHLCVSeries(series.symbol, series.timeframe, candles, series.source, series.fetched_at)
+    used_series = OHLCVSeries(
+        series.symbol,
+        series.timeframe,
+        candles,
+        series.source,
+        series.fetched_at,
+        series.venue,
+        series.market,
+        series.quote_currency,
+    )
     closes = [candle.close for candle in candles]
     volumes = [candle.volume for candle in candles]
     windows = config["moving_average_windows"]
@@ -435,88 +573,205 @@ def build_technical_snapshot(
         "MA200": moving_averages.get("MA200"),
     }
     atr_value = average_true_range(candles, config["atr_period"])
+    if atr_value is not None and atr_value <= 0:
+        atr_value = None
     atr_percent = None if atr_value is None else atr_value / closes[-1]
     relative = None if not volume_reliable or not any(volumes) else relative_volume(volumes, config["volume_average_window"])
     high = max(candle.high for candle in candles)
-    distance = current / high - 1.0
     swings = detect_swings(candles, config["swing_window"])
     swing_highs = tuple(point for point in swings if point.kind == "HIGH")
     swing_lows = tuple(point for point in swings if point.kind == "LOW")
     all_levels = tuple(ma_values.items())
     zones = build_structural_zones(
-        current,
+        supplied_spot.price,
         atr_value,
         moving_averages=dict(all_levels),
         swing_points=swing_lows,
         kind="SUPPORT",
         zone_half_width_atr=config["zone_half_width_atr"],
         minimum_zone_separation_atr=config["minimum_zone_separation_atr"],
+        maximum_zone_span_atr=config["maximum_zone_span_atr"],
     )
     resistance = build_structural_zones(
-        current,
+        supplied_spot.price,
         atr_value,
         moving_averages=dict(all_levels),
         swing_points=swing_highs,
         kind="RESISTANCE",
         zone_half_width_atr=config["zone_half_width_atr"],
         minimum_zone_separation_atr=config["minimum_zone_separation_atr"],
+        maximum_zone_span_atr=config["maximum_zone_span_atr"],
     )
-    confidence, quality = _technical_confidence(
-        len(candles),
-        config["preferred_history_days"],
-        config["minimum_history_days"],
-        relative,
-        atr_value,
+    coverage = daily_coverage(candles)
+    expected_date = expected_latest_completed_date(as_of_timestamp)
+    latest_date = date.fromisoformat(coverage["latest_completed_date"])
+    observation_lag = max(0, (expected_date - latest_date).days)
+    history_sufficient = (
+        len(candles) >= config["minimum_history_days"]
+        and coverage["calendar_span_days"] >= config["minimum_history_days"]
+    )
+    cadence_valid = (
+        coverage["coverage_ratio"] >= config["minimum_daily_coverage_ratio"]
+        and coverage["max_gap_days"] <= config["maximum_daily_gap_days"]
+    )
+    market_data_fresh = observation_lag <= config["maximum_daily_candle_lag_days"]
+    source_known = all(
+        str(value).strip().lower() not in {"", "unknown"}
+        for value in (series.source, supplied_spot.source)
+    )
+    volume_available = volume_reliable and relative is not None
+    test_semantics = all(
+        str(value).strip().lower() in {"synthetic", "test"}
+        for value in (series.source, supplied_spot.source)
+    )
+    spot_time_valid = not supplied_legacy_spot or test_semantics
+    provenance_complete = (
+        series.fetched_at is not None and supplied_spot.fetched_at is not None
+    ) or test_semantics
+    provenance_consistent = not (
+        source_known and series.source.strip().lower() != supplied_spot.source.strip().lower()
+    )
+    atr_available = atr_value is not None and atr_value > 0
+    spot_close_gap_atr = (
+        None
+        if atr_value is None or atr_value <= 0
+        else abs(supplied_spot.price - closes[-1]) / atr_value
+    )
+    data_quality_flags: list[str] = []
+    if not history_sufficient:
+        data_quality_flags.append("INSUFFICIENT_HISTORY")
+    if coverage["missing_day_count"]:
+        data_quality_flags.append("COVERAGE_GAP")
+    if not cadence_valid:
+        data_quality_flags.append("LARGE_CADENCE_GAP")
+    if not market_data_fresh:
+        data_quality_flags.append("STALE_MARKET_DATA")
+    if not source_known:
+        data_quality_flags.append("UNKNOWN_PROVENANCE")
+    if not provenance_complete:
+        data_quality_flags.append("INCOMPLETE_PROVENANCE")
+    if not spot_time_valid:
+        data_quality_flags.append("UNTIMESTAMPED_SPOT")
+    if not volume_available:
+        data_quality_flags.append("VOLUME_UNRELIABLE")
+    if not atr_available:
+        data_quality_flags.append("ATR_UNAVAILABLE")
+    if not provenance_consistent:
+        data_quality_flags.append("PROVENANCE_MISMATCH")
+    if spot_close_gap_atr is not None and spot_close_gap_atr > config["maximum_spot_close_gap_atr"]:
+        data_quality_flags.append("SPOT_CLOSE_GAP")
+    retrieval_stale = False
+    if as_of_was_omitted:
+        retrieval_stale = any(
+            (as_of_timestamp - parse_timestamp(value)).total_seconds() / 86400
+            > config["max_fetched_age_days"]
+            for value in (series.fetched_at, supplied_spot.fetched_at)
+            if value is not None and parse_timestamp(value) <= as_of_timestamp
+        )
+    if retrieval_stale:
+        data_quality_flags.append("STALE_RETRIEVAL")
+    if (
+        "SPOT_CLOSE_GAP" in data_quality_flags
+        and "PROVENANCE_MISMATCH" in data_quality_flags
+    ):
+        data_quality_flags.append("DATA_CONFLICT")
+    hard_data_failure = any(
+        flag in data_quality_flags
+        for flag in ("STALE_MARKET_DATA", "LARGE_CADENCE_GAP", "DATA_CONFLICT", "STALE_RETRIEVAL")
+    )
+    data_confidence = "LOW" if hard_data_failure or not history_sufficient or not atr_available else "MEDIUM"
+    if (
+        not hard_data_failure
+        and history_sufficient
+        and cadence_valid
+        and atr_available
+        and source_known
+        and provenance_consistent
+        and volume_available
+        and provenance_complete
+        and (spot_time_valid or test_semantics)
+        and len(candles) >= config["preferred_history_days"]
+        and not coverage["missing_day_count"]
+    ):
+        data_confidence = "HIGH"
+    full_quality = (
+        data_confidence == "HIGH"
+        and not coverage["missing_day_count"]
+        and not data_quality_flags
+    )
+    data_quality = _quality_label(data_quality_flags, full=full_quality)
+    setup_quality = _setup_quality(
         zones,
+        supplied_spot.price,
+        atr_value,
+        volume_state=_volume_state(relative, config["breakout"]["minimum_relative_volume"]),
     )
-    as_of_timestamp = parse_timestamp(as_of_value if isinstance(as_of_value, str) else as_of_value.isoformat())
-    if series.fetched_at is not None:
-        fetched_at = parse_timestamp(series.fetched_at)
-        age_days = (as_of_timestamp - fetched_at).total_seconds() / 86400
-        if age_days < 0:
-            quality = "CONFLICTING_METADATA"
-            confidence = "LOW"
-        elif age_days > config.get("max_fetched_age_days", 7):
-            quality = "STALE"
-            confidence = "LOW"
-    if not volume_reliable:
-        quality = f"{quality}_VOLUME_UNRELIABLE"
     threshold = config["volatility_atr_percent"]
     return TechnicalSnapshot(
         symbol=series.symbol,
-        as_of=as_of_value if isinstance(as_of_value, str) else as_of_value,
-        current_spot_price=current,
+        as_of=as_of_value,
+        current_spot_price=supplied_spot.price,
         last_completed_close=closes[-1],
         history_days=len(candles),
         ma20=ma_values["MA20"],
         ma50=ma_values["MA50"],
         ma100=ma_values["MA100"],
         ma200=ma_values["MA200"],
-        return_30d=lookback_return(closes, 30),
-        return_90d=lookback_return(closes, 90),
-        return_180d=lookback_return(closes, 180),
-        realized_vol_30d=realized_volatility(closes, 30, annualization_days=config["volatility_annualization_days"]),
-        realized_vol_90d=realized_volatility(closes, 90, annualization_days=config["volatility_annualization_days"]),
+        return_30d=calendar_lookback_return(candles, 30) if cadence_valid else None,
+        return_90d=calendar_lookback_return(candles, 90) if cadence_valid else None,
+        return_180d=calendar_lookback_return(candles, 180) if cadence_valid else None,
+        realized_vol_30d=calendar_realized_volatility(candles, 30, annualization_days=config["volatility_annualization_days"]) if cadence_valid else None,
+        realized_vol_90d=calendar_realized_volatility(candles, 90, annualization_days=config["volatility_annualization_days"]) if cadence_valid else None,
         atr14=atr_value,
         atr_percent=atr_percent,
         volume_ma20=volume_moving_average(volumes, config["volume_average_window"]) if volume_reliable else None,
         relative_volume=relative,
         history_high=high,
-        distance_from_history_high=distance,
-        current_drawdown=min(0.0, distance),
+        distance_from_history_high=supplied_spot.price / high - 1.0,
+        current_drawdown=min(0.0, supplied_spot.price / high - 1.0),
         swing_highs=swing_highs,
         swing_lows=swing_lows,
         support_zones=zones,
         resistance_zones=resistance,
-        trend_state=_trend_state(closes, dict(all_levels), current),
+        trend_state=_trend_state(closes, dict(all_levels), supplied_spot.price),
         volatility_state=_volatility_state(atr_percent, threshold),
         volume_state=_volume_state(relative, config["breakout"]["minimum_relative_volume"]),
-        technical_confidence=confidence,
-        data_quality=quality,
+        technical_confidence=data_confidence,
+        data_quality=data_quality,
         ohlcv_hash=used_series.ohlcv_hash,
         source=series.source,
         timeframe=series.timeframe,
-        ohlcv_metadata=used_series.metadata(),
+        ohlcv_metadata={
+            **used_series.metadata(),
+            **{key: value for key, value in coverage.items() if key != "latest_completed_date"},
+            "latest_completed_candle_date": latest_date.isoformat(),
+            "expected_latest_completed_date": expected_date.isoformat(),
+            "observation_lag_days": observation_lag,
+            "as_of": as_of_value,
+        },
+        spot_observed_at=supplied_spot.observed_at,
+        spot_source=supplied_spot.source,
+        spot_fetched_at=supplied_spot.fetched_at,
+        candle_count=coverage["candle_count"],
+        calendar_span_days=coverage["calendar_span_days"],
+        missing_day_count=coverage["missing_day_count"],
+        coverage_ratio=coverage["coverage_ratio"],
+        max_gap_days=coverage["max_gap_days"],
+        observation_lag_days=observation_lag,
+        data_confidence=data_confidence,
+        setup_quality=setup_quality,
+        data_quality_flags=tuple(data_quality_flags),
+        history_sufficient=history_sufficient,
+        market_data_fresh=market_data_fresh,
+        cadence_valid=cadence_valid,
+        source_known=source_known,
+        spot_time_valid=spot_time_valid,
+        volume_reliable=volume_available,
+        spot_close_gap_atr=spot_close_gap_atr,
+        provenance_consistent=provenance_consistent,
+        spot_venue=supplied_spot.venue,
+        spot_market=supplied_spot.market,
+        spot_quote_currency=supplied_spot.quote_currency,
     )
 
 
@@ -531,12 +786,16 @@ __all__ = [
     "build_support_zones",
     "build_structural_zones",
     "build_technical_snapshot",
+    "calendar_lookback_return",
+    "calendar_realized_volatility",
     "completed_candles",
     "canonical_ohlcv_hash",
     "calculate_atr",
     "calculate_realized_volatility",
     "detect_swings",
     "detect_swing_points",
+    "daily_coverage",
+    "expected_latest_completed_date",
     "history_position",
     "lookback_return",
     "realized_volatility",

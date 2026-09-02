@@ -56,6 +56,9 @@ _EXECUTION_FIELDS = {
     "preferred_history_days",
     "minimum_history_days",
     "max_fetched_age_days",
+    "maximum_daily_candle_lag_days",
+    "minimum_daily_coverage_ratio",
+    "maximum_daily_gap_days",
     "moving_average_windows",
     "atr_period",
     "realized_volatility_windows",
@@ -65,6 +68,9 @@ _EXECUTION_FIELDS = {
     "max_tranches",
     "zone_half_width_atr",
     "minimum_zone_separation_atr",
+    "maximum_zone_span_atr",
+    "maximum_spot_close_gap_atr",
+    "zone_quality",
     "volatility_atr_percent",
     "confidence_deployment_factor",
     "max_initial_tranche",
@@ -73,6 +79,15 @@ _EXECUTION_FIELDS = {
 }
 _VOLATILITY_FIELDS = {"low_max", "normal_max", "high_max"}
 _BREAKOUT_FIELDS = {"minimum_relative_volume", "max_atr_extension", "max_initial_tranche"}
+_ZONE_QUALITY_FIELDS = {"minimum_for_entry", "high_quality"}
+_EXECUTION_COMPAT_DEFAULTS = {
+    "maximum_daily_candle_lag_days": 1,
+    "minimum_daily_coverage_ratio": 0.90,
+    "maximum_daily_gap_days": 3,
+    "maximum_zone_span_atr": 1.0,
+    "maximum_spot_close_gap_atr": 4.0,
+    "zone_quality": {"minimum_for_entry": 55.0, "high_quality": 75.0},
+}
 _OVERRIDE_FIELDS = {
     "core_symbols",
     "satellite_symbols",
@@ -161,6 +176,9 @@ class Policy:
     regimes: Mapping[str, RegimeLimits]
     allocation: Mapping[str, Any]
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    _execution_omitted_fields: frozenset[str] = dataclass_field(
+        default_factory=frozenset, repr=False, compare=False
+    )
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -198,7 +216,7 @@ class Policy:
             raise PolicyError(f"unknown market regime: {name}") from exc
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "policy_version": self.policy_version,
             "investment_horizon_months": {
                 "min": self.investment_horizon_months[0],
@@ -227,8 +245,13 @@ class Policy:
                 for name, limits in self.regimes.items()
             },
             "allocation": dict(self.allocation),
-            **({"execution": dict(self.execution)} if self.execution else {}),
         }
+        if self.execution:
+            execution = dict(self.execution)
+            for field in self._execution_omitted_fields:
+                execution.pop(field, None)
+            result["execution"] = execution
+        return result
 
     def legacy_config(self) -> dict[str, Any]:
         """Return the old snapshot config shape for compatibility output."""
@@ -307,8 +330,11 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
     if not isinstance(value, dict):
         raise PolicyError("execution must be an object")
     _unknown_fields(value, _EXECUTION_FIELDS, "execution")
-    if set(value) != _EXECUTION_FIELDS:
-        raise PolicyError("execution fields are incomplete")
+    missing = _EXECUTION_FIELDS - set(value)
+    unsupported_missing = missing - set(_EXECUTION_COMPAT_DEFAULTS)
+    if unsupported_missing:
+        raise PolicyError(f"execution fields are incomplete: {', '.join(sorted(unsupported_missing))}")
+    value = {**_EXECUTION_COMPAT_DEFAULTS, **value}
     timeframe = value["timeframe"]
     if not isinstance(timeframe, str) or timeframe.strip().upper() != "1D":
         raise PolicyError("execution.timeframe must be 1D")
@@ -343,6 +369,33 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
     )
     if zone_half_width <= 0 or separation <= 0:
         raise PolicyError("execution ATR zone settings must be > 0")
+    maximum_zone_span = _number(
+        value["maximum_zone_span_atr"],
+        "execution.maximum_zone_span_atr",
+        minimum=0.0,
+    )
+    if maximum_zone_span <= 0:
+        raise PolicyError("execution.maximum_zone_span_atr must be > 0")
+    maximum_spot_gap = _number(
+        value["maximum_spot_close_gap_atr"],
+        "execution.maximum_spot_close_gap_atr",
+        minimum=0.0,
+    )
+    if maximum_spot_gap <= 0:
+        raise PolicyError("execution.maximum_spot_close_gap_atr must be > 0")
+
+    maximum_lag_number = _number(
+        value["maximum_daily_candle_lag_days"],
+        "execution.maximum_daily_candle_lag_days",
+        minimum=0.0,
+    )
+    if not maximum_lag_number.is_integer():
+        raise PolicyError("execution.maximum_daily_candle_lag_days must be a non-negative integer")
+    maximum_lag = int(maximum_lag_number)
+    maximum_gap = _number(value["maximum_daily_gap_days"], "execution.maximum_daily_gap_days", minimum=0.0)
+    if not maximum_gap.is_integer():
+        raise PolicyError("execution.maximum_daily_gap_days must be a non-negative integer")
+    coverage_ratio = _fraction(value["minimum_daily_coverage_ratio"], "execution.minimum_daily_coverage_ratio", exclusive_minimum=True)
 
     volatility = value["volatility_atr_percent"]
     if not isinstance(volatility, dict):
@@ -414,11 +467,34 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
     }
     if parsed_breakout["minimum_relative_volume"] <= 0 or parsed_breakout["max_atr_extension"] <= 0:
         raise PolicyError("execution breakout thresholds must be > 0")
+    if parsed_breakout["max_initial_tranche"] > max_initial_parsed["NORMAL"]:
+        raise PolicyError("execution.breakout.max_initial_tranche must not exceed NORMAL max_initial_tranche")
+    zone_quality = value["zone_quality"]
+    if not isinstance(zone_quality, dict):
+        raise PolicyError("execution.zone_quality must be an object")
+    _unknown_fields(zone_quality, _ZONE_QUALITY_FIELDS, "execution.zone_quality")
+    if set(zone_quality) != _ZONE_QUALITY_FIELDS:
+        raise PolicyError("execution.zone_quality fields are incomplete")
+    parsed_zone_quality = {
+        key: _number(item, f"execution.zone_quality.{key}", minimum=0.0, maximum=100.0)
+        for key, item in zone_quality.items()
+    }
+    if parsed_zone_quality["minimum_for_entry"] > parsed_zone_quality["high_quality"]:
+        raise PolicyError("execution.zone_quality minimum_for_entry must not exceed high_quality")
+    if not (
+        parsed_confidence_factor["HIGH"]
+        >= parsed_confidence_factor["MEDIUM"]
+        >= parsed_confidence_factor["LOW"]
+    ):
+        raise PolicyError("execution.confidence_deployment_factor must be monotonic HIGH >= MEDIUM >= LOW")
     return {
         "timeframe": "1D",
         "preferred_history_days": int(preferred),
         "minimum_history_days": int(minimum),
         "max_fetched_age_days": positive_int(value["max_fetched_age_days"], "execution.max_fetched_age_days"),
+        "maximum_daily_candle_lag_days": maximum_lag,
+        "minimum_daily_coverage_ratio": coverage_ratio,
+        "maximum_daily_gap_days": int(maximum_gap),
         "moving_average_windows": moving_average_windows,
         "atr_period": positive_int(value["atr_period"], "execution.atr_period"),
         "realized_volatility_windows": realized_windows,
@@ -431,6 +507,9 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
         "max_tranches": max_tranches,
         "zone_half_width_atr": zone_half_width,
         "minimum_zone_separation_atr": separation,
+        "maximum_zone_span_atr": maximum_zone_span,
+        "maximum_spot_close_gap_atr": maximum_spot_gap,
+        "zone_quality": parsed_zone_quality,
         "volatility_atr_percent": volatility_limits,
         "confidence_deployment_factor": parsed_confidence_factor,
         "max_initial_tranche": max_initial_parsed,
@@ -601,7 +680,8 @@ def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy
     if parsed_allocation["satellite_full_score"] <= parsed_allocation["satellite_min_score"]:
         raise PolicyError("allocation.satellite_full_score must exceed satellite_min_score")
 
-    return Policy(
+    parsed_execution = _parse_execution(data.get("execution"), allow_missing=allow_missing_execution)
+    policy = Policy(
         policy_version=version,
         investment_horizon_months=(int(horizon_min), int(horizon_max)),
         core_symbols=core,
@@ -621,8 +701,16 @@ def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy
         scoring=parsed_scoring,
         regimes=parsed_regimes,
         allocation=parsed_allocation,
-        execution=_parse_execution(data.get("execution"), allow_missing=allow_missing_execution),
+        execution=parsed_execution,
     )
+    raw_execution = data.get("execution")
+    omitted = (
+        frozenset(_EXECUTION_FIELDS - set(raw_execution))
+        if isinstance(raw_execution, dict)
+        else frozenset(_EXECUTION_FIELDS)
+    )
+    object.__setattr__(policy, "_execution_omitted_fields", omitted)
+    return policy
 
 
 def load_policy(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping, Protocol, Sequence
 
-from ..models.market import OHLCVSeries
+from ..models.market import OHLCVSeries, SpotPrice
 
 
 class MarketDataProvider(Protocol):
@@ -19,8 +19,8 @@ class MarketDataProvider(Protocol):
     ) -> OHLCVSeries:
         """Return normalized OHLCV candles without portfolio-side effects."""
 
-    def spot_price(self, symbol: str) -> float:
-        """Return a normalized current spot observation."""
+    def spot_price(self, symbol: str) -> SpotPrice:
+        """Return a normalized timestamped spot observation."""
 
     def prices(
         self,

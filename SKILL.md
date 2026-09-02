@@ -50,13 +50,18 @@ explanations.
 15. Run the rebalance engine.
 16. Reconcile executable trade dollars.
 17. Evaluate `NO_TRADE` before proposing a transaction.
-18. After a rebalance approves a trade amount, obtain current spot price and
-    normalized completed daily OHLCV.
-19. Build `TechnicalSnapshot`, run the deterministic entry planner, and validate
-    the resulting `ExecutionPlan` with `validate_execution_plan`.
-20. Produce the Chinese user-facing report using
+18. After a rebalance approves an `INCREASE` amount, obtain a timestamped
+    `SpotPrice` and normalized completed daily OHLCV.
+19. Validate observation freshness, UTC-day cadence, calendar coverage, and
+    provenance; build `TechnicalSnapshot`, evaluate setup quality, run the
+    deterministic entry planner, and validate the resulting `ExecutionPlan`
+    with `validate_execution_plan`.
+20. Bind the plan to exactly one matching approved `RebalanceAction`, create
+    `execution_technical` evidence, and cache the normalized OHLCV by hash
+    before persistence.
+21. Produce the Chinese user-facing report using
     `references/output-template.md`.
-21. Persist only validated snapshots, decisions, execution plans, and complete
+22. Persist only validated snapshots, decisions, execution plans, and complete
     evidence. Never
     rewrite prior rationale or mark a trade executed without explicit
     confirmation or a trusted later read-only snapshot.
@@ -69,16 +74,19 @@ runtime state.
 The portfolio engine remains authoritative for total USD exposure:
 
 ```text
-rebalance approved amount -> completed daily OHLCV -> TechnicalSnapshot
+rebalance approved amount -> timestamped SpotPrice + completed daily OHLCV
+-> time/cadence/provenance checks -> TechnicalSnapshot -> setup quality
 -> structural zones -> tranches and estimated quantities -> validated plan
 ```
 
-Use at least 120 completed daily candles, preferably 365, plus current spot
-price and reliable volume where available. When adequate OHLCV exists, do not
+Use at least 120 completed daily candles, preferably 365, plus a timestamped
+spot observation and reliable volume where available. When adequate OHLCV exists, do not
 manually invent moving averages, ATR, swing levels, zone prices, tranche
 arithmetic, or estimated quantities. The technical engine may return `WAIT` or
 leave part of the approved amount unallocated, but it can never increase the
-approved amount or place an order.
+approved amount or place an order. v1 generates pullback plans only:
+`BREAKOUT` returns `WAIT` and `MIXED` is rejected until those semantics are
+implemented.
 
 ## Accounting and missing data
 

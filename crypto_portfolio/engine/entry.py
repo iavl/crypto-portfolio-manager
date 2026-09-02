@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable, Mapping
 
-from ..models.execution import ExecutionPlan, ExecutionTranche, PriceZone
+from ..models.execution import ExecutionPlan, ExecutionTranche, Invalidation, PriceZone
+from ..models.evidence import Evidence
 from ..models.market import TechnicalSnapshot
 from ..models.policy import Policy, resolve_policy
 
@@ -13,7 +14,7 @@ from ..models.policy import Policy, resolve_policy
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
-_MODES = {"PULLBACK", "BREAKOUT", "MIXED", "WAIT"}
+_MODES = {"PULLBACK", "BREAKOUT", "WAIT"}
 
 
 def _number(value: Any, field: str, *, minimum: float = 0.0) -> float:
@@ -32,14 +33,23 @@ def _confidence(value: Any, field: str) -> str:
 
 
 def _metadata(snapshot: TechnicalSnapshot) -> dict[str, Any]:
+    metadata = dict(snapshot.ohlcv_metadata or {})
     return {
-        **dict(snapshot.ohlcv_metadata or {}),
+        **metadata,
         "symbol": snapshot.symbol,
         "source": snapshot.source,
         "timeframe": snapshot.timeframe,
-        "candle_count": snapshot.history_days,
-        "end_timestamp": snapshot.as_of,
-        "ohlcv_hash": snapshot.ohlcv_hash,
+        "candle_count": snapshot.candle_count,
+        "end_timestamp": metadata.get("end_timestamp", snapshot.as_of),
+        "ohlcv_hash": snapshot.ohlcv_hash or None,
+        "calendar_span_days": snapshot.calendar_span_days,
+        "missing_day_count": snapshot.missing_day_count,
+        "coverage_ratio": snapshot.coverage_ratio,
+        "max_gap_days": snapshot.max_gap_days,
+        "observation_lag_days": snapshot.observation_lag_days,
+        "venue": (snapshot.ohlcv_metadata or {}).get("venue"),
+        "market": (snapshot.ohlcv_metadata or {}).get("market"),
+        "quote_currency": (snapshot.ohlcv_metadata or {}).get("quote_currency"),
     }
 
 
@@ -52,7 +62,7 @@ def _wait_plan(
     action: str = "WAIT",
 ) -> ExecutionPlan:
     return ExecutionPlan(
-        execution_plan_version=1,
+        execution_plan_version=2,
         symbol=symbol,
         action=action,
         approved_amount_usd=approved,
@@ -60,10 +70,11 @@ def _wait_plan(
         unallocated_amount_usd=approved,
         current_price=snapshot.current_spot_price,
         entry_mode="WAIT",
-        technical_confidence=snapshot.technical_confidence,
+        technical_confidence=snapshot.data_confidence,
         rationale=reason,
         ohlcv_hash=snapshot.ohlcv_hash or None,
         ohlcv_metadata=_metadata(snapshot),
+        technical_summary=snapshot.technical_summary(),
     )
 
 
@@ -83,8 +94,6 @@ def _zone_quality(
                 "MA100": 20.0,
                 "MA200": 22.0,
                 "MA20": 10.0,
-                "BREAKOUT_RETEST": 22.0,
-                "ATR_PULLBACK": 8.0,
             }.get(source, 0.0)
             for source in zone.sources
         ),
@@ -123,9 +132,16 @@ def _select_zones(
     max_tranches: int,
     atr_value: float,
     separation_factor: float,
+    minimum_quality: float,
 ) -> list[tuple[PriceZone, float, str]]:
-    selected: list[tuple[PriceZone, float, str]] = []
-    for candidate in ranked:
+    candidates = [candidate for candidate in ranked if candidate[1] >= minimum_quality]
+    if not candidates:
+        return []
+    nearest = max(candidates, key=lambda item: (item[0].midpoint, -item[1]))
+    selected: list[tuple[PriceZone, float, str]] = [nearest]
+    for candidate in sorted(candidates, key=lambda item: (-item[1], -item[0].midpoint, item[0].sources)):
+        if candidate == nearest:
+            continue
         if all(abs(candidate[0].midpoint - item[0].midpoint) >= atr_value * separation_factor for item in selected):
             selected.append(candidate)
         if len(selected) == max_tranches:
@@ -162,46 +178,9 @@ def _fractions(
             tail = sum(values[1:])
             for index in range(1, len(values)):
                 values[index] += remainder * values[index] / tail
-    if mode == "BREAKOUT":
-        cap = config["breakout"]["max_initial_tranche"]
-        first = min(values[0], cap)
-        remainder = values[0] - first
-        values[0] = first
-        if remainder and len(values) > 1:
-            tail = sum(values[1:])
-            for index in range(1, len(values)):
-                values[index] += remainder * values[index] / tail
     deployed_fraction = sum(values)
     normalized = [value / deployed_fraction for value in values]
     return normalized, deployed_fraction
-
-
-def _breakout_allowed(
-    snapshot: TechnicalSnapshot,
-    regime: str,
-    portfolio_confidence: str,
-    config: Mapping[str, Any],
-    *,
-    breakout_confirmed: bool,
-    severe_event: bool,
-    thesis_broken: bool,
-    relative_strength_confirmed: bool,
-) -> bool:
-    if not breakout_confirmed or severe_event or thesis_broken or not relative_strength_confirmed:
-        return False
-    if regime != "NORMAL" or portfolio_confidence != "HIGH" or snapshot.technical_confidence != "HIGH":
-        return False
-    if snapshot.trend_state != "STRONG_UPTREND" or snapshot.volume_state != "SUPPORTIVE":
-        return False
-    if snapshot.relative_volume is None or snapshot.relative_volume < config["breakout"]["minimum_relative_volume"]:
-        return False
-    if snapshot.atr14 is None or not snapshot.support_zones:
-        return False
-    candidates = [zone.midpoint for zone in snapshot.support_zones if zone.midpoint <= snapshot.current_spot_price]
-    if not candidates:
-        return False
-    nearest = max(candidates)
-    return (snapshot.current_spot_price - nearest) / snapshot.atr14 <= config["breakout"]["max_atr_extension"]
 
 
 def build_entry_plan(
@@ -237,17 +216,23 @@ def build_entry_plan(
     if not config:
         raise ValueError("execution configuration is required")
     if normalized_action != "INCREASE":
-        return _wait_plan(normalized_symbol, approved, technical_snapshot, "technical entry planner only stages approved increases", action=normalized_action)
+        raise ValueError("technical entry planner only supports INCREASE actions")
     if approved <= 0:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "approved amount is zero")
     if normalized_regime == "CAPITAL_PRESERVATION":
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "capital-preservation regime reserves all approved risk")
-    if technical_snapshot.history_days < config["minimum_history_days"]:
+    if not technical_snapshot.history_sufficient or technical_snapshot.history_days < config["minimum_history_days"]:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "insufficient completed daily history")
-    if technical_snapshot.data_quality.startswith(("INSUFFICIENT", "STALE", "CONFLICT")):
-        return _wait_plan(normalized_symbol, approved, technical_snapshot, f"technical data quality is {technical_snapshot.data_quality}")
-    if technical_snapshot.technical_confidence == "LOW":
-        return _wait_plan(normalized_symbol, approved, technical_snapshot, "technical confidence is LOW")
+    if not technical_snapshot.market_data_fresh:
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "market observations are stale")
+    if "STALE_RETRIEVAL" in technical_snapshot.data_quality_flags:
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "market-data retrieval is stale")
+    if not technical_snapshot.cadence_valid:
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "daily OHLCV coverage is insufficient")
+    if "DATA_CONFLICT" in technical_snapshot.data_quality_flags:
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "spot and OHLCV observations conflict")
+    if technical_snapshot.data_confidence == "LOW":
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "technical data confidence is LOW")
     if technical_snapshot.volatility_state == "EXTREME":
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "volatility is EXTREME")
 
@@ -256,18 +241,11 @@ def build_entry_plan(
         raise ValueError(f"entry_mode must be one of {sorted(_MODES)}")
     if requested_mode == "WAIT":
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "entry mode is explicitly WAIT")
-    if requested_mode == "BREAKOUT" and not _breakout_allowed(
-        technical_snapshot,
-        normalized_regime,
-        portfolio_level,
-        config,
-        breakout_confirmed=breakout_confirmed,
-        severe_event=severe_event,
-        thesis_broken=thesis_broken,
-        relative_strength_confirmed=relative_strength_confirmed,
-    ):
-        return _wait_plan(normalized_symbol, approved, technical_snapshot, "breakout gates are not all satisfied")
-    mode = requested_mode if requested_mode in {"BREAKOUT", "MIXED"} else "PULLBACK"
+    if requested_mode == "BREAKOUT":
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "BREAKOUT generation is disabled until breakout/retest structure is implemented")
+    mode = "PULLBACK"
+    if technical_snapshot.setup_quality < config["zone_quality"]["minimum_for_entry"]:
+        return _wait_plan(normalized_symbol, approved, technical_snapshot, "setup quality is below the entry threshold")
     ranked = rank_support_zones(technical_snapshot)
     if not ranked:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "no confirmed support structure is available")
@@ -276,12 +254,13 @@ def build_entry_plan(
         max_tranches=config["max_tranches"],
         atr_value=technical_snapshot.atr14 or 0.0,
         separation_factor=config["minimum_zone_separation_atr"],
+        minimum_quality=config["zone_quality"]["minimum_for_entry"],
     )
     if not selected:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "support candidates are not materially distinct")
     nearest = selected[0][0]
     extension = (technical_snapshot.current_spot_price - nearest.midpoint) / (technical_snapshot.atr14 or 1.0)
-    if extension > config["breakout"]["max_atr_extension"] and mode in {"PULLBACK", "MIXED"}:
+    if extension > config["breakout"]["max_atr_extension"]:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, f"spot is {extension:.2f} ATR above nearest support")
 
     fractions, deployed_fraction = _fractions(
@@ -294,7 +273,7 @@ def build_entry_plan(
     )
     confidence_factor = min(
         config["confidence_deployment_factor"][portfolio_level],
-        config["confidence_deployment_factor"][technical_snapshot.technical_confidence],
+        config["confidence_deployment_factor"][technical_snapshot.data_confidence],
     )
     planned = approved * deployed_fraction * confidence_factor
     planned = min(approved, max(0.0, planned))
@@ -317,19 +296,17 @@ def build_entry_plan(
             )
         )
     major_zone = selected[-1][0]
-    invalidation = {
-        "kind": "STRUCTURAL_SUPPORT_LOSS",
-        "trigger": "completed daily close below major confirmed support",
-        "reference_price": major_zone.low,
-        "review_only": True,
-        "automatic_order": False,
-    }
+    invalidation = Invalidation(
+        kind="STRUCTURAL_SUPPORT_LOSS",
+        trigger="completed daily close below major confirmed support",
+        reference_price=major_zone.low,
+    )
     rationale = (
         f"{mode} entry from {len(selected)} confirmed support zone(s); "
         f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity"
     )
     return ExecutionPlan(
-        execution_plan_version=1,
+        execution_plan_version=2,
         symbol=normalized_symbol,
         action="INCREASE",
         approved_amount_usd=approved,
@@ -337,13 +314,47 @@ def build_entry_plan(
         unallocated_amount_usd=approved - planned,
         current_price=technical_snapshot.current_spot_price,
         entry_mode=mode,
-        technical_confidence=technical_snapshot.technical_confidence,
+        technical_confidence=technical_snapshot.data_confidence,
         tranches=tuple(tranche_values),
         invalidation=invalidation,
         rationale=rationale,
         ohlcv_hash=technical_snapshot.ohlcv_hash or None,
         ohlcv_metadata=_metadata(technical_snapshot),
+        technical_summary=technical_snapshot.technical_summary(zone for zone, _, _ in selected),
     )
 
 
-__all__ = ["build_entry_plan", "rank_support_zones"]
+def build_execution_evidence(
+    snapshot: TechnicalSnapshot, plan: ExecutionPlan | None = None
+) -> Evidence:
+    """Create the structured evidence record that explains a technical plan."""
+    if not isinstance(snapshot, TechnicalSnapshot):
+        raise ValueError("snapshot must be a TechnicalSnapshot")
+    if plan is not None and plan.symbol != snapshot.symbol:
+        raise ValueError("plan symbol must match snapshot symbol")
+    fetched_at = snapshot.spot_fetched_at or (snapshot.ohlcv_metadata or {}).get("fetched_at")
+    if fetched_at is None:
+        raise ValueError("technical evidence requires a fetched_at timestamp")
+    selected_zones = ()
+    if plan is not None and plan.technical_summary is not None:
+        selected_zones = tuple(
+            PriceZone.from_mapping(value)
+            for value in plan.technical_summary.get("selected_zones", ())
+        )
+    summary = snapshot.technical_summary(selected_zones)
+    digest = snapshot.ohlcv_hash or "no-ohlcv"
+    return Evidence(
+        id=f"execution-technical:{snapshot.symbol}:{digest}",
+        asset=snapshot.symbol,
+        factor="execution_technical",
+        source=snapshot.spot_source or snapshot.source or "unknown",
+        observed_at=snapshot.spot_observed_at or snapshot.as_of,
+        fetched_at=fetched_at,
+        freshness="CURRENT" if snapshot.market_data_fresh else "STALE",
+        confidence=snapshot.data_confidence,
+        value={"ohlcv_hash": snapshot.ohlcv_hash or None, "technical_summary": summary},
+        summary=plan.rationale if plan is not None else "technical execution evidence",
+    )
+
+
+__all__ = ["build_entry_plan", "build_execution_evidence", "rank_support_zones"]

@@ -45,12 +45,32 @@ Need:
 - volume and volatility when reliable.
 
 The execution layer consumes normalized `OHLCVSeries` data on the `1D`
-timeframe. Indicators use only completed candles; current spot is a separate
-observation. The preferred minimum is 120 completed candles and the preferred
-coverage is 365. Preserve source, fetched time, range, candle count, and the
-canonical SHA-256 OHLCV hash for replay.
-`ATR14` uses a simple mean of the latest 14 true ranges in v1, so replay does
-not depend on a library-specific Wilder-ATR convention.
+timeframe plus a typed `SpotPrice` with `observed_at` and `source`. Indicators
+use only completed candles; the spot observation is never inferred from the
+last candle for historical replay. The preferred minimum is 120 completed
+candles and the preferred coverage is 365 calendar days. Preserve source,
+venue/market/quote metadata, fetched time, range, candle count, calendar
+coverage, and the canonical SHA-256 OHLCV hash for replay.
+
+Freshness is based on the latest observed completed UTC date versus the
+decision `as_of`. `fetched_at` is retrieval metadata and may be after a
+historical `as_of`; a recent download does not make old candles current.
+Duplicate UTC dates are invalid. Small gaps lower confidence; large gaps or
+observation lag produce low confidence and `WAIT`. Calendar lookbacks never
+substitute an arbitrary number of candles when their date window is missing.
+`ATR14` uses a simple mean of 14 fully defined true ranges and therefore
+requires at least 15 candles in v1; it is not silently substituted with
+Wilder smoothing.
+
+Normalized OHLCV used by a plan may be stored as public, immutable content at
+`~/.local/share/crypto-portfolio-manager/market-data/sha256/<ohlcv_hash>.json`
+(or the configured runtime data directory). The plan also retains a compact
+technical summary and `execution_technical` evidence; no full candle array is
+embedded in every decision.
+
+`policy_version` remains the investment-policy version so existing historical
+records stay readable; execution serialization changes are tracked by
+`execution_plan_version` (new plans use version 2).
 
 ### BTC market context
 

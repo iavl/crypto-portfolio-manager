@@ -52,7 +52,7 @@ Targets should sum to approximately 100%.
 
 ## 6. 操作计划
 
-For each actual trade:
+For each approved recommendation:
 
 | Asset | Action | Amount | Target weight after trade | Execution |
 |---|---|---:|---:|---|
@@ -68,17 +68,19 @@ For staged buys, use the validated execution plan:
 Label quantity as approximate and use the zone midpoint as the reference price.
 Also report:
 
-- Approved total;
-- Planned now;
-- Still unallocated;
+- Approved total capacity;
+- Staged amount (`planned_amount_usd`), which is a recommendation rather than a fill;
+- Still unallocated / reserved amount;
 - Technical confidence;
+- Data confidence and setup quality;
+- Spot `observed_at`, OHLCV observation freshness, and `ohlcv_hash` when available;
 - Structured invalidation review trigger.
 
 If new capital is supplied, explicitly state:
 
 - available capital;
-- amount deployed now;
-- amount retained as cash;
+- amount staged now;
+- amount retained as cash / still unallocated;
 - reason not to deploy the remainder.
 
 ## 7. 风险检查

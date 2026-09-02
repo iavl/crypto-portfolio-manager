@@ -77,6 +77,9 @@
     "preferred_history_days": 365,
     "minimum_history_days": 120,
     "max_fetched_age_days": 7,
+    "maximum_daily_candle_lag_days": 1,
+    "minimum_daily_coverage_ratio": 0.9,
+    "maximum_daily_gap_days": 3,
     "moving_average_windows": [20, 50, 100, 200],
     "atr_period": 14,
     "realized_volatility_windows": [30, 90],
@@ -86,6 +89,12 @@
     "max_tranches": 3,
     "zone_half_width_atr": 0.25,
     "minimum_zone_separation_atr": 0.75,
+    "maximum_zone_span_atr": 1.0,
+    "maximum_spot_close_gap_atr": 4.0,
+    "zone_quality": {
+      "minimum_for_entry": 55,
+      "high_quality": 75
+    },
     "volatility_atr_percent": {
       "low_max": 0.03,
       "normal_max": 0.06,

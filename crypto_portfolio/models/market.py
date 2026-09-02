@@ -7,7 +7,7 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .execution import PriceZone
 from .time import normalize_timestamp, parse_timestamp
@@ -36,6 +36,64 @@ def _text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+@dataclass(frozen=True)
+class SpotPrice:
+    symbol: str
+    price: float
+    observed_at: str
+    source: str
+    fetched_at: str | None = None
+    venue: str | None = None
+    market: str | None = None
+    quote_currency: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbol", _text(self.symbol, "spot.symbol").upper())
+        price = _number(self.price, "spot.price", minimum=0.0)
+        if price <= 0:
+            raise ValueError("spot.price must be > 0")
+        object.__setattr__(self, "price", price)
+        object.__setattr__(self, "observed_at", _timestamp(self.observed_at, "spot.observed_at"))
+        object.__setattr__(self, "source", _text(self.source, "spot.source"))
+        if self.fetched_at is not None:
+            object.__setattr__(self, "fetched_at", _timestamp(self.fetched_at, "spot.fetched_at"))
+        for field in ("venue", "market", "quote_currency"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, _text(value, f"spot.{field}"))
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "SpotPrice":
+        if not isinstance(value, Mapping):
+            raise ValueError("spot must be an object")
+        required = ("symbol", "price", "observed_at", "source")
+        missing = [field for field in required if field not in value]
+        if missing:
+            raise ValueError(f"spot is missing fields: {', '.join(missing)}")
+        unknown = set(value) - set(required) - {"fetched_at", "venue", "market", "quote_currency"}
+        if unknown:
+            raise ValueError(f"spot contains unknown fields: {', '.join(sorted(unknown))}")
+        return cls(
+            **{field: value[field] for field in required},
+            fetched_at=value.get("fetched_at"),
+            venue=value.get("venue"),
+            market=value.get("market"),
+            quote_currency=value.get("quote_currency"),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "price": self.price,
+            "observed_at": self.observed_at,
+            "source": self.source,
+            "fetched_at": self.fetched_at,
+            "venue": self.venue,
+            "market": self.market,
+            "quote_currency": self.quote_currency,
+        }
 
 
 @dataclass(frozen=True)
@@ -108,6 +166,9 @@ class OHLCVSeries:
     candles: tuple[Candle, ...]
     source: str = "unknown"
     fetched_at: str | None = None
+    venue: str | None = None
+    market: str | None = None
+    quote_currency: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "series.symbol").upper())
@@ -123,16 +184,26 @@ class OHLCVSeries:
         timestamps = [parse_timestamp(candle.timestamp) for candle in candles]
         if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
             raise ValueError("series candles must have strictly increasing timestamps")
+        market_dates = [timestamp.date() for timestamp in timestamps]
+        if len(market_dates) != len(set(market_dates)):
+            raise ValueError("1D series cannot contain duplicate UTC market dates")
         object.__setattr__(self, "candles", candles)
         object.__setattr__(self, "source", _text(self.source, "series.source"))
         if self.fetched_at is not None:
             object.__setattr__(self, "fetched_at", _timestamp(self.fetched_at, "series.fetched_at"))
+        for field in ("venue", "market", "quote_currency"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, _text(value, f"series.{field}"))
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "OHLCVSeries":
         if not isinstance(value, Mapping):
             raise ValueError("OHLCV series must be an object")
-        unknown = set(value) - {"symbol", "timeframe", "candles", "source", "fetched_at"}
+        unknown = set(value) - {
+            "symbol", "timeframe", "candles", "source", "fetched_at",
+            "venue", "market", "quote_currency",
+        }
         if unknown:
             raise ValueError(f"series contains unknown fields: {', '.join(sorted(unknown))}")
         candles = value.get("candles")
@@ -144,6 +215,9 @@ class OHLCVSeries:
             candles=tuple(Candle.from_mapping(item) for item in candles),
             source=value.get("source", "unknown"),
             fetched_at=value.get("fetched_at"),
+            venue=value.get("venue"),
+            market=value.get("market"),
+            quote_currency=value.get("quote_currency"),
         )
 
     def completed_candles(self, as_of: str | datetime | None = None) -> tuple[Candle, ...]:
@@ -176,6 +250,21 @@ class OHLCVSeries:
             "candle_count": len(self.candles),
             "fetched_at": self.fetched_at,
             "ohlcv_hash": self.ohlcv_hash,
+            "venue": self.venue,
+            "market": self.market,
+            "quote_currency": self.quote_currency,
+        }
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
+            "candles": [candle.as_dict() for candle in self.candles],
+            "source": self.source,
+            "fetched_at": self.fetched_at,
+            "venue": self.venue,
+            "market": self.market,
+            "quote_currency": self.quote_currency,
         }
 
 
@@ -241,6 +330,29 @@ class TechnicalSnapshot:
     source: str | None = None
     timeframe: str = "1D"
     ohlcv_metadata: Mapping[str, Any] | None = None
+    spot_observed_at: str | None = None
+    spot_source: str | None = None
+    spot_fetched_at: str | None = None
+    candle_count: int | None = None
+    calendar_span_days: int | None = None
+    missing_day_count: int | None = None
+    coverage_ratio: float | None = None
+    max_gap_days: int | None = None
+    observation_lag_days: int | None = None
+    data_confidence: str | None = None
+    setup_quality: float = 0.0
+    data_quality_flags: tuple[str, ...] = ()
+    history_sufficient: bool = False
+    market_data_fresh: bool = False
+    cadence_valid: bool = False
+    source_known: bool = False
+    spot_time_valid: bool = False
+    volume_reliable: bool = False
+    spot_close_gap_atr: float | None = None
+    provenance_consistent: bool = True
+    spot_venue: str | None = None
+    spot_market: str | None = None
+    spot_quote_currency: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "snapshot.symbol").upper())
@@ -252,6 +364,20 @@ class TechnicalSnapshot:
             object.__setattr__(self, field, value)
         if isinstance(self.history_days, bool) or not isinstance(self.history_days, int) or self.history_days < 1:
             raise ValueError("snapshot.history_days must be a positive integer")
+        for field in ("candle_count", "calendar_span_days", "missing_day_count", "max_gap_days", "observation_lag_days"):
+            value = getattr(self, field)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ValueError(f"snapshot.{field} must be a non-negative integer or null")
+        if self.candle_count is None:
+            object.__setattr__(self, "candle_count", self.history_days)
+        if self.coverage_ratio is not None:
+            object.__setattr__(self, "coverage_ratio", _number(self.coverage_ratio, "snapshot.coverage_ratio", minimum=0.0))
+            if self.coverage_ratio > 1:
+                raise ValueError("snapshot.coverage_ratio must be <= 1")
+        if self.observation_lag_days is not None and self.observation_lag_days < 0:
+            raise ValueError("snapshot.observation_lag_days must be >= 0")
         for field in (
             "ma20", "ma50", "ma100", "ma200", "return_30d", "return_90d", "return_180d",
             "realized_vol_30d", "realized_vol_90d", "atr14", "atr_percent", "volume_ma20",
@@ -279,6 +405,37 @@ class TechnicalSnapshot:
                 raise ValueError(f"snapshot.{field} has an unsupported value")
             object.__setattr__(self, field, value)
         object.__setattr__(self, "data_quality", _text(self.data_quality, "snapshot.data_quality").upper())
+        data_confidence = self.technical_confidence if self.data_confidence is None else self.data_confidence
+        data_confidence = _text(data_confidence, "snapshot.data_confidence").upper()
+        if data_confidence not in {"HIGH", "MEDIUM", "LOW"}:
+            raise ValueError("snapshot.data_confidence has an unsupported value")
+        object.__setattr__(self, "data_confidence", data_confidence)
+        setup_quality = _number(self.setup_quality, "snapshot.setup_quality", minimum=0.0)
+        if setup_quality > 100:
+            raise ValueError("snapshot.setup_quality must be <= 100")
+        object.__setattr__(self, "setup_quality", setup_quality)
+        flags = tuple(_text(flag, "snapshot.data_quality_flags") for flag in self.data_quality_flags)
+        if len(flags) != len(set(flags)):
+            raise ValueError("snapshot.data_quality_flags must not contain duplicates")
+        object.__setattr__(self, "data_quality_flags", flags)
+        for field in (
+            "history_sufficient", "market_data_fresh", "cadence_valid", "source_known",
+            "spot_time_valid", "volume_reliable", "provenance_consistent",
+        ):
+            if not isinstance(getattr(self, field), bool):
+                raise ValueError(f"snapshot.{field} must be boolean")
+        for field in ("spot_observed_at", "spot_fetched_at"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, _timestamp(value, f"snapshot.{field}"))
+        if self.spot_source is not None:
+            object.__setattr__(self, "spot_source", _text(self.spot_source, "snapshot.spot_source"))
+        for field in ("spot_venue", "spot_market", "spot_quote_currency"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, _text(value, f"snapshot.{field}"))
+        if self.spot_close_gap_atr is not None:
+            object.__setattr__(self, "spot_close_gap_atr", _number(self.spot_close_gap_atr, "snapshot.spot_close_gap_atr", minimum=0.0))
         if self.ohlcv_hash:
             object.__setattr__(self, "ohlcv_hash", _hash(self.ohlcv_hash))
         if self.source is not None:
@@ -302,6 +459,38 @@ class TechnicalSnapshot:
     @property
     def latest_completed_close(self) -> float:
         return self.last_completed_close
+
+    def technical_summary(self, selected_zones: Iterable[PriceZone] = ()) -> dict[str, Any]:
+        return {
+            "summary_version": 1,
+            "symbol": self.symbol,
+            "spot_price": self.current_spot_price,
+            "spot_observed_at": self.spot_observed_at,
+            "spot_source": self.spot_source,
+            "spot_fetched_at": self.spot_fetched_at,
+            "spot_venue": self.spot_venue,
+            "spot_market": self.spot_market,
+            "spot_quote_currency": self.spot_quote_currency,
+            "ma20": self.ma20,
+            "ma50": self.ma50,
+            "ma100": self.ma100,
+            "ma200": self.ma200,
+            "atr14": self.atr14,
+            "atr_percent": self.atr_percent,
+            "return_30d": self.return_30d,
+            "return_90d": self.return_90d,
+            "return_180d": self.return_180d,
+            "realized_vol_30d": self.realized_vol_30d,
+            "realized_vol_90d": self.realized_vol_90d,
+            "relative_volume": self.relative_volume,
+            "trend_state": self.trend_state,
+            "data_confidence": self.data_confidence,
+            "setup_quality": self.setup_quality,
+            "data_quality": self.data_quality,
+            "data_quality_flags": list(self.data_quality_flags),
+            "selected_zones": [zone.as_dict() for zone in selected_zones],
+            "ohlcv_hash": self.ohlcv_hash or None,
+        }
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -334,7 +523,30 @@ class TechnicalSnapshot:
             "volatility_state": self.volatility_state,
             "volume_state": self.volume_state,
             "technical_confidence": self.technical_confidence,
+            "data_confidence": self.data_confidence,
+            "setup_quality": self.setup_quality,
             "data_quality": self.data_quality,
+            "data_quality_flags": list(self.data_quality_flags),
+            "history_sufficient": self.history_sufficient,
+            "market_data_fresh": self.market_data_fresh,
+            "cadence_valid": self.cadence_valid,
+            "source_known": self.source_known,
+            "spot_time_valid": self.spot_time_valid,
+            "volume_reliable": self.volume_reliable,
+            "spot_close_gap_atr": self.spot_close_gap_atr,
+            "provenance_consistent": self.provenance_consistent,
+            "spot_observed_at": self.spot_observed_at,
+            "spot_source": self.spot_source,
+            "spot_fetched_at": self.spot_fetched_at,
+            "spot_venue": self.spot_venue,
+            "spot_market": self.spot_market,
+            "spot_quote_currency": self.spot_quote_currency,
+            "candle_count": self.candle_count,
+            "calendar_span_days": self.calendar_span_days,
+            "missing_day_count": self.missing_day_count,
+            "coverage_ratio": self.coverage_ratio,
+            "max_gap_days": self.max_gap_days,
+            "observation_lag_days": self.observation_lag_days,
             "ohlcv_hash": self.ohlcv_hash,
             "source": self.source,
             "timeframe": self.timeframe,
@@ -353,4 +565,4 @@ def _hash(value: Any, field: str = "hash") -> str:
     return result
 
 
-__all__ = ["Candle", "OHLCVSeries", "SwingPoint", "TechnicalSnapshot"]
+__all__ = ["Candle", "OHLCVSeries", "SpotPrice", "SwingPoint", "TechnicalSnapshot"]

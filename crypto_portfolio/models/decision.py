@@ -74,7 +74,20 @@ class Decision:
             raise ValueError("current_weights and target_weights must be non-empty")
         if not isinstance(self.factor_scores, Mapping) and self.factor_scores is not None:
             raise ValueError("factor_scores must be an object or null")
-        object.__setattr__(self, "actions", tuple(self.actions))
+        from ..engine.rebalance import RebalanceAction
+
+        parsed_actions = []
+        for item in self.actions:
+            if isinstance(item, RebalanceAction):
+                parsed_actions.append(item)
+                continue
+            if not isinstance(item, Mapping):
+                raise ValueError("actions must contain RebalanceAction objects or mappings")
+            try:
+                parsed_actions.append(RebalanceAction(**item))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid rebalance action: {exc}") from exc
+        object.__setattr__(self, "actions", tuple(parsed_actions))
         object.__setattr__(self, "risk_checks", tuple(self.risk_checks))
         object.__setattr__(self, "evidence", tuple(self.evidence))
         evidence_ids = []
@@ -131,6 +144,29 @@ class Decision:
                     raise ValueError(f"execution plan symbol {normalized_symbol} does not match mapping key")
                 parsed_plans[normalized_symbol] = plan
             object.__setattr__(self, "execution_plans", parsed_plans)
+            increase_actions = [
+                action for action in self.actions if action.action == "INCREASE"
+            ]
+            for plan in parsed_plans.values():
+                if plan.action != "INCREASE" and not (
+                    plan.action == "WAIT" and plan.approved_amount_usd > 0
+                ):
+                    continue
+                matches = [
+                    action
+                    for action in increase_actions
+                    if action.symbol == plan.symbol
+                    and math.isclose(
+                        action.amount_usd,
+                        plan.approved_amount_usd,
+                        rel_tol=1e-9,
+                        abs_tol=1e-7,
+                    )
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        "each INCREASE execution plan must match exactly one approved INCREASE action"
+                    )
         if self.policy_hash is not None:
             if not isinstance(self.policy_hash, str) or len(self.policy_hash) != 64:
                 raise ValueError("policy_hash must be a SHA-256 hex digest")
@@ -163,6 +199,23 @@ class Decision:
                         raise ValueError(f"factor {factor} references evidence for wrong asset {evidence_id}")
                     if evidence.factor != factor:
                         raise ValueError(f"factor {factor} references evidence for wrong factor {evidence_id}")
+        for plan in (self.execution_plans or {}).values():
+            if plan.technical_summary is None:
+                continue
+            linked = [
+                evidence
+                for evidence in self.evidence
+                if isinstance(evidence, Evidence)
+                and evidence.asset == plan.symbol
+                and evidence.factor == "execution_technical"
+                and isinstance(evidence.value, Mapping)
+                and evidence.value.get("ohlcv_hash") == plan.ohlcv_hash
+                and evidence.value.get("technical_summary") == plan.technical_summary
+            ]
+            if len(linked) != 1:
+                raise ValueError(
+                    "each execution plan with a technical summary must have one matching execution_technical evidence record"
+                )
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "Decision":

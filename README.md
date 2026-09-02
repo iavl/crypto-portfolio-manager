@@ -25,8 +25,9 @@ Trading:  advisory only; no automatic execution
 - Preserves evidence, factor scores, and append-only decision history.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.
 - Treats stablecoins and cash as one sleeve and permits `NO_TRADE`.
-- Stages an approved rebalance amount from completed OHLCV with deterministic
-  ATR-aware zones, confirmed swings, tranches, and `WAIT` handling.
+- Stages an approved rebalance amount from timestamped spot data and completed
+  OHLCV with calendar coverage checks, deterministic ATR-aware zones, confirmed
+  swings, tranches, and `WAIT` handling.
 
 ## Safety / What It Is Not
 
@@ -38,8 +39,9 @@ futures/perpetuals system, or custodial exchange integration. Never provide
 private keys, seed phrases, or trading credentials.
 
 Portfolio allocation decides total USD exposure. The technical execution layer
-only decides how to stage that already-approved amount; it may deploy less and
-does not place orders.
+only decides how to stage that already-approved amount; every plan is bound to
+the matching rebalance approval, may stage less, and does not place orders.
+`planned_amount_usd` means staged recommendation capacity, not filled orders.
 
 ## Requirements
 
@@ -121,6 +123,8 @@ Set `CRYPTO_PORTFOLIO_DATA_DIR` to use another directory. No third-party API
 key is required by the repository itself because it has no live provider
 adapters. Never commit real balances, quantities, cost basis, transaction
 history, account identifiers, credentials, private keys, or seed phrases.
+Content-addressed public OHLCV replay data is stored under
+`market-data/sha256/<ohlcv_hash>.json` in that same runtime directory.
 
 ## Development
 
