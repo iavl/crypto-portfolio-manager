@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/collection-event.schema.json",
+  "title": "Metric Collection Event",
+  "type": "object",
+  "required": ["event_id", "timestamp", "asset", "metric_key", "status"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "asset": {"type": "string", "minLength": 1},
+    "metric_key": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"]},
+    "reason": {"type": ["string", "null"], "minLength": 1},
+    "source": {"type": ["string", "null"], "minLength": 1},
+    "observed_at": {"type": ["string", "null"], "format": "date-time"},
+    "decision_id": {"type": ["string", "null"], "minLength": 1},
+    "fetched_at": {"type": ["string", "null"], "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"enum": ["FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"]}}, "required": ["status"]},
+      "then": {"required": ["reason"], "properties": {"reason": {"type": "string", "minLength": 1}}}
+    }
+  ],
+  "additionalProperties": false
+}

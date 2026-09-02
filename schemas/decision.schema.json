@@ -32,7 +32,8 @@
           "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
           "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
           "value": {},
-          "summary": {"type": ["string", "null"]}
+          "summary": {"type": ["string", "null"]},
+          "metadata": {"type": ["object", "null"]}
         },
         "additionalProperties": false
       }
@@ -96,6 +97,9 @@
         "invalidation": {"$ref": "#/$defs/invalidationOrLegacy"},
         "rationale": {"type": "string"},
         "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "volume_profile_metadata": {"type": ["object", "null"]},
         "ohlcv_metadata": {"$ref": "#/$defs/ohlcvMetadata"},
         "technical_summary": {"$ref": "#/$defs/technicalSummary"}
       },
@@ -149,7 +153,7 @@
       "properties": {
         "symbol": {"type": "string", "minLength": 1},
         "source": {"type": "string", "minLength": 1},
-        "timeframe": {"const": "1D"},
+        "timeframe": {"enum": ["1H", "4H", "1D"]},
         "start_timestamp": {"type": "string", "format": "date-time"},
         "end_timestamp": {"type": "string", "format": "date-time"},
         "candle_count": {"type": "integer", "minimum": 1},
@@ -179,6 +183,19 @@
         "kind": {"type": "string", "minLength": 1},
         "strength": {"type": "number", "minimum": 0, "maximum": 100},
         "sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "volumeNode": {
+      "type": "object",
+      "required": ["price_low", "price_high", "midpoint", "kind", "strength", "volume_fraction"],
+      "properties": {
+        "price_low": {"type": "number", "exclusiveMinimum": 0},
+        "price_high": {"type": "number", "exclusiveMinimum": 0},
+        "midpoint": {"type": "number", "exclusiveMinimum": 0},
+        "kind": {"enum": ["HVN", "LVN"]},
+        "strength": {"type": "number", "minimum": 0, "maximum": 100},
+        "volume_fraction": {"type": "number", "minimum": 0, "maximum": 1}
       },
       "additionalProperties": false
     },
@@ -213,7 +230,16 @@
         "data_quality": {"type": "string", "minLength": 1},
         "data_quality_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "selected_zones": {"type": "array", "items": {"$ref": "#/$defs/zone"}},
-        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "volume_profile_confidence": {"type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", "UNAVAILABLE", null]},
+        "volume_profile_poc": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "volume_profile_val": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "volume_profile_vah": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "volume_hvns": {"type": "array", "items": {"$ref": "#/$defs/volumeNode"}},
+        "volume_lvns": {"type": "array", "items": {"$ref": "#/$defs/volumeNode"}},
+        "volume_profile_summary": {"type": ["object", "null"]},
+        "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "volume_profile_metadata": {"type": ["object", "null"]}
       },
       "additionalProperties": false
     }

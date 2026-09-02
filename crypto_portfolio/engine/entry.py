@@ -9,6 +9,7 @@ from ..models.execution import ExecutionPlan, ExecutionTranche, Invalidation, Pr
 from ..models.evidence import Evidence
 from ..models.market import TechnicalSnapshot
 from ..models.policy import Policy, resolve_policy
+from .technical import structural_confluence
 
 
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
@@ -73,6 +74,8 @@ def _wait_plan(
         technical_confidence=snapshot.data_confidence,
         rationale=reason,
         ohlcv_hash=snapshot.ohlcv_hash or None,
+        volume_profile_hash=snapshot.volume_profile_hash,
+        volume_profile_metadata=snapshot.volume_profile_metadata,
         ohlcv_metadata=_metadata(snapshot),
         technical_summary=snapshot.technical_summary(),
     )
@@ -85,7 +88,7 @@ def _zone_quality(
     *,
     volume_state: str,
 ) -> tuple[float, str]:
-    confluence = min(35.0, 18.0 + 9.0 * max(0, len(zone.sources) - 1))
+    confluence = structural_confluence(zone.sources)
     source_bonus = min(25.0, max(
         (
             {
@@ -101,8 +104,17 @@ def _zone_quality(
     ))
     distance_atr = max(0.0, (current_price - zone.midpoint) / atr_value)
     distance_bonus = max(0.0, 22.0 - min(22.0, distance_atr * 4.0))
-    volume_bonus = 10.0 if volume_state == "SUPPORTIVE" else 0.0
-    quality = min(100.0, confluence + source_bonus + distance_bonus + volume_bonus + zone.strength * 0.20)
+    profile_sources = [source for source in zone.sources if source.startswith("VOLUME_")]
+    profile_bonus = min(
+        12.0,
+        4.0 * len(profile_sources) + (4.0 if "VOLUME_PROFILE_CONFLUENCE" in zone.sources else 0.0),
+    )
+    relative_volume_bonus = 5.0 if volume_state == "SUPPORTIVE" else 0.0
+    volume_bonus = min(15.0, profile_bonus + relative_volume_bonus)
+    quality = confluence + source_bonus + distance_bonus + volume_bonus + zone.strength * 0.20
+    if zone.sources and all(source.startswith("VOLUME_") for source in zone.sources):
+        quality = min(50.0, quality)
+    quality = min(100.0, quality)
     reasons = [f"{source} confluence" for source in zone.sources]
     reasons.append(f"{distance_atr:.2f} ATR below spot")
     if volume_state == "SUPPORTIVE":
@@ -319,6 +331,8 @@ def build_entry_plan(
         invalidation=invalidation,
         rationale=rationale,
         ohlcv_hash=technical_snapshot.ohlcv_hash or None,
+        volume_profile_hash=technical_snapshot.volume_profile_hash,
+        volume_profile_metadata=technical_snapshot.volume_profile_metadata,
         ohlcv_metadata=_metadata(technical_snapshot),
         technical_summary=technical_snapshot.technical_summary(zone for zone, _, _ in selected),
     )
@@ -352,7 +366,11 @@ def build_execution_evidence(
         fetched_at=fetched_at,
         freshness="CURRENT" if snapshot.market_data_fresh else "STALE",
         confidence=snapshot.data_confidence,
-        value={"ohlcv_hash": snapshot.ohlcv_hash or None, "technical_summary": summary},
+        value={
+            "ohlcv_hash": snapshot.ohlcv_hash or None,
+            "volume_profile_hash": snapshot.volume_profile_hash,
+            "technical_summary": summary,
+        },
         summary=plan.rationale if plan is not None else "technical execution evidence",
     )
 

@@ -1,0 +1,1 @@
+{"symbol":"ETH","timeframe":"1H","source":"synthetic","candles":[{"timestamp":"2026-09-01T00:00:00Z","open":99,"high":101,"low":98,"close":100,"volume":10},{"timestamp":"2026-09-01T01:00:00Z","open":109,"high":111,"low":108,"close":110,"volume":20},{"timestamp":"2026-09-01T10:00:00Z","open":999,"high":1001,"low":998,"close":1000,"volume":9999}]}

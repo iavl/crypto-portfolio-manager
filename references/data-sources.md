@@ -72,6 +72,21 @@ embedded in every decision.
 records stay readable; execution serialization changes are tracked by
 `execution_plan_version` (new plans use version 2).
 
+Successful review metrics are normalized as `MetricObservation` records in the
+append-only runtime `metrics/observations.jsonl` series. The next review uses
+latest/previous observations for compact trend comparison, but refetches
+current values because historical freshness does not make old data current.
+Every attempt, including `FAILED`, `STALE`, `CONFLICT`, and
+`NOT_APPLICABLE`, is retained in `metrics/collection-events.jsonl`.
+
+For Volume Profile, prefer completed `1H` or `4H` OHLCV from one consistent,
+liquid spot venue. Do not mix incompatible raw-volume sources in one profile.
+The `1D` fallback is a low-resolution bar approximation and is capped at
+`MEDIUM` confidence.
+When bin volumes tie, the deterministic POC tie-break selects the lower-price
+bin; value-area expansion also selects the lower-price side on an equal next
+bin. Profile values are replayed from their cached hashes.
+
 ### BTC market context
 
 Useful:

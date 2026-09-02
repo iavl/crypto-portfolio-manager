@@ -33,6 +33,7 @@ _TOP_LEVEL_FIELDS = {
     "regimes",
     "allocation",
     "execution",
+    "volume_profile",
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -80,6 +81,21 @@ _EXECUTION_FIELDS = {
 _VOLATILITY_FIELDS = {"low_max", "normal_max", "high_max"}
 _BREAKOUT_FIELDS = {"minimum_relative_volume", "max_atr_extension", "max_initial_tranche"}
 _ZONE_QUALITY_FIELDS = {"minimum_for_entry", "high_quality"}
+_VOLUME_PROFILE_FIELDS = {
+    "enabled",
+    "preferred_timeframe",
+    "fallback_timeframe",
+    "lookback_days",
+    "preferred_lookback_days",
+    "price_bins",
+    "value_area_fraction",
+    "hvn_percentile",
+    "max_hvn_nodes",
+    "minimum_node_separation_atr",
+    "zone_half_width_atr",
+    "allow_daily_approximation",
+    "daily_approximation_confidence_cap",
+}
 _EXECUTION_COMPAT_DEFAULTS = {
     "maximum_daily_candle_lag_days": 1,
     "minimum_daily_coverage_ratio": 0.90,
@@ -179,6 +195,7 @@ class Policy:
     _execution_omitted_fields: frozenset[str] = dataclass_field(
         default_factory=frozenset, repr=False, compare=False
     )
+    volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -246,6 +263,8 @@ class Policy:
             },
             "allocation": dict(self.allocation),
         }
+        if self.volume_profile:
+            result["volume_profile"] = dict(self.volume_profile)
         if self.execution:
             execution = dict(self.execution)
             for field in self._execution_omitted_fields:
@@ -322,6 +341,68 @@ def _integer_list(value: Any, name: str, *, exact: tuple[int, ...] | None = None
     if exact is not None and tuple(result) != exact:
         raise PolicyError(f"{name} must equal {list(exact)}")
     return result
+
+
+def _parse_volume_profile(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("volume_profile must be an object")
+    _unknown_fields(value, _VOLUME_PROFILE_FIELDS, "volume_profile")
+    if set(value) != _VOLUME_PROFILE_FIELDS:
+        raise PolicyError("volume_profile fields are incomplete")
+    if not isinstance(value["enabled"], bool):
+        raise PolicyError("volume_profile.enabled must be boolean")
+    preferred = str(value["preferred_timeframe"]).strip().upper()
+    fallback = str(value["fallback_timeframe"]).strip().upper()
+    if preferred not in {"1H", "4H"}:
+        raise PolicyError("volume_profile.preferred_timeframe must be 1H or 4H")
+    if fallback not in {"1H", "4H", "1D"}:
+        raise PolicyError("volume_profile.fallback_timeframe must be 1H, 4H, or 1D")
+    lookback_days = _integer_list(value["lookback_days"], "volume_profile.lookback_days")
+    preferred_lookback = _number(
+        value["preferred_lookback_days"],
+        "volume_profile.preferred_lookback_days",
+        minimum=1,
+    )
+    if not preferred_lookback.is_integer() or int(preferred_lookback) not in lookback_days:
+        raise PolicyError("volume_profile.preferred_lookback_days must be one of lookback_days")
+    price_bins = _number(value["price_bins"], "volume_profile.price_bins", minimum=2)
+    if not price_bins.is_integer() or price_bins > 512:
+        raise PolicyError("volume_profile.price_bins must be an integer from 2 to 512")
+    value_area = _fraction(value["value_area_fraction"], "volume_profile.value_area_fraction", exclusive_minimum=True)
+    hvn_percentile = _fraction(value["hvn_percentile"], "volume_profile.hvn_percentile", exclusive_minimum=True)
+    max_hvn_nodes = _number(value["max_hvn_nodes"], "volume_profile.max_hvn_nodes", minimum=1)
+    if not max_hvn_nodes.is_integer():
+        raise PolicyError("volume_profile.max_hvn_nodes must be a positive integer")
+    separation = _number(
+        value["minimum_node_separation_atr"],
+        "volume_profile.minimum_node_separation_atr",
+        minimum=0.0,
+    )
+    width = _number(value["zone_half_width_atr"], "volume_profile.zone_half_width_atr", minimum=0.0)
+    if separation <= 0 or width <= 0:
+        raise PolicyError("volume_profile ATR settings must be > 0")
+    if not isinstance(value["allow_daily_approximation"], bool):
+        raise PolicyError("volume_profile.allow_daily_approximation must be boolean")
+    confidence_cap = str(value["daily_approximation_confidence_cap"]).strip().upper()
+    if confidence_cap not in {"LOW", "MEDIUM"}:
+        raise PolicyError("volume_profile.daily_approximation_confidence_cap must be LOW or MEDIUM")
+    return {
+        "enabled": value["enabled"],
+        "preferred_timeframe": preferred,
+        "fallback_timeframe": fallback,
+        "lookback_days": lookback_days,
+        "preferred_lookback_days": int(preferred_lookback),
+        "price_bins": int(price_bins),
+        "value_area_fraction": value_area,
+        "hvn_percentile": hvn_percentile,
+        "max_hvn_nodes": int(max_hvn_nodes),
+        "minimum_node_separation_atr": separation,
+        "zone_half_width_atr": width,
+        "allow_daily_approximation": value["allow_daily_approximation"],
+        "daily_approximation_confidence_cap": confidence_cap,
+    }
 
 
 def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
@@ -518,15 +599,22 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
     }
 
 
-def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy:
+def _parse_policy(
+    data: Any,
+    *,
+    allow_missing_execution: bool = False,
+    allow_missing_volume_profile: bool = False,
+) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
     _unknown_fields(data, _TOP_LEVEL_FIELDS, "policy")
-    missing = sorted(_TOP_LEVEL_FIELDS - set(data))
-    if allow_missing_execution and missing == ["execution"]:
-        missing = []
+    missing = set(_TOP_LEVEL_FIELDS - set(data))
+    if allow_missing_execution:
+        missing.discard("execution")
+    if allow_missing_volume_profile:
+        missing.discard("volume_profile")
     if missing:
-        raise PolicyError(f"policy is missing fields: {', '.join(missing)}")
+        raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
     version = data["policy_version"]
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
@@ -681,6 +769,9 @@ def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy
         raise PolicyError("allocation.satellite_full_score must exceed satellite_min_score")
 
     parsed_execution = _parse_execution(data.get("execution"), allow_missing=allow_missing_execution)
+    parsed_volume_profile = _parse_volume_profile(
+        data.get("volume_profile"), allow_missing=allow_missing_volume_profile
+    )
     policy = Policy(
         policy_version=version,
         investment_horizon_months=(int(horizon_min), int(horizon_max)),
@@ -701,6 +792,7 @@ def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy
         scoring=parsed_scoring,
         regimes=parsed_regimes,
         allocation=parsed_allocation,
+        volume_profile=parsed_volume_profile,
         execution=parsed_execution,
     )
     raw_execution = data.get("execution")
@@ -710,6 +802,8 @@ def _parse_policy(data: Any, *, allow_missing_execution: bool = False) -> Policy
         else frozenset(_EXECUTION_FIELDS)
     )
     object.__setattr__(policy, "_execution_omitted_fields", omitted)
+    if "volume_profile" not in data:
+        object.__setattr__(policy, "volume_profile", {})
     return policy
 
 
@@ -727,7 +821,11 @@ def load_policy(
 
 def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
     """Parse an embedded resolved policy for historical-state replay."""
-    return _parse_policy(dict(data), allow_missing_execution=True)
+    return _parse_policy(
+        dict(data),
+        allow_missing_execution=True,
+        allow_missing_volume_profile=True,
+    )
 
 
 def resolve_policy(

@@ -23,7 +23,8 @@
     "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
     "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
     "value": {},
-    "summary": {"type": ["string", "null"]}
+    "summary": {"type": ["string", "null"]},
+    "metadata": {"type": ["object", "null"]}
   },
   "additionalProperties": false
 }

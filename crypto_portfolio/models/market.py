@@ -6,11 +6,15 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
 from .execution import PriceZone
 from .time import normalize_timestamp, parse_timestamp
+from .volume_profile import VolumeNode
+
+
+_TIMEFRAME_SECONDS = {"1H": 60 * 60, "4H": 4 * 60 * 60, "1D": 24 * 60 * 60}
 
 
 def _timestamp(value: Any, field: str) -> str:
@@ -173,8 +177,8 @@ class OHLCVSeries:
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "series.symbol").upper())
         timeframe = _text(self.timeframe, "series.timeframe").upper()
-        if timeframe != "1D":
-            raise ValueError("only the 1D timeframe is supported")
+        if timeframe not in _TIMEFRAME_SECONDS:
+            raise ValueError("series.timeframe must be 1H, 4H, or 1D")
         object.__setattr__(self, "timeframe", timeframe)
         candles = tuple(self.candles)
         if not candles:
@@ -185,7 +189,7 @@ class OHLCVSeries:
         if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
             raise ValueError("series candles must have strictly increasing timestamps")
         market_dates = [timestamp.date() for timestamp in timestamps]
-        if len(market_dates) != len(set(market_dates)):
+        if timeframe == "1D" and len(market_dates) != len(set(market_dates)):
             raise ValueError("1D series cannot contain duplicate UTC market dates")
         object.__setattr__(self, "candles", candles)
         object.__setattr__(self, "source", _text(self.source, "series.source"))
@@ -221,14 +225,39 @@ class OHLCVSeries:
         )
 
     def completed_candles(self, as_of: str | datetime | None = None) -> tuple[Candle, ...]:
-        """Return candles closed by ``as_of``; daily timestamps identify UTC days."""
+        """Return candles whose timeframe interval is closed by ``as_of``."""
         cutoff = None if as_of is None else parse_timestamp(_timestamp(as_of, "as_of"))
-        day_start = None if cutoff is None else cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
+        interval = _TIMEFRAME_SECONDS[self.timeframe]
         return tuple(
             candle
             for candle in self.candles
-            if candle.completed and (day_start is None or parse_timestamp(candle.timestamp) < day_start)
+            if candle.completed
+            and (cutoff is None or parse_timestamp(candle.timestamp) + timedelta(seconds=interval) <= cutoff)
         )
+
+    @property
+    def interval_seconds(self) -> int:
+        return _TIMEFRAME_SECONDS[self.timeframe]
+
+    def cadence_metadata(self, as_of: str | datetime | None = None) -> dict[str, int | float]:
+        candles = self.completed_candles(as_of)
+        if not candles:
+            raise ValueError("no completed candles are available")
+        interval = self.interval_seconds
+        first = parse_timestamp(candles[0].timestamp)
+        last = parse_timestamp(candles[-1].timestamp)
+        expected = int((last - first).total_seconds() / interval) + 1
+        gaps = [
+            int((parse_timestamp(right.timestamp) - parse_timestamp(left.timestamp)).total_seconds() / interval) - 1
+            for left, right in zip(candles, candles[1:])
+        ]
+        return {
+            "candle_count": len(candles),
+            "expected_candle_count": expected,
+            "missing_interval_count": max(0, expected - len(candles)),
+            "coverage_ratio": len(candles) / expected,
+            "max_gap_intervals": max(gaps, default=0),
+        }
 
     @property
     def ohlcv_hash(self) -> str:
@@ -353,6 +382,15 @@ class TechnicalSnapshot:
     spot_venue: str | None = None
     spot_market: str | None = None
     spot_quote_currency: str | None = None
+    volume_profile_confidence: str | None = None
+    volume_profile_poc: float | None = None
+    volume_profile_val: float | None = None
+    volume_profile_vah: float | None = None
+    volume_hvns: tuple[VolumeNode, ...] = ()
+    volume_lvns: tuple[VolumeNode, ...] = ()
+    volume_profile_summary: Mapping[str, Any] | None = None
+    volume_profile_hash: str | None = None
+    volume_profile_metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "snapshot.symbol").upper())
@@ -382,8 +420,12 @@ class TechnicalSnapshot:
             "ma20", "ma50", "ma100", "ma200", "return_30d", "return_90d", "return_180d",
             "realized_vol_30d", "realized_vol_90d", "atr14", "atr_percent", "volume_ma20",
             "relative_volume", "history_high", "distance_from_history_high", "current_drawdown",
+            "volume_profile_poc", "volume_profile_val", "volume_profile_vah",
         ):
             object.__setattr__(self, field, _optional_number(getattr(self, field), f"snapshot.{field}"))
+        if all(getattr(self, field) is not None for field in ("volume_profile_poc", "volume_profile_val", "volume_profile_vah")):
+            if not self.volume_profile_val <= self.volume_profile_poc <= self.volume_profile_vah:
+                raise ValueError("snapshot Volume Profile levels must satisfy VAL <= POC <= VAH")
         for field in ("swing_highs", "swing_lows"):
             points = tuple(getattr(self, field))
             if any(not isinstance(point, SwingPoint) for point in points):
@@ -394,6 +436,16 @@ class TechnicalSnapshot:
             if any(not isinstance(zone, PriceZone) for zone in zones):
                 raise ValueError(f"snapshot.{field} must contain PriceZone objects")
             object.__setattr__(self, field, zones)
+        for field in ("volume_hvns", "volume_lvns"):
+            nodes = tuple(getattr(self, field))
+            if any(not isinstance(node, VolumeNode) for node in nodes):
+                raise ValueError(f"snapshot.{field} must contain VolumeNode objects")
+            object.__setattr__(self, field, nodes)
+        if self.volume_profile_confidence is not None:
+            confidence = _text(self.volume_profile_confidence, "snapshot.volume_profile_confidence").upper()
+            if confidence not in {"HIGH", "MEDIUM", "LOW", "UNAVAILABLE"}:
+                raise ValueError("snapshot.volume_profile_confidence is unsupported")
+            object.__setattr__(self, "volume_profile_confidence", confidence)
         for field, allowed in (
             ("trend_state", {"STRONG_UPTREND", "UPTREND", "NEUTRAL", "DOWNTREND", "STRONG_DOWNTREND"}),
             ("volatility_state", {"LOW", "NORMAL", "HIGH", "EXTREME", "UNKNOWN"}),
@@ -438,6 +490,8 @@ class TechnicalSnapshot:
             object.__setattr__(self, "spot_close_gap_atr", _number(self.spot_close_gap_atr, "snapshot.spot_close_gap_atr", minimum=0.0))
         if self.ohlcv_hash:
             object.__setattr__(self, "ohlcv_hash", _hash(self.ohlcv_hash))
+        if self.volume_profile_hash:
+            object.__setattr__(self, "volume_profile_hash", _hash(self.volume_profile_hash, "snapshot.volume_profile_hash"))
         if self.source is not None:
             object.__setattr__(self, "source", _text(self.source, "snapshot.source"))
         if self.ohlcv_metadata is not None:
@@ -447,6 +501,12 @@ class TechnicalSnapshot:
             metadata_hash = self.ohlcv_metadata.get("ohlcv_hash")
             if metadata_hash is not None and self.ohlcv_hash and metadata_hash != self.ohlcv_hash:
                 raise ValueError("snapshot.ohlcv_metadata ohlcv_hash does not match snapshot.ohlcv_hash")
+        for field in ("volume_profile_summary", "volume_profile_metadata"):
+            value = getattr(self, field)
+            if value is not None:
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"snapshot.{field} must be an object or null")
+                object.__setattr__(self, field, dict(value))
         timeframe = _text(self.timeframe, "snapshot.timeframe").upper()
         if timeframe != "1D":
             raise ValueError("snapshot.timeframe must be 1D")
@@ -483,6 +543,15 @@ class TechnicalSnapshot:
             "realized_vol_30d": self.realized_vol_30d,
             "realized_vol_90d": self.realized_vol_90d,
             "relative_volume": self.relative_volume,
+            "volume_profile_confidence": self.volume_profile_confidence,
+            "volume_profile_poc": self.volume_profile_poc,
+            "volume_profile_val": self.volume_profile_val,
+            "volume_profile_vah": self.volume_profile_vah,
+            "volume_hvns": [node.as_dict() for node in self.volume_hvns],
+            "volume_lvns": [node.as_dict() for node in self.volume_lvns],
+            "volume_profile_summary": self.volume_profile_summary,
+            "volume_profile_hash": self.volume_profile_hash,
+            "volume_profile_metadata": self.volume_profile_metadata,
             "trend_state": self.trend_state,
             "data_confidence": self.data_confidence,
             "setup_quality": self.setup_quality,
@@ -512,6 +581,15 @@ class TechnicalSnapshot:
             "atr_percent": self.atr_percent,
             "volume_ma20": self.volume_ma20,
             "relative_volume": self.relative_volume,
+            "volume_profile_confidence": self.volume_profile_confidence,
+            "volume_profile_poc": self.volume_profile_poc,
+            "volume_profile_val": self.volume_profile_val,
+            "volume_profile_vah": self.volume_profile_vah,
+            "volume_hvns": [node.as_dict() for node in self.volume_hvns],
+            "volume_lvns": [node.as_dict() for node in self.volume_lvns],
+            "volume_profile_summary": self.volume_profile_summary,
+            "volume_profile_hash": self.volume_profile_hash,
+            "volume_profile_metadata": self.volume_profile_metadata,
             "history_high": self.history_high,
             "distance_from_history_high": self.distance_from_history_high,
             "current_drawdown": self.current_drawdown,

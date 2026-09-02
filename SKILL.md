@@ -62,16 +62,20 @@ display data, so the engine uses value ÷ quantity and records a note.
 3. Validate the snapshot and apply only explicit policy overrides.
 4. Load historical snapshots, decisions, and the previous thesis before
    fetching new evidence when local history is available. Use the structured
-   Position P&L history context for latest/previous asset returns.
+   Position P&L history context for latest/previous asset returns, and load
+   compact metric history for held/watchlisted assets.
 5. Build cash-flow-aware NAV and drawdown history.
 6. Select `SNAPSHOT_REVIEW`, `FULL_REVIEW`, or `EVENT_REVIEW`; recommend a
    `FULL_REVIEW` when at least 14 days have passed since the last one.
-7. Fetch current price, trend, flow, fundamental, on-chain, and event evidence;
-   emit a visible `Data Collection Log` for each requested decision-relevant
-   metric.
-8. Validate evidence completeness and preserve provenance. Never silently omit
-   a requested metric: record its collection status and scoring effect.
-9. Build `Evidence`, `FactorScore`, and `AssetAssessment` records.
+7. Define and fetch current price, trend, flow, fundamental, on-chain, and
+   event metrics; emit a visible `Data Collection Log` for every requested
+   metric, including `FAILED`, `STALE`, `CONFLICT`, and `NOT_APPLICABLE`.
+8. Validate evidence completeness, preserve provenance, and persist successful
+   normalized `MetricObservation` records plus every `CollectionEvent`.
+   Never silently omit a requested metric; retain its status and scoring effect.
+9. Compare current observations with previous observations and build
+   `Evidence`, `FactorScore`, and `AssetAssessment` records. Keep complete
+   Evidence embedded in the Decision.
 10. Run deterministic scoring and missing-factor coverage checks; publish the
     collection summary with weighted coverage and resulting confidence.
 11. Run the regime engine.
@@ -82,14 +86,17 @@ display data, so the engine uses value ÷ quantity and records a note.
 16. Reconcile executable trade dollars.
 17. Evaluate `NO_TRADE` before proposing a transaction.
 18. After a rebalance approves an `INCREASE` amount, obtain a timestamped
-    `SpotPrice` and normalized completed daily OHLCV.
-19. Validate observation freshness, UTC-day cadence, calendar coverage, and
-    provenance; build `TechnicalSnapshot`, evaluate setup quality, run the
+    `SpotPrice`, normalized completed daily OHLCV, and—when available—completed
+    `1H` or `4H` OHLCV from one consistent liquid spot venue.
+19. Validate observation freshness, timeframe cadence, calendar coverage, and
+    provenance; build the daily `TechnicalSnapshot` for MA/ATR/trend and a
+    Volume Profile from intraday data (or the explicitly capped daily fallback).
+    Merge profile nodes with confirmed MA/swing/ATR structure, run the
     deterministic entry planner, and validate the resulting `ExecutionPlan`
     with `validate_execution_plan`.
 20. Bind the plan to exactly one matching approved `RebalanceAction`, create
-    `execution_technical` evidence, and cache the normalized OHLCV by hash
-    before persistence.
+    `execution_technical` evidence, and cache normalized OHLCV and Volume
+    Profile artifacts by hash before persistence.
 21. Produce the Chinese user-facing report using
     `references/output-template.md`. Every normal review shows Position P&L
     when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
@@ -97,7 +104,8 @@ display data, so the engine uses value ÷ quantity and records a note.
     return. `FULL_REVIEW` also compares the prior/current return by asset in
     percentage points; `SNAPSHOT_REVIEW` shows the current table without
     treating cost basis as a buy signal.
-22. Persist only validated snapshots, decisions, execution plans, and complete
+22. Persist only validated snapshots, decisions, execution plans, metric
+    observations, collection events, and complete
     evidence. Never
     rewrite prior rationale or mark a trade executed without explicit
     confirmation or a trusted later read-only snapshot.
@@ -165,6 +173,20 @@ validated `Evidence` records or change the persistent `freshness` contract;
 carry source, observed/fetched timestamps, value/summary, confidence, and
 factor links into the canonical records.
 
+## Historical metrics and Volume Profile
+
+`MetricObservation` history is sparse and append-only. The Agent receives only
+latest/previous values, changes, and compact trends; current values are still
+refetched for freshness. `CollectionEvent` records failed or stale attempts so
+missing data remains visible.
+
+Volume Profile uses completed OHLCV bars and the representative price
+`(high + low + close) / 3`. It describes historical traded-volume
+concentration, not exact holder cost basis. `POC`, `VAL`, `VAH`, and bounded
+`HVN`/`LVN` nodes are cached separately from decisions. Intraday `1H`/`4H`
+data is preferred; `1D` is an explicitly lower-confidence approximation.
+LVNs are context only and cannot create support, allocation, or a trade.
+
 ## Deterministic staged execution
 
 The portfolio engine remains authoritative for total USD exposure:
@@ -210,7 +232,11 @@ keys fail validation, and missing BTC-relative evidence makes a satellite
 Real portfolio data must remain outside Git. Append-only state defaults to
 `~/.local/share/crypto-portfolio-manager/` and can be redirected with the
 `CRYPTO_PORTFOLIO_DATA_DIR` environment variable. Repository `data/` is for
-fake fixtures and `.gitkeep` files only.
+fake fixtures and `.gitkeep` files only. Metric history is stored under
+`metrics/observations.jsonl` and `metrics/collection-events.jsonl`; normalized
+public market/profile artifacts use
+`market-data/sha256/<ohlcv_hash>.json` and
+`volume-profiles/sha256/<profile_hash>.json`.
 
 For a compatibility normalization check, run:
 

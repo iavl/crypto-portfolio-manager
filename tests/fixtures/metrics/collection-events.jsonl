@@ -1,0 +1,2 @@
+{"event_id":"synthetic-success-1","timestamp":"2026-09-02T01:00:00Z","asset":"ETH","metric_key":"fundamentals.tvl","status":"SUCCESS","source":"synthetic","observed_at":"2026-09-02T00:00:00Z","fetched_at":"2026-09-02T01:00:00Z"}
+{"event_id":"synthetic-failed-1","timestamp":"2026-09-02T01:00:00Z","asset":"AAVE","metric_key":"fundamentals.revenue_30d","status":"FAILED","reason":"synthetic source unavailable","source":"synthetic"}

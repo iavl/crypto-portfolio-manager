@@ -59,8 +59,21 @@ class PolicyTests(unittest.TestCase):
             path.write_text(json.dumps(invalid), encoding="utf-8")
             with self.assertRaises(PolicyError):
                 load_policy(path)
+
         invalid = json.loads(json.dumps(policy.as_dict()))
         invalid["execution"]["breakout"]["max_initial_tranche"] = 0.6
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+
+    def test_volume_profile_policy_is_canonical_and_bounded(self):
+        policy = load_policy()
+        self.assertEqual(policy.volume_profile["preferred_timeframe"], "4H")
+        self.assertEqual(policy.volume_profile["lookback_days"], [90, 180])
+        invalid = json.loads(json.dumps(policy.as_dict()))
+        invalid["volume_profile"]["daily_approximation_confidence_cap"] = "HIGH"
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "policy.json"
             path.write_text(json.dumps(invalid), encoding="utf-8")

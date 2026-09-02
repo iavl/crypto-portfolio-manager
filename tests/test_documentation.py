@@ -26,6 +26,9 @@ class DocumentationTests(unittest.TestCase):
             "schemas",
             "schemas/execution-plan.schema.json",
             "schemas/market.schema.json",
+            "schemas/metric-observation.schema.json",
+            "schemas/collection-event.schema.json",
+            "schemas/volume-profile.schema.json",
             "scripts",
         )
         for relative_path in required_paths:

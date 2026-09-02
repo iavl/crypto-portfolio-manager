@@ -14,6 +14,7 @@ from ..models.decision import Decision
 from ..models.portfolio import snapshot_from_mapping
 from ..models.time import parse_timestamp
 from .decisions import read_decisions
+from .metrics import metric_history_context, read_metric_observations
 from .snapshots import read_snapshots
 
 
@@ -136,8 +137,10 @@ def last_full_review(path: str | Path | None = None) -> dict[str, Any] | None:
 def build_history_context(
     snapshot_path: str | Path | None = None,
     decision_path: str | Path | None = None,
+    metrics_path: str | Path | None = None,
     *,
     as_of: str | None = None,
+    metric_keys: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, Any]:
     snapshot = latest_snapshot(snapshot_path)
     decision = latest_decision(decision_path)
@@ -155,6 +158,37 @@ def build_history_context(
         parsed_decision = Decision.from_mapping(decision)
         previous_assessments = dict(parsed_decision.factor_scores)
     position_pnl = build_position_pnl_context(snapshot_path)
+    observations = read_metric_observations(metrics_path)
+    assets = {
+        position.get("symbol", "").strip().upper()
+        for position in (snapshot or {}).get("positions", ())
+        if isinstance(position, dict) and isinstance(position.get("symbol"), str)
+    }
+    if decision:
+        assets.update(
+            str(symbol).strip().upper()
+            for symbol in (decision.get("factor_scores") or {})
+            if str(symbol).strip()
+        )
+    if not assets:
+        assets.update(item.asset for item in observations)
+    keys_by_asset: dict[str, set[str]] = {}
+    for item in observations:
+        if item.asset in assets:
+            keys_by_asset.setdefault(item.asset, set()).add(item.metric_key)
+    if metric_keys is not None:
+        requested_keys = tuple(metric_keys)
+        for asset in assets:
+            keys_by_asset.setdefault(asset, set()).update(requested_keys)
+    metric_history_summary = {
+        asset: metric_history_context(
+            asset,
+            sorted(keys),
+            path=metrics_path,
+        )
+        for asset, keys in sorted(keys_by_asset.items())
+        if keys
+    }
     return {
         "latest_snapshot": snapshot,
         "latest_decision": decision,
@@ -168,6 +202,7 @@ def build_history_context(
         "last_full_review": full_review,
         "full_review_due": full_review_due,
         "position_pnl": position_pnl,
+        "metric_history_summary": metric_history_summary,
     }
 
 

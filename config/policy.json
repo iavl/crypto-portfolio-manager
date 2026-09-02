@@ -72,6 +72,21 @@
       "high": 0.5
     }
   },
+  "volume_profile": {
+    "enabled": true,
+    "preferred_timeframe": "4H",
+    "fallback_timeframe": "1D",
+    "lookback_days": [90, 180],
+    "preferred_lookback_days": 180,
+    "price_bins": 64,
+    "value_area_fraction": 0.7,
+    "hvn_percentile": 0.75,
+    "max_hvn_nodes": 6,
+    "minimum_node_separation_atr": 0.5,
+    "zone_half_width_atr": 0.2,
+    "allow_daily_approximation": true,
+    "daily_approximation_confidence_cap": "MEDIUM"
+  },
   "execution": {
     "timeframe": "1D",
     "preferred_history_days": 365,

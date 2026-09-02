@@ -210,6 +210,10 @@ class Decision:
                 and evidence.factor == "execution_technical"
                 and isinstance(evidence.value, Mapping)
                 and evidence.value.get("ohlcv_hash") == plan.ohlcv_hash
+                and (
+                    not plan.volume_profile_hash
+                    or evidence.value.get("volume_profile_hash") == plan.volume_profile_hash
+                )
                 and evidence.value.get("technical_summary") == plan.technical_summary
             ]
             if len(linked) != 1:

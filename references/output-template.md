@@ -112,6 +112,11 @@ Below the factor table, include this compact decision bridge:
 - **什么会改变建议**：link to the concrete invalidation/catalyst in section
   8.
 
+For material assets, also show the most important historical metric change:
+current value, previous value, absolute/percentage change, recent trend, and
+the observation IDs used. Explain any recommendation change with the changed
+metrics, confidence change, regime change, and portfolio constraint.
+
 For a satellite, also state the BTC opportunity cost: relative performance,
 relative risk/volatility, current satellite exposure, applicable regime cap,
 and why the incremental risk is or is not better than allocating the same
@@ -141,6 +146,17 @@ For staged buys, use the validated execution plan:
 | Asset | Tranche | Price Zone | USD | Est. Qty | Structural Basis |
 |---|---:|---|---:|---:|---|
 | ETH | 1 | 结构区间 | 600U | ~0.157 ETH | MA50 + confirmed swing support |
+
+When available, add:
+
+```text
+Volume Profile：4H / 180D / MEDIUM
+POC：$...
+VAL / VAH：$... / $...
+重要 HVN：$...
+依据：MA50 + confirmed swing + 90D POC + 180D HVN
+说明：历史成交密集区代理，不是所有持币者真实成本；LVN 仅作过渡区背景。
+```
 
 Label quantity as approximate and use the zone midpoint as the reference price.
 Also report:

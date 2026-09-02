@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/metric-observation.schema.json",
+  "title": "Historical Metric Observation",
+  "type": "object",
+  "required": ["observation_id", "asset", "metric_key", "factor", "value", "observed_at", "fetched_at", "source", "freshness", "confidence"],
+  "properties": {
+    "observation_id": {"type": "string", "minLength": 1},
+    "asset": {"type": "string", "minLength": 1},
+    "metric_key": {"type": "string", "minLength": 1},
+    "factor": {"type": "string", "minLength": 1},
+    "value": {"type": ["number", "string", "null"]},
+    "unit": {"type": ["string", "null"]},
+    "period": {"type": ["string", "null"]},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "fetched_at": {"type": "string", "format": "date-time"},
+    "source": {"type": "string", "minLength": 1},
+    "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
+    "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+    "decision_id": {"type": ["string", "null"], "minLength": 1},
+    "review_type": {"type": ["string", "null"], "enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW", null]},
+    "metadata": {"type": ["object", "null"]},
+    "supersedes_observation_id": {"type": ["string", "null"], "minLength": 1},
+    "revision_reason": {"type": ["string", "null"], "minLength": 1}
+  },
+  "additionalProperties": false
+}

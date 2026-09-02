@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -48,6 +49,7 @@ class Evidence:
     confidence: str
     value: Any = None
     summary: str | None = None
+    metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         for field in ("id", "factor", "source", "observed_at", "fetched_at"):
@@ -65,6 +67,15 @@ class Evidence:
             raise ValueError("evidence.value must be finite")
         if self.summary is not None:
             object.__setattr__(self, "summary", _text(self.summary, "summary"))
+        if self.metadata is not None:
+            if not isinstance(self.metadata, Mapping):
+                raise ValueError("evidence.metadata must be an object or null")
+            metadata = dict(self.metadata)
+            try:
+                json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("evidence.metadata must be JSON serializable and finite") from exc
+            object.__setattr__(self, "metadata", metadata)
 
     def as_dict(self) -> dict[str, Any]:
         result = {
@@ -81,6 +92,8 @@ class Evidence:
             result["value"] = self.value
         if self.summary is not None:
             result["summary"] = self.summary
+        if self.metadata is not None:
+            result["metadata"] = dict(self.metadata)
         return result
 
 

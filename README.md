@@ -23,13 +23,16 @@ Trading:  advisory only; no automatic execution
 - Performs cash-flow-aware NAV, risk, allocation, benchmark, and rebalance
   calculations.
 - Preserves evidence, factor scores, and append-only decision history.
+- Persists decision-relevant `MetricObservation` history and collection
+  failures for compact current-vs-previous trend comparisons.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.
 - Treats stablecoins and cash as one sleeve and permits `NO_TRADE`.
 - Imports structured fields from Binance wallet screenshots and deterministically
   calculates per-position cost basis, unrealized P&L, return, and coverage.
 - Stages an approved rebalance amount from timestamped spot data and completed
   OHLCV with calendar coverage checks, deterministic ATR-aware zones, confirmed
-  swings, tranches, and `WAIT` handling.
+  swings, Volume Profile POC/value area/HVN context, tranches, and `WAIT`
+  handling.
 
 ## Safety / What It Is Not
 
@@ -133,6 +136,10 @@ adapters. Never commit real balances, quantities, cost basis, transaction
 history, account identifiers, credentials, private keys, or seed phrases.
 Content-addressed public OHLCV replay data is stored under
 `market-data/sha256/<ohlcv_hash>.json` in that same runtime directory.
+Metric observations and collection events are stored under `metrics/`; cached
+Volume Profile results are stored under
+`volume-profiles/sha256/<profile_hash>.json`. Volume Profile is a historical
+traded-volume concentration proxy, not exact holder cost basis.
 Position P&L is unrealized performance for the remaining position only; this
 feature does not claim realized P&L, fees, tax lots, or lifetime return.
 

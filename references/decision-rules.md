@@ -84,7 +84,15 @@ using:
 - 20D/50D/100D/200D moving averages where relevant;
 - ATR/realized volatility;
 - volume/market structure;
+- Volume Profile `POC`, `HVN`, `VAL`/`VAH`, and multi-horizon confluence;
 - invalidation point.
+
+Volume Profile is a historical traded-volume concentration proxy derived from
+completed bars, not exact holder cost basis. Prefer 1H/4H data; daily fallback
+is capped at the policy confidence limit. `LVN` is transition context and is
+not automatic support. Profile levels can improve an existing MA/swing/ATR
+zone, but cannot create portfolio risk or a trade without an approved
+rebalance action.
 
 Avoid arbitrary “-5%, -10%, -15%” ladders without structural justification.
 The engine may deploy less than the approved amount or return `WAIT` when

@@ -173,6 +173,15 @@ not dollars already filled.
 v1 generates pullback plans only. `BREAKOUT` returns `WAIT` until a real
 breakout/retest planner exists, and `MIXED` is rejected.
 
+When staged entry planning is approved, completed `1H` or `4H` OHLCV from one
+consistent liquid spot venue is preferred for Volume Profile. The bar-level
+profile assigns volume to `(high + low + close) / 3` and reports `POC`,
+`VAL`/`VAH`, and bounded `HVN`/`LVN` nodes. These are historical traded-volume
+concentration proxies, not exact holder cost basis; LVNs are context only.
+Daily profile fallback is allowed by policy but its confidence is capped at
+`MEDIUM`. Profile nodes can strengthen an existing MA/swing/ATR zone but cannot
+create portfolio allocation or a trade by themselves.
+
 Exact normalized OHLCV can be cached and replayed without network access from
 `~/.local/share/crypto-portfolio-manager/market-data/sha256/<ohlcv_hash>.json`
 (or the configured `CRYPTO_PORTFOLIO_DATA_DIR`).
@@ -343,7 +352,11 @@ Current state files are:
 ├── decisions/
 │   ├── decisions.jsonl
 │   └── status-events.jsonl
-└── market-data/sha256/<ohlcv_hash>.json
+├── metrics/
+│   ├── observations.jsonl
+│   └── collection-events.jsonl
+├── market-data/sha256/<ohlcv_hash>.json
+└── volume-profiles/sha256/<profile_hash>.json
 ```
 
 History supports comparison with previous holdings, cash-flow-aware NAV and
@@ -351,7 +364,10 @@ drawdown, previous targets/actions/theses, and full-review timing. Records are
 append-only; previous rationales are not rewritten. Position history is
 available through `latest_position_performance()`,
 `position_performance_history()`, and `build_position_pnl_context()`, including
-the latest/previous unrealized return and percentage-point change.
+the latest/previous unrealized return and percentage-point change. Metric
+history is queried through `metric_series()`, `latest_metric()`,
+`previous_metric()`, and `compare_latest_metric()`; failed/stale/conflicting
+attempts remain visible in `collection-events.jsonl`.
 
 On the first review, there may be no prior snapshot, decision, or NAV history.
 The Skill establishes a validated baseline and does not fabricate historical

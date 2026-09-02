@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/volume-profile.schema.json",
+  "title": "Volume-at-Price Profile",
+  "type": "object",
+  "required": ["symbol", "as_of", "timeframe", "lookback_days", "total_volume", "bins", "poc", "value_area_low", "value_area_high", "high_volume_nodes", "low_volume_nodes", "data_confidence", "source", "ohlcv_hash", "value_area_fraction", "profile_hash"],
+  "properties": {
+    "symbol": {"type": "string", "minLength": 1},
+    "as_of": {"type": "string", "format": "date-time"},
+    "timeframe": {"enum": ["1H", "4H", "1D"]},
+    "lookback_days": {"type": "integer", "minimum": 1},
+    "total_volume": {"type": "number", "minimum": 0},
+    "bins": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/bin"}},
+    "poc": {"type": "number", "exclusiveMinimum": 0},
+    "value_area_low": {"type": "number", "exclusiveMinimum": 0},
+    "value_area_high": {"type": "number", "exclusiveMinimum": 0},
+    "high_volume_nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+    "low_volume_nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+    "data_confidence": {"enum": ["HIGH", "MEDIUM", "LOW", "UNAVAILABLE"]},
+    "source": {"type": "string", "minLength": 1},
+    "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "value_area_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+    "metadata": {"type": ["object", "null"]},
+    "profile_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "bin": {
+      "type": "object",
+      "required": ["price_low", "price_high", "midpoint", "volume", "volume_fraction"],
+      "properties": {
+        "price_low": {"type": "number", "exclusiveMinimum": 0},
+        "price_high": {"type": "number", "exclusiveMinimum": 0},
+        "midpoint": {"type": "number", "exclusiveMinimum": 0},
+        "volume": {"type": "number", "minimum": 0},
+        "volume_fraction": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["price_low", "price_high", "midpoint", "kind", "strength", "volume_fraction"],
+      "properties": {
+        "price_low": {"type": "number", "exclusiveMinimum": 0},
+        "price_high": {"type": "number", "exclusiveMinimum": 0},
+        "midpoint": {"type": "number", "exclusiveMinimum": 0},
+        "kind": {"enum": ["HVN", "LVN"]},
+        "strength": {"type": "number", "minimum": 0, "maximum": 100},
+        "volume_fraction": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}

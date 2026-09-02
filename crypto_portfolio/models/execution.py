@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any, Mapping
 
 from .time import normalize_timestamp
+from .volume_profile import VolumeNode
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
@@ -267,6 +268,13 @@ class ExecutionPlan:
     ohlcv_hash: str | None = None
     ohlcv_metadata: Mapping[str, Any] | None = None
     technical_summary: Mapping[str, Any] | None = None
+    volume_profile_hash: str | None = None
+    volume_profile_metadata: Mapping[str, Any] | None = None
+
+    @property
+    def profile_hash(self) -> str | None:
+        """Compatibility alias used by the execution/reporting vocabulary."""
+        return self.volume_profile_hash
 
     def __post_init__(self) -> None:
         if isinstance(self.execution_plan_version, bool) or not isinstance(self.execution_plan_version, int) or self.execution_plan_version < 1:
@@ -321,6 +329,8 @@ class ExecutionPlan:
         object.__setattr__(self, "rationale", _text(self.rationale, "rationale", allow_empty=True))
         if self.ohlcv_hash is not None:
             object.__setattr__(self, "ohlcv_hash", _hash(self.ohlcv_hash, "ohlcv_hash"))
+        if self.volume_profile_hash is not None:
+            object.__setattr__(self, "volume_profile_hash", _hash(self.volume_profile_hash, "volume_profile_hash"))
         if self.ohlcv_metadata is not None:
             if not isinstance(self.ohlcv_metadata, Mapping):
                 raise ValueError("ohlcv_metadata must be an object or null")
@@ -351,9 +361,9 @@ class ExecutionPlan:
             if not isinstance(metadata["source"], str) or not metadata["source"].strip():
                 raise ValueError("ohlcv_metadata source must be a non-empty string")
             metadata["source"] = metadata["source"].strip()
-            if str(metadata["timeframe"]).strip().upper() != "1D":
-                raise ValueError("ohlcv_metadata timeframe must be 1D")
-            metadata["timeframe"] = "1D"
+            if str(metadata["timeframe"]).strip().upper() not in {"1H", "4H", "1D"}:
+                raise ValueError("ohlcv_metadata timeframe must be 1H, 4H, or 1D")
+            metadata["timeframe"] = str(metadata["timeframe"]).strip().upper()
             for field in ("start_timestamp", "end_timestamp"):
                 metadata[field] = normalize_timestamp(metadata[field], f"ohlcv_metadata.{field}")
             if metadata["fetched_at"] is not None:
@@ -394,6 +404,10 @@ class ExecutionPlan:
             if self.ohlcv_hash and metadata_hash != self.ohlcv_hash:
                 raise ValueError("ohlcv_metadata ohlcv_hash does not match plan ohlcv_hash")
             object.__setattr__(self, "ohlcv_metadata", metadata)
+        if self.volume_profile_metadata is not None:
+            if not isinstance(self.volume_profile_metadata, Mapping):
+                raise ValueError("volume_profile_metadata must be an object or null")
+            object.__setattr__(self, "volume_profile_metadata", dict(self.volume_profile_metadata))
         if self.invalidation is not None and not isinstance(self.invalidation, (str, Mapping)):
             if not isinstance(self.invalidation, Invalidation):
                 raise ValueError("invalidation must be a typed object, string, or null")
@@ -413,7 +427,9 @@ class ExecutionPlan:
                 "ma50", "ma100", "ma200", "atr14", "atr_percent", "return_30d", "return_90d",
                 "return_180d", "realized_vol_30d", "realized_vol_90d", "relative_volume",
                 "trend_state", "data_confidence", "setup_quality", "data_quality",
-                "data_quality_flags", "selected_zones", "ohlcv_hash",
+                "data_quality_flags", "selected_zones", "ohlcv_hash", "volume_profile_confidence",
+                "volume_profile_poc", "volume_profile_val", "volume_profile_vah", "volume_hvns",
+                "volume_lvns", "volume_profile_summary", "volume_profile_hash", "volume_profile_metadata",
             }
             unknown_summary = set(summary) - allowed_summary
             if unknown_summary:
@@ -473,6 +489,27 @@ class ExecutionPlan:
                     summary[field] = _number(summary[field], f"technical_summary.{field}", minimum=minimum)
                     if field in positive_metrics and summary[field] <= 0:
                         raise ValueError(f"technical_summary.{field} must be > 0")
+            for field in ("volume_profile_poc", "volume_profile_val", "volume_profile_vah"):
+                if field in summary and summary[field] is not None:
+                    summary[field] = _number(summary[field], f"technical_summary.{field}", minimum=0.0)
+                    if summary[field] <= 0:
+                        raise ValueError(f"technical_summary.{field} must be > 0")
+            if summary.get("volume_profile_confidence") is not None:
+                confidence = _text(
+                    summary["volume_profile_confidence"],
+                    "technical_summary.volume_profile_confidence",
+                ).upper()
+                if confidence not in {"HIGH", "MEDIUM", "LOW", "UNAVAILABLE"}:
+                    raise ValueError("technical_summary volume_profile_confidence is unsupported")
+                summary["volume_profile_confidence"] = confidence
+            for field in ("volume_hvns", "volume_lvns"):
+                if field in summary and summary[field] is not None:
+                    if not isinstance(summary[field], list):
+                        raise ValueError(f"technical_summary {field} must be a list")
+                    summary[field] = [
+                        (node if isinstance(node, VolumeNode) else VolumeNode.from_mapping(node)).as_dict()
+                        for node in summary[field]
+                    ]
             if summary.get("spot_fetched_at") is not None:
                 summary["spot_fetched_at"] = normalize_timestamp(
                     summary["spot_fetched_at"], "technical_summary.spot_fetched_at"
@@ -491,6 +528,18 @@ class ExecutionPlan:
                 summary["ohlcv_hash"] = _hash(summary["ohlcv_hash"], "technical_summary.ohlcv_hash")
             if self.ohlcv_hash and summary["ohlcv_hash"] != self.ohlcv_hash:
                 raise ValueError("technical_summary ohlcv_hash does not match plan ohlcv_hash")
+            if summary.get("volume_profile_hash") is not None:
+                summary["volume_profile_hash"] = _hash(
+                    summary["volume_profile_hash"],
+                    "technical_summary.volume_profile_hash",
+                )
+            if self.volume_profile_hash and summary.get("volume_profile_hash") != self.volume_profile_hash:
+                raise ValueError("technical_summary volume_profile_hash does not match plan volume_profile_hash")
+            for field in ("volume_profile_summary", "volume_profile_metadata"):
+                if field in summary and summary[field] is not None:
+                    if not isinstance(summary[field], Mapping):
+                        raise ValueError(f"technical_summary {field} must be an object or null")
+                    summary[field] = dict(summary[field])
             object.__setattr__(self, "technical_summary", summary)
 
     def as_dict(self) -> dict[str, Any]:
@@ -508,9 +557,13 @@ class ExecutionPlan:
             "invalidation": self.invalidation,
             "rationale": self.rationale,
             "ohlcv_hash": self.ohlcv_hash,
+            "volume_profile_hash": self.volume_profile_hash,
+            "profile_hash": self.volume_profile_hash,
         }
         if self.ohlcv_metadata is not None:
             result["ohlcv_metadata"] = dict(self.ohlcv_metadata)
+        if self.volume_profile_metadata is not None:
+            result["volume_profile_metadata"] = dict(self.volume_profile_metadata)
         if self.technical_summary is not None:
             result["technical_summary"] = dict(self.technical_summary)
         if isinstance(self.invalidation, Invalidation):
@@ -525,7 +578,7 @@ class ExecutionPlan:
             "execution_plan_version", "symbol", "action", "approved_amount_usd",
             "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
-            "ohlcv_metadata", "technical_summary",
+            "volume_profile_hash", "profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -538,6 +591,12 @@ class ExecutionPlan:
         missing = [field for field in required if field not in value]
         if missing:
             raise ValueError(f"execution plan is missing fields: {', '.join(missing)}")
+        if (
+            value.get("volume_profile_hash") is not None
+            and value.get("profile_hash") is not None
+            and value["volume_profile_hash"] != value["profile_hash"]
+        ):
+            raise ValueError("volume_profile_hash and profile_hash disagree")
         raw_tranches = value.get("tranches", ())
         if not isinstance(raw_tranches, (list, tuple)):
             raise ValueError("execution plan tranches must be a list")
@@ -554,6 +613,8 @@ class ExecutionPlan:
             invalidation=value["invalidation"],
             rationale=value["rationale"],
             ohlcv_hash=value["ohlcv_hash"],
+            volume_profile_hash=value.get("volume_profile_hash", value.get("profile_hash")),
+            volume_profile_metadata=value.get("volume_profile_metadata"),
             ohlcv_metadata=value.get("ohlcv_metadata"),
             technical_summary=value.get("technical_summary"),
         )
