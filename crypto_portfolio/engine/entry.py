@@ -8,8 +8,17 @@ from typing import Any, Iterable, Mapping
 from ..models.execution import ExecutionPlan, ExecutionTranche, Invalidation, PriceZone
 from ..models.evidence import Evidence
 from ..models.market import TechnicalSnapshot
+from ..models.market_overlays import MarketOverlays
+from ..models.cycle import BTCCycleContext
+from ..models.positioning import PositioningFacts
 from ..models.policy import Policy, resolve_policy
 from .technical import structural_confluence
+from .overlays import (
+    cycle_deployment_factor,
+    effective_deployment_factor,
+    overlay_wait_required,
+    positioning_deployment_factor,
+)
 
 
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
@@ -54,6 +63,40 @@ def _metadata(snapshot: TechnicalSnapshot) -> dict[str, Any]:
     }
 
 
+def _positioning_summary(value: PositioningFacts | Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    facts = value if isinstance(value, PositioningFacts) else PositioningFacts.from_mapping(value)
+    return {
+        "leverage_state": facts.leverage_state,
+        "bias": facts.bias,
+        "risk": facts.risk,
+        "social_state": facts.social_state,
+        "confidence": facts.confidence,
+        "evidence_ids": list(facts.evidence_ids),
+        "notes": list(facts.notes),
+    }
+
+
+def _cycle_summary(value: BTCCycleContext | Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    context = value if isinstance(value, BTCCycleContext) else BTCCycleContext.from_mapping(value)
+    return {
+        "halving_context": context.halving_context,
+        "days_since_halving": context.days_since_halving,
+        "estimated_days_to_next_halving": context.estimated_days_to_next_halving,
+        "halving_epoch_progress": context.halving_epoch_progress,
+        "valuation_state": context.valuation_state,
+        "holder_state": context.holder_state,
+        "market_cycle_state": context.market_cycle_state,
+        "cycle_risk": context.cycle_risk,
+        "confidence": context.confidence,
+        "evidence_ids": list(context.evidence_ids),
+        "reasons": list(context.reasons),
+    }
+
+
 def _wait_plan(
     symbol: str,
     approved: float,
@@ -61,6 +104,10 @@ def _wait_plan(
     reason: str,
     *,
     action: str = "WAIT",
+    positioning: PositioningFacts | Mapping[str, Any] | None = None,
+    btc_cycle: BTCCycleContext | Mapping[str, Any] | None = None,
+    effective_factor: float | None = None,
+    overlay_warnings: Iterable[str] = (),
 ) -> ExecutionPlan:
     return ExecutionPlan(
         execution_plan_version=2,
@@ -78,6 +125,10 @@ def _wait_plan(
         volume_profile_metadata=snapshot.volume_profile_metadata,
         ohlcv_metadata=_metadata(snapshot),
         technical_summary=snapshot.technical_summary(),
+        positioning_summary=_positioning_summary(positioning),
+        btc_cycle_summary=_cycle_summary(btc_cycle),
+        effective_deployment_factor=effective_factor,
+        overlay_warnings=tuple(overlay_warnings),
     )
 
 
@@ -209,6 +260,9 @@ def build_entry_plan(
     severe_event: bool = False,
     thesis_broken: bool = False,
     relative_strength_confirmed: bool = False,
+    positioning: PositioningFacts | Mapping[str, Any] | None = None,
+    btc_cycle: BTCCycleContext | Mapping[str, Any] | None = None,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> ExecutionPlan:
     """Stage only the amount approved by the portfolio/rebalance engine."""
     if not isinstance(technical_snapshot, TechnicalSnapshot):
@@ -229,6 +283,10 @@ def build_entry_plan(
         raise ValueError("execution configuration is required")
     if normalized_action != "INCREASE":
         raise ValueError("technical entry planner only supports INCREASE actions")
+    if overlays is not None:
+        overlay_values = overlays if isinstance(overlays, MarketOverlays) else MarketOverlays.from_mapping(overlays)
+        positioning = overlay_values.positioning_by_asset.get(normalized_symbol, positioning)
+        btc_cycle = overlay_values.btc_cycle if btc_cycle is None else btc_cycle
     if approved <= 0:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "approved amount is zero")
     if normalized_regime == "CAPITAL_PRESERVATION":
@@ -274,6 +332,22 @@ def build_entry_plan(
     extension = (technical_snapshot.current_spot_price - nearest.midpoint) / (technical_snapshot.atr14 or 1.0)
     if extension > config["breakout"]["max_atr_extension"]:
         return _wait_plan(normalized_symbol, approved, technical_snapshot, f"spot is {extension:.2f} ATR above nearest support")
+    if overlay_wait_required(
+        positioning,
+        extension,
+        btc_cycle=btc_cycle,
+        policy=policy,
+    ):
+        return _wait_plan(
+            normalized_symbol,
+            approved,
+            technical_snapshot,
+            "confirmed crowded positioning and technical extension require WAIT",
+            positioning=positioning,
+            btc_cycle=btc_cycle,
+            effective_factor=0.0,
+            overlay_warnings=("confirmed crowded positioning and technical extension require WAIT",),
+        )
 
     fractions, deployed_fraction = _fractions(
         config,
@@ -287,7 +361,14 @@ def build_entry_plan(
         config["confidence_deployment_factor"][portfolio_level],
         config["confidence_deployment_factor"][technical_snapshot.data_confidence],
     )
-    planned = approved * deployed_fraction * confidence_factor
+    base_deployment_factor = min(1.0, confidence_factor * deployed_fraction)
+    deployment_factor = effective_deployment_factor(
+        base_deployment_factor,
+        positioning=positioning,
+        btc_cycle=btc_cycle,
+        policy=policy,
+    )
+    planned = approved * deployment_factor
     planned = min(approved, max(0.0, planned))
     tranche_values = []
     for sequence, ((zone, quality, reason), fraction) in enumerate(zip(selected, fractions), 1):
@@ -313,9 +394,22 @@ def build_entry_plan(
         trigger="completed daily close below major confirmed support",
         reference_price=major_zone.low,
     )
+    overlay_note = ""
+    if deployment_factor < base_deployment_factor:
+        overlay_note = "; overlay cap applied"
+    positioning_factor = positioning_deployment_factor(positioning, policy=policy)
+    cycle_factor = cycle_deployment_factor(btc_cycle, policy=policy)
+    overlay_warnings = tuple(
+        item
+        for item, active in (
+            ("positioning deployment cap applied", positioning_factor < base_deployment_factor),
+            ("BTC cycle deployment cap applied", cycle_factor < base_deployment_factor),
+        )
+        if active
+    )
     rationale = (
         f"{mode} entry from {len(selected)} confirmed support zone(s); "
-        f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity"
+        f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity{overlay_note}"
     )
     return ExecutionPlan(
         execution_plan_version=2,
@@ -335,6 +429,10 @@ def build_entry_plan(
         volume_profile_metadata=technical_snapshot.volume_profile_metadata,
         ohlcv_metadata=_metadata(technical_snapshot),
         technical_summary=technical_snapshot.technical_summary(zone for zone, _, _ in selected),
+        positioning_summary=_positioning_summary(positioning),
+        btc_cycle_summary=_cycle_summary(btc_cycle),
+        effective_deployment_factor=deployment_factor,
+        overlay_warnings=overlay_warnings,
     )
 
 

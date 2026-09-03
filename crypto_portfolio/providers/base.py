@@ -52,10 +52,28 @@ class MetricDataProvider(Protocol):
         """Return one structured result for each requested metric."""
 
 
+class DerivativesDataProvider(Protocol):
+    def derivatives(self, symbols: Sequence[str]) -> Mapping[str, Mapping[str, Any]]:
+        """Return normalized, provenance-preserving derivatives observations."""
+
+
+class SocialDataProvider(Protocol):
+    def sentiment(self, symbols: Sequence[str]) -> Mapping[str, Mapping[str, Any]]:
+        """Return structured social observations with quality metadata."""
+
+
+class CycleDataProvider(Protocol):
+    def cycle(self, symbol: str = "BTC") -> Mapping[str, Any]:
+        """Return normalized BTC cycle/on-chain observations."""
+
+
 __all__ = [
     "EventDataProvider",
+    "CycleDataProvider",
+    "DerivativesDataProvider",
     "FundamentalDataProvider",
     "MarketDataProvider",
     "MetricDataProvider",
     "OnchainDataProvider",
+    "SocialDataProvider",
 ]

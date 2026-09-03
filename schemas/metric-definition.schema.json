@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/metric-definition.schema.json",
+  "title": "Metric definition",
+  "type": "object",
+  "required": ["metric_key", "factor", "expected_type", "unit", "direction", "default_freshness", "critical", "trend_comparison_enabled", "asset_scope", "decision_role", "context_group"],
+  "properties": {
+    "metric_key": {"type": "string", "minLength": 1},
+    "factor": {"type": "string", "minLength": 1},
+    "expected_type": {"enum": ["number", "string"]},
+    "value_type": {"enum": ["number", "string"]},
+    "unit": {"type": ["string", "null"]},
+    "direction": {"enum": ["HIGHER_IS_BETTER", "LOWER_IS_BETTER", "CONTEXTUAL"]},
+    "default_freshness": {"type": ["string", "number"]},
+    "freshness": {"type": ["string", "number"]},
+    "critical": {"type": "boolean"},
+    "trend_comparison_enabled": {"type": "boolean"},
+    "trend_enabled": {"type": "boolean"},
+    "asset_scope": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "decision_role": {"enum": ["SCORING_FACTOR", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT"]},
+    "context_group": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

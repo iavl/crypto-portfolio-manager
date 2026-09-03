@@ -114,6 +114,93 @@
     "allow_daily_approximation": true,
     "daily_approximation_confidence_cap": "MEDIUM"
   },
+  "positioning": {
+    "enabled": true,
+    "minimum_derivatives_confirmations_for_crowded": 2,
+    "minimum_derivatives_confirmations_for_extreme": 3,
+    "funding_rate": {
+      "elevated_positive": 0.0003,
+      "extreme_positive": 0.001,
+      "elevated_negative": -0.0003,
+      "extreme_negative": -0.001
+    },
+    "open_interest_change_7d": {
+      "building": 0.2,
+      "rapid": 0.4
+    },
+    "long_short_ratio": {
+      "long_crowded": 1.5,
+      "short_crowded": 0.67,
+      "long_extreme": 1.75,
+      "short_extreme": 0.57
+    },
+    "futures_basis": {
+      "elevated_positive": 0.1,
+      "extreme_positive": 0.2,
+      "elevated_negative": -0.1,
+      "extreme_negative": -0.2
+    },
+    "social": {
+      "fearful_bullish_share": 0.2,
+      "optimistic_bullish_share": 0.6,
+      "euphoric_bullish_share": 0.8,
+      "attention_growth_extreme": 2.0
+    },
+    "deleveraging": {
+      "liquidation_to_open_interest": 0.1,
+      "normalized_funding_abs": 0.0003
+    }
+  },
+  "btc_cycle": {
+    "enabled": true,
+    "halving_context_days": {
+      "early_post_halving_max": 180,
+      "mid_epoch_max": 730,
+      "late_epoch_min": 900
+    },
+    "minimum_non_clock_confirmations_for_elevated_risk": 2,
+    "minimum_non_clock_confirmations_for_high_risk": 3,
+    "allow_halving_clock_as_trade_trigger": false,
+    "allow_cycle_context_to_change_base_score": false,
+    "allow_cycle_context_to_increase_exposure": false,
+    "valuation": {
+      "mvrv_zscore_elevated": 3.5,
+      "mvrv_zscore_extreme": 7.0,
+      "market_to_realized_price_elevated": 1.5,
+      "market_to_realized_price_extreme": 2.0
+    },
+    "price": {
+      "extension_atr": 2.0,
+      "drawdown_reset": 0.5
+    },
+    "holder": {
+      "lth_distribution_threshold": -0.05,
+      "lth_accumulation_threshold": 0.05,
+      "sopr_distribution_threshold": 1.05
+    },
+    "flows": {
+      "weakening_threshold": -0.05
+    }
+  },
+  "execution_overlay": {
+    "positioning": {
+      "NORMAL": 1.0,
+      "ELEVATED": 0.75,
+      "HIGH": 0.5,
+      "EXTREME": 0.25,
+      "UNKNOWN": 1.0
+    },
+    "btc_cycle": {
+      "NORMAL": 1.0,
+      "ELEVATED": 0.8,
+      "HIGH": 0.5,
+      "UNKNOWN": 1.0
+    },
+    "wait": {
+      "enabled": true,
+      "minimum_extension_atr": 2.0
+    }
+  },
   "execution": {
     "timeframe": "1D",
     "preferred_history_days": 365,

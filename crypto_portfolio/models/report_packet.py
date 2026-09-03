@@ -99,6 +99,11 @@ class ReportPacket:
     sol_review: SolReview | Mapping[str, Any] | None = None
     critical_missing_data: tuple[str, ...] = ()
     data_quality: Mapping[str, Any] = field(default_factory=dict)
+    positioning_summaries: Mapping[str, Any] = field(default_factory=dict)
+    btc_cycle_summary: Mapping[str, Any] | None = None
+    overlay_confidence: str = "LOW"
+    overlay_warnings: tuple[str, ...] = ()
+    effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -139,6 +144,47 @@ class ReportPacket:
             if not isinstance(getattr(self, field_name), Mapping):
                 raise ValueError(f"{field_name} must be an object")
             object.__setattr__(self, field_name, freeze_packet_value(getattr(self, field_name), path=field_name))
+        if not isinstance(self.positioning_summaries, Mapping):
+            raise ValueError("positioning_summaries must be an object")
+        summaries = {}
+        for raw_symbol, summary in self.positioning_summaries.items():
+            symbol = _text(raw_symbol, "positioning_summaries symbol").upper()
+            if symbol in summaries:
+                raise ValueError(f"positioning_summaries contains duplicate symbol {symbol}")
+            if hasattr(summary, "as_dict"):
+                summary = summary.as_dict()
+            if not isinstance(summary, Mapping):
+                raise ValueError(f"positioning_summaries.{symbol} must be an object")
+            summaries[symbol] = freeze_packet_value(summary, path=f"positioning_summaries.{symbol}")
+        object.__setattr__(self, "positioning_summaries", MappingProxyType(summaries))
+        if self.btc_cycle_summary is not None:
+            if hasattr(self.btc_cycle_summary, "as_dict"):
+                object.__setattr__(self, "btc_cycle_summary", self.btc_cycle_summary.as_dict())
+            if not isinstance(self.btc_cycle_summary, Mapping):
+                raise ValueError("btc_cycle_summary must be an object or null")
+            object.__setattr__(self, "btc_cycle_summary", freeze_packet_value(self.btc_cycle_summary, path="btc_cycle_summary"))
+        overlay_confidence = _text(self.overlay_confidence, "overlay_confidence").upper()
+        if overlay_confidence not in {"HIGH", "MEDIUM", "LOW"}:
+            raise ValueError("overlay_confidence must be HIGH, MEDIUM, or LOW")
+        object.__setattr__(self, "overlay_confidence", overlay_confidence)
+        warnings = tuple(_text(item, "overlay_warnings") for item in self.overlay_warnings)
+        if len(warnings) != len(set(warnings)):
+            raise ValueError("overlay_warnings must contain unique values")
+        object.__setattr__(self, "overlay_warnings", warnings)
+        if not isinstance(self.effective_deployment_caps, Mapping):
+            raise ValueError("effective_deployment_caps must be an object")
+        caps = {}
+        for raw_symbol, raw_factor in self.effective_deployment_caps.items():
+            symbol = _text(raw_symbol, "effective_deployment_caps symbol").upper()
+            if isinstance(raw_factor, bool) or not isinstance(raw_factor, (int, float)):
+                raise ValueError("effective_deployment_caps values must be numbers")
+            factor = float(raw_factor)
+            if not math.isfinite(factor) or not 0 <= factor <= 1:
+                raise ValueError("effective_deployment_caps values must be finite and in [0, 1]")
+            if symbol in caps:
+                raise ValueError(f"effective_deployment_caps contains duplicate symbol {symbol}")
+            caps[symbol] = factor
+        object.__setattr__(self, "effective_deployment_caps", MappingProxyType(caps))
         for field_name in ("risk_flags", "critical_missing_data"):
             values = tuple(_text(item, field_name) for item in getattr(self, field_name))
             if len(values) != len(set(values)):
@@ -152,6 +198,14 @@ class ReportPacket:
     @property
     def finalized(self) -> bool:
         return True
+
+    @property
+    def positioning_summary(self) -> Mapping[str, Any]:
+        return self.positioning_summaries
+
+    @property
+    def btc_cycle(self) -> Mapping[str, Any] | None:
+        return self.btc_cycle_summary
 
     @property
     def prompt_rule(self) -> str:
@@ -172,6 +226,14 @@ class ReportPacket:
             "sol_review": self.sol_review.as_dict() if self.sol_review else None,
             "critical_missing_data": list(self.critical_missing_data),
             "data_quality": thaw_packet_value(self.data_quality),
+            "positioning_summaries": {
+                symbol: thaw_packet_value(summary)
+                for symbol, summary in self.positioning_summaries.items()
+            },
+            "btc_cycle_summary": thaw_packet_value(self.btc_cycle_summary) if self.btc_cycle_summary is not None else None,
+            "overlay_confidence": self.overlay_confidence,
+            "overlay_warnings": list(self.overlay_warnings),
+            "effective_deployment_caps": dict(self.effective_deployment_caps),
         }
 
     @classmethod

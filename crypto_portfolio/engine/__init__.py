@@ -16,6 +16,17 @@ from .metric_normalization import (
 )
 from .report_packet import build_report_packet, validate_report_packet
 from .regime_inputs import build_regime_inputs
+from .positioning import build_positioning_facts, build_positioning_overlay, classify_positioning
+from .cycle import build_btc_cycle_context, build_cycle_context, classify_btc_cycle, halving_context_for_days
+from .overlays import (
+    OverlayDeployment,
+    apply_overlay_deployment_cap,
+    build_market_overlays,
+    cycle_deployment_factor,
+    effective_deployment_factor,
+    overlay_wait_required,
+    positioning_deployment_factor,
+)
 
 __all__ = [
     "calculate_portfolio_position_performance",
@@ -29,6 +40,20 @@ __all__ = [
     "build_metric_collection_plan",
     "build_metric_collection_request",
     "build_regime_inputs",
+    "build_positioning_facts",
+    "build_positioning_overlay",
+    "classify_positioning",
+    "build_btc_cycle_context",
+    "build_cycle_context",
+    "classify_btc_cycle",
+    "halving_context_for_days",
+    "OverlayDeployment",
+    "apply_overlay_deployment_cap",
+    "build_market_overlays",
+    "cycle_deployment_factor",
+    "effective_deployment_factor",
+    "overlay_wait_required",
+    "positioning_deployment_factor",
     "build_report_packet",
     "validate_report_packet",
     "normalize_metric_observation",

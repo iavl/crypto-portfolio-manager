@@ -50,17 +50,41 @@ The model boundary is Python-first:
 ```text
 LUNA_MAX extraction/collection
 → Python validation, history, and deterministic Facts
-→ Terra bounded semantic factor judgment
+→ LUNA_MAX bounded semantic factor judgment
 → Python score/regime/allocation/risk/rebalance/execution
 → conditional Sol high-impact critique
-→ Terra report from immutable finalized values
+→ LUNA_MAX report from immutable finalized values
 ```
+
+The repository's current `balanced` routing maps the semantic and report stages
+to the configured `LUNA_MAX` preset; inspect `config/model-routing.json` for the
+authoritative stage mapping.
 
 Python builds the metric collection plan from `crypto_portfolio/metrics_registry.py`;
 a model does not invent metric keys. Raw webpages, raw OHLCV, full metric
 history, and private reasoning are not forwarded to downstream packets.
 Luna-family stages must use `LUNA_MAX`; see `config/model-routing.json` for
 logical routing.
+
+## Positioning & Cycle Context
+
+Normal reviews may include a compact derivatives/social positioning overlay and
+BTC cycle context. The overlay records funding, open interest, compatible
+long/short ratios, liquidations, basis, social quality metadata, halving timing,
+and optional BTC on-chain metrics with source and observed timestamps.
+
+This context does not add a scoring factor. The seven base weights and target
+allocation stay unchanged. Multiple compatible derivatives confirmations are
+required for `CROWDED`/`EXTREME`; social-only euphoria is never enough. The
+halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
+`REDUCE`, or `EXIT`.
+
+After an `INCREASE` is approved, execution may cap immediate staging with the
+minimum of the base, positioning, and cycle deployment factors. A confirmed
+long-crowding signal combined with excessive technical extension can leave the
+amount `WAIT`; a `DELEVERAGED` state never boosts the approved amount. The
+report shows the target, cap, unallocated remainder, overlay confidence, and
+warnings separately.
 
 ## Choose a Model Profile
 

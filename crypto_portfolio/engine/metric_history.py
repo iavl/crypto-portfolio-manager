@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any, Iterable, Mapping, Type
 
 from ..facts.models import FACT_TYPES, FactBase
+from ..metrics_registry import metric_definition
 from ..models.metrics_history import MetricObservation
 from ..models.time import parse_timestamp
 from ..state.metrics import classify_metric_change
@@ -114,6 +115,10 @@ def build_factor_facts(
         factor_name = factor.strip().lower()
         values = tuple(item for item in values if item.factor.lower() == factor_name)
         previous_values = tuple(item for item in previous_values if item.factor.lower() == factor_name)
+        if factor_name not in FACT_TYPES:
+            raise ValueError(f"overlay factor {factor_name} must use its dedicated overlay engine")
+    values = tuple(item for item in values if metric_definition(item.metric_key).decision_role == "SCORING_FACTOR")
+    previous_values = tuple(item for item in previous_values if metric_definition(item.metric_key).decision_role == "SCORING_FACTOR")
     if values and normalized_symbol is None:
         symbols = {item.asset for item in values}
         if len(symbols) != 1:
@@ -204,7 +209,12 @@ def build_facts_for_asset(
 ) -> dict[str, FactBase]:
     values = _observations(observations)
     previous = _observations(previous_observations)
-    factors = sorted({item.factor for item in values if item.asset == symbol.strip().upper()})
+    factors = sorted({
+        item.factor
+        for item in values
+        if item.asset == symbol.strip().upper()
+        and metric_definition(item.metric_key).decision_role == "SCORING_FACTOR"
+    })
     return {
         factor: build_factor_facts(
             values,

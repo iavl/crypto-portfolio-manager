@@ -35,6 +35,9 @@ _TOP_LEVEL_FIELDS = {
     "allocation",
     "execution",
     "volume_profile",
+    "positioning",
+    "btc_cycle",
+    "execution_overlay",
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -112,6 +115,75 @@ _VOLUME_PROFILE_FIELDS = {
     "allow_daily_approximation",
     "daily_approximation_confidence_cap",
 }
+_POSITIONING_FIELDS = {
+    "enabled",
+    "minimum_derivatives_confirmations_for_crowded",
+    "minimum_derivatives_confirmations_for_extreme",
+    "funding_rate",
+    "open_interest_change_7d",
+    "long_short_ratio",
+    "futures_basis",
+    "social",
+    "deleveraging",
+}
+_FUNDING_FIELDS = {
+    "elevated_positive",
+    "extreme_positive",
+    "elevated_negative",
+    "extreme_negative",
+}
+_OI_FIELDS = {"building", "rapid"}
+_LONG_SHORT_FIELDS = {"long_crowded", "short_crowded", "long_extreme", "short_extreme"}
+_BASIS_FIELDS = {"elevated_positive", "extreme_positive", "elevated_negative", "extreme_negative"}
+_SOCIAL_FIELDS = {
+    "fearful_bullish_share",
+    "optimistic_bullish_share",
+    "euphoric_bullish_share",
+    "attention_growth_extreme",
+}
+_DELEVERAGING_FIELDS = {"liquidation_to_open_interest", "normalized_funding_abs"}
+_BTC_CYCLE_FIELDS = {
+    "enabled",
+    "halving_context_days",
+    "minimum_non_clock_confirmations_for_elevated_risk",
+    "minimum_non_clock_confirmations_for_high_risk",
+    "allow_halving_clock_as_trade_trigger",
+    "allow_cycle_context_to_change_base_score",
+    "allow_cycle_context_to_increase_exposure",
+    "valuation",
+    "price",
+    "holder",
+    "flows",
+}
+_HALVING_DAYS_FIELDS = {"early_post_halving_max", "mid_epoch_max", "late_epoch_min"}
+_CYCLE_VALUATION_FIELDS = {
+    "mvrv_zscore_elevated",
+    "mvrv_zscore_extreme",
+    "market_to_realized_price_elevated",
+    "market_to_realized_price_extreme",
+}
+_CYCLE_PRICE_FIELDS = {"extension_atr", "drawdown_reset"}
+_CYCLE_HOLDER_FIELDS = {"lth_distribution_threshold", "lth_accumulation_threshold", "sopr_distribution_threshold"}
+_CYCLE_FLOW_FIELDS = {"weakening_threshold"}
+_EXECUTION_OVERLAY_FIELDS = {"positioning", "btc_cycle", "wait"}
+_OVERLAY_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "EXTREME")
+_POSITIONING_REQUIRED_FIELDS = {
+    "enabled",
+    "minimum_derivatives_confirmations_for_crowded",
+    "minimum_derivatives_confirmations_for_extreme",
+    "funding_rate",
+    "open_interest_change_7d",
+    "long_short_ratio",
+}
+_BTC_CYCLE_REQUIRED_FIELDS = {
+    "enabled",
+    "halving_context_days",
+    "minimum_non_clock_confirmations_for_elevated_risk",
+    "minimum_non_clock_confirmations_for_high_risk",
+    "allow_halving_clock_as_trade_trigger",
+    "allow_cycle_context_to_change_base_score",
+    "allow_cycle_context_to_increase_exposure",
+}
 _EXECUTION_COMPAT_DEFAULTS = {
     "maximum_daily_candle_lag_days": 1,
     "minimum_daily_coverage_ratio": 0.90,
@@ -134,6 +206,13 @@ def _unknown_fields(value: Mapping[str, Any], allowed: set[str], name: str) -> N
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise PolicyError(f"{name} contains unknown fields: {', '.join(unknown)}")
+
+
+def _copy_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: _copy_mapping(item) if isinstance(item, Mapping) else list(item) if isinstance(item, tuple) else item
+        for key, item in value.items()
+    }
 
 
 def _number(value: Any, name: str, *, minimum: float | None = None, maximum: float | None = None) -> float:
@@ -213,6 +292,9 @@ class Policy:
     )
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
     factor_rules: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    positioning: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    btc_cycle: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    execution_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -292,6 +374,12 @@ class Policy:
             for field in self._execution_omitted_fields:
                 execution.pop(field, None)
             result["execution"] = execution
+        if self.positioning:
+            result["positioning"] = _copy_mapping(self.positioning)
+        if self.btc_cycle:
+            result["btc_cycle"] = _copy_mapping(self.btc_cycle)
+        if self.execution_overlay:
+            result["execution_overlay"] = _copy_mapping(self.execution_overlay)
         return result
 
     def legacy_config(self) -> dict[str, Any]:
@@ -690,12 +778,305 @@ def _parse_factor_rules(value: Any, *, allow_missing: bool = False) -> dict[str,
     }
 
 
+def _positive_integer(value: Any, name: str) -> int:
+    number = _number(value, name, minimum=1)
+    if not number.is_integer():
+        raise PolicyError(f"{name} must be a positive integer")
+    return int(number)
+
+
+def _parse_positioning(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("positioning must be an object")
+    _unknown_fields(value, _POSITIONING_FIELDS, "positioning")
+    if not _POSITIONING_REQUIRED_FIELDS.issubset(value):
+        raise PolicyError("positioning fields are incomplete")
+    if not isinstance(value["enabled"], bool):
+        raise PolicyError("positioning.enabled must be boolean")
+    crowded = _positive_integer(
+        value["minimum_derivatives_confirmations_for_crowded"],
+        "positioning.minimum_derivatives_confirmations_for_crowded",
+    )
+    extreme = _positive_integer(
+        value["minimum_derivatives_confirmations_for_extreme"],
+        "positioning.minimum_derivatives_confirmations_for_extreme",
+    )
+    if extreme < crowded:
+        raise PolicyError("positioning extreme confirmation count must be >= crowded count")
+
+    def signed_thresholds(raw: Any, name: str, positive_keys: tuple[str, str], negative_keys: tuple[str, str]) -> dict[str, float]:
+        if not isinstance(raw, dict):
+            raise PolicyError(f"{name} must be an object")
+        allowed = set(positive_keys + negative_keys)
+        _unknown_fields(raw, allowed, name)
+        if set(raw) != allowed:
+            raise PolicyError(f"{name} fields are incomplete")
+        parsed = {key: _number(raw[key], f"{name}.{key}") for key in allowed}
+        positive, extreme_positive = positive_keys
+        extreme_negative, negative = negative_keys
+        if not (
+            parsed[positive] > 0
+            and parsed[extreme_positive] >= parsed[positive]
+            and parsed[negative] < 0
+            and parsed[extreme_negative] <= parsed[negative]
+        ):
+            raise PolicyError(f"{name} thresholds have invalid signs or ordering")
+        return {key: parsed[key] for key in raw}
+
+    funding = signed_thresholds(
+        value["funding_rate"],
+        "positioning.funding_rate",
+        ("elevated_positive", "extreme_positive"),
+        ("extreme_negative", "elevated_negative"),
+    )
+    oi = value["open_interest_change_7d"]
+    if not isinstance(oi, dict):
+        raise PolicyError("positioning.open_interest_change_7d must be an object")
+    _unknown_fields(oi, _OI_FIELDS, "positioning.open_interest_change_7d")
+    if set(oi) != _OI_FIELDS:
+        raise PolicyError("positioning.open_interest_change_7d fields are incomplete")
+    oi_parsed = {key: _number(oi[key], f"positioning.open_interest_change_7d.{key}", minimum=0.0) for key in oi}
+    if oi_parsed["building"] <= 0 or oi_parsed["rapid"] < oi_parsed["building"]:
+        raise PolicyError("positioning open-interest thresholds must be ordered and > 0")
+
+    ratios = value["long_short_ratio"]
+    if not isinstance(ratios, dict):
+        raise PolicyError("positioning.long_short_ratio must be an object")
+    _unknown_fields(ratios, _LONG_SHORT_FIELDS, "positioning.long_short_ratio")
+    if not {"long_crowded", "short_crowded"}.issubset(ratios):
+        raise PolicyError("positioning.long_short_ratio fields are incomplete")
+    ratios_parsed = {
+        "long_crowded": _number(ratios["long_crowded"], "positioning.long_short_ratio.long_crowded", minimum=0.0),
+        "short_crowded": _number(ratios["short_crowded"], "positioning.long_short_ratio.short_crowded", minimum=0.0),
+        "long_extreme": _number(ratios.get("long_extreme", 1.75), "positioning.long_short_ratio.long_extreme", minimum=0.0),
+        "short_extreme": _number(ratios.get("short_extreme", 0.57), "positioning.long_short_ratio.short_extreme", minimum=0.0),
+    }
+    if not (
+        ratios_parsed["long_crowded"] > 1
+        and ratios_parsed["long_extreme"] >= ratios_parsed["long_crowded"]
+        and 0 < ratios_parsed["short_extreme"] <= ratios_parsed["short_crowded"] < 1
+    ):
+        raise PolicyError("positioning long/short thresholds are invalid")
+
+    basis = signed_thresholds(
+        value.get(
+            "futures_basis",
+            {
+                "elevated_positive": 0.10,
+                "extreme_positive": 0.20,
+                "elevated_negative": -0.10,
+                "extreme_negative": -0.20,
+            },
+        ),
+        "positioning.futures_basis",
+        ("elevated_positive", "extreme_positive"),
+        ("extreme_negative", "elevated_negative"),
+    )
+    social = value.get(
+        "social",
+        {
+            "fearful_bullish_share": 0.20,
+            "optimistic_bullish_share": 0.60,
+            "euphoric_bullish_share": 0.80,
+            "attention_growth_extreme": 2.0,
+        },
+    )
+    if not isinstance(social, dict):
+        raise PolicyError("positioning.social must be an object")
+    _unknown_fields(social, _SOCIAL_FIELDS, "positioning.social")
+    if not {"euphoric_bullish_share", "attention_growth_extreme"}.issubset(social):
+        raise PolicyError("positioning.social fields are incomplete")
+    social_parsed = {
+        "fearful_bullish_share": _fraction(social.get("fearful_bullish_share", 0.2), "positioning.social.fearful_bullish_share"),
+        "optimistic_bullish_share": _fraction(social.get("optimistic_bullish_share", 0.6), "positioning.social.optimistic_bullish_share"),
+        "euphoric_bullish_share": _fraction(social["euphoric_bullish_share"], "positioning.social.euphoric_bullish_share"),
+    }
+    social_parsed["attention_growth_extreme"] = _number(
+        social["attention_growth_extreme"],
+        "positioning.social.attention_growth_extreme",
+        minimum=0.0,
+    )
+    if not (
+        social_parsed["fearful_bullish_share"]
+        < social_parsed["optimistic_bullish_share"]
+        < social_parsed["euphoric_bullish_share"]
+    ):
+        raise PolicyError("positioning social bullish-share thresholds must be ordered")
+
+    deleveraging = value.get(
+        "deleveraging",
+        {"liquidation_to_open_interest": 0.10, "normalized_funding_abs": 0.0003},
+    )
+    if not isinstance(deleveraging, dict):
+        raise PolicyError("positioning.deleveraging must be an object")
+    _unknown_fields(deleveraging, _DELEVERAGING_FIELDS, "positioning.deleveraging")
+    deleveraging_parsed = {
+        "liquidation_to_open_interest": _number(deleveraging.get("liquidation_to_open_interest", 0.1), "positioning.deleveraging.liquidation_to_open_interest", minimum=0.0),
+        "normalized_funding_abs": _number(deleveraging.get("normalized_funding_abs", 0.0003), "positioning.deleveraging.normalized_funding_abs", minimum=0.0),
+    }
+    if deleveraging_parsed["liquidation_to_open_interest"] <= 0:
+        raise PolicyError("positioning.deleveraging.liquidation_to_open_interest must be > 0")
+    return {
+        "enabled": value["enabled"],
+        "minimum_derivatives_confirmations_for_crowded": crowded,
+        "minimum_derivatives_confirmations_for_extreme": extreme,
+        "funding_rate": funding,
+        "open_interest_change_7d": oi_parsed,
+        "long_short_ratio": ratios_parsed,
+        "futures_basis": basis,
+        "social": social_parsed,
+        "deleveraging": deleveraging_parsed,
+    }
+
+
+def _parse_btc_cycle(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("btc_cycle must be an object")
+    _unknown_fields(value, _BTC_CYCLE_FIELDS, "btc_cycle")
+    if not _BTC_CYCLE_REQUIRED_FIELDS.issubset(value):
+        raise PolicyError("btc_cycle fields are incomplete")
+    if not isinstance(value["enabled"], bool):
+        raise PolicyError("btc_cycle.enabled must be boolean")
+    halving = value["halving_context_days"]
+    if not isinstance(halving, dict):
+        raise PolicyError("btc_cycle.halving_context_days must be an object")
+    _unknown_fields(halving, _HALVING_DAYS_FIELDS, "btc_cycle.halving_context_days")
+    if set(halving) != _HALVING_DAYS_FIELDS:
+        raise PolicyError("btc_cycle.halving_context_days fields are incomplete")
+    halving_parsed = {key: _positive_integer(item, f"btc_cycle.halving_context_days.{key}") for key, item in halving.items()}
+    if not (
+        halving_parsed["early_post_halving_max"] < halving_parsed["mid_epoch_max"]
+        and halving_parsed["late_epoch_min"] > halving_parsed["mid_epoch_max"]
+    ):
+        raise PolicyError("btc_cycle halving context ranges must be ordered")
+    elevated = _positive_integer(
+        value["minimum_non_clock_confirmations_for_elevated_risk"],
+        "btc_cycle.minimum_non_clock_confirmations_for_elevated_risk",
+    )
+    high = _positive_integer(
+        value["minimum_non_clock_confirmations_for_high_risk"],
+        "btc_cycle.minimum_non_clock_confirmations_for_high_risk",
+    )
+    if high < elevated:
+        raise PolicyError("btc_cycle high confirmation count must be >= elevated count")
+    for name in (
+        "allow_halving_clock_as_trade_trigger",
+        "allow_cycle_context_to_change_base_score",
+        "allow_cycle_context_to_increase_exposure",
+    ):
+        if value[name] is not False:
+            raise PolicyError(f"btc_cycle.{name} must remain false")
+
+    def optional_numbers(raw: Any, fields: set[str], name: str, defaults: Mapping[str, float]) -> dict[str, float]:
+        if not isinstance(raw, dict):
+            raise PolicyError(f"{name} must be an object")
+        _unknown_fields(raw, fields, name)
+        result = {key: float(defaults[key]) for key in fields}
+        for key, item in raw.items():
+            result[key] = _number(item, f"{name}.{key}", minimum=0.0)
+        return result
+
+    valuation = optional_numbers(
+        value.get("valuation", {}),
+        _CYCLE_VALUATION_FIELDS,
+        "btc_cycle.valuation",
+        {
+            "mvrv_zscore_elevated": 3.5,
+            "mvrv_zscore_extreme": 7.0,
+            "market_to_realized_price_elevated": 1.5,
+            "market_to_realized_price_extreme": 2.0,
+        },
+    )
+    if not (
+        valuation["mvrv_zscore_extreme"] >= valuation["mvrv_zscore_elevated"]
+        and valuation["market_to_realized_price_extreme"] >= valuation["market_to_realized_price_elevated"]
+    ):
+        raise PolicyError("btc_cycle valuation thresholds must be ordered")
+    price = optional_numbers(
+        value.get("price", {}),
+        _CYCLE_PRICE_FIELDS,
+        "btc_cycle.price",
+        {"extension_atr": 2.0, "drawdown_reset": 0.5},
+    )
+    holder = value.get("holder", {})
+    if not isinstance(holder, dict):
+        raise PolicyError("btc_cycle.holder must be an object")
+    _unknown_fields(holder, _CYCLE_HOLDER_FIELDS, "btc_cycle.holder")
+    holder_parsed = {
+        "lth_distribution_threshold": _number(holder.get("lth_distribution_threshold", -0.05), "btc_cycle.holder.lth_distribution_threshold"),
+        "lth_accumulation_threshold": _number(holder.get("lth_accumulation_threshold", 0.05), "btc_cycle.holder.lth_accumulation_threshold"),
+        "sopr_distribution_threshold": _number(holder.get("sopr_distribution_threshold", 1.05), "btc_cycle.holder.sopr_distribution_threshold", minimum=0.0),
+    }
+    if holder_parsed["lth_distribution_threshold"] >= 0 or holder_parsed["lth_accumulation_threshold"] <= 0:
+        raise PolicyError("btc_cycle holder LTH thresholds have invalid signs")
+    flows = value.get("flows", {})
+    if not isinstance(flows, dict):
+        raise PolicyError("btc_cycle.flows must be an object")
+    _unknown_fields(flows, _CYCLE_FLOW_FIELDS, "btc_cycle.flows")
+    flows_parsed = {"weakening_threshold": _number(flows.get("weakening_threshold", -0.05), "btc_cycle.flows.weakening_threshold")}
+    if flows_parsed["weakening_threshold"] >= 0:
+        raise PolicyError("btc_cycle.flows.weakening_threshold must be negative")
+    return {
+        "enabled": value["enabled"],
+        "halving_context_days": halving_parsed,
+        "minimum_non_clock_confirmations_for_elevated_risk": elevated,
+        "minimum_non_clock_confirmations_for_high_risk": high,
+        "allow_halving_clock_as_trade_trigger": False,
+        "allow_cycle_context_to_change_base_score": False,
+        "allow_cycle_context_to_increase_exposure": False,
+        "valuation": valuation,
+        "price": price,
+        "holder": holder_parsed,
+        "flows": flows_parsed,
+    }
+
+
+def _parse_execution_overlay(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("execution_overlay must be an object")
+    _unknown_fields(value, _EXECUTION_OVERLAY_FIELDS, "execution_overlay")
+    if not {"positioning", "btc_cycle"}.issubset(value):
+        raise PolicyError("execution_overlay fields are incomplete")
+
+    def factors(raw: Any, name: str, states: tuple[str, ...]) -> dict[str, float]:
+        if not isinstance(raw, dict):
+            raise PolicyError(f"{name} must be an object")
+        _unknown_fields(raw, set(states) | {"UNKNOWN"}, name)
+        result = {state: _fraction(raw.get(state, 1.0), f"{name}.{state}") for state in states}
+        result["UNKNOWN"] = _fraction(raw.get("UNKNOWN", 1.0), f"{name}.UNKNOWN")
+        if any(result[left] < result[right] for left, right in zip(states, states[1:])):
+            raise PolicyError(f"{name} deployment factors must not increase with risk")
+        return result
+
+    positioning = factors(value["positioning"], "execution_overlay.positioning", _OVERLAY_RISK_STATES)
+    cycle = factors(value["btc_cycle"], "execution_overlay.btc_cycle", ("NORMAL", "ELEVATED", "HIGH"))
+    wait = value.get("wait", {"enabled": True, "minimum_extension_atr": 2.0})
+    if not isinstance(wait, dict):
+        raise PolicyError("execution_overlay.wait must be an object")
+    _unknown_fields(wait, {"enabled", "minimum_extension_atr"}, "execution_overlay.wait")
+    if set(wait) != {"enabled", "minimum_extension_atr"}:
+        raise PolicyError("execution_overlay.wait fields are incomplete")
+    if not isinstance(wait["enabled"], bool):
+        raise PolicyError("execution_overlay.wait.enabled must be boolean")
+    extension = _number(wait["minimum_extension_atr"], "execution_overlay.wait.minimum_extension_atr", minimum=0.0)
+    if extension <= 0:
+        raise PolicyError("execution_overlay.wait.minimum_extension_atr must be > 0")
+    return {"positioning": positioning, "btc_cycle": cycle, "wait": {"enabled": wait["enabled"], "minimum_extension_atr": extension}}
+
+
 def _parse_policy(
     data: Any,
     *,
     allow_missing_execution: bool = False,
     allow_missing_volume_profile: bool = False,
     allow_missing_factor_rules: bool = False,
+    allow_missing_overlays: bool = False,
 ) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
@@ -707,6 +1088,8 @@ def _parse_policy(
         missing.discard("volume_profile")
     if allow_missing_factor_rules:
         missing.discard("factor_rules")
+    if allow_missing_overlays:
+        missing.difference_update({"positioning", "btc_cycle", "execution_overlay"})
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -801,6 +1184,11 @@ def _parse_policy(
     parsed_factor_rules = _parse_factor_rules(
         data.get("factor_rules"), allow_missing=allow_missing_factor_rules
     )
+    parsed_positioning = _parse_positioning(data.get("positioning"), allow_missing=allow_missing_overlays)
+    parsed_btc_cycle = _parse_btc_cycle(data.get("btc_cycle"), allow_missing=allow_missing_overlays)
+    parsed_execution_overlay = _parse_execution_overlay(
+        data.get("execution_overlay"), allow_missing=allow_missing_overlays
+    )
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -893,6 +1281,9 @@ def _parse_policy(
         volume_profile=parsed_volume_profile,
         execution=parsed_execution,
         factor_rules=parsed_factor_rules,
+        positioning=parsed_positioning,
+        btc_cycle=parsed_btc_cycle,
+        execution_overlay=parsed_execution_overlay,
     )
     raw_execution = data.get("execution")
     omitted = (
@@ -905,6 +1296,12 @@ def _parse_policy(
         object.__setattr__(policy, "volume_profile", {})
     if "factor_rules" not in data:
         object.__setattr__(policy, "factor_rules", {})
+    if "positioning" not in data:
+        object.__setattr__(policy, "positioning", {})
+    if "btc_cycle" not in data:
+        object.__setattr__(policy, "btc_cycle", {})
+    if "execution_overlay" not in data:
+        object.__setattr__(policy, "execution_overlay", {})
     return policy
 
 
@@ -927,6 +1324,7 @@ def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
         allow_missing_execution=True,
         allow_missing_volume_profile=True,
         allow_missing_factor_rules=True,
+        allow_missing_overlays=True,
     )
 
 

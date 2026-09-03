@@ -138,6 +138,37 @@ Check for:
 
 ## Freshness standards
 
+### Derivatives positioning
+
+Prefer official exchange derivatives endpoints, then reputable multi-venue
+aggregators or providers with documented methodology. Preserve venue or
+aggregation scope, funding interval, contract basis methodology, source,
+observed time, and fetched time. Long/short ratios from different venues or
+methodologies are not comparable; mark the comparison `CONFLICT` or unavailable
+and lower confidence.
+
+Collect funding rate and compatible 24H/7D averages, open interest and its
+1D/7D changes, long/short ratios, liquidations, and annualized futures basis
+when available. Open-interest growth or decline is context, not a standalone
+directional signal.
+
+### Community sentiment
+
+Prefer transparent structured analytics with bot/spam filtering, unique-author
+counts, engagement quality, sample size, and methodology. Social bullish share,
+mention counts/changes, and market fear/greed are lower-authority context.
+Unstructured posts may support a short low-confidence narrative, but never
+become a fabricated numeric metric or a standalone trade trigger.
+
+### BTC cycle and on-chain context
+
+Use original or established on-chain analytics with explicit methodology for
+MVRV, realized price, SOPR, NUPL, and holder metrics. Halving timestamps are
+static protocol facts; the next timestamp is an estimate and must be labeled as
+such. Missing proprietary cycle metrics lowers cycle confidence but does not
+block an otherwise valid portfolio review. Cycle timing alone is not a
+top/bottom or execution signal.
+
 Use judgment, but default to:
 
 - spot price: current session / near real time;

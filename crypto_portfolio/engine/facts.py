@@ -6,6 +6,8 @@ from typing import Any, Iterable, Mapping
 
 from ..facts.models import FactBase
 from .metric_history import build_factor_facts, build_facts_for_asset
+from .positioning import build_positioning_facts
+from .cycle import build_btc_cycle_context
 
 
 def build_deterministic_facts(
@@ -39,4 +41,10 @@ def build_asset_facts(
 build_facts = build_deterministic_facts
 
 
-__all__ = ["build_asset_facts", "build_deterministic_facts", "build_facts"]
+__all__ = [
+    "build_asset_facts",
+    "build_btc_cycle_context",
+    "build_deterministic_facts",
+    "build_facts",
+    "build_positioning_facts",
+]

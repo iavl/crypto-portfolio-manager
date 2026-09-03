@@ -122,6 +122,28 @@ current value, previous value, absolute/percentage change, recent trend, and
 the observation IDs used. Explain any recommendation change with the changed
 metrics, confidence change, regime change, and portfolio constraint.
 
+## Positioning & Cycle Context
+
+Show the finalized compact overlay values without raw social posts or dense
+series:
+
+| Asset | Positioning | Bias | Risk | Social | Decision Effect |
+|---|---|---|---|---|---|
+
+For BTC, show `Halving Context`, `Market Cycle State`, `Cycle Risk`,
+`Confidence`, and key non-clock drivers. State explicitly that cycle context is
+not a deterministic top/bottom forecast. State the effective deployment cap and
+whether the target is unchanged, immediate deployment is reduced, or the
+remaining approved amount is `WAIT`/unallocated.
+
+Example:
+
+```text
+Target unchanged. Positioning is LONG_CROWDED/HIGH; immediate deployment is
+capped to 50% and the remaining amount stays WAIT. The halving clock is context
+only and does not create this action.
+```
+
 For a satellite, also state the BTC opportunity cost: relative performance,
 relative risk/volatility, current satellite exposure, applicable regime cap,
 and why the incremental risk is or is not better than allocating the same

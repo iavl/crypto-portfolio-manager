@@ -227,6 +227,11 @@ class DecisionReviewPacket:
     risk_escalation: bool = False
     recommendation_reversal: bool = False
     previous_target_weights: Mapping[str, float] = field(default_factory=dict)
+    positioning_summaries: Mapping[str, Any] = field(default_factory=dict)
+    btc_cycle_summary: Mapping[str, Any] | None = None
+    overlay_confidence: str = "LOW"
+    overlay_warnings: tuple[str, ...] = ()
+    effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -261,6 +266,47 @@ class DecisionReviewPacket:
         if not isinstance(self.execution_summary, Mapping):
             raise ValueError("execution_summary must be an object")
         object.__setattr__(self, "execution_summary", freeze_packet_value(self.execution_summary, path="execution_summary"))
+        if not isinstance(self.positioning_summaries, Mapping):
+            raise ValueError("positioning_summaries must be an object")
+        summaries = {}
+        for raw_symbol, summary in self.positioning_summaries.items():
+            if not isinstance(raw_symbol, str) or not raw_symbol.strip():
+                raise ValueError("positioning_summaries contains an invalid symbol")
+            symbol = raw_symbol.strip().upper()
+            if symbol in summaries:
+                raise ValueError(f"positioning_summaries contains duplicate symbol {symbol}")
+            if hasattr(summary, "as_dict"):
+                summary = summary.as_dict()
+            if not isinstance(summary, Mapping):
+                raise ValueError(f"positioning_summaries.{symbol} must be an object")
+            summaries[symbol] = freeze_packet_value(summary, path=f"positioning_summaries.{symbol}")
+        object.__setattr__(self, "positioning_summaries", MappingProxyType(summaries))
+        if self.btc_cycle_summary is not None:
+            if hasattr(self.btc_cycle_summary, "as_dict"):
+                object.__setattr__(self, "btc_cycle_summary", self.btc_cycle_summary.as_dict())
+            if not isinstance(self.btc_cycle_summary, Mapping):
+                raise ValueError("btc_cycle_summary must be an object or null")
+            object.__setattr__(self, "btc_cycle_summary", freeze_packet_value(self.btc_cycle_summary, path="btc_cycle_summary"))
+        overlay_confidence = _text(self.overlay_confidence, "overlay_confidence").upper()
+        if overlay_confidence not in _CONFIDENCE:
+            raise ValueError("overlay_confidence must be HIGH, MEDIUM, or LOW")
+        object.__setattr__(self, "overlay_confidence", overlay_confidence)
+        warnings = _ids(self.overlay_warnings, "overlay_warnings")
+        object.__setattr__(self, "overlay_warnings", warnings)
+        if not isinstance(self.effective_deployment_caps, Mapping):
+            raise ValueError("effective_deployment_caps must be an object")
+        caps = {}
+        for raw_symbol, raw_factor in self.effective_deployment_caps.items():
+            symbol = _text(raw_symbol, "effective_deployment_caps symbol").upper()
+            if isinstance(raw_factor, bool) or not isinstance(raw_factor, (int, float)):
+                raise ValueError("effective_deployment_caps values must be numbers")
+            factor = float(raw_factor)
+            if not math.isfinite(factor) or not 0 <= factor <= 1:
+                raise ValueError("effective_deployment_caps values must be finite and in [0, 1]")
+            if symbol in caps:
+                raise ValueError(f"effective_deployment_caps contains duplicate symbol {symbol}")
+            caps[symbol] = factor
+        object.__setattr__(self, "effective_deployment_caps", MappingProxyType(caps))
         for field_name in ("major_event_risk", "risk_budget_breach", "risk_escalation", "recommendation_reversal"):
             if not isinstance(getattr(self, field_name), bool):
                 raise ValueError(f"{field_name} must be boolean")
@@ -268,6 +314,14 @@ class DecisionReviewPacket:
     @property
     def asset_summaries(self) -> tuple[AssetDecisionSummary, ...]:
         return self.assets
+
+    @property
+    def positioning_summary(self) -> Mapping[str, Any]:
+        return self.positioning_summaries
+
+    @property
+    def btc_cycle(self) -> Mapping[str, Any] | None:
+        return self.btc_cycle_summary
 
     @property
     def high_impact_flags(self) -> tuple[str, ...]:
@@ -295,6 +349,14 @@ class DecisionReviewPacket:
             "risk_budget_breach": self.risk_budget_breach,
             "risk_escalation": self.risk_escalation,
             "recommendation_reversal": self.recommendation_reversal,
+            "positioning_summaries": {
+                symbol: thaw_packet_value(summary)
+                for symbol, summary in self.positioning_summaries.items()
+            },
+            "btc_cycle_summary": thaw_packet_value(self.btc_cycle_summary) if self.btc_cycle_summary is not None else None,
+            "overlay_confidence": self.overlay_confidence,
+            "overlay_warnings": list(self.overlay_warnings),
+            "effective_deployment_caps": dict(self.effective_deployment_caps),
         }
 
     @classmethod
@@ -302,6 +364,15 @@ class DecisionReviewPacket:
         if not isinstance(value, Mapping):
             raise ValueError("decision review packet must be an object")
         data = dict(value)
+        if data.get("market_overlays") is not None:
+            from .market_overlays import MarketOverlays
+
+            compact = MarketOverlays.from_mapping(data.pop("market_overlays")).compact_summary()
+            data.setdefault("positioning_summaries", compact["positioning"])
+            data.setdefault("btc_cycle_summary", compact["btc_cycle"])
+            data.setdefault("overlay_confidence", compact["overlay_confidence"])
+            data.setdefault("overlay_warnings", compact["warnings"])
+            data.setdefault("effective_deployment_caps", compact["effective_deployment_caps"])
         raw_assets = data.get("assets", data.get("asset_summaries", ()))
         if isinstance(raw_assets, Mapping):
             raw_assets = [dict(item, symbol=symbol) for symbol, item in raw_assets.items()]

@@ -34,7 +34,7 @@ flowchart TD
     F --> G[Python normalization, MetricObservation, CollectionEvent]
     G --> H[Python metric history and deterministic Facts]
     H --> I[Python deterministic factors]
-    H --> J[TERRA bounded semantic factor judgment]
+    H --> J[LUNA_MAX bounded semantic factor judgment]
     I --> K[Python weighted scoring]
     J --> K
     K --> L[Python market regime]
@@ -53,7 +53,7 @@ flowchart TD
     V -- Skipped --> X[No Sol review]
     W --> Y[Immutable ReportPacket]
     X --> Y
-    Y --> Z[TERRA Chinese report]
+    Y --> Z[LUNA_MAX Chinese report]
     Z --> AA[Validated append-only local state]
 ```
 
@@ -78,11 +78,11 @@ finalized amount.
 | MA / ATR / returns / volatility | Python | `technical.py` and `metrics.py` perform the arithmetic. |
 | Volume Profile | Python | `volume_profile.py` bins completed OHLCV and derives levels/nodes. |
 | Deterministic factor calculations | Python where implemented | Trend, BTC-relative strength, and numeric flow interpretation are implemented. |
-| Hybrid semantic factor interpretation | `TERRA` | Valuation, fundamentals, on-chain, event, and source-conflict meaning can be judged from compact Facts. |
+| Hybrid semantic factor interpretation | `LUNA_MAX` in the current balanced profile | Valuation, fundamentals, on-chain, event, and source-conflict meaning can be judged from compact Facts. |
 | Weighted scoring | Python | Missing factors are removed and remaining weights are renormalized. |
 | Regime / allocation / risk / rebalance | Python | Portfolio constraints and action amounts are deterministic. |
 | Major thesis/event review | `SOL`, conditionally | Python decides whether the high-impact critic is needed. |
-| Final prose | `TERRA` | Writes the Chinese explanation from finalized structured values. |
+| Final prose | `LUNA_MAX` in the current balanced profile | Writes the Chinese explanation from finalized structured values. |
 
 Semantic packets reject raw webpages, full metric history, raw OHLCV,
 volume-profile bins, and private reasoning. Normalized records and hashes are
@@ -114,8 +114,8 @@ The logical stage owners remain:
 
 | Logical owner | Configured stages |
 |---|---|
-| `LUNA_MAX` | `screenshot_extraction`, `metric_collection`, `normal_source_retrieval` |
-| `TERRA` | `source_conflict_resolution`, `factor_semantic_analysis`, `report_generation` |
+| `LUNA_MAX` (balanced default) | `screenshot_extraction`, `metric_collection`, `normal_source_retrieval`, `source_conflict_resolution`, `factor_semantic_analysis`, `report_generation` |
+| `TERRA` (configured quality profile) | `source_conflict_resolution`, `factor_semantic_analysis`, `report_generation` |
 | `SOL` | `major_event_analysis`, `high_impact_final_review` |
 | `PYTHON` | `history`, `facts`, `metrics_math`, `technical`, `scoring_math`, `regime`, `allocation`, `risk`, `rebalance`, `execution` |
 
@@ -236,7 +236,9 @@ de-duplicate identical records.
 
 `crypto_portfolio/metrics_registry.py` is the canonical registry. Each
 `MetricDefinition` gives a key, factor, expected type, unit, direction,
-freshness, criticality, trend-comparison behavior, and optional asset scope.
+freshness, criticality, trend-comparison behavior, optional asset scope, and
+the `decision_role`/`context_group` that separates scoring factors from
+positioning and cycle context.
 Examples include:
 
 ```text
@@ -259,6 +261,11 @@ definition's freshness window, but the plan does not let a model invent a new
 metric key. `normalize_collection_results()` requires exactly one result for
 each planned `(asset, metric_key)` pair; omissions, extras, and duplicates
 fail closed.
+
+The registry also includes derivatives (`derivatives.*`), structured social
+(`sentiment.*`), and BTC on-chain (`onchain.btc.*`) observations. They are
+`POSITIONING_OVERLAY` or `CYCLE_CONTEXT` definitions, not additions to the
+seven base scoring weights.
 
 ## 5. Collection Status and Data Quality
 
@@ -305,6 +312,30 @@ Flow, Relative Strength, and Event facts. `AssetFactorPacket` combines those
 facts for one asset and carries a prior assessment and de-duplicated evidence
 IDs. Semantic stages receive this compact packet, not raw history or source
 pages.
+
+### Positioning and BTC cycle overlays
+
+After collection, the deterministic overlay path is:
+
+```text
+Metric collection
+    → base Facts → base score
+    + PositioningFacts
+    + BTCCycleContext
+    → risk/execution context
+```
+
+`engine.positioning` requires compatible multi-signal derivatives evidence for
+`CROWDED` and `EXTREME`; a single funding print or social euphoria is not
+enough. `engine.cycle` computes halving deltas, optional valuation and holder
+states, and requires non-clock confirmation for elevated/high cycle risk. The
+halving clock alone is descriptive and has no action authority.
+
+`MarketOverlays` carries compact states, reasons, evidence IDs, and provenance.
+It never enters `FactorScore`, scoring coverage, target-weight arithmetic, or
+an independent `EXIT`. Execution combines caps with `min(base, positioning,
+cycle)`, so target and approved rebalance amounts remain unchanged while
+immediate staging may be reduced or held back.
 
 ## 7. Asset Factors and Scoring
 
@@ -532,6 +563,13 @@ cannot be an automatic order. A plan is persisted only when it matches exactly
 one same-symbol approved `INCREASE` action at the same amount and its
 `execution_technical` evidence matches the technical summary and hashes.
 
+When supplied, `PositioningFacts` and `BTCCycleContext` are execution context,
+not allocation inputs. Long-crowded/high positioning and cycle risk apply the
+configured deployment caps; their combination uses the minimum cap rather than
+multiplying penalties. Confirmed technical extension plus long crowding may
+return `WAIT`. Deleveraging only removes a crowding penalty and never boosts the
+base plan.
+
 ## 12. Compact Review Packets
 
 Packets are the handoff boundary between Python and model stages:
@@ -540,10 +578,11 @@ Packets are the handoff boundary between Python and model stages:
   assessment, and evidence IDs for one asset.
 - `DecisionReviewPacket` contains normalized per-asset summaries, current and
   target weights, previous targets, actions, execution summary, risk flags,
-  critical missing data, conflicts, and high-impact flags.
+  critical missing data, conflicts, high-impact flags, and compact positioning/
+  BTC-cycle overlay outcomes with effective deployment caps.
 - `ReportPacket` contains the finalized regime, scores, weights, actions,
   approved amounts, zones, historical changes, risk flags, optional Sol review,
-  and data-quality summary.
+  data-quality summary, and immutable overlay outcomes.
 
 The packet models are frozen dataclasses. Nested values are frozen or
 validated, raw/full-history keys are rejected, and score/weight/amount/action
@@ -585,6 +624,9 @@ and uncertainty, but it must not recompute or alter the finalized values.
 | Metric collection planning | [`engine/metric_plan.py`](crypto_portfolio/engine/metric_plan.py) |
 | Metric normalization/history | [`engine/metric_normalization.py`](crypto_portfolio/engine/metric_normalization.py), [`engine/metric_history.py`](crypto_portfolio/engine/metric_history.py), [`state/metrics.py`](crypto_portfolio/state/metrics.py) |
 | Facts | [`facts/`](crypto_portfolio/facts/), [`engine/facts.py`](crypto_portfolio/engine/facts.py) |
+| Positioning overlay | [`engine/positioning.py`](crypto_portfolio/engine/positioning.py), [`models/positioning.py`](crypto_portfolio/models/positioning.py) |
+| BTC cycle context | [`engine/cycle.py`](crypto_portfolio/engine/cycle.py), [`models/cycle.py`](crypto_portfolio/models/cycle.py) |
+| Overlay container/caps | [`models/market_overlays.py`](crypto_portfolio/models/market_overlays.py), [`engine/overlays.py`](crypto_portfolio/engine/overlays.py) |
 | Factors | [`engine/factors/`](crypto_portfolio/engine/factors/) |
 | Scoring | [`engine/scoring.py`](crypto_portfolio/engine/scoring.py) |
 | Regime | [`engine/regime_inputs.py`](crypto_portfolio/engine/regime_inputs.py), [`engine/regime.py`](crypto_portfolio/engine/regime.py) |

@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping
 from ..models.decision_packet import AssetDecisionSummary, DecisionReviewPacket
 from ..models.evidence import AssetAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
+from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 from ..model_routing import ModelRouting, validate_model_routing
 
@@ -175,6 +176,7 @@ def _execution_summary(execution: Any) -> dict[str, Any]:
             "symbol", "action", "approved_amount_usd", "planned_amount_usd",
             "unallocated_amount_usd", "entry_mode", "technical_confidence",
             "current_price", "rationale", "ohlcv_hash", "volume_profile_hash",
+            "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings",
         )
         if key in value
     }
@@ -219,6 +221,25 @@ def _factor_packet(value: Any) -> AssetFactorPacket | None:
     raise ValueError("factor_packets must contain AssetFactorPacket objects or mappings")
 
 
+def _overlay_summary(value: MarketOverlays | Mapping[str, Any] | None) -> dict[str, Any]:
+    if value is None:
+        return {}
+    overlays = value if isinstance(value, MarketOverlays) else MarketOverlays.from_mapping(value)
+    summary = overlays.compact_summary()
+    if not summary["effective_deployment_caps"]:
+        from .overlays import effective_deployment_factor
+
+        summary["effective_deployment_caps"] = {
+            symbol: effective_deployment_factor(1.0, positioning=facts, btc_cycle=overlays.btc_cycle)
+            for symbol, facts in overlays.positioning_by_asset.items()
+        }
+        if overlays.btc_cycle is not None and "BTC" not in summary["effective_deployment_caps"]:
+            summary["effective_deployment_caps"]["BTC"] = effective_deployment_factor(
+                1.0, btc_cycle=overlays.btc_cycle
+            )
+    return summary
+
+
 def build_decision_review_packet(
     decision: Mapping[str, Any] | None = None,
     *,
@@ -240,9 +261,16 @@ def build_decision_review_packet(
     risk_budget_breach: bool = False,
     risk_escalation: bool = False,
     recommendation_reversal: bool = False,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    market_overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
+    if overlays is not None and market_overlays is not None:
+        raise ValueError("provide only one of overlays or market_overlays")
+    overlays = market_overlays if market_overlays is not None else overlays
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
+    if overlays is None and source.get("market_overlays") is not None:
+        overlays = source["market_overlays"]
     review = review_type or source.get("review_type", "SNAPSHOT_REVIEW")
     regime = market_regime or source.get("market_regime", "NORMAL")
     current = current_weights if current_weights is not None else source.get("current_weights", {})
@@ -255,6 +283,38 @@ def build_decision_review_packet(
     raw_assessments = {str(key).strip().upper(): value for key, value in raw_assessments.items()}
     raw_previous = {str(key).strip().upper(): value for key, value in raw_previous.items()}
     action_by_symbol = _action_map(actions if actions is not None else source.get("actions"))
+    overlay = _overlay_summary(overlays)
+    execution_summary = _execution_summary(execution if execution is not None else source.get("execution"))
+    if not overlay and any(
+        execution_summary.get(key) is not None
+        for key in ("positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings")
+    ):
+        if execution_summary.get("positioning_summary") is not None:
+            overlay["positioning"] = {
+                str(execution_summary.get("symbol", "")).strip().upper(): execution_summary["positioning_summary"]
+            }
+        overlay["btc_cycle"] = execution_summary.get("btc_cycle_summary")
+        if execution_summary.get("effective_deployment_factor") is not None and execution_summary.get("symbol"):
+            overlay["effective_deployment_caps"] = {
+                str(execution_summary["symbol"]).strip().upper(): execution_summary["effective_deployment_factor"]
+            }
+        overlay["warnings"] = execution_summary.get("overlay_warnings", ())
+    positioning_summaries = (
+        overlay.get("positioning", {})
+        if overlay
+        else source.get("positioning_summaries", source.get("positioning", {}))
+    )
+    btc_cycle_summary = (
+        overlay.get("btc_cycle")
+        if overlay
+        else source.get("btc_cycle_summary", source.get("btc_cycle"))
+    )
+    overlay_confidence = overlay.get("overlay_confidence", source.get("overlay_confidence", "LOW"))
+    overlay_warnings = overlay.get("warnings", source.get("overlay_warnings", ()))
+    deployment_caps = overlay.get(
+        "effective_deployment_caps",
+        source.get("effective_deployment_caps", {}),
+    )
     symbols = list(dict.fromkeys([
         *(str(symbol).strip().upper() for symbol in current),
         *(str(symbol).strip().upper() for symbol in target),
@@ -289,13 +349,18 @@ def build_decision_review_packet(
         target_weights=target,
         previous_target_weights=previous_target,
         assets=assets,
-        execution_summary=_execution_summary(execution if execution is not None else source.get("execution")),
+        execution_summary=execution_summary,
         critical_missing_data=tuple(critical_missing_data) or tuple(source.get("critical_missing_data", ())),
         major_conflicts=tuple(major_conflicts) or tuple(source.get("major_conflicts", ())),
         major_event_risk=major_event_risk or bool(source.get("major_event_risk", False)),
         risk_budget_breach=risk_budget_breach or bool(source.get("risk_budget_breach", False)),
         risk_escalation=risk_escalation or bool(source.get("risk_escalation", False)),
         recommendation_reversal=recommendation_reversal or bool(source.get("recommendation_reversal", False)),
+        positioning_summaries=positioning_summaries,
+        btc_cycle_summary=btc_cycle_summary,
+        overlay_confidence=overlay_confidence,
+        overlay_warnings=tuple(overlay_warnings),
+        effective_deployment_caps=deployment_caps,
     )
 
 

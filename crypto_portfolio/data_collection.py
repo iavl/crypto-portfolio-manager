@@ -37,7 +37,11 @@ def collection_summary(
     if any(not isinstance(event, CollectionEvent) for event in values):
         raise ValueError("events must contain CollectionEvent objects")
     counts = Counter(event.status for event in values)
-    applicable = [event for event in values if event.status != "NOT_APPLICABLE"]
+    scoring_events = [
+        event for event in values
+        if metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
+    ]
+    applicable = [event for event in scoring_events if event.status != "NOT_APPLICABLE"]
     if weights is None:
         coverage = (
             sum(event.status == "SUCCESS" for event in applicable) / len(applicable)
@@ -62,6 +66,7 @@ def collection_summary(
     critical_failures = sum(
         event.status in {"FAILED", "STALE", "CONFLICT"}
         and metric_definition(event.metric_key).critical
+        and metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
         for event in values
     )
     if critical_failures or coverage < 0.7:
@@ -77,6 +82,7 @@ def collection_summary(
         "coverage": coverage,
         "evidence_coverage": coverage,
         "confidence": confidence,
+        "overlay_requested": len(values) - len(scoring_events),
     }
 
 
@@ -110,7 +116,10 @@ def format_collection_event(
         )
     if event.reason:
         lines.append(f"       reason: {event.reason}")
-    if event.status == "SUCCESS":
+    definition = metric_definition(event.metric_key)
+    if definition.decision_role != "SCORING_FACTOR":
+        effect = "context only; excluded from base scoring coverage"
+    elif event.status == "SUCCESS":
         effect = "available for scoring/history"
     elif event.status == "NOT_APPLICABLE":
         effect = "excluded from applicable coverage"
@@ -133,8 +142,34 @@ def format_collection_summary(summary: Mapping[str, Any]) -> str:
             f"Critical failures: {summary['critical_failures']}",
             f"Overall evidence coverage: {summary['coverage']:.0%}",
             f"Decision confidence: {summary['confidence']}",
+            f"Overlay context metrics: {summary.get('overlay_requested', 0)}",
         )
     )
+
+
+def format_overlay_summary(overlays: Any) -> str:
+    """Render compact positioning/cycle telemetry without raw source data."""
+    from .models.market_overlays import MarketOverlays
+
+    value = overlays if isinstance(overlays, MarketOverlays) else MarketOverlays.from_mapping(overlays)
+    lines = ["Positioning & Cycle Context"]
+    for symbol, facts in value.positioning_by_asset.items():
+        lines.append(
+            f"{symbol} Positioning: {facts.bias} / {facts.risk} "
+            f"({facts.confidence} confidence; Social {facts.social_state})"
+        )
+    if value.btc_cycle is not None:
+        cycle = value.btc_cycle
+        lines.append(
+            f"BTC Cycle: {cycle.market_cycle_state} / {cycle.cycle_risk} "
+            f"({cycle.confidence} confidence; {cycle.halving_context})"
+        )
+    if value.effective_deployment_caps:
+        lines.append("Effective deployment caps: " + ", ".join(
+            f"{symbol} {factor:.0%}" for symbol, factor in value.effective_deployment_caps.items()
+        ))
+    lines.extend(value.warnings)
+    return "\n".join(lines)
 
 
 @dataclass
@@ -200,4 +235,5 @@ __all__ = [
     "collection_summary",
     "format_collection_event",
     "format_collection_summary",
+    "format_overlay_summary",
 ]

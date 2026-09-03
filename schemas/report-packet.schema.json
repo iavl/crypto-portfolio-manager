@@ -18,6 +18,11 @@
     "sol_review": {"type": ["object", "null"]},
     "critical_missing_data": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "data_quality": {"type": "object"}
+    ,"positioning_summaries": {"type": "object", "additionalProperties": {"type": "object"}}
+    ,"btc_cycle_summary": {"type": ["object", "null"]}
+    ,"overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]}
+    ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+    ,"effective_deployment_caps": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
   },
   "additionalProperties": false
 }

@@ -10,10 +10,18 @@ from typing import Any
 
 _EXPECTED_TYPES = {"number", "string"}
 _DIRECTIONS = {"HIGHER_IS_BETTER", "LOWER_IS_BETTER", "CONTEXTUAL"}
+_DECISION_ROLES = {
+    "SCORING_FACTOR",
+    "POSITIONING_OVERLAY",
+    "CYCLE_CONTEXT",
+    "EXECUTION_CONTEXT",
+}
+DECISION_ROLES = tuple(sorted(_DECISION_ROLES))
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _FRESHNESS_WINDOW = re.compile(r"^[1-9][0-9]*d$")
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
 _APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
+_DERIVATIVES_ASSETS = _PROTOCOL_ASSETS
 
 
 def _freshness(value: Any, field: str) -> str | int | float:
@@ -58,6 +66,8 @@ class MetricDefinition:
     value_type: str | None = None
     freshness: str | int | float | None = None
     trend_enabled: bool | None = None
+    decision_role: str = "SCORING_FACTOR"
+    context_group: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.key, str) or not self.key.strip():
@@ -100,12 +110,34 @@ class MetricDefinition:
         object.__setattr__(self, "trend_comparison_enabled", trend_enabled)
         object.__setattr__(self, "trend_enabled", trend_enabled)
         object.__setattr__(self, "asset_scope", _scope(self.asset_scope))
+        role = str(self.decision_role).strip().upper()
+        if role not in _DECISION_ROLES:
+            raise ValueError("metric definition decision_role is unsupported")
+        context_group = self.context_group
+        if context_group is not None:
+            if not isinstance(context_group, str) or not context_group.strip():
+                raise ValueError("metric definition context_group must be a non-empty string or null")
+            context_group = context_group.strip().lower()
+        if role != "SCORING_FACTOR" and context_group is None:
+            raise ValueError("overlay metric definitions require context_group")
+        if role == "SCORING_FACTOR" and context_group is not None:
+            raise ValueError("scoring metric definitions must not set context_group")
+        object.__setattr__(self, "decision_role", role)
+        object.__setattr__(self, "context_group", context_group)
 
     def applies_to(self, asset: str) -> bool:
         """Return whether this definition explicitly covers ``asset``."""
         if not isinstance(asset, str) or not asset.strip():
             raise ValueError("asset must be a non-empty string")
         return self.asset_scope is None or asset.strip().upper() in self.asset_scope
+
+    @property
+    def is_scoring_factor(self) -> bool:
+        return self.decision_role == "SCORING_FACTOR"
+
+    @property
+    def is_overlay(self) -> bool:
+        return not self.is_scoring_factor
 
     @property
     def freshness_days(self) -> int | float | None:
@@ -131,6 +163,8 @@ class MetricDefinition:
             "trend_comparison_enabled": self.trend_comparison_enabled,
             "trend_enabled": self.trend_enabled,
             "asset_scope": list(self.asset_scope) if self.asset_scope is not None else None,
+            "decision_role": self.decision_role,
+            "context_group": self.context_group,
         }
 
 
@@ -145,6 +179,8 @@ def _definition(
     asset_scope: tuple[str, ...] | None = None,
     freshness: str | int | float = "CURRENT",
     trend_enabled: bool = True,
+    decision_role: str = "SCORING_FACTOR",
+    context_group: str | None = None,
 ) -> MetricDefinition:
     return MetricDefinition(
         key,
@@ -159,6 +195,8 @@ def _definition(
         expected_type,
         freshness,
         trend_enabled,
+        decision_role=decision_role,
+        context_group=context_group,
     )
 
 
@@ -212,6 +250,168 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
     "risk.regulatory_event_status": _definition("risk.regulatory_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
     "risk.governance_event_status": _definition("risk.governance_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
+
+    # Positioning and social context are deliberately separate from scoring.
+    "derivatives.funding_rate": _definition(
+        "derivatives.funding_rate", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.funding_rate_24h_avg": _definition(
+        "derivatives.funding_rate_24h_avg", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.funding_rate_7d_avg": _definition(
+        "derivatives.funding_rate_7d_avg", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.funding_rate_percentile": _definition(
+        "derivatives.funding_rate_percentile", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.open_interest_usd": _definition(
+        "derivatives.open_interest_usd", "positioning", "number", "USD", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.open_interest_change_1d": _definition(
+        "derivatives.open_interest_change_1d", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.open_interest_change_7d": _definition(
+        "derivatives.open_interest_change_7d", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.open_interest_to_market_cap": _definition(
+        "derivatives.open_interest_to_market_cap", "positioning", "number", "ratio", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.long_short_account_ratio": _definition(
+        "derivatives.long_short_account_ratio", "positioning", "number", "ratio", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.top_trader_long_short_ratio": _definition(
+        "derivatives.top_trader_long_short_ratio", "positioning", "number", "ratio", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.long_liquidations_24h_usd": _definition(
+        "derivatives.long_liquidations_24h_usd", "positioning", "number", "USD", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.short_liquidations_24h_usd": _definition(
+        "derivatives.short_liquidations_24h_usd", "positioning", "number", "USD", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.total_liquidations_24h_usd": _definition(
+        "derivatives.total_liquidations_24h_usd", "positioning", "number", "USD", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.long_liquidations_7d_usd": _definition(
+        "derivatives.long_liquidations_7d_usd", "positioning", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.short_liquidations_7d_usd": _definition(
+        "derivatives.short_liquidations_7d_usd", "positioning", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "derivatives.futures_basis_annualized": _definition(
+        "derivatives.futures_basis_annualized", "positioning", "number", "fraction", "CONTEXTUAL",
+        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "sentiment.social_bullish_share": _definition(
+        "sentiment.social_bullish_share", "sentiment", "number", "fraction", "CONTEXTUAL",
+        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "sentiment.social_mentions_24h": _definition(
+        "sentiment.social_mentions_24h", "sentiment", "number", "count", "CONTEXTUAL",
+        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "sentiment.social_mentions_change_7d": _definition(
+        "sentiment.social_mentions_change_7d", "sentiment", "number", "fraction", "CONTEXTUAL",
+        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "sentiment.social_sentiment_percentile": _definition(
+        "sentiment.social_sentiment_percentile", "sentiment", "number", "fraction", "CONTEXTUAL",
+        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "sentiment.social_attention_percentile": _definition(
+        "sentiment.social_attention_percentile", "sentiment", "number", "fraction", "CONTEXTUAL",
+        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "sentiment.market_fear_greed": _definition(
+        "sentiment.market_fear_greed", "sentiment", "number", "score", "CONTEXTUAL",
+        freshness="2d", asset_scope=("MARKET",),
+        decision_role="POSITIONING_OVERLAY", context_group="positioning",
+    ),
+    "onchain.btc.mvrv": _definition(
+        "onchain.btc.mvrv", "cycle_context", "number", "ratio", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.mvrv_zscore": _definition(
+        "onchain.btc.mvrv_zscore", "cycle_context", "number", "zscore", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.realized_price": _definition(
+        "onchain.btc.realized_price", "cycle_context", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.market_to_realized_price": _definition(
+        "onchain.btc.market_to_realized_price", "cycle_context", "number", "ratio", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.sopr": _definition(
+        "onchain.btc.sopr", "cycle_context", "number", "ratio", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.lth_supply_pct": _definition(
+        "onchain.btc.lth_supply_pct", "cycle_context", "number", "fraction", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.lth_net_position_change": _definition(
+        "onchain.btc.lth_net_position_change", "cycle_context", "number", "fraction", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.sth_realized_price": _definition(
+        "onchain.btc.sth_realized_price", "cycle_context", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.lth_realized_price": _definition(
+        "onchain.btc.lth_realized_price", "cycle_context", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
+    "onchain.btc.nupl": _definition(
+        "onchain.btc.nupl", "cycle_context", "number", "fraction", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",),
+        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
+    ),
 }
 
 METRICS = METRIC_REGISTRY
@@ -248,6 +448,11 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         or definition.key.startswith("relative.return_vs_btc_")
         or definition.key == "market.drawdown"
         or definition.key.startswith("flows.")
+        or definition.key.startswith("derivatives.funding_rate")
+        or definition.key.startswith("derivatives.open_interest_change_")
+        or definition.key == "derivatives.futures_basis_annualized"
+        or definition.key == "sentiment.social_mentions_change_7d"
+        or definition.key in {"onchain.btc.mvrv_zscore", "onchain.btc.lth_net_position_change", "onchain.btc.nupl"}
     )
     if not signed and number < 0:
         raise ValueError(f"metric {definition.key} value must be non-negative")
@@ -261,6 +466,31 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         raise ValueError("metric market.drawdown value must be <= 0")
     if definition.key in {"market.btc_dominance", "market.breadth"} and number > 1:
         raise ValueError(f"metric {definition.key} fraction must be <= 1")
+    if definition.key in {
+        "derivatives.funding_rate_percentile",
+        "sentiment.social_bullish_share",
+        "sentiment.social_sentiment_percentile",
+        "sentiment.social_attention_percentile",
+        "onchain.btc.lth_supply_pct",
+    } and not 0 <= number <= 1:
+        raise ValueError(f"metric {definition.key} fraction must be <= 1")
+    if definition.key == "sentiment.market_fear_greed" and not 0 <= number <= 100:
+        raise ValueError("metric sentiment.market_fear_greed score must be in [0, 100]")
+    if definition.key in {
+        "derivatives.long_short_account_ratio",
+        "derivatives.top_trader_long_short_ratio",
+        "derivatives.open_interest_to_market_cap",
+        "onchain.btc.mvrv",
+        "onchain.btc.market_to_realized_price",
+        "onchain.btc.sopr",
+    } and number <= 0:
+        raise ValueError(f"metric {definition.key} ratio must be > 0")
+    if definition.key.startswith(("derivatives.open_interest_change_", "sentiment.social_mentions_change_")) or definition.key in {
+        "onchain.btc.lth_net_position_change",
+        "onchain.btc.nupl",
+    }:
+        if number < -1:
+            raise ValueError(f"metric {definition.key} change must be >= -1")
     return value
 
 
@@ -281,17 +511,42 @@ def metrics_for_factor(factor: str, *, asset: str | None = None) -> tuple[Metric
     return values
 
 
+def metrics_for_role(
+    decision_role: str,
+    *,
+    context_group: str | None = None,
+    asset: str | None = None,
+) -> tuple[MetricDefinition, ...]:
+    if not isinstance(decision_role, str) or not decision_role.strip():
+        raise ValueError("decision_role must be a non-empty string")
+    role = decision_role.strip().upper()
+    if role not in _DECISION_ROLES:
+        raise ValueError("decision_role is unsupported")
+    if context_group is not None and (not isinstance(context_group, str) or not context_group.strip()):
+        raise ValueError("context_group must be a non-empty string or null")
+    group = context_group.strip().lower() if context_group is not None else None
+    return tuple(
+        definition
+        for definition in METRIC_REGISTRY.values()
+        if definition.decision_role == role
+        and (group is None or definition.context_group == group)
+        and (asset is None or definition.applies_to(asset))
+    )
+
+
 validate_metric_key = metric_definition
 
 
 __all__ = [
     "METRIC_REGISTRY",
     "METRICS",
+    "DECISION_ROLES",
     "MetricDefinition",
     "get_metric_definition",
     "get_metric",
     "known_metric_keys",
     "metrics_for_factor",
+    "metrics_for_role",
     "metric_definition",
     "normalize_metric_key",
     "validate_metric_key",

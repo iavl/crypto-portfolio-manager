@@ -33,6 +33,8 @@ Trading:  advisory only; no automatic execution
 - Preserves evidence, factor scores, and append-only decision history.
 - Persists decision-relevant `MetricObservation` history and collection
   failures for compact current-vs-previous trend comparisons.
+- Adds derivatives/social positioning and BTC cycle context as non-scoring
+  overlays that can conservatively cap immediate deployment.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.
 - Treats stablecoins and cash as one sleeve and permits `NO_TRADE`.
 - Imports structured fields from Binance wallet screenshots and deterministically

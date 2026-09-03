@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..models.evidence import AssetAssessment
+from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 
 
@@ -94,6 +95,7 @@ def run_risk_gate(
     regime: str = "NORMAL",
     assessments: Mapping[str, AssetAssessment | Mapping[str, Any]] | None = None,
     current_drawdown: float | None = None,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> RiskCheckResult:
     resolved = policy or resolve_policy()
     if hasattr(target_weights, "target_weights"):
@@ -237,6 +239,44 @@ def run_risk_gate(
                 "capital-preservation allocation exceeds its satellite envelope",
             )
         )
+    if overlays is not None:
+        overlay_values = overlays if isinstance(overlays, MarketOverlays) else MarketOverlays.from_mapping(overlays)
+        if resolved.positioning.get("enabled", True):
+            for symbol, facts in overlay_values.positioning_by_asset.items():
+                if facts.bias in {"LONG_BIASED", "LONG_CROWDED"} and facts.risk in {"HIGH", "EXTREME"}:
+                    violations.append(
+                        RiskViolation(
+                            "WARNING",
+                            "POSITIONING_CROWDED_LONG",
+                            f"{symbol} has confirmed long-crowded positioning; immediate deployment should be conservative",
+                        )
+                    )
+                if facts.risk == "EXTREME" or facts.leverage_state == "EXTREME":
+                    violations.append(
+                        RiskViolation(
+                            "WARNING",
+                            "POSITIONING_EXTREME",
+                            f"{symbol} has extreme positioning risk; overlays cannot increase or independently exit exposure",
+                        )
+                    )
+        cycle = overlay_values.btc_cycle
+        if cycle is not None and resolved.btc_cycle.get("enabled", True):
+            if cycle.cycle_risk == "HIGH":
+                violations.append(
+                    RiskViolation(
+                        "WARNING",
+                        "BTC_CYCLE_RISK_HIGH",
+                        "BTC cycle context has high non-clock risk confirmation; target allocation remains unchanged",
+                    )
+                )
+            elif cycle.cycle_risk == "ELEVATED":
+                violations.append(
+                    RiskViolation(
+                        "WARNING",
+                        "BTC_CYCLE_RISK_ELEVATED",
+                        "BTC cycle context has elevated non-clock risk confirmation; deployment may be reduced",
+                    )
+                )
     return RiskCheckResult(tuple(violations))
 
 
@@ -247,6 +287,7 @@ def risk_gate(
     regime: str = "NORMAL",
     assessments: Mapping[str, AssetAssessment | Mapping[str, Any]] | None = None,
     current_drawdown: float | None = None,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> RiskCheckResult:
     return run_risk_gate(
         target_weights,
@@ -254,6 +295,7 @@ def risk_gate(
         regime=regime,
         assessments=assessments,
         current_drawdown=current_drawdown,
+        overlays=overlays,
     )
 
 

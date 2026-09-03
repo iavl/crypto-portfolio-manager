@@ -21,6 +21,8 @@
           "factor": {"type": "string", "minLength": 1},
           "value_type": {"enum": ["number", "string"]},
           "unit": {"type": ["string", "null"]},
+          "decision_role": {"enum": ["SCORING_FACTOR", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT"]},
+          "context_group": {"type": ["string", "null"]},
           "critical": {"type": "boolean"},
           "freshness": {"type": ["string", "number"]},
           "trend_enabled": {"type": "boolean"},

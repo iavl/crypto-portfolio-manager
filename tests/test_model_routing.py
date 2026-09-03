@@ -31,8 +31,8 @@ class ModelRoutingTests(unittest.TestCase):
             routing = load_model_routing()
         self.assertEqual(routing.routing_policy_version, 2)
         self.assertEqual(routing.profile, "balanced")
-        self.assertEqual(routing.preset_for_stage("factor_semantic_analysis"), "terra_medium")
-        self.assertEqual(load_model_routing(profile="efficient").preset_for_stage("source_conflict_resolution"), "terra_low")
+        self.assertEqual(routing.preset_for_stage("factor_semantic_analysis"), "luna_max")
+        self.assertEqual(load_model_routing(profile="efficient").preset_for_stage("source_conflict_resolution"), "luna_max")
         self.assertEqual(load_model_routing(profile="efficient").preset_for_stage("report_generation"), "luna_max")
         quality = load_model_routing(profile="quality")
         self.assertEqual(quality.preset_for_stage("major_event_analysis"), "sol_xhigh")
@@ -184,7 +184,7 @@ class ModelRoutingTests(unittest.TestCase):
         route = resolve_stage_route(
             "factor_semantic_analysis", routing=routing, runtime_capabilities=chatgpt
         )
-        self.assertEqual(route.requested_model, "gpt-5.6-terra")
+        self.assertEqual(route.requested_model, "gpt-5.6-luna")
         self.assertEqual(route.effective_model, "CURRENT_SESSION")
         self.assertEqual(route.effective_reasoning_effort, "inherit")
         self.assertTrue(route.fallback_used)
@@ -204,8 +204,8 @@ class ModelRoutingTests(unittest.TestCase):
         route = resolve_stage_route(
             "factor_semantic_analysis", routing=routing, runtime_capabilities=capable
         )
-        self.assertEqual(route.effective_model, "gpt-5.6-terra")
-        self.assertEqual(route.effective_reasoning_effort, "medium")
+        self.assertEqual(route.effective_model, "gpt-5.6-luna")
+        self.assertEqual(route.effective_reasoning_effort, "max")
         self.assertFalse(route.fallback_used)
 
     def test_unavailable_model_and_effort_are_explicit(self):
@@ -220,13 +220,13 @@ class ModelRoutingTests(unittest.TestCase):
             "CODEX",
             True,
             True,
-            ("gpt-5.6-terra",),
-            {"gpt-5.6-terra": ("low",)},
+            ("gpt-5.6-luna",),
+            {"gpt-5.6-luna": ("low",)},
         )
         route = resolve_stage_route(
             "factor_semantic_analysis", routing=routing, runtime_capabilities=limited
         )
-        self.assertEqual(route.effective_model, "gpt-5.6-terra")
+        self.assertEqual(route.effective_model, "CURRENT_SESSION")
         self.assertEqual(route.effective_reasoning_effort, "inherit")
         self.assertTrue(route.fallback_used)
         self.assertIn("reasoning effort", route.fallback_reason)
@@ -238,7 +238,7 @@ class ModelRoutingTests(unittest.TestCase):
         self.assertEqual(metadata["profile"], "balanced")
         self.assertEqual(metadata["runtime"], "CODEX")
         self.assertEqual(len(metadata["stages"]), len(PYTHON_STAGES | LLM_STAGES))
-        self.assertEqual(metadata["stages"]["factor_semantic_analysis"]["effective_model"], "gpt-5.6-terra")
+        self.assertEqual(metadata["stages"]["factor_semantic_analysis"]["effective_model"], "gpt-5.6-luna")
         self.assertEqual(len(metadata["config_hash"]), 64)
         self.assertNotIn("reasoning", json.dumps(metadata).lower().replace("reasoning_effort", ""))
         self.assertNotEqual(routing.config_hash, load_model_routing(profile="quality").config_hash)

@@ -41,9 +41,10 @@ may only provide bounded semantic judgment or explanation. They must not
 recompute or alter Python outputs. Deterministic financial calculations belong
 to Python, and LLM must never silently override deterministic engine outputs.
 
-Every Luna-assigned stage uses `LUNA_MAX` only. Terra handles bounded normal
-semantic interpretation and report prose. Sol is conditional and reserved for
-major event/thesis-risk analysis or a high-impact final critique. Logical
+Every Luna-assigned stage uses `LUNA_MAX` only. The current balanced profile
+also routes bounded semantic interpretation and report prose through the
+configured `LUNA_MAX` preset. Sol is conditional and reserved for major
+event/thesis-risk analysis or a high-impact final critique. Logical
 routing is recorded in `config/model-routing.json`; runtime model IDs are not
 hard-coded here. Load the effective model/reasoning profile before any
 LLM-owned stage, honoring the default, explicit profile, and run override.
@@ -103,6 +104,8 @@ display data, so the engine uses value ÷ quantity and records a note.
 10. Build deterministic Facts and compact factor packets, then run
     deterministic scoring and missing-factor coverage checks; publish the
     collection summary with weighted coverage and resulting confidence.
+    Build `PositioningFacts` and `BTCCycleContext` separately; their metrics
+    are context overlays and never base scoring factors.
 11. Run the regime engine.
 12. Run the allocation engine.
 13. Run the risk gate and stop on `ERROR` violations.
@@ -110,26 +113,29 @@ display data, so the engine uses value ÷ quantity and records a note.
 15. Run the rebalance engine.
 16. Reconcile executable trade dollars.
 17. Evaluate `NO_TRADE` before proposing a transaction.
-18. After a rebalance approves an `INCREASE` amount, obtain a timestamped
+18. After a rebalance approves an `INCREASE` amount, apply the positioning and
+    cycle deployment cap; overlays may reduce staging or produce a confirmed
+    `WAIT`, but cannot increase the approved amount or change target allocation.
+19. After a rebalance approves an `INCREASE` amount, obtain a timestamped
     `SpotPrice`, normalized completed daily OHLCV, and—when available—completed
     `1H` or `4H` OHLCV from one consistent liquid spot venue.
-19. Validate observation freshness, timeframe cadence, calendar coverage, and
+20. Validate observation freshness, timeframe cadence, calendar coverage, and
     provenance; build the daily `TechnicalSnapshot` for MA/ATR/trend and a
     Volume Profile from intraday data (or the explicitly capped daily fallback).
     Merge profile nodes with confirmed MA/swing/ATR structure, run the
     deterministic entry planner, and validate the resulting `ExecutionPlan`
     with `validate_execution_plan`.
-20. Bind the plan to exactly one matching approved `RebalanceAction`, create
+21. Bind the plan to exactly one matching approved `RebalanceAction`, create
     `execution_technical` evidence, and cache normalized OHLCV and Volume
     Profile artifacts by hash before persistence.
-21. Build a finalized immutable ReportPacket and produce the Chinese
+22. Build a finalized immutable ReportPacket and produce the Chinese
     user-facing report using `references/output-template.md`. Every normal review shows Position P&L
     when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
     `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
     return. `FULL_REVIEW` also compares the prior/current return by asset in
     percentage points; `SNAPSHOT_REVIEW` shows the current table without
     treating cost basis as a buy signal.
-22. Persist only validated snapshots, decisions, execution plans, metric
+23. Persist only validated snapshots, decisions, execution plans, metric
     observations, collection events, and complete
     evidence. Never
     rewrite prior rationale or mark a trade executed without explicit
@@ -137,6 +143,26 @@ display data, so the engine uses value ÷ quantity and records a note.
 
 When the user explicitly requests a dry run or no persistence, do not append
 runtime state.
+
+## Positioning and BTC cycle overlays
+
+Python builds derivatives positioning and BTC cycle context after normalized
+observations. Funding, open interest, ratios, liquidations, basis, structured
+social metrics, halving timing, and optional BTC on-chain metrics retain their
+source, scope/methodology, observed time, and evidence IDs.
+
+These are overlays, not new weighted factors. They do not enter `FactorScore`,
+base `scoring_weights`, missing-factor renormalization, or base evidence
+coverage. Positioning needs multiple compatible derivatives confirmations for
+`CROWDED`/`EXTREME`; social-only euphoria never creates an extreme state. The
+halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
+`REDUCE`, or `EXIT`.
+
+Allocation and risk remain authoritative for target weights and approved
+dollars. Execution may use `min(base, positioning, cycle)` to cap immediate
+deployment, retain the remainder as unallocated, reject chasing when extension
+and confirmed long crowding agree, or return `WAIT`. A deleveraged state only
+removes a crowding penalty; it never boosts exposure.
 
 ## Visible evidence collection
 
