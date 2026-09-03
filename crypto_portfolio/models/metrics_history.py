@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..metrics_registry import metric_definition, normalize_metric_key
+from ..metrics_registry import metric_definition, normalize_metric_key, validate_metric_value
 from .time import normalize_timestamp, parse_timestamp
 
 
@@ -114,6 +114,8 @@ class MetricObservation:
                 raise ValueError(f"metric {key} value must be numeric")
             if definition.expected_type == "string" and not isinstance(value, str):
                 raise ValueError(f"metric {key} value must be a string")
+            if definition.decision_role != "SCORING_FACTOR":
+                validate_metric_value(key, value)
         object.__setattr__(self, "value", value)
         unit = _optional_text(self.unit, "unit")
         if unit is not None and definition.unit is not None and unit.upper() != definition.unit.upper():
@@ -221,6 +223,8 @@ class MetricObservation:
             "metric_key": self.metric_key,
             "unit": self.unit,
             "period": self.period,
+            "decision_role": metric_definition(self.metric_key).decision_role,
+            "context_group": metric_definition(self.metric_key).context_group,
         })
         if self.supersedes_observation_id is not None:
             metadata.update({

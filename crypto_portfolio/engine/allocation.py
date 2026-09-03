@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..models.evidence import AssetAssessment, FactorScore
+from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
 
 
@@ -173,8 +174,13 @@ def build_target_allocation(
     regime: str = "NORMAL",
     assessments: Mapping[str, AssetAssessment | Mapping[str, Any] | float] | None = None,
     current_weights: Mapping[str, float] | None = None,
+    *,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
+    if overlays is not None:
+        if not isinstance(overlays, MarketOverlays):
+            MarketOverlays.from_mapping(overlays)
     regime_name = regime.regime if hasattr(regime, "regime") else str(regime).upper()
     limits: RegimeLimits = resolved.regime(regime_name)
     if not resolved.stable_symbols:
@@ -323,8 +329,10 @@ def allocate(
     regime: str = "NORMAL",
     assessments: Mapping[str, AssetAssessment | Mapping[str, Any] | float] | None = None,
     current_weights: Mapping[str, float] | None = None,
+    *,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> AllocationResult:
-    return build_target_allocation(policy, regime, assessments, current_weights)
+    return build_target_allocation(policy, regime, assessments, current_weights, overlays=overlays)
 
 
 __all__ = ["AllocationResult", "allocate", "build_target_allocation", "satellite_eligibility"]

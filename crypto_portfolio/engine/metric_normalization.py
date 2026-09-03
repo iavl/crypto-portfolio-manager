@@ -136,7 +136,8 @@ def normalize_metric_observation(
         "observation_id", "asset", "metric_key", "status", "value", "unit", "period",
         "observed_at", "fetched_at", "source", "freshness", "confidence", "decision_id",
         "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason",
-        "timestamp", "event_id",
+        "timestamp", "event_id", "venue", "aggregation_scope", "scope", "funding_interval",
+        "interval", "methodology", "method",
     }
     unknown = set(value) - allowed
     if unknown:
@@ -170,6 +171,10 @@ def normalize_metric_observation(
         observation_value,
         value.get("period"),
     )
+    metadata = dict(value.get("metadata") or {})
+    for field in ("venue", "aggregation_scope", "scope", "funding_interval", "interval", "methodology", "method"):
+        if field in value:
+            metadata[field] = value[field]
     return MetricObservation(
         observation_id=observation_id,
         asset=asset,
@@ -186,7 +191,7 @@ def normalize_metric_observation(
         decision_id=value.get("decision_id", decision_id),
         review_type=value.get("review_type", review_type),
         summary=value.get("summary"),
-        metadata=value.get("metadata"),
+        metadata=metadata or None,
         supersedes_observation_id=value.get("supersedes_observation_id"),
         revision_reason=value.get("revision_reason"),
     )

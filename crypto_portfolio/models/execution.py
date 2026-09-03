@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from .time import normalize_timestamp
 from .volume_profile import VolumeNode
+from .factor_packet import freeze_packet_value, thaw_packet_value
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
@@ -270,6 +271,10 @@ class ExecutionPlan:
     technical_summary: Mapping[str, Any] | None = None
     volume_profile_hash: str | None = None
     volume_profile_metadata: Mapping[str, Any] | None = None
+    positioning_summary: Mapping[str, Any] | None = None
+    btc_cycle_summary: Mapping[str, Any] | None = None
+    effective_deployment_factor: float | None = None
+    overlay_warnings: tuple[str, ...] = ()
 
     @property
     def profile_hash(self) -> str | None:
@@ -415,6 +420,23 @@ class ExecutionPlan:
             object.__setattr__(self, "invalidation", _text(self.invalidation, "invalidation"))
         elif isinstance(self.invalidation, Mapping):
             object.__setattr__(self, "invalidation", Invalidation.from_mapping(self.invalidation))
+        for field_name in ("positioning_summary", "btc_cycle_summary"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if hasattr(value, "as_dict"):
+                    value = value.as_dict()
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{field_name} must be an object or null")
+                object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        if self.effective_deployment_factor is not None:
+            factor = _number(self.effective_deployment_factor, "effective_deployment_factor", minimum=0.0)
+            if factor > 1:
+                raise ValueError("effective_deployment_factor must be <= 1")
+            object.__setattr__(self, "effective_deployment_factor", factor)
+        warnings = tuple(_text(item, "overlay_warnings") for item in self.overlay_warnings)
+        if len(warnings) != len(set(warnings)):
+            raise ValueError("overlay_warnings must contain unique values")
+        object.__setattr__(self, "overlay_warnings", warnings)
         if self.execution_plan_version >= 2 and self.technical_summary is None:
             raise ValueError("execution plan version 2 requires technical_summary")
         if self.technical_summary is not None:
@@ -566,6 +588,14 @@ class ExecutionPlan:
             result["volume_profile_metadata"] = dict(self.volume_profile_metadata)
         if self.technical_summary is not None:
             result["technical_summary"] = dict(self.technical_summary)
+        if self.positioning_summary is not None:
+            result["positioning_summary"] = thaw_packet_value(self.positioning_summary)
+        if self.btc_cycle_summary is not None:
+            result["btc_cycle_summary"] = thaw_packet_value(self.btc_cycle_summary)
+        if self.effective_deployment_factor is not None:
+            result["effective_deployment_factor"] = self.effective_deployment_factor
+        if self.overlay_warnings:
+            result["overlay_warnings"] = list(self.overlay_warnings)
         if isinstance(self.invalidation, Invalidation):
             result["invalidation"] = self.invalidation.as_dict()
         return result
@@ -579,6 +609,7 @@ class ExecutionPlan:
             "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
             "volume_profile_hash", "profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
+            "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -617,6 +648,10 @@ class ExecutionPlan:
             volume_profile_metadata=value.get("volume_profile_metadata"),
             ohlcv_metadata=value.get("ohlcv_metadata"),
             technical_summary=value.get("technical_summary"),
+            positioning_summary=value.get("positioning_summary"),
+            btc_cycle_summary=value.get("btc_cycle_summary"),
+            effective_deployment_factor=value.get("effective_deployment_factor"),
+            overlay_warnings=tuple(value.get("overlay_warnings", ())),
         )
 
 

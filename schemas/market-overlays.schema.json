@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/market-overlays.schema.json",
+  "title": "Compact market overlays",
+  "type": "object",
+  "required": ["positioning_by_asset", "btc_cycle", "overlay_confidence", "warnings", "effective_deployment_caps"],
+  "properties": {
+    "positioning_by_asset": {"type": "object", "additionalProperties": {"type": "object"}},
+    "btc_cycle": {"type": ["object", "null"]},
+    "overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+    "warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "effective_deployment_caps": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
+  },
+  "additionalProperties": false
+}

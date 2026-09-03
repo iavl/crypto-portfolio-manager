@@ -32,6 +32,21 @@ Create a repeatable 0–100 measure of portfolio attractiveness. The score is no
 
 Total: 100%.
 
+## Positioning and cycle overlays
+
+Derivatives Positioning, structured Community Sentiment, and BTC Cycle Context
+are downstream overlays. They receive no base scoring weight and are excluded
+from missing-factor renormalization and the base evidence-coverage denominator.
+They answer whether deployment should be cautious, not whether the asset is
+attractive on the medium-term thesis.
+
+Funding, open interest, compatible long/short ratios, liquidations, and basis
+can confirm crowding. `CROWDED` requires multiple compatible derivatives
+confirmations; social euphoria is lower-authority confirmation only. BTC
+halving timing is descriptive context and cannot change the base score or
+create a trade by itself. MVRV, realized-price, trend, and flow information is
+referenced as confirmation rather than scored a second time.
+
 ## Factor scoring
 
 Each factor receives 0–100:

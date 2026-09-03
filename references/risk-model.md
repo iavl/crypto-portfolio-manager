@@ -157,3 +157,20 @@ When reducing risk, generally prefer:
 `weak/high-beta configured satellites -> stronger configured satellites -> configured core assets -> stablecoin`
 
 This is a default hierarchy, not an absolute rule. A severe asset-specific event can make a core asset reduce faster than a satellite.
+
+## Positioning and cycle warnings
+
+Derivatives positioning and BTC Cycle Context are execution overlays, not
+additional portfolio risk budgets. The risk gate may emit
+`POSITIONING_CROWDED_LONG`, `POSITIONING_EXTREME`,
+`BTC_CYCLE_RISK_ELEVATED`, or `BTC_CYCLE_RISK_HIGH` as warnings. They do not
+change target weights, independently create `REDUCE`/`EXIT`, or override the
+base portfolio risk gate.
+
+For an approved `INCREASE`, immediate deployment uses the configured minimum
+of the base, positioning, and cycle factors. High long-crowding may cap the
+first deployment to 50% and extreme positioning to 25% under the default
+policy; elevated and high cycle risk default to 80% and 50%. A confirmed
+technical extension plus long crowding can produce `WAIT`. Deleveraging only
+removes a crowding penalty and never boosts exposure. The halving clock alone
+has no risk or trade authority.

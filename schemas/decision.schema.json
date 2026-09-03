@@ -64,6 +64,7 @@
     "config": {"type": ["object", "null"]},
     "routing_metadata": {"type": ["object", "null"]},
     "execution_plans": {"type": ["object", "null"], "additionalProperties": {"$ref": "#/$defs/executionPlan"}}
+    ,"market_overlays": {"type": ["object", "null"]}
   },
   "additionalProperties": false,
   "$defs": {
@@ -103,6 +104,10 @@
         "volume_profile_metadata": {"type": ["object", "null"]},
         "ohlcv_metadata": {"$ref": "#/$defs/ohlcvMetadata"},
         "technical_summary": {"$ref": "#/$defs/technicalSummary"}
+        ,"positioning_summary": {"type": ["object", "null"]}
+        ,"btc_cycle_summary": {"type": ["object", "null"]}
+        ,"effective_deployment_factor": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+        ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       },
       "additionalProperties": false,
       "allOf": [

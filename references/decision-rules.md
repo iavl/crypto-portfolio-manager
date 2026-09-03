@@ -178,3 +178,27 @@ Every material trade recommendation should state what would change it, such as:
 Do not reverse a medium-term recommendation based solely on one or two noisy daily candles.
 
 A new recommendation that contradicts the prior two-week thesis should identify the new evidence that justifies the change.
+
+## Rule 12 — Positioning and cycle context
+
+Derivatives positioning, structured social sentiment, and BTC Cycle Context are
+overlays. They never add a weighted scoring factor, change the base score, or
+create a target allocation. The base model still answers whether the exposure
+is wanted; overlays answer whether now is a cautious time to deploy it.
+
+Use compatible funding, open-interest, ratio, liquidation, and basis series.
+Persistent funding and multiple derivatives confirmations are required before
+calling positioning `CROWDED` or `EXTREME`; one print or one social signal is
+not enough. Social-only euphoria remains low-authority context and cannot
+create `WAIT`, `REDUCE`, or `EXIT`.
+
+Halving timing and days since halving are descriptive. A clock-only cycle
+context is low confidence and cannot create `WAIT`, `INCREASE`, `REDUCE`, or
+`EXIT`. Elevated/high cycle risk needs independent price, valuation, holder,
+flow/liquidity, or positioning confirmation.
+
+After allocation, risk, and rebalance approve an `INCREASE`, execution may cap
+the staged amount with `min(base, positioning, cycle)`. It may leave the
+remainder unallocated or return `WAIT` for confirmed technical extension plus
+long crowding. It may never increase approved dollars. `DELEVERAGED` only
+removes a crowding penalty; it is not a positive exposure signal.

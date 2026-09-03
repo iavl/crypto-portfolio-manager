@@ -25,6 +25,7 @@ _GLOBAL_METRICS = (
     "flows.etf_net_1d",
     "flows.etf_net_7d",
     "flows.etf_net_30d",
+    "sentiment.market_fear_greed",
 )
 _ASSET_METRICS = (
     "market.spot_price",
@@ -67,6 +68,41 @@ _RELATIVE_METRICS = (
     "relative.return_vs_btc_30d",
     "relative.return_vs_btc_90d",
     "relative.return_vs_btc_180d",
+)
+_POSITIONING_METRICS = (
+    "derivatives.funding_rate",
+    "derivatives.funding_rate_24h_avg",
+    "derivatives.funding_rate_7d_avg",
+    "derivatives.funding_rate_percentile",
+    "derivatives.open_interest_usd",
+    "derivatives.open_interest_change_1d",
+    "derivatives.open_interest_change_7d",
+    "derivatives.open_interest_to_market_cap",
+    "derivatives.long_short_account_ratio",
+    "derivatives.top_trader_long_short_ratio",
+    "derivatives.long_liquidations_24h_usd",
+    "derivatives.short_liquidations_24h_usd",
+    "derivatives.total_liquidations_24h_usd",
+    "derivatives.long_liquidations_7d_usd",
+    "derivatives.short_liquidations_7d_usd",
+    "derivatives.futures_basis_annualized",
+    "sentiment.social_bullish_share",
+    "sentiment.social_mentions_24h",
+    "sentiment.social_mentions_change_7d",
+    "sentiment.social_sentiment_percentile",
+    "sentiment.social_attention_percentile",
+)
+_BTC_CYCLE_METRICS = (
+    "onchain.btc.mvrv",
+    "onchain.btc.mvrv_zscore",
+    "onchain.btc.realized_price",
+    "onchain.btc.market_to_realized_price",
+    "onchain.btc.sopr",
+    "onchain.btc.lth_supply_pct",
+    "onchain.btc.lth_net_position_change",
+    "onchain.btc.sth_realized_price",
+    "onchain.btc.lth_realized_price",
+    "onchain.btc.nupl",
 )
 
 
@@ -177,6 +213,7 @@ class MetricRequest:
         allowed = {
             "asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness",
             "trend_enabled", "can_reuse", "cached_observation_id", "reason", "definition",
+            "decision_role", "context_group",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -186,14 +223,28 @@ class MetricRequest:
             raise ValueError("metric request value_type does not match the registry")
         if "unit" in data and data["unit"] != definition.unit:
             raise ValueError("metric request unit does not match the registry")
+        if "decision_role" in data and str(data["decision_role"]).strip().upper() != definition.decision_role:
+            raise ValueError("metric request decision_role does not match the registry")
+        if "context_group" in data and data["context_group"] != definition.context_group:
+            raise ValueError("metric request context_group does not match the registry")
         data.pop("value_type", None)
         data.pop("unit", None)
         data.pop("definition", None)
+        data.pop("decision_role", None)
+        data.pop("context_group", None)
         return cls(**data)
 
     @property
     def freshness_requirement(self) -> str | int | float:
         return self.freshness
+
+    @property
+    def decision_role(self) -> str:
+        return self.definition.decision_role
+
+    @property
+    def context_group(self) -> str | None:
+        return self.definition.context_group
 
     def as_dict(self) -> dict[str, Any]:
         result = {
@@ -202,6 +253,8 @@ class MetricRequest:
             "factor": self.factor,
             "value_type": self.definition.value_type,
             "unit": self.definition.unit,
+            "decision_role": self.definition.decision_role,
+            "context_group": self.definition.context_group,
             "critical": self.critical,
             "freshness": self.freshness,
             "trend_enabled": self.trend_enabled,
@@ -378,7 +431,8 @@ def _fresh_enough(observation: MetricObservation, definition: MetricDefinition, 
     if not isinstance(window, str) or not window.lower().endswith("d"):
         return True
     days = int(window[:-1])
-    return (parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of) - parse_timestamp(observation.observed_at)).total_seconds() <= days * 86400
+    age = (parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of) - parse_timestamp(observation.observed_at)).total_seconds()
+    return 0 <= age <= days * 86400
 
 
 def _latest_cached(
@@ -466,6 +520,11 @@ def build_metric_collection_plan(
             discovery.append(symbol)
         for key in _ASSET_METRICS:
             add(symbol, key, "asset market, risk, and decision factors")
+        for key in _POSITIONING_METRICS:
+            add(symbol, key, "derivatives positioning and social context")
+        if symbol == "BTC":
+            for key in _BTC_CYCLE_METRICS:
+                add(symbol, key, "BTC cycle and on-chain context")
         if symbol != "BTC":
             for key in _RELATIVE_METRICS:
                 add(symbol, key, "BTC-relative performance")

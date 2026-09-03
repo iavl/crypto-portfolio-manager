@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from .evidence import AssetAssessment, Evidence, FactorScore
 from .execution import ExecutionPlan
+from .factor_packet import freeze_packet_value, thaw_packet_value
 from .policy import policy_hash
 from .time import normalize_timestamp
 
@@ -60,6 +61,7 @@ class Decision:
     based_on_snapshot_id: str | None = None
     execution_plans: Mapping[str, ExecutionPlan | Mapping[str, Any]] | None = None
     routing_metadata: Mapping[str, Any] | None = None
+    market_overlays: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -111,6 +113,11 @@ class Decision:
             parsed_factor_scores[normalized_symbol] = assessment
         object.__setattr__(self, "factor_scores", parsed_factor_scores)
         object.__setattr__(self, "constraints_applied", tuple(self.constraints_applied))
+        if self.market_overlays is not None:
+            value = self.market_overlays.as_dict() if hasattr(self.market_overlays, "as_dict") else self.market_overlays
+            if not isinstance(value, Mapping):
+                raise ValueError("market_overlays must be an object or null")
+            object.__setattr__(self, "market_overlays", freeze_packet_value(value, path="market_overlays"))
         if self.config is not None:
             if not isinstance(self.config, Mapping):
                 raise ValueError("config must be an object or null")
@@ -337,6 +344,7 @@ class Decision:
             based_on_snapshot_id=data.get("based_on_snapshot_id"),
             execution_plans=data.get("execution_plans"),
             routing_metadata=data.get("routing_metadata"),
+            market_overlays=data.get("market_overlays"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -375,6 +383,8 @@ class Decision:
             }
         if self.routing_metadata is not None:
             result["routing_metadata"] = dict(self.routing_metadata)
+        if self.market_overlays is not None:
+            result["market_overlays"] = thaw_packet_value(self.market_overlays)
         return result
 
 
