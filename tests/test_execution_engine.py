@@ -84,6 +84,14 @@ class ExecutionEngineTests(unittest.TestCase):
         stale_plan = build_entry_plan("ETH", 2000, stale_snapshot, "NORMAL", "HIGH")
         self.assertEqual(stale_plan.action, "WAIT")
 
+    def test_low_confidence_returns_wait_not_crash(self):
+        low = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "LOW")
+        self.assertEqual(low.action, "WAIT")
+        self.assertEqual(low.entry_mode, "WAIT")
+        self.assertEqual(low.planned_amount_usd, 0)
+        self.assertEqual(low.unallocated_amount_usd, 2000)
+        self.assertTrue(validate_execution_plan(low))
+
     def test_regime_and_confidence_are_monotonic(self):
         normal = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
         defensive = build_entry_plan("ETH", 2000, self.snapshot, "DEFENSIVE", "HIGH")
@@ -285,6 +293,7 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_cached_ohlcv_is_immutable(self):
         original = series()
+        # Different provenance is different content: it gets its own entry.
         different_provenance = OHLCVSeries(
             original.symbol,
             original.timeframe,
@@ -292,11 +301,20 @@ class ExecutionEngineTests(unittest.TestCase):
             source="other",
             fetched_at=original.fetched_at,
         )
-        self.assertEqual(original.ohlcv_hash, different_provenance.ohlcv_hash)
+        self.assertNotEqual(original.ohlcv_hash, different_provenance.ohlcv_hash)
         with tempfile.TemporaryDirectory() as directory:
             cache_ohlcv(original, directory)
-            with self.assertRaises(ValueError):
-                cache_ohlcv(different_provenance, directory)
+            cache_ohlcv(different_provenance, directory)
+            self.assertEqual(load_ohlcv(original.ohlcv_hash, directory), original)
+            self.assertEqual(
+                load_ohlcv(different_provenance.ohlcv_hash, directory), different_provenance
+            )
+        # Identical content with a later fetch time is a cache hit, not a change.
+        refetch = replace(original, fetched_at="2026-01-02T00:00:00Z")
+        self.assertEqual(refetch.ohlcv_hash, original.ohlcv_hash)
+        with tempfile.TemporaryDirectory() as directory:
+            path = cache_ohlcv(original, directory)
+            self.assertEqual(cache_ohlcv(refetch, directory), path)
 
 
 if __name__ == "__main__":

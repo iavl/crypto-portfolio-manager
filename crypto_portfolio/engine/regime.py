@@ -65,7 +65,7 @@ def _drawdown_level(value: str | float, policy: Policy) -> tuple[bool, bool, str
         if drawdown != drawdown or drawdown == float("inf") or drawdown == float("-inf"):
             raise ValueError("portfolio_drawdown_band must be finite")
         budget = policy.max_portfolio_drawdown
-        if drawdown <= -budget:
+        if drawdown < -budget:
             return True, True, f"portfolio drawdown {drawdown:.2%} breached the risk budget"
         if drawdown <= -0.6 * budget:
             return True, False, f"portfolio drawdown {drawdown:.2%} is materially elevated"

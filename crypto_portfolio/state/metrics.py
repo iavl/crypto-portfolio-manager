@@ -57,7 +57,10 @@ def append_metric_observation(
 ) -> Path:
     model = _observation(observation)
     destination = Path(path or default_observations_path())
-    existing = read_metric_observations(destination)
+    # Legacy records may no longer parse; they cannot collide with the new
+    # observation's dedup identity, so read tolerantly and continue.
+    invalid: list[str] = []
+    existing = read_metric_observations(destination, invalid=invalid)
     for item in existing:
         if item.observation_id == model.observation_id:
             if _same_identity(item, model):
@@ -73,7 +76,8 @@ def append_metric_observation(
             and item.period == model.period
         )
     ]
-    if any(_same_value(item.value, model.value) for item in same_point):
+    is_revision = model.supersedes_observation_id is not None
+    if any(_same_value(item.value, model.value) for item in same_point) and not is_revision:
         return destination
     if same_point:
         if model.supersedes_observation_id not in {item.observation_id for item in same_point}:
@@ -107,8 +111,25 @@ def read_metric_observations(
     metric_key: str | None = None,
     start: str | datetime | None = None,
     end: str | datetime | None = None,
+    invalid: list[str] | None = None,
 ) -> list[MetricObservation]:
-    records = [MetricObservation.from_mapping(item) for item in read_records(path or default_observations_path())]
+    """Read canonical observations.
+
+    Persistence is strictly validated, but *historical* files are append-only
+    and may contain records written before registry/schema changes. History
+    must inform, not block, a new review, so records that no longer parse are
+    skipped and reported through ``invalid`` (a collector for human-readable
+    messages) instead of failing the whole read. Callers that require strict
+    reads simply omit ``invalid`` and keep the raising behavior.
+    """
+    records: list[MetricObservation] = []
+    for item in read_records(path or default_observations_path()):
+        try:
+            records.append(MetricObservation.from_mapping(item))
+        except ValueError as exc:
+            if invalid is None:
+                raise
+            invalid.append(str(exc))
     if asset is not None and (not isinstance(asset, str) or not asset.strip()):
         raise ValueError("asset must be a non-empty string or null")
     normalized_asset = asset.strip().upper() if asset is not None else None
@@ -125,8 +146,24 @@ def read_metric_observations(
     return result
 
 
-def read_collection_events(path: str | Path | None = None) -> list[CollectionEvent]:
-    return [CollectionEvent.from_mapping(item) for item in read_records(path or default_collection_events_path())]
+def read_collection_events(
+    path: str | Path | None = None,
+    *,
+    invalid: list[str] | None = None,
+) -> list[CollectionEvent]:
+    """Read collection events, skipping legacy records that no longer parse.
+
+    See :func:`read_metric_observations` for the historical-file rationale.
+    """
+    records: list[CollectionEvent] = []
+    for item in read_records(path or default_collection_events_path()):
+        try:
+            records.append(CollectionEvent.from_mapping(item))
+        except ValueError as exc:
+            if invalid is None:
+                raise
+            invalid.append(str(exc))
+    return records
 
 
 default_metric_observation_path = default_observations_path
@@ -142,8 +179,11 @@ def _series(
     path: str | Path | None = None,
     start: str | datetime | None = None,
     end: str | datetime | None = None,
+    invalid: list[str] | None = None,
 ) -> list[MetricObservation]:
-    values = read_metric_observations(path, asset=asset, metric_key=metric_key, start=start, end=end)
+    values = read_metric_observations(
+        path, asset=asset, metric_key=metric_key, start=start, end=end, invalid=invalid
+    )
     return sorted(enumerate(values), key=lambda item: (parse_timestamp(item[1].observed_at), item[0]))
 
 
@@ -154,8 +194,14 @@ def metric_series(
     start: str | datetime | None = None,
     end: str | datetime | None = None,
     path: str | Path | None = None,
+    invalid: list[str] | None = None,
 ) -> list[MetricObservation]:
-    return [item for _, item in _series(asset, metric_key, path=path, start=start, end=end)]
+    return [
+        item
+        for _, item in _series(
+            asset, metric_key, path=path, start=start, end=end, invalid=invalid
+        )
+    ]
 
 
 def latest_metric(
@@ -163,8 +209,9 @@ def latest_metric(
     metric_key: str,
     *,
     path: str | Path | None = None,
+    invalid: list[str] | None = None,
 ) -> MetricObservation | None:
-    values = metric_series(asset, metric_key, path=path)
+    values = metric_series(asset, metric_key, path=path, invalid=invalid)
     return values[-1] if values else None
 
 
@@ -173,8 +220,9 @@ def previous_metric(
     metric_key: str,
     *,
     path: str | Path | None = None,
+    invalid: list[str] | None = None,
 ) -> MetricObservation | None:
-    values = metric_series(asset, metric_key, path=path)
+    values = metric_series(asset, metric_key, path=path, invalid=invalid)
     if not values:
         return None
     latest_time = values[-1].observed_at
@@ -218,8 +266,9 @@ def trend_summary(
     *,
     path: str | Path | None = None,
     limit: int | None = None,
+    invalid: list[str] | None = None,
 ) -> dict[str, Any]:
-    values = metric_series(asset, metric_key, path=path)
+    values = metric_series(asset, metric_key, path=path, invalid=invalid)
     if limit is not None:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive integer or null")
@@ -262,9 +311,10 @@ def compare_latest_metric(
     metric_key: str,
     *,
     path: str | Path | None = None,
+    invalid: list[str] | None = None,
 ) -> dict[str, Any]:
-    latest = latest_metric(asset, metric_key, path=path)
-    previous = previous_metric(asset, metric_key, path=path)
+    latest = latest_metric(asset, metric_key, path=path, invalid=invalid)
+    previous = previous_metric(asset, metric_key, path=path, invalid=invalid)
     canonical_key = metric_definition(metric_key).key
     result: dict[str, Any] = {
         "asset": asset.strip().upper(),
@@ -283,7 +333,7 @@ def compare_latest_metric(
         "trend": "INSUFFICIENT_HISTORY",
         "stale": bool(latest and latest.freshness != "CURRENT"),
     }
-    result["recent_trend"] = trend_summary(asset, canonical_key, path=path, limit=3)
+    result["recent_trend"] = trend_summary(asset, canonical_key, path=path, limit=3, invalid=invalid)
     if latest is None or previous is None:
         return result
     absolute, percentage = _numeric_change(latest.value, previous.value)
@@ -302,10 +352,13 @@ def metric_history_context(
     metric_keys: Iterable[str],
     *,
     path: str | Path | None = None,
+    invalid: list[str] | None = None,
 ) -> dict[str, Any]:
     normalized_asset = asset.strip().upper()
     return {
-        metric_definition(key).key: compare_latest_metric(normalized_asset, key, path=path)
+        metric_definition(key).key: compare_latest_metric(
+            normalized_asset, key, path=path, invalid=invalid
+        )
         for key in metric_keys
     }
 

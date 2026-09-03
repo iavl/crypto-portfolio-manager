@@ -1013,6 +1013,8 @@ def _parse_btc_cycle(value: Any, *, allow_missing: bool = False) -> dict[str, An
     }
     if holder_parsed["lth_distribution_threshold"] >= 0 or holder_parsed["lth_accumulation_threshold"] <= 0:
         raise PolicyError("btc_cycle holder LTH thresholds have invalid signs")
+    if holder_parsed["sopr_distribution_threshold"] <= 1:
+        raise PolicyError("btc_cycle.holder.sopr_distribution_threshold must be > 1")
     flows = value.get("flows", {})
     if not isinstance(flows, dict):
         raise PolicyError("btc_cycle.flows must be an object")

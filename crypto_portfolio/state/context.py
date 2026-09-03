@@ -19,7 +19,10 @@ from .snapshots import read_snapshots
 
 
 def _latest(records: list[dict[str, Any]]) -> dict[str, Any] | None:
-    return max(records, key=lambda item: parse_timestamp(item["timestamp"])) if records else None
+    # Tie-break on append order so equal timestamps resolve to the newest
+    # persisted record, not an arbitrary one.
+    indexed = enumerate(records)
+    return max(indexed, key=lambda item: (parse_timestamp(item[1]["timestamp"]), item[0]))[1] if records else None
 
 
 def latest_snapshot(path: str | Path | None = None) -> dict[str, Any] | None:
@@ -32,16 +35,25 @@ def latest_decision(path: str | Path | None = None) -> dict[str, Any] | None:
 
 def portfolio_nav_history(path: str | Path | None = None):
     snapshots = []
-    for record in read_snapshots(path):
+    for index, record in enumerate(read_snapshots(path)):
         snapshot, _, _ = snapshot_from_mapping(record)
-        snapshots.append(
+        snapshots.append((index, snapshot))
+    # Append order is not guaranteed to be chronological; NAV history requires
+    # strictly increasing timestamps, so sort by timestamp with append-order
+    # as a deterministic tie-break for equal timestamps.
+    snapshots.sort(
+        key=lambda item: (parse_timestamp(item[1].timestamp), item[0])
+    )
+    return build_nav_history(
+        [
             LedgerSnapshot(
                 snapshot.timestamp,
                 snapshot.total_value_usd,
                 snapshot.external_cash_flow,
             )
-        )
-    return build_nav_history(snapshots) if snapshots else []
+            for _, snapshot in snapshots
+        ]
+    ) if snapshots else []
 
 
 def previous_asset_assessment(
@@ -158,7 +170,8 @@ def build_history_context(
         parsed_decision = Decision.from_mapping(decision)
         previous_assessments = dict(parsed_decision.factor_scores)
     position_pnl = build_position_pnl_context(snapshot_path)
-    observations = read_metric_observations(metrics_path)
+    invalid_observations: list[str] = []
+    observations = read_metric_observations(metrics_path, invalid=invalid_observations)
     assets = {
         position.get("symbol", "").strip().upper()
         for position in (snapshot or {}).get("positions", ())
@@ -185,10 +198,12 @@ def build_history_context(
             asset,
             sorted(keys),
             path=metrics_path,
+            invalid=invalid_observations,
         )
         for asset, keys in sorted(keys_by_asset.items())
         if keys
     }
+    history_warnings = tuple(dict.fromkeys(invalid_observations))
     return {
         "latest_snapshot": snapshot,
         "latest_decision": decision,
@@ -203,6 +218,7 @@ def build_history_context(
         "full_review_due": full_review_due,
         "position_pnl": position_pnl,
         "metric_history_summary": metric_history_summary,
+        "history_warnings": history_warnings,
     }
 
 

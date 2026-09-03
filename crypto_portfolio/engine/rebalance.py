@@ -11,6 +11,7 @@ from ..models.policy import Policy, resolve_policy
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"}
+_REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 
 
 def _weights(value: Mapping[str, Any], field: str) -> dict[str, float]:
@@ -180,6 +181,7 @@ def recommend_rebalance(
     new_cash_available: float = 0.0,
     thesis_broken: Iterable[str] | Mapping[str, bool] | None = None,
     policy: Policy | None = None,
+    regime: str = "NORMAL",
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -209,7 +211,25 @@ def recommend_rebalance(
     if post_cash_total <= 0:
         raise ValueError("portfolio_value plus new_cash_available must be > 0")
     stable_symbols = tuple(resolved.stable_symbols)
+    if not stable_symbols:
+        raise ValueError("policy must define at least one stable symbol")
     stable_target = _stable_target_weights(current, target, stable_symbols)
+    # The stablecoin/cash sleeve must satisfy the harder of the global floor
+    # and the active regime target; allocation and the risk gate enforce it on
+    # their paths, and rebalance validates the target it is asked to execute.
+    regime_name = str(regime).strip().upper()
+    if regime_name not in _REGIMES:
+        raise ValueError(f"regime must be one of {sorted(_REGIMES)}")
+    required_stable = max(
+        resolved.min_stablecoin_weight,
+        resolved.regime(regime_name).stablecoin_target,
+    )
+    target_stable_total = sum(target.get(symbol, 0.0) for symbol in stable_symbols)
+    if target_stable_total + 1e-9 < required_stable:
+        raise ValueError(
+            f"target stablecoin sleeve {target_stable_total:.2%} is below "
+            f"required {required_stable:.2%}"
+        )
     effective_current: dict[str, float] = {
         symbol: weight * portfolio_value for symbol, weight in current.items()
     }
@@ -319,6 +339,7 @@ def rebalance(
     new_cash_available: float = 0.0,
     thesis_broken: Iterable[str] | Mapping[str, bool] | None = None,
     policy: Policy | None = None,
+    regime: str = "NORMAL",
 ) -> RebalanceResult:
     return recommend_rebalance(
         current_weights,
@@ -327,6 +348,7 @@ def rebalance(
         new_cash_available=new_cash_available,
         thesis_broken=thesis_broken,
         policy=policy,
+        regime=regime,
     )
 
 

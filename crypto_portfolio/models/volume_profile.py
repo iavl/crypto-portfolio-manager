@@ -235,7 +235,6 @@ class VolumeProfile:
                 raise ValueError("profile.metadata must be JSON serializable and finite") from exc
             object.__setattr__(self, "metadata", metadata)
         hash_payload = _profile_payload(self)
-        hash_payload.pop("source", None)
         expected_hash = hashlib.sha256(
             json.dumps(hash_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

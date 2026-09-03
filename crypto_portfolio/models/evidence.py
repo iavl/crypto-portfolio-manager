@@ -38,6 +38,19 @@ def _confidence(value: Any, field: str = "confidence") -> str:
     return value
 
 
+def contains_private_reasoning(value: Any) -> bool:
+    """Recursively detect forbidden private-reasoning fields."""
+    if isinstance(value, Mapping):
+        return any(
+            str(key).strip().lower() in _PRIVATE_REASONING_FIELDS
+            or contains_private_reasoning(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (tuple, list)):
+        return any(contains_private_reasoning(item) for item in value)
+    return False
+
+
 @dataclass(frozen=True)
 class Evidence:
     id: str
@@ -72,7 +85,7 @@ class Evidence:
             if not isinstance(self.metadata, Mapping):
                 raise ValueError("evidence.metadata must be an object or null")
             metadata = dict(self.metadata)
-            if any(str(key).strip().lower() in _PRIVATE_REASONING_FIELDS for key in metadata):
+            if contains_private_reasoning(metadata):
                 raise ValueError("evidence.metadata must not contain private reasoning")
             try:
                 json.dumps(metadata, ensure_ascii=False, allow_nan=False)
@@ -222,4 +235,4 @@ class AssetAssessment:
         }
 
 
-__all__ = ["AssetAssessment", "Evidence", "FactorScore"]
+__all__ = ["AssetAssessment", "Evidence", "FactorScore", "contains_private_reasoning"]

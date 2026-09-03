@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/volume-profile.schema.json",
   "title": "Volume-at-Price Profile",
   "type": "object",
-  "required": ["symbol", "as_of", "timeframe", "lookback_days", "total_volume", "bins", "poc", "value_area_low", "value_area_high", "high_volume_nodes", "low_volume_nodes", "data_confidence", "source", "ohlcv_hash", "value_area_fraction", "profile_hash"],
+  "required": ["symbol", "as_of", "timeframe", "lookback_days", "total_volume", "bins", "poc", "value_area_low", "value_area_high", "high_volume_nodes", "low_volume_nodes", "data_confidence", "source", "ohlcv_hash", "value_area_fraction"],
   "properties": {
     "symbol": {"type": "string", "minLength": 1},
     "as_of": {"type": "string", "format": "date-time"},

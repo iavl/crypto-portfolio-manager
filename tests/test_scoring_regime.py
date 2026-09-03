@@ -1,9 +1,11 @@
 import unittest
 
 from crypto_portfolio.engine.regime import RegimeInputs, determine_regime
+from crypto_portfolio.engine.risk import run_risk_gate
 from crypto_portfolio.engine.scoring import score_factors
 from crypto_portfolio.engine.scoring import score_assessment
 from crypto_portfolio.models.evidence import AssetAssessment
+from crypto_portfolio.models.policy import resolve_policy
 
 
 class ScoringAndRegimeTests(unittest.TestCase):
@@ -94,6 +96,28 @@ class ScoringAndRegimeTests(unittest.TestCase):
                     RegimeInputs("HEALTHY", "LOW", drawdown, "NEUTRAL", "HEALTHY", False)
                 )
                 self.assertEqual(result.regime, expected)
+
+    def test_breach_boundary_is_strictly_below_minus_d(self):
+        # AGENTS.md: breach is `< -D`; exactly -D is the capital-preservation
+        # floor, not a breach. Regime and risk gate must agree.
+        policy = resolve_policy()
+        budget = policy.max_portfolio_drawdown
+        for drawdown, breach in ((-budget, False), (-budget - 1e-9, True)):
+            with self.subTest(drawdown=drawdown):
+                floor = determine_regime(
+                    RegimeInputs("HEALTHY", "LOW", drawdown, "NEUTRAL", "HEALTHY", False),
+                    policy=policy,
+                )
+                gate = run_risk_gate(
+                    {"BTC": 0.6, "USDT": 0.4},
+                    policy=policy,
+                    current_drawdown=drawdown,
+                )
+                self.assertEqual(
+                    any(item.code == "DRAWDOWN_BREACH" for item in gate.violations),
+                    breach,
+                )
+                self.assertEqual(floor.regime, "CAPITAL_PRESERVATION")
 
     def test_worse_drawdown_is_never_less_defensive(self):
         order = {"NORMAL": 0, "DEFENSIVE": 1, "CAPITAL_PRESERVATION": 2}

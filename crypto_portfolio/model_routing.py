@@ -1048,6 +1048,27 @@ def validate_stage_model(
     return True
 
 
+def validate_historical_stage_model(stage: str, model: str) -> bool:
+    """Validate a persisted stage model without comparing against current config.
+
+    Append-only decision records carry ``stages_used`` metadata that was valid
+    under the routing policy current when the record was written. The current
+    config may later change those stage assignments, so historical records are
+    checked only for a well-formed, permitted model name (including the
+    Luna-family ``LUNA_MAX``-only rule) rather than for a match with the
+    current stage mapping.
+    """
+    name = _text(stage, "stage")
+    if name not in REQUIRED_STAGES:
+        raise RoutingError(f"Unknown stage: {name}")
+    value = _text(model, f"model for {name}")
+    if value.upper() in _V1_MODELS:
+        _legacy_model(value, f"model for {name}")
+    else:
+        _logical_for_value(value, _routing(None), f"model for {name}")
+    return True
+
+
 def luna_max_only(model: str) -> bool:
     text = _text(model, "model")
     if text.upper().startswith("LUNA") and text.upper() != LUNA_MAX:
@@ -1205,4 +1226,5 @@ __all__ = [
     "validate_model_routing",
     "validate_routing_config",
     "validate_stage_model",
+    "validate_historical_stage_model",
 ]

@@ -365,7 +365,10 @@ def build_multi_horizon_profiles(
     if not isinstance(series, OHLCVSeries):
         raise ValueError("series must be an OHLCVSeries or mapping")
     config = (policy or resolve_policy()).volume_profile
-    if series.timeframe == "1D" and not config["allow_daily_approximation"]:
+    # Historical policies parsed with allow_missing_volume_profile=True carry an
+    # empty volume_profile mapping; default to the same conservative behavior
+    # that build_technical_snapshot uses via .get().
+    if series.timeframe == "1D" and not config.get("allow_daily_approximation", True):
         return {}
     values = tuple(lookback_days)
     if not values:
@@ -375,15 +378,17 @@ def build_multi_horizon_profiles(
         profile = build_volume_profile(
             series,
             lookback_days=days,
-            price_bins=config["price_bins"],
-            value_area_fraction=config["value_area_fraction"],
-            hvn_percentile=config["hvn_percentile"],
-            max_hvn_nodes=config["max_hvn_nodes"],
-            minimum_node_separation_atr=config["minimum_node_separation_atr"],
+            price_bins=config.get("price_bins", 64),
+            value_area_fraction=config.get("value_area_fraction", 0.7),
+            hvn_percentile=config.get("hvn_percentile", 0.75),
+            max_hvn_nodes=config.get("max_hvn_nodes", 6),
+            minimum_node_separation_atr=config.get("minimum_node_separation_atr", 0.5),
             atr_value=atr_value,
             as_of=as_of,
             volume_reliable=volume_reliable,
-            daily_approximation_confidence_cap=config["daily_approximation_confidence_cap"],
+            daily_approximation_confidence_cap=config.get(
+                "daily_approximation_confidence_cap", "MEDIUM"
+            ),
         )
         if profile is not None:
             result[days] = profile

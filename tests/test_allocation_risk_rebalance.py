@@ -101,6 +101,35 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
             result.reconciliation["residual_stablecoin_change"],
         )
 
+    def test_rebalance_enforces_stable_sleeve_floor(self):
+        with self.assertRaises(ValueError):
+            recommend_rebalance(
+                {"BTC": 0.95, "USDT": 0.05},
+                {"BTC": 0.95, "USDT": 0.05},
+                1000,
+            )
+        with self.assertRaises(ValueError):
+            recommend_rebalance(
+                {"BTC": 0.8, "USDT": 0.2},
+                {"BTC": 0.8, "USDT": 0.2},
+                1000,
+                regime="DEFENSIVE",
+            )
+        # At the global floor and above the regime target the call succeeds.
+        result = recommend_rebalance(
+            {"BTC": 0.9, "USDT": 0.1},
+            {"BTC": 0.9, "USDT": 0.1},
+            1000,
+        )
+        self.assertTrue(result.no_trade)
+        defensive = recommend_rebalance(
+            {"BTC": 0.75, "USDT": 0.25},
+            {"BTC": 0.75, "USDT": 0.25},
+            1000,
+            regime="DEFENSIVE",
+        )
+        self.assertTrue(defensive.no_trade)
+
     def test_satellite_sizing_scales_with_score_confidence_and_risk(self):
         def weight(score=85, confidence="HIGH", risk_tier="normal"):
             return build_target_allocation(

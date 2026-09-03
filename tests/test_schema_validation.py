@@ -130,6 +130,30 @@ class SchemaValidationTests(unittest.TestCase):
         self.validate("market.schema.json", spot.as_dict())
         self.validate("market.schema.json", series.as_dict())
 
+    def test_rebalance_action_amount_constraints_match_model(self):
+        schema = json.loads((SCHEMAS / "decision.schema.json").read_text(encoding="utf-8"))
+        validator = Draft202012Validator(schema["$defs"]["rebalanceAction"], format_checker=FormatChecker())
+
+        def record(action, amount):
+            return {
+                "symbol": "BTC",
+                "action": action,
+                "current_weight": 0.5,
+                "target_weight": 0.5,
+                "amount_usd": amount,
+                "priority": "HIGH",
+                "rationale": "x",
+            }
+
+        for action in ("INCREASE", "REDUCE", "EXIT"):
+            errors = list(validator.iter_errors(record(action, 0.0)))
+            self.assertNotEqual([], errors, f"{action} with amount 0 must be rejected")
+            self.assertEqual([], list(validator.iter_errors(record(action, 10.0))))
+        for action in ("HOLD", "WAIT", "NO_TRADE"):
+            self.assertEqual([], list(validator.iter_errors(record(action, 0.0))))
+            errors = list(validator.iter_errors(record(action, 10.0)))
+            self.assertNotEqual([], errors, f"{action} with positive amount must be rejected")
+
 
 if __name__ == "__main__":
     unittest.main()
