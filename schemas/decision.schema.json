@@ -80,6 +80,16 @@
         "priority": {"type": "string", "minLength": 1},
         "rationale": {"type": "string"}
       },
+      "allOf": [
+        {
+          "if": {"properties": {"action": {"enum": ["INCREASE", "REDUCE", "EXIT"]}}, "required": ["action"]},
+          "then": {"properties": {"amount_usd": {"exclusiveMinimum": 0}}}
+        },
+        {
+          "if": {"properties": {"action": {"enum": ["HOLD", "WAIT", "NO_TRADE"]}}, "required": ["action"]},
+          "then": {"properties": {"amount_usd": {"const": 0}}}
+        }
+      ],
       "additionalProperties": false
     },
     "executionPlan": {

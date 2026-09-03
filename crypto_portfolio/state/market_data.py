@@ -4,12 +4,39 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
 from ..models.market import OHLCVSeries
 from ..models.volume_profile import VolumeProfile
 from .snapshots import runtime_data_dir
+
+
+def _atomic_write(destination: Path, payload: str) -> None:
+    """Write ``payload`` atomically: temp file in the same directory + os.replace.
+
+    Concurrent readers never see a partially written cache entry; both writers
+    of identical content resolve to the same final file.
+    """
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=str(destination.parent), delete=False
+    )
+    try:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    finally:
+        handle.close()
+    os.replace(handle.name, destination)
+    try:
+        directory_fd = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        pass
 
 
 def _validate_hash(value: str) -> str:
@@ -40,21 +67,16 @@ def cache_ohlcv(
     destination.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
         series.as_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    ) + "\n"
     if destination.exists():
         existing = load_ohlcv(series.ohlcv_hash, directory)
-        if existing.as_dict() != series.as_dict():
+        if existing.content_identity() != series.content_identity():
             raise ValueError("content-addressed OHLCV entry is immutable")
         return destination
-    try:
-        with destination.open("x", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-    except FileExistsError:
+    _atomic_write(destination, payload)
+    if destination.exists():
         existing = load_ohlcv(series.ohlcv_hash, directory)
-        if existing.as_dict() != series.as_dict():
+        if existing.content_identity() != series.content_identity():
             raise ValueError("content-addressed OHLCV entry is immutable")
     return destination
 
@@ -97,19 +119,14 @@ def cache_volume_profile(
         raise ValueError("profile must be a VolumeProfile")
     destination = volume_profile_path(profile.profile_hash, directory)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(profile.as_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload = json.dumps(profile.as_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
     if destination.exists():
         existing = load_volume_profile(profile.profile_hash, directory)
         if existing.as_dict() != profile.as_dict():
             raise ValueError("content-addressed volume profile entry is immutable")
         return destination
-    try:
-        with destination.open("x", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-    except FileExistsError:
+    _atomic_write(destination, payload)
+    if destination.exists():
         existing = load_volume_profile(profile.profile_hash, directory)
         if existing.as_dict() != profile.as_dict():
             raise ValueError("content-addressed volume profile entry is immutable")

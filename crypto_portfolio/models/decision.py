@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .evidence import AssetAssessment, Evidence, FactorScore
+from .evidence import AssetAssessment, Evidence, FactorScore, contains_private_reasoning
 from .execution import ExecutionPlan
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .policy import policy_hash
@@ -233,18 +233,6 @@ class Decision:
             if not isinstance(self.routing_metadata, Mapping):
                 raise ValueError("routing_metadata must be an object or null")
             metadata = dict(self.routing_metadata)
-            forbidden = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
-            def contains_private_reasoning(value: Any) -> bool:
-                if isinstance(value, Mapping):
-                    return any(
-                        str(key).strip().lower() in forbidden
-                        or contains_private_reasoning(item)
-                        for key, item in value.items()
-                    )
-                if isinstance(value, (tuple, list)):
-                    return any(contains_private_reasoning(item) for item in value)
-                return False
-
             if contains_private_reasoning(metadata):
                 raise ValueError("routing_metadata must not contain private reasoning")
             routing_version = metadata.get("routing_policy_version", 1)
@@ -254,11 +242,16 @@ class Decision:
             if stages_used is not None:
                 if not isinstance(stages_used, Mapping):
                     raise ValueError("routing_metadata.stages_used must be an object")
+                # Historical records are append-only and were validated against the
+                # routing policy current when they were written. Re-validating them
+                # against the *current* config (validate_stage_model) would make old
+                # records unreadable after any routing change, so historical records
+                # receive legacy-name validation only.
                 if routing_version < 2:
-                    from ..model_routing import validate_stage_model
+                    from ..model_routing import validate_historical_stage_model
 
                     for stage, model in stages_used.items():
-                        validate_stage_model(stage, model)
+                        validate_historical_stage_model(stage, model)
                 elif any(
                     not isinstance(stage, str)
                     or not stage.strip()
@@ -318,10 +311,30 @@ class Decision:
         missing = [field for field in required if field not in data]
         if missing:
             raise ValueError(f"decision is missing fields: {', '.join(missing)}")
-        evidence = tuple(
-            Evidence(**item) if isinstance(item, Mapping) else item
-            for item in data.get("evidence", ())
-        )
+
+        def _evidence_item(item: Any) -> Any:
+            if not isinstance(item, Mapping):
+                return item
+            if "id" in item:
+                # Canonical Evidence record, possibly carrying legacy
+                # observation keys alongside the Evidence-level id; keep only
+                # the Evidence fields.
+                allowed = {
+                    "id", "asset", "factor", "source", "observed_at",
+                    "fetched_at", "freshness", "confidence", "value",
+                    "summary", "metadata",
+                }
+                return Evidence(**{key: item[key] for key in allowed if key in item})
+            if set(item) & {"metric_key", "observation_id"}:
+                # Historical records may embed MetricObservation-shaped
+                # dictionaries directly (older writer paths). Project them
+                # through the canonical observation model.
+                from .metrics_history import MetricObservation
+
+                return MetricObservation.from_mapping(item).to_evidence()
+            return Evidence(**item)
+
+        evidence = tuple(_evidence_item(item) for item in data.get("evidence", ()))
         data["evidence"] = evidence
         data["factor_scores"] = data.get("factor_scores") or {}
         return cls(

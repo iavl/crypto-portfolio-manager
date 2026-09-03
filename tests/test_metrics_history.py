@@ -53,6 +53,12 @@ class MetricHistoryTests(unittest.TestCase):
         for value in (math.nan, math.inf, -math.inf, True):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 MetricObservation(first_id, "ETH", "fundamentals.tvl", "fundamentals", value, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+        # Non-negative scoring-factor values must be rejected at the model boundary.
+        spot_id = stable_observation_id("BTC", "market.spot_price", "2026-09-01", "test", -5.0)
+        with self.assertRaises(ValueError):
+            MetricObservation(spot_id, "BTC", "market.spot_price", "trend", -5.0, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+        with self.assertRaises(ValueError):
+            MetricObservation(first_id, "ETH", "fundamentals.tvl", "fundamentals", -1.0, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
         with self.assertRaises(ValueError):
             MetricObservation(first_id, "ETH", "fundamentals.tvl", "onchain", 100, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
         evidence = MetricObservation(
@@ -81,6 +87,21 @@ class MetricHistoryTests(unittest.TestCase):
             append_metric_observation(revised, path)
             self.assertEqual(latest_metric("ETH", "fundamentals.tvl", path=path).value, 105)
             self.assertEqual(previous_metric("ETH", "fundamentals.tvl", path=path).value, 100)
+            # A same-value revision still persists (value unchanged but the
+            # supersedes chain and revision reason carry meaning).
+            same_value_revision = MetricObservation(
+                "rev-same-1",
+                "ETH", "fundamentals.tvl", "fundamentals", 105.0, "USD", "30d",
+                "2026-09-02", "2026-09-02", "test", "CURRENT", "HIGH",
+                supersedes_observation_id=revised.observation_id,
+                revision_reason="same value, updated metadata",
+            )
+            append_metric_observation(same_value_revision, path)
+            self.assertEqual(len(read_metric_observations(path)), 4)
+            self.assertEqual(
+                latest_metric("ETH", "fundamentals.tvl", path=path).revision_reason,
+                "same value, updated metadata",
+            )
             with self.assertRaises(ValueError):
                 append_metric_observation(observation(106, "2026-09-02"), path)
 
@@ -92,7 +113,6 @@ class MetricHistoryTests(unittest.TestCase):
             comparison = compare_latest_metric("ETH", "fundamentals.tvl", path=path)
             self.assertIsNone(comparison["percentage_change"])
             self.assertEqual(comparison["trend"], "IMPROVING")
-            append_metric_observation(observation(-5, "2026-09-03"), path)
             contextual = MetricObservation(
                 stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-03", "test", -5),
                 "MARKET", "flows.exchange_netflow", "capital_flows", -5, "USD", None,
@@ -107,7 +127,12 @@ class MetricHistoryTests(unittest.TestCase):
             self.assertEqual(compare_latest_metric("MARKET", "flows.exchange_netflow", path=path)["trend"], "CONFLICTING")
             append_metric_observation(observation(120, "2026-09-04", freshness="STALE"), path)
             self.assertEqual(compare_latest_metric("ETH", "fundamentals.tvl", path=path)["trend"], "CONFLICTING")
-            context = build_history_context(metrics_path=path, metric_keys=("fundamentals.tvl",))
+            context = build_history_context(
+                snapshot_path=Path(directory) / "missing-snapshots.jsonl",
+                decision_path=Path(directory) / "missing-decisions.jsonl",
+                metrics_path=path,
+                metric_keys=("fundamentals.tvl",),
+            )
             self.assertIn("ETH", context["metric_history_summary"])
             self.assertIn("fundamentals.tvl", context["metric_history_summary"]["ETH"])
 

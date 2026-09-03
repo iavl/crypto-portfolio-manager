@@ -261,13 +261,27 @@ class OHLCVSeries:
 
     @property
     def ohlcv_hash(self) -> str:
-        payload = {
+        encoded = json.dumps(
+            self.content_identity(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    def content_identity(self) -> dict[str, Any]:
+        """Canonical cache identity: data plus provenance, excluding fetch time.
+
+        ``fetched_at`` is fetch metadata (it changes on every re-fetch of the
+        same data), so it is deliberately excluded: re-fetching identical
+        candles from the same source is a cache hit, not a content change.
+        """
+        return {
             "symbol": self.symbol,
             "timeframe": self.timeframe,
             "candles": [candle.as_dict() for candle in self.candles],
+            "source": self.source,
+            "venue": self.venue,
+            "market": self.market,
+            "quote_currency": self.quote_currency,
         }
-        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-        return hashlib.sha256(encoded).hexdigest()
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -423,6 +437,17 @@ class TechnicalSnapshot:
             "volume_profile_poc", "volume_profile_val", "volume_profile_vah",
         ):
             object.__setattr__(self, field, _optional_number(getattr(self, field), f"snapshot.{field}"))
+        # Price/volume levels must be non-negative; requiring them > 0 would
+        # reject legitimate zero-volume or zero-ATR snapshots, but a negative
+        # level is always a data error.
+        for field in (
+            "ma20", "ma50", "ma100", "ma200", "realized_vol_30d", "realized_vol_90d",
+            "atr14", "atr_percent", "volume_ma20", "relative_volume", "history_high",
+            "volume_profile_poc", "volume_profile_val", "volume_profile_vah",
+        ):
+            value = getattr(self, field)
+            if value is not None and value < 0:
+                raise ValueError(f"snapshot.{field} must be non-negative")
         if all(getattr(self, field) is not None for field in ("volume_profile_poc", "volume_profile_val", "volume_profile_vah")):
             if not self.volume_profile_val <= self.volume_profile_poc <= self.volume_profile_vah:
                 raise ValueError("snapshot Volume Profile levels must satisfy VAL <= POC <= VAH")

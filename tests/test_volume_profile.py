@@ -98,9 +98,13 @@ class VolumeProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache_volume_profile(first, directory)
             self.assertEqual(load_volume_profile(first.profile_hash, directory), first)
+            # Different provenance is different content: it gets its own entry.
             changed = replace(first, source="other", profile_hash=None)
-            with self.assertRaises(ValueError):
-                cache_volume_profile(changed, directory)
+            self.assertNotEqual(changed.profile_hash, first.profile_hash)
+            cache_volume_profile(changed, directory)
+            self.assertEqual(
+                load_volume_profile(changed.profile_hash, directory), changed
+            )
 
     def test_multi_horizon_levels_and_zone_confluence(self):
         series = bars("4H", tuple((100 + (index % 4) * 2, 10 + index) for index in range(80)))

@@ -14,7 +14,12 @@ def append_record(path: str | Path, record: Mapping[str, Any]) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(
         dict(record), ensure_ascii=False, allow_nan=False, separators=(",", ":")
-    ) + "\n"
+    )
+    # str.splitlines() also splits on U+2028/U+2029/U+0085, so escape them to
+    # keep the one-record-per-line framing unambiguous.
+    for separator in ("\u2028", "\u2029", "\u0085"):
+        encoded = encoded.replace(separator, f"\\u{ord(separator):04x}")
+    encoded += "\n"
     # ponytail: file-level lock keeps JSONL writes safe; use a database if throughput requires it.
     with destination.open("a", encoding="utf-8") as stream:
         fcntl.flock(stream.fileno(), fcntl.LOCK_EX)

@@ -212,13 +212,17 @@ def _select_zones(
     return sorted(selected, key=lambda item: item[0].midpoint, reverse=True)
 
 
+def _template_key(regime: str, volatility: str) -> str:
+    if regime == "DEFENSIVE":
+        return "DEFENSIVE"
+    if regime == "CAPITAL_PRESERVATION":
+        return "CAPITAL_PRESERVATION"
+    return "NORMAL_HIGH_VOL" if volatility == "HIGH" else "NORMAL_LOW_VOL"
+
+
 def _template(config: Mapping[str, Any], regime: str, volatility: str) -> list[float]:
     templates = config["tranche_templates"]
-    if regime == "DEFENSIVE":
-        return list(templates["DEFENSIVE"])
-    if regime == "CAPITAL_PRESERVATION":
-        return list(templates["CAPITAL_PRESERVATION"])
-    return list(templates["NORMAL_HIGH_VOL" if volatility == "HIGH" else "NORMAL_LOW_VOL"])
+    return list(templates[_template_key(regime, volatility)])
 
 
 def _fractions(
@@ -229,7 +233,12 @@ def _fractions(
     count: int,
     qualities: Iterable[float] = (),
 ) -> tuple[list[float], float]:
-    values = _template(config, regime, volatility)[:count]
+    template = _template(config, regime, volatility)
+    if count > len(template):
+        raise ValueError(
+            f"{count} tranches requested but tranche template has only {len(template)}"
+        )
+    values = template[:count]
     quality_values = list(qualities)
     if len(quality_values) == count:
         values = [value * (0.75 + max(0.0, min(100.0, quality)) / 200.0) for value, quality in zip(values, quality_values)]
@@ -321,7 +330,9 @@ def build_entry_plan(
         return _wait_plan(normalized_symbol, approved, technical_snapshot, "no confirmed support structure is available")
     selected = _select_zones(
         ranked,
-        max_tranches=config["max_tranches"],
+        # Cap at the template length so every selected zone always gets a
+        # tranche fraction (no silent drop for custom policies).
+        max_tranches=min(config["max_tranches"], len(config["tranche_templates"].get(_template_key(regime, technical_snapshot.volatility_state), ()))),
         atr_value=technical_snapshot.atr14 or 0.0,
         separation_factor=config["minimum_zone_separation_atr"],
         minimum_quality=config["zone_quality"]["minimum_for_entry"],
@@ -361,6 +372,16 @@ def build_entry_plan(
         config["confidence_deployment_factor"][portfolio_level],
         config["confidence_deployment_factor"][technical_snapshot.data_confidence],
     )
+    if confidence_factor <= 0:
+        return _wait_plan(
+            normalized_symbol,
+            approved,
+            technical_snapshot,
+            "deployment confidence is LOW; approved amount reserved",
+            positioning=positioning,
+            btc_cycle=btc_cycle,
+            effective_factor=0.0,
+        )
     base_deployment_factor = min(1.0, confidence_factor * deployed_fraction)
     deployment_factor = effective_deployment_factor(
         base_deployment_factor,
@@ -370,6 +391,16 @@ def build_entry_plan(
     )
     planned = approved * deployment_factor
     planned = min(approved, max(0.0, planned))
+    if planned <= 0:
+        return _wait_plan(
+            normalized_symbol,
+            approved,
+            technical_snapshot,
+            "overlay deployment cap reserves the approved amount",
+            positioning=positioning,
+            btc_cycle=btc_cycle,
+            effective_factor=deployment_factor,
+        )
     tranche_values = []
     for sequence, ((zone, quality, reason), fraction) in enumerate(zip(selected, fractions), 1):
         amount = planned * fraction

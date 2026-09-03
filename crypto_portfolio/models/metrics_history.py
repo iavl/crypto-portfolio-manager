@@ -114,8 +114,7 @@ class MetricObservation:
                 raise ValueError(f"metric {key} value must be numeric")
             if definition.expected_type == "string" and not isinstance(value, str):
                 raise ValueError(f"metric {key} value must be a string")
-            if definition.decision_role != "SCORING_FACTOR":
-                validate_metric_value(key, value)
+            validate_metric_value(key, value)
         object.__setattr__(self, "value", value)
         unit = _optional_text(self.unit, "unit")
         if unit is not None and definition.unit is not None and unit.upper() != definition.unit.upper():
