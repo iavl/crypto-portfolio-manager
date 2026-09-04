@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/provider-runtime-status.schema.json",
+  "title": "Offline provider runtime status",
+  "type": "object",
+  "required": ["provider", "configured", "config_enabled", "adapter_available", "credential_required", "credential_present", "runtime_ready", "reason"],
+  "properties": {
+    "provider": {"type": "string", "minLength": 1},
+    "configured": {"type": "boolean"},
+    "config_enabled": {"type": "boolean"},
+    "adapter_available": {"type": "boolean"},
+    "credential_required": {"type": "boolean"},
+    "credential_present": {"type": "boolean"},
+    "runtime_ready": {"type": "boolean"},
+    "reason": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

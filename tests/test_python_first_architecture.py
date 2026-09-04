@@ -15,10 +15,10 @@ from crypto_portfolio.engine.factors.relative_strength import calculate_relative
 from crypto_portfolio.engine.factors.trend import calculate_trend_factor
 from crypto_portfolio.engine.metric_history import build_factor_facts
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result, persist_metric_result
-from crypto_portfolio.engine.metric_plan import build_metric_collection_plan
+from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest, build_metric_collection_plan
 from crypto_portfolio.engine.report_packet import build_report_packet
 from crypto_portfolio.engine.regime_inputs import build_regime_inputs
-from crypto_portfolio.metrics_registry import MetricDefinition
+from crypto_portfolio.metrics_registry import METRIC_REGISTRY, MetricDefinition
 from crypto_portfolio.model_routing import RoutingError, load_model_routing, validate_stage_model
 from crypto_portfolio.models.market import TechnicalSnapshot
 from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
@@ -62,6 +62,35 @@ class PythonFirstArchitectureTests(unittest.TestCase):
         self.assertFalse(plan.for_asset("USDT"))
         self.assertTrue(plan.for_asset("SOL"))
         self.assertIn("market.spot_price", plan.metric_keys)
+
+    def test_review_specific_criticality_is_resolved_by_plan(self):
+        governance = METRIC_REGISTRY["risk.governance_event_status"]
+        security = METRIC_REGISTRY["risk.security_event_status"]
+        self.assertFalse(governance.is_critical_for("SNAPSHOT_REVIEW"))
+        self.assertFalse(governance.is_critical_for("FULL_REVIEW"))
+        self.assertTrue(governance.is_critical_for("EVENT_REVIEW"))
+        self.assertTrue(all(security.is_critical_for(review) for review in ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")))
+
+        for review_type, expected in (("SNAPSHOT_REVIEW", ("risk.security_event_status",)), ("FULL_REVIEW", ("risk.security_event_status",)), ("EVENT_REVIEW", ("risk.governance_event_status", "risk.security_event_status"))):
+            plan = MetricCollectionPlan(
+                review_type,
+                (
+                    MetricRequest("ETH", "risk.governance_event_status"),
+                    MetricRequest("ETH", "risk.security_event_status"),
+                ),
+            )
+            self.assertEqual(plan.critical_metric_keys, expected)
+
+        with self.assertRaises(ValueError):
+            MetricDefinition(
+                key="fundamentals.tvl", factor="fundamentals", expected_type="number",
+                critical_review_types=("UNKNOWN_REVIEW",),
+            )
+        with self.assertRaises(ValueError):
+            MetricDefinition(
+                key="fundamentals.tvl", factor="fundamentals", expected_type="number",
+                critical_review_types=("FULL_REVIEW", "FULL_REVIEW"),
+            )
 
     def test_normalization_history_and_facts_are_python_owned(self):
         result = normalize_metric_result(

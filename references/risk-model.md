@@ -174,3 +174,22 @@ policy; elevated and high cycle risk default to 80% and 50%. A confirmed
 technical extension plus long crowding can produce `WAIT`. Deleveraging only
 removes a crowding penalty and never boosts exposure. The halving clock alone
 has no risk or trade authority.
+
+## Review-specific event criticality
+
+Event metrics remain requested and visible even when they are not hard
+critical. The canonical matrix is:
+
+| Metric | `SNAPSHOT_REVIEW` | `FULL_REVIEW` | `EVENT_REVIEW` |
+|---|---|---|---|
+| Security | Critical | Critical | Critical |
+| Chain liveness | Critical | Critical | Critical |
+| Governance / protocol-change context | Context | Required | Critical |
+| Regulatory | Context | Required | Critical |
+
+`Context` and `Required` failures lower coverage/confidence and remain in the
+collection log. `Critical` failures trigger hard-critical handling and block
+high-conviction action. A current scan with no material result is
+`NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; it is risk hygiene, not bullish
+evidence. The scan timestamp controls freshness, not the date of an older
+incident article.

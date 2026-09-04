@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from .base import ProviderCapabilities, ProviderRuntimeStatus
+
 
 _ROOT_CONFIG = Path(__file__).resolve().parents[2] / "config" / "data-providers.json"
 _DEFAULT_LOCAL_CONFIG = Path.home() / ".config" / "crypto-portfolio-manager" / "data-providers.json"
@@ -56,7 +58,7 @@ def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
             if not isinstance(settings["api_key_env"], str) or not settings["api_key_env"].strip():
                 raise ValueError(f"provider {raw_name} api_key_env must be a non-empty string")
             settings["api_key_env"] = settings["api_key_env"].strip()
-        if any(str(key).strip().lower() in _SECRET_FIELDS for key in settings):
+        if any(str(key).strip().lower().replace("-", "_") in _SECRET_FIELDS for key in settings):
             raise ValueError(f"provider {raw_name} config must not contain secret values")
         normalized_providers[raw_name.strip().lower()] = settings
     result["version"] = version
@@ -150,18 +152,76 @@ def provider_api_key(name: str, config: Mapping[str, Any] | None = None, environ
     return value or None
 
 
-def provider_status(config: Mapping[str, Any] | None = None, environ: Mapping[str, str] | None = None) -> tuple[dict[str, Any], ...]:
+def provider_runtime_status(
+    config: Mapping[str, Any] | None = None,
+    adapters: Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[ProviderRuntimeStatus, ...]:
     loaded = config or load_provider_config()
     environment = environ if environ is not None else os.environ
-    rows = []
-    for name, settings in loaded.get("providers", {}).items():
+    configured = loaded.get("providers", {})
+    if not isinstance(configured, Mapping):
+        raise ValueError("provider config providers must be an object")
+    adapter_map = {
+        str(name).strip().lower(): value
+        for name, value in (adapters or {}).items()
+    }
+    names = list(str(name).strip().lower() for name in configured)
+    names.extend(name for name in adapter_map if name not in names)
+    rows: list[ProviderRuntimeStatus] = []
+    for name in names:
+        settings = dict(configured.get(name, {})) if isinstance(configured.get(name, {}), Mapping) else {}
         key_env = settings.get("api_key_env")
-        rows.append({
-            "provider": name,
-            "enabled": provider_enabled(name, loaded, environ),
-            "credential_present": bool(key_env and environment.get(key_env, "").strip()),
-            "api_key_env": key_env,
+        capability = getattr(adapter_map.get(name), "capabilities", None)
+        if callable(capability):
+            capability = capability()
+        capability_requires_key = isinstance(capability, ProviderCapabilities) and capability.requires_api_key
+        credential_required = bool(key_env) or capability_requires_key
+        credential_present = bool(key_env and environment.get(key_env, "").strip())
+        is_configured = name in configured
+        config_enabled = provider_enabled(name, loaded, environment) if is_configured else False
+        adapter_available = name in adapter_map
+        runtime_ready = config_enabled and adapter_available and (not credential_required or credential_present)
+        reason = None
+        if not is_configured:
+            reason = "provider is not present in configuration"
+        elif not config_enabled:
+            reason = "provider is disabled by configuration" if settings.get("enabled") is False else "required credential is missing"
+        elif not adapter_available:
+            reason = "provider adapter is unavailable"
+        elif credential_required and not credential_present:
+            reason = "required credential is missing"
+        rows.append(ProviderRuntimeStatus(
+            provider=name,
+            configured=is_configured,
+            config_enabled=config_enabled,
+            adapter_available=adapter_available,
+            credential_required=credential_required,
+            credential_present=credential_present,
+            runtime_ready=runtime_ready,
+            reason=reason,
+        ))
+    return tuple(rows)
+
+
+def provider_status(
+    config: Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+    *,
+    adapters: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Return runtime diagnostics, retaining legacy ``enabled`` fields."""
+    loaded = config or load_provider_config()
+    settings_by_name = loaded.get("providers", {})
+    rows = []
+    for status in provider_runtime_status(loaded, adapters=adapters, environ=environ):
+        settings = settings_by_name.get(status.provider, {})
+        row = status.as_dict()
+        row.update({
+            "enabled": status.config_enabled,
+            "api_key_env": settings.get("api_key_env") if isinstance(settings, Mapping) else None,
         })
+        rows.append(row)
     return tuple(rows)
 
 
@@ -176,6 +236,7 @@ __all__ = [
     "load_config",
     "provider_api_key",
     "provider_enabled",
+    "provider_runtime_status",
     "provider_settings",
     "provider_status",
     "resolve_provider_config",

@@ -268,6 +268,73 @@ Prefer small typed deterministic pure functions, standard library, existing
 helpers, and dependency-light code. Avoid hidden global state, magic values,
 duplicate policy, premature microservices, and heavyweight dependencies.
 
+### Maintainability first
+
+Treat maintainability as a required engineering property, not an optional
+cleanup goal. New code should be easy for a future maintainer or agent to
+understand, verify, test, and change without reconstructing hidden assumptions.
+
+Prefer:
+
+- clear responsibility boundaries and single-purpose modules/functions;
+- descriptive names that reflect portfolio-domain meaning;
+- explicit typed inputs/outputs and narrow interfaces;
+- existing shared abstractions when they are already the canonical path;
+- small reusable helpers when they remove real duplication;
+- deterministic control flow over clever or implicit behavior;
+- comments that explain non-obvious financial invariants or design reasons, not
+  comments that merely restate the code;
+- localized changes with reviewable diffs;
+- regression tests that document intended behavior.
+
+Avoid:
+
+- copy/paste implementations of policy or accounting logic;
+- parallel sources of truth;
+- one-off special cases when a general existing invariant should be fixed;
+- large functions that mix validation, calculation, persistence, I/O, and LLM
+  orchestration;
+- deeply nested conditionals when clearer decomposition is practical;
+- hidden coupling through globals, environment state, mutable singletons, or
+  undocumented side effects;
+- speculative abstractions created for hypothetical future requirements;
+- broad refactors bundled with unrelated behavioral changes.
+
+When touching an existing subsystem, follow its established architecture and
+conventions unless there is a concrete maintainability, correctness, or safety
+reason to change them. Prefer incremental improvement over architectural churn.
+
+### Clarify material uncertainty before coding
+
+If an implementation choice is materially ambiguous and the repository does not
+provide a clear authoritative answer, ask the user before making the change.
+Do not silently choose a consequential interpretation merely to keep the task
+moving.
+
+Ask for confirmation before coding when uncertainty could materially affect any
+of the following:
+
+- portfolio policy, risk constraints, or investment semantics;
+- accounting or benchmark methodology;
+- public APIs, CLI behavior, Skill behavior, or provider contracts;
+- persistent state, schemas, history compatibility, or migrations;
+- canonical configuration ownership or source-of-truth placement;
+- architecture or responsibility boundaries between modules;
+- dependency additions, removals, or major upgrades;
+- security/privacy boundaries or any path toward real-money execution;
+- destructive changes, data loss, or backward-incompatible behavior;
+- a design trade-off where multiple plausible choices have materially different
+  maintenance or correctness consequences.
+
+Do not interrupt the user for low-risk implementation details when the codebase
+already establishes a clear convention. In those cases, choose the most
+conservative option that is easiest to verify, test, explain, and maintain.
+
+If a task is partially specified but a safe, reversible, low-risk portion is
+unambiguous, that portion may be implemented while the materially uncertain part
+is surfaced for confirmation. Never guess through uncertainty that could change
+financial behavior or persistent data semantics.
+
 Preserve formats and public behavior when practical. Breaking changes must
 identify affected schemas/history/CLI/Skill behavior and provide migration or
 version handling. Invalid financial inputs generally fail clearly: NaN,
@@ -311,4 +378,7 @@ deterministic allocation, canonical policy, evidence, models, CI/regressions,
 providers, read-only integrations, interfaces, then secondary analytics.
 
 When a simpler deterministic implementation is sufficient, choose the one
-that is easiest to verify, reproduce, explain, and maintain.
+that is easiest to verify, reproduce, explain, test, and maintain. Prefer
+boring, explicit, well-factored code over cleverness. If two approaches are
+otherwise equivalent, choose the one with fewer hidden assumptions, clearer
+ownership, and lower long-term maintenance cost.

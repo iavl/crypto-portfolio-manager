@@ -12,7 +12,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from crypto_portfolio.engine.metric_plan import build_metric_collection_plan
-from crypto_portfolio.providers.config import load_provider_config, provider_status
+from crypto_portfolio.providers.config import load_provider_config
 from crypto_portfolio.providers.routes import provider_chain
 from crypto_portfolio.providers.router import ProviderRouter
 
@@ -20,7 +20,7 @@ from crypto_portfolio.providers.router import ProviderRouter
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="list provider capabilities")
-    parser.add_argument("--status", action="store_true", help="show enabled state and credential presence")
+    parser.add_argument("--status", action="store_true", help="show offline config, adapter, credential, and runtime readiness")
     parser.add_argument("--metric", help="show the deterministic provider chain for a metric")
     parser.add_argument("--asset", help="asset used with --plan")
     parser.add_argument("--plan", action="store_true", help="show a local metric collection plan")
@@ -28,11 +28,13 @@ def main() -> int:
     config = load_provider_config()
     router = ProviderRouter(config=config)
     if args.status or not any((args.list, args.metric, args.plan)):
-        for row in provider_status(config):
-            enabled = "ENABLED" if row["enabled"] else "DISABLED"
-            credential = "yes" if row["credential_present"] else "no"
-            requirement = "key configured" if row["api_key_env"] else "no key required"
-            print(f"{row['provider']:<22} {enabled:<8} {requirement}; credential present: {credential}")
+        print("provider               config    adapter   credential   runtime")
+        for row in router.provider_status():
+            config_state = "ENABLED" if row["config_enabled"] else "DISABLED"
+            adapter = "YES" if row["adapter_available"] else "NO"
+            credential = "N/A" if not row["credential_required"] else ("YES" if row["credential_present"] else "NO")
+            runtime = "READY" if row["runtime_ready"] else "NOT_READY"
+            print(f"{row['provider']:<22} {config_state:<9} {adapter:<9} {credential:<12} {runtime}")
     if args.list:
         for name, provider in sorted(router.providers.items()):
             capabilities = router.capabilities(name)

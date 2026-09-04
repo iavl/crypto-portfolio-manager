@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/event-source-scan-response.schema.json",
+  "title": "Structured event source scan response",
+  "type": "object",
+  "required": ["source_id", "reachable", "checked_at", "items", "error", "conflict"],
+  "properties": {
+    "source_id": {"type": "string", "minLength": 1},
+    "reachable": {"type": "boolean"},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "published_at": {"type": "string", "format": "date-time"},
+          "canonical_url": {"type": "string", "format": "uri"},
+          "summary": {"type": "string", "minLength": 1},
+          "materiality": {"oneOf": [{"type": "boolean"}, {"type": "string"}]},
+          "affected_assets": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "error": {"type": ["string", "null"]},
+    "conflict": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

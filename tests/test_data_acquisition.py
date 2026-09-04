@@ -14,10 +14,18 @@ from crypto_portfolio.providers.base import ProviderRequest, ProviderUnavailable
 from crypto_portfolio.providers.binance import BinanceProvider
 from crypto_portfolio.providers.cache import CacheExpired, ProviderCache, request_hash
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider, catalog_metrics, parse_timeseries
-from crypto_portfolio.providers.config import load_provider_config, provider_enabled
+from crypto_portfolio.providers.coinglass import (
+    API_KEY_HEADER,
+    BASE_URL as COINGLASS_BASE_URL,
+    CoinGlassProvider,
+    parse_etf_flow_history,
+    parse_liquidation_history,
+)
+from crypto_portfolio.providers.config import load_provider_config, provider_enabled, provider_runtime_status, provider_status
 from crypto_portfolio.providers.defillama import identifier_for_asset
 from crypto_portfolio.providers.http import HttpClient, redact_secrets
 from crypto_portfolio.providers.router import ProviderRouter
+from crypto_portfolio.providers.routes import provider_chain
 
 
 def config_for(*providers):
@@ -180,6 +188,183 @@ class DataAcquisitionTests(unittest.TestCase):
             self.assertEqual(routed.provider_fallbacks, 1)
             self.assertTrue(all(item["source"] == "bybit" for item in routed.observations))
 
+    def test_router_retains_exhausted_unresolved_details(self):
+        request = ProviderRequest(
+            "binance", "funding", "BTC", {}, ("derivatives.funding_rate",),
+        )
+        primary = StructuredProvider(error=ProviderUnavailable("provider unavailable"))
+        with TemporaryDirectory() as directory:
+            router = ProviderRouter(
+                {"binance": primary},
+                config=config_for("binance"),
+                cache=ProviderCache(Path(directory) / "cache"),
+            )
+            result = router.collect((request,), as_of="2026-09-04T00:00:00Z", now="2026-09-04T00:00:00Z")
+        self.assertEqual(result.unresolved, (("BTC", "derivatives.funding_rate"),))
+        self.assertEqual(result.unresolved_details[0]["asset"], "BTC")
+        self.assertEqual(result.unresolved_details[0]["metric_key"], "derivatives.funding_rate")
+        self.assertEqual(result.unresolved_details[0]["providers_attempted"], ["binance", "bybit"])
+        self.assertNotIn("provider unavailable", str(result.unresolved_details[0]))
+
+    def test_router_unresolved_details_only_include_missing_bundle_identities(self):
+        class PartialProvider(StructuredProvider):
+            def collect(self, request):
+                self.calls += 1
+                return [
+                    {
+                        "asset": request.asset,
+                        "metric_key": request.metric_keys[0],
+                        "value": self.value,
+                        "unit": "fraction",
+                        "observed_at": "2026-09-04T00:00:00Z",
+                        "fetched_at": "2026-09-04T00:00:00Z",
+                        "source": self.source,
+                        "confidence": "HIGH",
+                    }
+                ]
+
+        request = ProviderRequest(
+            "binance", "funding", "BTC", {},
+            ("derivatives.funding_rate", "derivatives.funding_rate_24h_avg"),
+        )
+        with TemporaryDirectory() as directory:
+            result = ProviderRouter(
+                {"binance": PartialProvider(source="binance")},
+                config=config_for("binance"),
+                cache=ProviderCache(Path(directory) / "cache"),
+            ).collect((request,), as_of="2026-09-04T00:00:00Z", now="2026-09-04T00:00:00Z")
+        self.assertEqual(result.unresolved, (("BTC", "derivatives.funding_rate_24h_avg"),))
+        self.assertEqual(len(result.unresolved_details), 1)
+
+    def test_acquisition_uses_router_unresolved_reason_for_web_fallback(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("ETH", "fundamentals.tvl"),
+        ))
+        class FailingProvider(StructuredProvider):
+            def collect(self, request):
+                raise ProviderUnavailable("provider unavailable")
+
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"defillama": FailingProvider()},
+                    config=config_for("defillama"),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(plan, as_of="2026-09-04T00:00:00Z", now="2026-09-04T00:00:00Z", cached_observations=())
+        self.assertEqual(len(result.web_fallbacks), 1)
+        self.assertIn("provider unavailable", result.web_fallbacks[0].reason)
+
+    def test_coinglass_bundles_etf_flows_and_liquidations(self):
+        flows = [
+            {"timestamp": int((datetime(2026, 8, 6, tzinfo=timezone.utc) + timedelta(days=index)).timestamp() * 1000), "flow_usd": index * 10}
+            for index in range(30)
+        ]
+        flow_values = parse_etf_flow_history(
+            {"code": "0", "data": flows},
+            ("flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d"),
+            fetched_at="2026-09-05T00:00:00Z", as_of="2026-09-04T00:00:00Z",
+        )
+        self.assertEqual(len(flow_values), 3)
+        self.assertEqual(flow_values[0]["value"], 290)
+        self.assertEqual(flow_values[1]["value"], sum(index * 10 for index in range(23, 30)))
+        self.assertEqual(flow_values[2]["value"], sum(index * 10 for index in range(30)))
+
+        liquidation_rows = [
+            {
+                "time": int((datetime(2026, 8, 29, tzinfo=timezone.utc) + timedelta(days=index)).timestamp() * 1000),
+                "aggregated_long_liquidation_usd": index + 1,
+                "aggregated_short_liquidation_usd": (index + 1) * 2,
+            }
+            for index in range(7)
+        ]
+        liquidation_values = parse_liquidation_history(
+            {"code": 0, "data": liquidation_rows},
+            ("derivatives.long_liquidations_24h_usd", "derivatives.short_liquidations_24h_usd", "derivatives.total_liquidations_24h_usd", "derivatives.long_liquidations_7d_usd"),
+            asset="BTC", fetched_at="2026-09-05T00:00:00Z", as_of="2026-09-04T00:00:00Z",
+        )
+        values = {item["metric_key"]: item["value"] for item in liquidation_values}
+        self.assertEqual(values["derivatives.long_liquidations_24h_usd"], 7)
+        self.assertEqual(values["derivatives.short_liquidations_24h_usd"], 14)
+        self.assertEqual(values["derivatives.total_liquidations_24h_usd"], 21)
+        self.assertEqual(values["derivatives.long_liquidations_7d_usd"], 28)
+        self.assertEqual(
+            parse_liquidation_history(
+                {"code": 0, "data": liquidation_rows[:2]},
+                ("derivatives.long_liquidations_7d_usd",),
+                asset="BTC", fetched_at="2026-09-05T00:00:00Z",
+            ),
+            (),
+        )
+
+    def test_coinglass_auth_header_and_runtime_registration(self):
+        class FakeCoinGlassClient:
+            def __init__(self):
+                self.calls = []
+
+            def get_json(self, url, *, params=None, headers=None):
+                self.calls.append((url, params, headers))
+                return {"code": "0", "data": [{
+                    "timestamp": 1788476400000, "flow_usd": 10,
+                }]}
+
+        client = FakeCoinGlassClient()
+        provider = CoinGlassProvider(client=client, api_key="fake-secret")
+        values = provider.collect(ProviderRequest("coinglass", "etf", "MARKET", {}, ("flows.etf_net_1d",)))
+        self.assertEqual(values[0]["value"], 10)
+        self.assertEqual(client.calls[0][0], COINGLASS_BASE_URL + "/api/etf/bitcoin/flow-history")
+        self.assertEqual(client.calls[0][2], {API_KEY_HEADER: "fake-secret"})
+        self.assertEqual(provider.capabilities.requires_api_key, True)
+        self.assertEqual(provider_chain("derivatives.total_liquidations_24h_usd"), ("coinglass",))
+
+        config = config_for("coinglass")
+        config["providers"]["coinglass"] = {"enabled": "AUTO", "api_key_env": "COINGLASS_API_KEY"}
+        with patch.dict("os.environ", {"COINGLASS_API_KEY": "fake-secret"}, clear=False):
+            router = ProviderRouter(config=config, http_client=object())
+            self.assertIn("coinglass", router.providers)
+        with patch.dict("os.environ", {}, clear=True):
+            router = ProviderRouter(config=config, http_client=object())
+            self.assertNotIn("coinglass", router.providers)
+
+    def test_coinglass_secret_is_redacted_from_router_diagnostics(self):
+        class LeakingClient:
+            def get_json(self, url, *, params=None, headers=None):
+                raise RuntimeError(f"request failed for {headers[API_KEY_HEADER]}")
+
+        provider = CoinGlassProvider(client=LeakingClient(), api_key="fake-secret")
+        request = ProviderRequest("coinglass", "etf", "MARKET", {}, ("flows.etf_net_1d",))
+        config = config_for("coinglass")
+        config["providers"]["coinglass"] = {"enabled": True, "api_key_env": "COINGLASS_API_KEY"}
+        with patch.dict("os.environ", {"COINGLASS_API_KEY": "fake-secret"}, clear=False):
+            with TemporaryDirectory() as directory:
+                result = ProviderRouter(
+                    {"coinglass": provider},
+                    config=config,
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ).collect((request,), now="2026-09-04T00:00:00Z")
+        self.assertNotIn("fake-secret", str(result.as_dict()))
+
+    def test_coinglass_plan_denial_is_a_safe_provider_fallback(self):
+        class DeniedClient:
+            def get_json(self, url, *, params=None, headers=None):
+                return {"code": "1003", "msg": "upgrade plan required", "data": []}
+
+        provider = CoinGlassProvider(client=DeniedClient(), api_key="fake-secret")
+        request = ProviderRequest("coinglass", "etf", "MARKET", {}, ("flows.etf_net_1d",))
+        config = config_for("coinglass")
+        config["providers"]["coinglass"] = {"enabled": True, "api_key_env": "COINGLASS_API_KEY"}
+        with patch.dict("os.environ", {"COINGLASS_API_KEY": "fake-secret"}, clear=False):
+            with TemporaryDirectory() as directory:
+                result = ProviderRouter(
+                    {"coinglass": provider},
+                    config=config,
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ).collect((request,), now="2026-09-04T00:00:00Z")
+        self.assertEqual(result.unresolved, (("MARKET", "flows.etf_net_1d"),))
+        self.assertEqual(result.attempts[0].status, "UNSUPPORTED")
+        self.assertNotIn("fake-secret", str(result.as_dict()))
+
     def test_incremental_series_requests_only_tail(self):
         base = datetime(2026, 9, 1, tzinfo=timezone.utc)
         def series(days):
@@ -247,6 +432,34 @@ class DataAcquisitionTests(unittest.TestCase):
             override.write_text('{"providers":{"binance":{"enabled":false}}}', encoding="utf-8")
             with patch.dict("os.environ", {"CRYPTO_PORTFOLIO_PROVIDER_CONFIG": str(override)}, clear=False):
                 self.assertFalse(load_provider_config()["providers"]["binance"]["enabled"])
+
+    def test_provider_runtime_status_separates_config_adapter_and_credential(self):
+        config = config_for("binance", "coinglass")
+        config["providers"]["coinglass"] = {"enabled": "AUTO", "api_key_env": "COINGLASS_API_KEY"}
+        adapters = {"binance": object(), "coinglass": object()}
+        missing = provider_runtime_status(config, adapters=adapters, environ={})
+        by_name = {item.provider: item for item in missing}
+        self.assertTrue(by_name["binance"].runtime_ready)
+        self.assertFalse(by_name["coinglass"].config_enabled)
+        self.assertTrue(by_name["coinglass"].adapter_available)
+        self.assertTrue(by_name["coinglass"].credential_required)
+        self.assertFalse(by_name["coinglass"].runtime_ready)
+        self.assertNotIn("COINGLASS", str(by_name["coinglass"]))
+
+        ready = provider_runtime_status(config, adapters=adapters, environ={"COINGLASS_API_KEY": "secret"})
+        self.assertTrue({item.provider: item for item in ready}["coinglass"].runtime_ready)
+        status = provider_status(config, {"COINGLASS_API_KEY": "secret"}, adapters=adapters)
+        row = {item["provider"]: item for item in status}["coinglass"]
+        self.assertTrue(row["enabled"])
+        self.assertTrue(row["config_enabled"])
+        self.assertTrue(row["runtime_ready"])
+        self.assertNotIn("secret", str(status))
+
+        unavailable = provider_runtime_status(config, adapters={"binance": object()}, environ={"COINGLASS_API_KEY": "secret"})
+        row = {item.provider: item for item in unavailable}["coinglass"]
+        self.assertTrue(row.config_enabled)
+        self.assertFalse(row.adapter_available)
+        self.assertFalse(row.runtime_ready)
 
     def test_binance_spot_and_klines_use_public_endpoints(self):
         class FakeClient:

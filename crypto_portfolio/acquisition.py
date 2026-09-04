@@ -6,19 +6,29 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import math
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .data_collection import collection_summary
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
 from .engine.metric_plan import MetricCollectionPlan, MetricRequest
+from .events import EventScanner, EventSourceScanRequest, event_metric_category
 from .metrics_registry import metric_definition
+from .models.events import EventScanResult
 from .models.metrics_history import MetricObservation
 from .models.time import normalize_timestamp, parse_timestamp
 from .providers.base import FetchMode
 from .providers.config import load_provider_config
+from .providers.http import redact_secrets
 from .providers.routes import metric_is_mutable, provider_chain
 from .providers.router import ProviderRouter
 from .state.metrics import latest_usable_observation, read_metric_observations
+
+
+_EVENT_METRIC_KEYS = {
+    "security": "risk.security_event_status",
+    "governance": "risk.governance_event_status",
+    "regulatory": "risk.regulatory_event_status",
+}
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,8 @@ class AcquisitionResult:
     web_fallbacks: tuple[WebFallbackRequest, ...] = ()
     summary: Mapping[str, Any] | None = None
     attempts: tuple[Mapping[str, Any], ...] = ()
+    event_scan_requests: tuple[EventSourceScanRequest, ...] = ()
+    event_scans: tuple[EventScanResult, ...] = ()
 
     @property
     def observations(self) -> tuple[MetricObservation, ...]:
@@ -80,6 +92,8 @@ class AcquisitionResult:
             "web_fallbacks": [item.as_dict() for item in self.web_fallbacks],
             "summary": dict(self.summary or {}),
             "attempts": [dict(item) for item in self.attempts],
+            "event_scan_requests": [item.as_dict() for item in self.event_scan_requests],
+            "event_scans": [item.as_dict() for item in self.event_scans],
         }
 
 
@@ -134,6 +148,8 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
         f"API-derived metrics: {summary.get('api_derived_metrics', 0)}",
         f"Provider fallbacks: {summary.get('provider_fallbacks', 0)}",
         f"Web fallbacks: {summary.get('web_fallbacks', 0)}",
+        f"Event scan source requests: {summary.get('event_scan_requests', 0)}",
+        f"Event scans completed: {summary.get('event_scans', 0)}",
         f"Failed after all fallbacks: {summary.get('failed_after_fallbacks', 0)}",
     ))
 
@@ -150,6 +166,7 @@ class AcquisitionManager:
         config: Mapping[str, Any] | None = None,
         persist: bool = True,
         fetch_mode: FetchMode | str | None = None,
+        event_scanner: EventScanner | None = None,
     ) -> None:
         self.config = dict(config or load_provider_config())
         self.router = router or ProviderRouter(config=self.config)
@@ -157,6 +174,7 @@ class AcquisitionManager:
         self.event_path = event_path
         self.persist = persist
         self.fetch_mode = resolve_fetch_mode(fetch_mode)
+        self.event_scanner = event_scanner or EventScanner()
 
     def run(
         self,
@@ -168,6 +186,8 @@ class AcquisitionManager:
         now: str | datetime | None = None,
         cached_observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
         persist: bool | None = None,
+        event_scan_results: Mapping[Any, EventScanResult | Mapping[str, Any]] | Iterable[EventScanResult | Mapping[str, Any]] | None = None,
+        event_source_fetcher: Callable[[EventSourceScanRequest], Any] | None = None,
     ) -> AcquisitionResult:
         model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
         selected_mode = resolve_fetch_mode(fetch_mode if fetch_mode is not None else (mode if mode is not None else self.fetch_mode))
@@ -213,12 +233,98 @@ class AcquisitionManager:
             routed_values,
             fetched_at=current,
         ))
+        routed_reasons = {
+            (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): str(item.get("reason", ""))
+            for item in routed.unresolved_details
+        }
+        scanner = self.event_scanner
+        event_scans = self._coerce_event_scans(event_scan_results)
+        event_errors: dict[tuple[str, str], str] = {}
+        missing_event_identities = [
+            (request.asset, request.metric_key)
+            for request in model.requests
+            if event_metric_category(request.metric_key) is not None
+            and (request.asset, request.metric_key) not in reusable
+            and (request.asset, event_metric_category(request.metric_key)) not in event_scans
+        ]
+        event_groups: dict[tuple[str, str], None] = {}
+        regulatory_assets: list[str] = []
+        for asset, metric_key in missing_event_identities:
+            category = event_metric_category(metric_key)
+            if category == "regulatory":
+                if asset not in regulatory_assets:
+                    regulatory_assets.append(asset)
+            elif category is not None:
+                event_groups[(asset, category)] = None
+        shared_regulatory = event_scans.get(("MARKET", "regulatory"))
+        if isinstance(shared_regulatory, EventScanResult):
+            for asset in regulatory_assets:
+                event_scans[(asset, "regulatory")] = self._map_shared_regulatory(shared_regulatory, asset)
+        scan_as_of = as_of if as_of is not None else current
+        if event_source_fetcher is not None and selected_mode != FetchMode.CACHE_ONLY:
+            for asset, category in event_groups:
+                try:
+                    event_scans[(asset, category)] = scanner.scan(
+                        asset, category, scan_as_of,
+                        source_fetcher=event_source_fetcher,
+                        review_type=model.review_type,
+                        fetch_mode=selected_mode,
+                    )
+                except Exception as exc:
+                    event_errors[(asset, category)] = f"event source scan failed: {redact_secrets(str(exc))}"
+            if regulatory_assets:
+                try:
+                    event_scans.update({
+                        (asset, "regulatory"): scan
+                        for asset, scan in scanner.scan_shared_regulatory(
+                            regulatory_assets, scan_as_of,
+                            source_fetcher=event_source_fetcher,
+                            review_type=model.review_type,
+                            fetch_mode=selected_mode,
+                        ).items()
+                    })
+                except Exception as exc:
+                    reason = f"shared regulatory event scan failed: {redact_secrets(str(exc))}"
+                    event_errors.update({(asset, "regulatory"): reason for asset in regulatory_assets})
+        event_scan_requests: list[EventSourceScanRequest] = []
+        request_identities = {(request.asset, request.metric_key) for request in model.requests}
+        for asset, category in event_groups:
+            if (asset, category) in event_scans:
+                continue
+            if selected_mode != FetchMode.CACHE_ONLY:
+                event_scan_requests.extend(scanner.build_requests(
+                    asset, category, scan_as_of, review_type=model.review_type,
+                ))
+        if regulatory_assets and selected_mode != FetchMode.CACHE_ONLY:
+            if not all((asset, "regulatory") in event_scans for asset in regulatory_assets):
+                event_scan_requests.extend(scanner.build_requests(
+                    "MARKET", "regulatory", scan_as_of, review_type=model.review_type,
+                ))
+        unique_event_requests = {
+            (item.asset, item.category, item.source_id): item for item in event_scan_requests
+        }
+        event_scan_requests = list(unique_event_requests.values())
+        for (asset, category), scan in tuple(event_scans.items()):
+            if not isinstance(scan, EventScanResult):
+                continue
+            key = _EVENT_METRIC_KEYS.get(category)
+            if key is None or (asset, key) not in request_identities:
+                continue
+            try:
+                routed_values[(asset, key)] = scanner.observation(scan, key, fetched_at=current)
+            except ValueError as exc:
+                event_errors[(asset, category)] = f"event scan result rejected: {exc}"
         results: list[NormalizedMetricResult] = []
         web_fallbacks: list[WebFallbackRequest] = []
         should_persist = self.persist if persist is None else persist
 
         def add_web_fallback(request: MetricRequest, reason: str) -> None:
-            if selected_mode == FetchMode.CACHE_ONLY or not self.router.allow_web:
+            if (
+                selected_mode == FetchMode.CACHE_ONLY
+                or not self.router.allow_web
+                or event_metric_category(request.metric_key) is not None
+                or request.metric_key == "risk.chain_liveness_status"
+            ):
                 return
             chain = provider_chain(request.metric_key)
             web_fallbacks.append(WebFallbackRequest(
@@ -262,10 +368,20 @@ class AcquisitionManager:
                         normalized = self._failure(request, current, reason, stale=True)
             else:
                 old = stale.get(identity)
-                reason = "no configured provider returned a usable observation"
+                category = event_metric_category(request.metric_key)
+                if category is not None:
+                    reason = event_errors.get(
+                        (request.asset, category),
+                        f"{category} event scan requires the returned authoritative source plan",
+                    )
+                elif request.metric_key == "risk.chain_liveness_status":
+                    reason = "chain liveness requires a separate structured status check"
+                else:
+                    reason = routed_reasons.get(identity, "no configured provider returned a usable observation")
                 if old is not None:
                     reason = f"last observation is stale as of {cutoff}"
-                add_web_fallback(request, reason)
+                if category is None and request.metric_key != "risk.chain_liveness_status":
+                    add_web_fallback(request, reason)
                 normalized = self._failure(request, current, reason, stale=old is not None)
             if should_persist:
                 persist_metric_result(
@@ -276,7 +392,7 @@ class AcquisitionManager:
             results.append(normalized)
 
         events = tuple(item.event for item in results)
-        summary = collection_summary(events)
+        summary = collection_summary(events, review_type=model.review_type)
         summary.update({
             "metrics_requested": len(model.requests),
             "fresh_observation_hits": fresh_hits,
@@ -287,6 +403,8 @@ class AcquisitionManager:
             "web_fallbacks": len(web_fallbacks),
             "failed_after_fallbacks": sum(item.status in {"FAILED", "STALE", "CONFLICT"} for item in events),
             "fetch_mode": selected_mode.value,
+            "event_scan_requests": len(event_scan_requests),
+            "event_scans": len(event_scans),
         })
         return AcquisitionResult(
             model,
@@ -294,6 +412,8 @@ class AcquisitionManager:
             tuple(web_fallbacks),
             summary,
             tuple(attempt.as_dict() for attempt in routed.attempts),
+            tuple(event_scan_requests),
+            tuple(event_scans.values()),
         )
 
     collect = run
@@ -309,6 +429,52 @@ class AcquisitionManager:
             "reason": reason,
             "source": "provider-router",
         }, now=timestamp)
+
+    @staticmethod
+    def _coerce_event_scans(
+        value: Mapping[Any, EventScanResult | Mapping[str, Any]] | Iterable[EventScanResult | Mapping[str, Any]] | None,
+    ) -> dict[tuple[str, str], EventScanResult]:
+        if value is None:
+            return {}
+        if isinstance(value, Mapping):
+            items = value.items()
+        else:
+            items = ((None, item) for item in value)
+        result: dict[tuple[str, str], EventScanResult] = {}
+        for key, raw in items:
+            scan = raw if isinstance(raw, EventScanResult) else EventScanResult.from_mapping(raw)
+            identity = (scan.asset, scan.category)
+            if isinstance(key, tuple) and len(key) == 2:
+                target = str(key[0]).strip().upper()
+                category = str(key[1]).strip().lower()
+                if scan.asset == "MARKET" and category == "regulatory" and target != "MARKET":
+                    scan = AcquisitionManager._map_shared_regulatory(scan, target)
+                identity = (target, category)
+            result[identity] = scan
+        return result
+
+    @staticmethod
+    def _map_shared_regulatory(scan: EventScanResult, asset: str) -> EventScanResult:
+        if scan.asset == asset:
+            return scan
+        if scan.asset != "MARKET" or scan.category != "regulatory":
+            raise ValueError("only a shared MARKET regulatory scan can be mapped to an asset")
+        events = tuple(
+            item for item in scan.material_events
+            if not item.get("affected_assets")
+            or asset in item.get("affected_assets", ())
+            or "MARKET" in item.get("affected_assets", ())
+        )
+        return EventScanResult(
+            asset=asset,
+            category="regulatory",
+            scan_as_of=scan.scan_as_of,
+            lookback_days=scan.lookback_days,
+            sources_checked=scan.sources_checked,
+            material_events=events,
+            coverage=scan.coverage,
+            confidence=scan.confidence,
+        )
 
     @staticmethod
     def _derive_relative_observations(

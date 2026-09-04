@@ -113,6 +113,48 @@ class ProviderCapabilities:
 
 
 @dataclass(frozen=True)
+class ProviderRuntimeStatus:
+    """Offline diagnostic state for one configured provider."""
+
+    provider: str
+    configured: bool
+    config_enabled: bool
+    adapter_available: bool
+    credential_required: bool
+    credential_present: bool
+    runtime_ready: bool
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "provider", _text(self.provider, "provider").lower())
+        for field in (
+            "configured", "config_enabled", "adapter_available",
+            "credential_required", "credential_present", "runtime_ready",
+        ):
+            if not isinstance(getattr(self, field), bool):
+                raise ValueError(f"provider runtime {field} must be boolean")
+        expected_ready = self.config_enabled and self.adapter_available and (
+            not self.credential_required or self.credential_present
+        )
+        if self.runtime_ready != expected_ready:
+            raise ValueError("provider runtime_ready does not match runtime readiness inputs")
+        if self.reason is not None:
+            object.__setattr__(self, "reason", _text(self.reason, "reason"))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "configured": self.configured,
+            "config_enabled": self.config_enabled,
+            "adapter_available": self.adapter_available,
+            "credential_required": self.credential_required,
+            "credential_present": self.credential_present,
+            "runtime_ready": self.runtime_ready,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class ProviderRequest:
     """Deterministic, secret-free description of one provider bundle."""
 
@@ -266,6 +308,7 @@ __all__ = [
     "ProviderRequest",
     "ProviderResponse",
     "ProviderResponseError",
+    "ProviderRuntimeStatus",
     "ProviderUnavailable",
     "ProviderUnsupportedMetric",
     "SocialDataProvider",

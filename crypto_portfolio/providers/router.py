@@ -14,6 +14,7 @@ from .base import (
     ProviderError,
     ProviderRequest,
     ProviderResponse,
+    ProviderRuntimeStatus,
     ProviderUnavailable,
     ProviderUnsupportedMetric,
 )
@@ -59,6 +60,7 @@ class RouterResult:
     api_requests: int = 0
     api_derived_metrics: int = 0
     provider_fallbacks: int = 0
+    unresolved_details: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def network_requests(self) -> int:
@@ -69,6 +71,7 @@ class RouterResult:
             "observations": [dict(item) for item in self.observations],
             "attempts": [item.as_dict() for item in self.attempts],
             "unresolved": [list(item) for item in self.unresolved],
+            "unresolved_details": [dict(item) for item in self.unresolved_details],
             "provider_cache_hits": self.provider_cache_hits,
             "api_requests": self.api_requests,
             "api_derived_metrics": self.api_derived_metrics,
@@ -138,6 +141,7 @@ class ProviderRouter:
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
+        from .coinglass import CoinglassProvider
         from .defillama import DeFiLlamaProvider
 
         client = self.http_client or HttpClient()
@@ -156,6 +160,11 @@ class ProviderRouter:
                 client=client,
                 api_key=provider_api_key("coinmetrics_pro", self.config),
             )
+        if provider_enabled("coinglass", self.config):
+            providers["coinglass"] = CoinglassProvider(
+                client=client,
+                api_key=provider_api_key("coinglass", self.config),
+            )
         return providers
 
     @property
@@ -165,7 +174,14 @@ class ProviderRouter:
     def provider_status(self) -> tuple[dict[str, Any], ...]:
         from .config import provider_status
 
-        return provider_status(self.config)
+        return provider_status(self.config, adapters=self.providers)
+
+    def provider_runtime_status(self) -> tuple[ProviderRuntimeStatus, ...]:
+        from .config import provider_runtime_status
+
+        return provider_runtime_status(self.config, adapters=self.providers)
+
+    runtime_status = provider_runtime_status
 
     def capabilities(self, provider: str) -> ProviderCapabilities | None:
         value = self.providers.get(provider.strip().lower())
@@ -220,6 +236,7 @@ class ProviderRouter:
 
         observations: dict[tuple[str, str], Mapping[str, Any]] = {}
         attempts: list[ProviderAttempt] = []
+        exhausted: dict[tuple[str, str], dict[str, Any]] = {}
         cache_hits = api_requests = api_derived = fallbacks = 0
 
         while pending:
@@ -250,7 +267,10 @@ class ProviderRouter:
                         provider_name, request.dataset, request.asset, request.metric_keys,
                         "DISABLED", "NONE", "provider disabled or unavailable", request_hash(request),
                     ))
-                    self._advance(pending, identities)
+                    self._advance(
+                        pending, identities, exhausted=exhausted, provider=provider_name,
+                        status="DISABLED", reason="provider disabled or unavailable",
+                    )
                     progressed = True
                     continue
                 capabilities = self.capabilities(provider_name)
@@ -265,7 +285,10 @@ class ProviderRouter:
                         provider_name, request.dataset, request.asset, tuple(identity[1] for identity in unsupported),
                         "UNSUPPORTED", "NONE", "capability declaration does not include metric", request_hash(request),
                     ))
-                    self._advance(pending, unsupported)
+                    self._advance(
+                        pending, unsupported, exhausted=exhausted, provider=provider_name,
+                        status="UNSUPPORTED", reason="capability declaration does not include metric",
+                    )
                     progressed = True
                 if not supported:
                     continue
@@ -309,10 +332,14 @@ class ProviderRouter:
                     if first["index"] > 0:
                         fallbacks += 1
                     if missing:
-                        self._advance(pending, missing)
+                        self._advance(
+                            pending, missing, exhausted=exhausted, provider=provider_name,
+                            status=status, reason="provider returned no usable value for some metrics",
+                        )
                     progressed = True
                 except Exception as exc:  # provider boundaries must not abort an entire review
-                    reason = redact_secrets(str(exc)) or exc.__class__.__name__
+                    secret = provider_api_key(provider_name, self.config)
+                    reason = redact_secrets(str(exc), (secret,) if secret else ()) or exc.__class__.__name__
                     failed_network_requests = self._last_network_requests
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, request.metric_keys,
@@ -321,12 +348,22 @@ class ProviderRouter:
                     api_requests += failed_network_requests
                     if first["index"] > 0:
                         fallbacks += 1
-                    self._advance(pending, identities)
+                    self._advance(
+                        pending, identities, exhausted=exhausted, provider=provider_name,
+                        status=self._error_status(exc), reason=reason,
+                    )
                     progressed = True
             if not progressed:
+                for identity, item in tuple(pending.items()):
+                    exhausted[identity] = self._unresolved_detail(
+                        identity,
+                        item,
+                        reason="router made no progress",
+                    )
                 break
 
-        unresolved = tuple(sorted(pending))
+        unresolved = tuple(sorted(exhausted))
+        unresolved_details = tuple(exhausted[identity] for identity in unresolved)
         return RouterResult(
             observations=tuple(observations.values()),
             attempts=tuple(attempts),
@@ -335,6 +372,7 @@ class ProviderRouter:
             api_requests=api_requests,
             api_derived_metrics=api_derived,
             provider_fallbacks=fallbacks,
+            unresolved_details=unresolved_details,
         )
 
     route = collect
@@ -359,14 +397,43 @@ class ProviderRouter:
         return "FAILED"
 
     @staticmethod
-    def _advance(pending: dict[tuple[str, str], dict[str, Any]], identities: Iterable[tuple[str, str]]) -> None:
+    def _unresolved_detail(
+        identity: tuple[str, str],
+        item: Mapping[str, Any],
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        attempted = tuple(dict.fromkeys(str(provider) for provider in item.get("attempted", ())))
+        return {
+            "asset": identity[0],
+            "metric_key": identity[1],
+            "reason": reason,
+            "providers_attempted": list(attempted),
+        }
+
+    @classmethod
+    def _advance(
+        cls,
+        pending: dict[tuple[str, str], dict[str, Any]],
+        identities: Iterable[tuple[str, str]],
+        *,
+        exhausted: dict[tuple[str, str], dict[str, Any]],
+        provider: str,
+        status: str,
+        reason: str,
+    ) -> None:
         for identity in identities:
             item = pending.get(identity)
             if item is None:
                 continue
+            attempted = item.setdefault("attempted", [])
+            attempted.append(provider)
+            item["last_status"] = status
+            item["last_reason"] = reason
             item["index"] += 1
             if item["index"] >= len(item["chain"]):
                 pending.pop(identity, None)
+                exhausted[identity] = cls._unresolved_detail(identity, item, reason=reason)
 
     def _budget(self, provider: str) -> None:
         network = self.config.get("network", {})

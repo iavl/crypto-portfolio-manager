@@ -25,6 +25,8 @@
     "open_interest": 3600,
     "ratios": 3600,
     "basis": 3600,
+    "liquidations": 3600,
+    "etf": 86400,
     "sentiment": 43200,
     "protocol": 21600,
     "onchain": 86400,

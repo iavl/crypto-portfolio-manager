@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
-from ..metrics_registry import METRIC_REGISTRY, MetricDefinition, metric_definition
+from ..metrics_registry import METRIC_REGISTRY, REVIEW_TYPES, MetricDefinition, metric_definition
 from ..models.metrics_history import MetricObservation
 from ..models.portfolio import PortfolioSnapshot
 from ..models.time import parse_timestamp
 from ..models.policy import Policy, resolve_policy
 
 
-_REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
+_REVIEW_TYPES = set(REVIEW_TYPES)
 _GLOBAL_METRICS = (
     "market.btc_dominance",
     "market.total_crypto_market_cap",
@@ -144,6 +144,7 @@ class MetricRequest:
     cached_observation_id: str | None = None
     reason: str = ""
     definition: MetricDefinition | None = None
+    review_type: str | None = None
 
     def __post_init__(self) -> None:
         asset = _text(self.asset, "metric request asset").upper()
@@ -183,15 +184,22 @@ class MetricRequest:
             raise ValueError("cached_observation_id requires can_reuse")
         if not isinstance(self.reason, str):
             raise ValueError("metric request reason must be a string")
+        review_type = None if self.review_type is None else _review_type(self.review_type)
         object.__setattr__(self, "asset", asset)
         object.__setattr__(self, "metric_key", definition.key)
         object.__setattr__(self, "definition", definition)
         object.__setattr__(self, "factor", definition.factor)
-        object.__setattr__(self, "critical", definition.critical if self.critical is None else self.critical)
+        object.__setattr__(
+            self,
+            "critical",
+            definition.is_critical_for(review_type) if review_type is not None
+            else definition.critical if self.critical is None else self.critical,
+        )
         object.__setattr__(self, "freshness", definition.freshness if self.freshness is None else self.freshness)
         object.__setattr__(self, "trend_enabled", definition.trend_enabled if self.trend_enabled is None else self.trend_enabled)
         object.__setattr__(self, "cached_observation_id", cached_id)
         object.__setattr__(self, "reason", self.reason.strip())
+        object.__setattr__(self, "review_type", review_type)
 
     @property
     def required(self) -> bool:
@@ -214,6 +222,7 @@ class MetricRequest:
             "asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness",
             "trend_enabled", "can_reuse", "cached_observation_id", "reason", "definition",
             "decision_role", "context_group",
+            "review_type",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -276,11 +285,28 @@ class MetricCollectionPlan:
     collector_model: str = "LUNA_MAX"
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "review_type", _review_type(self.review_type))
+        review_type = _review_type(self.review_type)
         requests = tuple(
             item if isinstance(item, MetricRequest) else MetricRequest.from_mapping(item)
             for item in self.requests
         )
+        requests = tuple(
+            item if item.review_type == review_type and item.critical == item.definition.is_critical_for(review_type) else MetricRequest(
+                asset=item.asset,
+                metric_key=item.metric_key,
+                factor=item.factor,
+                critical=item.definition.is_critical_for(review_type),
+                freshness=item.freshness,
+                trend_enabled=item.trend_enabled,
+                can_reuse=item.can_reuse,
+                cached_observation_id=item.cached_observation_id,
+                reason=item.reason,
+                definition=item.definition,
+                review_type=review_type,
+            )
+            for item in requests
+        )
+        object.__setattr__(self, "review_type", review_type)
         identities = [(item.asset, item.metric_key) for item in requests]
         if len(identities) != len(set(identities)):
             raise ValueError("metric collection plan contains duplicate requests")
@@ -502,7 +528,8 @@ def build_metric_collection_plan(
                 asset=asset,
                 metric_key=key,
                 definition=definition,
-                critical=definition.critical,
+                critical=definition.is_critical_for(review),
+                review_type=review,
                 can_reuse=latest is not None,
                 cached_observation_id=latest.observation_id if latest else None,
                 reason=reason,

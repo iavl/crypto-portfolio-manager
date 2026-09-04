@@ -13,6 +13,11 @@ from .time import normalize_timestamp, parse_timestamp
 
 
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
+_EVENT_METRICS = {
+    "security": "risk.security_event_status",
+    "governance": "risk.governance_event_status",
+    "regulatory": "risk.regulatory_event_status",
+}
 
 
 def _text(value: Any, field: str) -> str:
@@ -88,6 +93,9 @@ class EventScanResult:
         definition = metric_definition(metric_key)
         if not definition.key.startswith("risk."):
             raise ValueError("event scans can only produce risk event metrics")
+        expected_metric = _EVENT_METRICS.get(self.category)
+        if expected_metric is not None and definition.key != expected_metric:
+            raise ValueError(f"{self.category} event scan must produce {expected_metric}")
         fetched = fetched_at.isoformat() if isinstance(fetched_at, datetime) else fetched_at
         fetched = normalize_timestamp(fetched, "fetched_at") if fetched is not None else _now()
         if parse_timestamp(fetched) < parse_timestamp(self.scan_as_of):
@@ -102,6 +110,7 @@ class EventScanResult:
             "confidence": self.confidence,
             "summary": self.status,
             "metadata": {
+                "category": self.category,
                 "scan_as_of": self.scan_as_of,
                 "lookback_days": self.lookback_days,
                 "sources_checked": list(self.sources_checked),

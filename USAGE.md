@@ -399,7 +399,8 @@ them to `snapshots.jsonl`.
 The repository uses `AcquisitionManager` for on-demand, cache-first public
 data collection. It checks fresh normalized observations, then provider cache
 entries, then free structured APIs. Web/LLM retrieval receives only explicit
-unresolved `WebFallbackRequest`s.
+unresolved `WebFallbackRequest`s. Security, governance, and regulatory metrics
+use the dedicated EventScanner source plan instead of generic web fallback.
 
 Depending on the review, the Skill may need:
 
@@ -464,9 +465,44 @@ is enabled only when its environment variable is present:
 COINMETRICS_API_KEY
 ```
 
-CoinGlass and LunarCrush remain key-gated extension slots in the provider
-config, but no vendor-specific adapter is shipped yet; unresolved metrics use
-the normal Web fallback.
+CoinGlass API V4 is an optional read-only provider for Bitcoin ETF flows and
+aggregated historical liquidations. Configure its key only in the environment:
+
+```bash
+export COINGLASS_API_KEY='...'
+python3 scripts/providers.py --status
+```
+
+The adapter uses the official `CG-API-KEY` header and is registered only when
+the key is present. Endpoint access and interval limits depend on the
+CoinGlass plan; a present credential does not guarantee every endpoint is
+available. Keys never enter repository JSON, request identities, cache files,
+history, logs, or reports. LunarCrush remains a key-gated extension slot
+without a shipped adapter.
+
+## Event Scanner
+
+Event scanning is on demand. Python creates requests from the fixed source
+catalog, and the runtime Web stage may check only those URLs. Results are
+validated into `EventScanResult` and then normalized as metric observations;
+raw HTML is not persisted.
+
+The configured source scope contains Bitcoin Core/BIPs sources, Ethereum
+Foundation, go-ethereum, consensus, EIPs, and AllCoreDevs sources for BTC/ETH,
+plus a shared market-level SEC, CFTC, and ESMA/MiCA regulatory scan. This is a
+configured primary-source scope, not worldwide regulatory coverage. A shared
+regulatory scan is run once and mapped to affected assets.
+
+Event freshness is the scan timestamp (`scan_as_of`), not the publication date
+of the newest or oldest incident. A current scan with no material result is
+reported as `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; it never claims
+absolute safety. Incomplete primary coverage is
+`INSUFFICIENT_SOURCE_COVERAGE` and lowers scan confidence.
+
+Security and chain-liveness failures remain hard-critical in every review.
+Governance and regulatory metrics remain requested and visible, but their
+missing values are context/coverage losses in `SNAPSHOT_REVIEW` and
+`FULL_REVIEW`; they are hard-critical for `EVENT_REVIEW`.
 
 If a future provider needs credentials, supply them through environment
 variables or a secret store. Never put keys in policy files, Skill files,

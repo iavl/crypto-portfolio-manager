@@ -201,6 +201,14 @@
       "minimum_extension_atr": 2.0
     }
   },
+  "events": {
+    "lookback_days": {
+      "SNAPSHOT_REVIEW": {"security": 30, "governance": 30, "regulatory": 30},
+      "FULL_REVIEW": {"security": 90, "governance": 90, "regulatory": 90},
+      "EVENT_REVIEW": {"security": 30, "governance": 30, "regulatory": 30}
+    },
+    "coverage": {"medium_minimum": 0.5, "high_minimum": 1.0}
+  },
   "execution": {
     "timeframe": "1D",
     "preferred_history_days": 365,

@@ -148,6 +148,27 @@ Check for:
 - ETF/product changes;
 - protocol upgrades with economic consequences.
 
+The on-demand EventScanner uses a deterministic allowlist rather than a
+generic crawler. BTC security/protocol sources are Bitcoin Core security
+advisories, Core releases, and BIPs. ETH security sources are Ethereum.org
+security guidance, go-ethereum advisories, and consensus-spec advisories;
+Ethereum security is not represented by one client. ETH governance sources
+are EIPs, AllCoreDevs coordination, and Ethereum Foundation protocol notices.
+The compatible BTC metric key `risk.governance_event_status` means material
+protocol-development/governance-context changes, not DAO governance.
+
+Regulatory collection is one shared market-level scan over the configured SEC,
+CFTC, and ESMA/MiCA primary-source scope and is then mapped to affected assets.
+It does not claim worldwide regulatory coverage. Tier 2/3 material claims may
+confirm or discover leads, but cannot replace an inaccessible required Tier 1
+source.
+
+Event scan freshness is based on `scan_as_of`, the time the configured source
+set was checked. It is not based on the publication time of the last incident.
+Full required-source coverage with no material item is
+`NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; incomplete coverage is
+`INSUFFICIENT_SOURCE_COVERAGE` and is never reported as safety.
+
 ## Freshness standards
 
 ### Derivatives positioning

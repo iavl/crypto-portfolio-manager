@@ -8,7 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, TextIO
 
-from .metrics_registry import metric_definition
+from .metrics_registry import REVIEW_TYPES, metric_definition
 from .models.metrics_history import CollectionEvent, MetricObservation
 from .state.metrics import (
     append_collection_event,
@@ -32,10 +32,15 @@ def collection_summary(
     events: Iterable[CollectionEvent],
     *,
     weights: Mapping[str, float] | None = None,
+    review_type: str | None = None,
 ) -> dict[str, Any]:
     values = tuple(events)
     if any(not isinstance(event, CollectionEvent) for event in values):
         raise ValueError("events must contain CollectionEvent objects")
+    if review_type is not None:
+        review_type = review_type.strip().upper() if isinstance(review_type, str) else review_type
+        if review_type not in REVIEW_TYPES:
+            raise ValueError(f"review_type must be one of {list(REVIEW_TYPES)}")
     counts = Counter(event.status for event in values)
     scoring_events = [
         event for event in values
@@ -65,7 +70,11 @@ def collection_summary(
         coverage = successful / total if total else 0.0
     critical_failures = sum(
         event.status in {"FAILED", "STALE", "CONFLICT"}
-        and metric_definition(event.metric_key).critical
+        and (
+            metric_definition(event.metric_key).is_critical_for(review_type)
+            if review_type is not None
+            else metric_definition(event.metric_key).critical
+        )
         and metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
         for event in values
     )
@@ -83,6 +92,7 @@ def collection_summary(
         "evidence_coverage": coverage,
         "confidence": confidence,
         "overlay_requested": len(values) - len(scoring_events),
+        "review_type": review_type,
     }
 
 
@@ -90,6 +100,8 @@ def format_collection_event(
     event: CollectionEvent,
     observation: MetricObservation | None = None,
     previous: MetricObservation | None = None,
+    *,
+    review_type: str | None = None,
 ) -> str:
     if not isinstance(event, CollectionEvent):
         raise ValueError("event must be a CollectionEvent")
@@ -125,8 +137,12 @@ def format_collection_event(
         effect = "excluded from applicable coverage"
     else:
         effect = "coverage/confidence reduced"
-        if metric_definition(event.metric_key).critical:
+        definition = metric_definition(event.metric_key)
+        hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
+        if hard_critical:
             effect += "; CRITICAL DATA FAILURE; high-conviction trade blocked"
+        elif review_type is not None and definition.critical:
+            effect += "; not hard-critical for this review"
     lines.append(f"       scoring_effect: {effect}")
     return "\n".join(lines)
 
@@ -181,6 +197,7 @@ class CollectionReporter:
     event_path: str | None = None
     weights: Mapping[str, float] | None = None
     routing: Mapping[str, str] | None = None
+    review_type: str | None = None
 
     def __post_init__(self) -> None:
         self.stream = self.stream or sys.stderr
@@ -204,10 +221,10 @@ class CollectionReporter:
         if self.event_path:
             append_collection_event(event, self.event_path)
         self.events.append(event)
-        print(format_collection_event(event, observation, previous), file=self.stream)
+        print(format_collection_event(event, observation, previous, review_type=self.review_type), file=self.stream)
 
     def summary(self) -> dict[str, Any]:
-        result = collection_summary(self.events, weights=self.weights)
+        result = collection_summary(self.events, weights=self.weights, review_type=self.review_type)
         if self.routing is not None:
             from .model_routing import routing_metadata
 

@@ -38,6 +38,7 @@ _TOP_LEVEL_FIELDS = {
     "positioning",
     "btc_cycle",
     "execution_overlay",
+    "events",
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -166,6 +167,9 @@ _CYCLE_PRICE_FIELDS = {"extension_atr", "drawdown_reset"}
 _CYCLE_HOLDER_FIELDS = {"lth_distribution_threshold", "lth_accumulation_threshold", "sopr_distribution_threshold"}
 _CYCLE_FLOW_FIELDS = {"weakening_threshold"}
 _EXECUTION_OVERLAY_FIELDS = {"positioning", "btc_cycle", "wait"}
+_EVENTS_FIELDS = {"lookback_days", "coverage"}
+_EVENT_REVIEW_TYPES = ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")
+_EVENT_CATEGORIES = ("security", "governance", "regulatory")
 _OVERLAY_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "EXTREME")
 _POSITIONING_REQUIRED_FIELDS = {
     "enabled",
@@ -295,6 +299,7 @@ class Policy:
     positioning: Mapping[str, Any] = dataclass_field(default_factory=dict)
     btc_cycle: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    events: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -380,6 +385,8 @@ class Policy:
             result["btc_cycle"] = _copy_mapping(self.btc_cycle)
         if self.execution_overlay:
             result["execution_overlay"] = _copy_mapping(self.execution_overlay)
+        if self.events:
+            result["events"] = _copy_mapping(self.events)
         return result
 
     def legacy_config(self) -> dict[str, Any]:
@@ -1072,6 +1079,42 @@ def _parse_execution_overlay(value: Any, *, allow_missing: bool = False) -> dict
     return {"positioning": positioning, "btc_cycle": cycle, "wait": {"enabled": wait["enabled"], "minimum_extension_atr": extension}}
 
 
+def _parse_events(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("events must be an object")
+    _unknown_fields(value, _EVENTS_FIELDS, "events")
+    if set(value) != _EVENTS_FIELDS:
+        raise PolicyError("events must contain lookback_days and coverage")
+    raw_lookbacks = value["lookback_days"]
+    if not isinstance(raw_lookbacks, dict) or set(raw_lookbacks) != set(_EVENT_REVIEW_TYPES):
+        raise PolicyError("events.lookback_days must contain all review types")
+    lookbacks: dict[str, dict[str, int]] = {}
+    for review_type in _EVENT_REVIEW_TYPES:
+        raw_categories = raw_lookbacks[review_type]
+        if not isinstance(raw_categories, dict) or set(raw_categories) != set(_EVENT_CATEGORIES):
+            raise PolicyError(f"events.lookback_days.{review_type} must contain all event categories")
+        categories: dict[str, int] = {}
+        for category in _EVENT_CATEGORIES:
+            categories[category] = _positive_integer(
+                raw_categories[category],
+                f"events.lookback_days.{review_type}.{category}",
+            )
+        lookbacks[review_type] = categories
+    coverage = value["coverage"]
+    if not isinstance(coverage, dict) or set(coverage) != {"medium_minimum", "high_minimum"}:
+        raise PolicyError("events.coverage must contain medium_minimum and high_minimum")
+    medium = _fraction(coverage["medium_minimum"], "events.coverage.medium_minimum")
+    high = _fraction(coverage["high_minimum"], "events.coverage.high_minimum")
+    if medium <= 0 or high < medium:
+        raise PolicyError("events coverage thresholds must be ordered and positive")
+    return {
+        "lookback_days": lookbacks,
+        "coverage": {"medium_minimum": medium, "high_minimum": high},
+    }
+
+
 def _parse_policy(
     data: Any,
     *,
@@ -1079,6 +1122,7 @@ def _parse_policy(
     allow_missing_volume_profile: bool = False,
     allow_missing_factor_rules: bool = False,
     allow_missing_overlays: bool = False,
+    allow_missing_events: bool = False,
 ) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
@@ -1092,6 +1136,8 @@ def _parse_policy(
         missing.discard("factor_rules")
     if allow_missing_overlays:
         missing.difference_update({"positioning", "btc_cycle", "execution_overlay"})
+    if allow_missing_events:
+        missing.discard("events")
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -1191,6 +1237,7 @@ def _parse_policy(
     parsed_execution_overlay = _parse_execution_overlay(
         data.get("execution_overlay"), allow_missing=allow_missing_overlays
     )
+    parsed_events = _parse_events(data.get("events"), allow_missing=allow_missing_events)
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -1286,6 +1333,7 @@ def _parse_policy(
         positioning=parsed_positioning,
         btc_cycle=parsed_btc_cycle,
         execution_overlay=parsed_execution_overlay,
+        events=parsed_events,
     )
     raw_execution = data.get("execution")
     omitted = (
@@ -1304,6 +1352,8 @@ def _parse_policy(
         object.__setattr__(policy, "btc_cycle", {})
     if "execution_overlay" not in data:
         object.__setattr__(policy, "execution_overlay", {})
+    if "events" not in data:
+        object.__setattr__(policy, "events", {})
     return policy
 
 
@@ -1327,6 +1377,7 @@ def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
         allow_missing_volume_profile=True,
         allow_missing_factor_rules=True,
         allow_missing_overlays=True,
+        allow_missing_events=True,
     )
 
 

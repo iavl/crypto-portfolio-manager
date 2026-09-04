@@ -7,7 +7,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from crypto_portfolio.data_collection import CollectionReporter, collection_summary
+from crypto_portfolio.data_collection import CollectionReporter, collection_summary, format_collection_event
 from crypto_portfolio.models.metrics_history import (
     CollectionEvent,
     MetricObservation,
@@ -156,6 +156,36 @@ class MetricHistoryTests(unittest.TestCase):
             self.assertIn("[DATA] ETH fundamentals.tvl SUCCESS", stream.getvalue())
             self.assertIn("Data Collection Summary", stream.getvalue())
             self.assertEqual(collection_summary(read_collection_events(event_path))["critical_failures"], 0)
+
+    def test_collection_criticality_is_review_specific(self):
+        regulatory = CollectionEvent(
+            "regulatory", "2026-09-01", "ETH", "risk.regulatory_event_status", "FAILED",
+            reason="primary source unavailable", source="event-scan",
+        )
+        security = CollectionEvent(
+            "security", "2026-09-01", "ETH", "risk.security_event_status", "FAILED",
+            reason="primary source unavailable", source="event-scan",
+        )
+        snapshot = collection_summary((regulatory, security), review_type="SNAPSHOT_REVIEW")
+        self.assertEqual(snapshot["critical_failures"], 1)
+        regulatory_text = format_collection_event(regulatory, review_type="SNAPSHOT_REVIEW")
+        self.assertNotIn("CRITICAL DATA FAILURE", regulatory_text)
+        self.assertIn("not hard-critical for this review", regulatory_text)
+        self.assertIn("CRITICAL DATA FAILURE", format_collection_event(security, review_type="SNAPSHOT_REVIEW"))
+
+        full = collection_summary((regulatory,), review_type="FULL_REVIEW")
+        event = collection_summary((regulatory,), review_type="EVENT_REVIEW")
+        self.assertEqual(full["critical_failures"], 0)
+        self.assertEqual(event["critical_failures"], 1)
+
+        success = CollectionEvent(
+            "price", "2026-09-01", "ETH", "market.spot_price", "SUCCESS",
+            source="test", observed_at="2026-09-01", fetched_at="2026-09-01",
+        )
+        self.assertEqual(
+            collection_summary((success, regulatory), review_type="SNAPSHOT_REVIEW")["critical_failures"],
+            0,
+        )
 
     def test_history_records_validate_against_schemas(self):
         root = Path(__file__).parents[1] / "schemas"

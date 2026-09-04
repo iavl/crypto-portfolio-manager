@@ -38,6 +38,9 @@ flowchart TD
     H --> I[Optional API-key providers]
     I --> J[Web fallback requests only]
     J --> K[Python normalization, MetricObservation, CollectionEvent]
+    G --> E1[EventScanner source plan]
+    E1 --> E2[Runtime checks allowlisted event sources]
+    E2 --> K
     K --> L[Python metric history and deterministic Facts]
     L --> M[Python deterministic factors]
     L --> N[LUNA_MAX bounded semantic factor judgment]
@@ -273,6 +276,30 @@ does not let a model invent a new metric key. `normalize_collection_results()`
 requires exactly one result for each planned `(asset, metric_key)` pair;
 omissions, extras, and duplicates fail closed.
 
+### Event scanning
+
+`events/sources.py` is the deterministic allowlist for event evidence.
+`EventScanner` turns it into typed `EventSourceScanRequest` values and accepts
+typed source responses from the runtime Web stage. Fetched page text is
+untrusted evidence: it cannot add URLs, change source scope, execute commands,
+or reveal secrets. Python calculates source coverage, material-event status,
+and confidence, then uses the existing `EventScanResult` and
+`event_scan_observation()` contracts.
+
+Security sources cover Bitcoin Core and the Ethereum Foundation, go-ethereum,
+and consensus-client advisories independently; one client does not represent
+all Ethereum security. Governance sources cover BIPs/Core releases for BTC and
+EIPs, AllCoreDevs coordination, and Ethereum protocol announcements for ETH.
+Regulatory work is one shared market scan over the configured SEC, CFTC, and
+ESMA/MiCA primary-source scope, then mapped to BTC/ETH/other affected assets.
+This is not a global regulator crawler.
+
+`observed_at` for an event observation is always `scan_as_of`. An old incident
+publication therefore does not make a successfully completed current scan
+stale. Full primary coverage with no material result is
+`NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; lower coverage is
+`INSUFFICIENT_SOURCE_COVERAGE`, never a claim of safety.
+
 The registry also includes derivatives (`derivatives.*`), structured social
 (`sentiment.*`), and BTC on-chain (`onchain.btc.*`) observations. They are
 `POSITIONING_OVERLAY` or `CYCLE_CONTEXT` definitions, not additions to the
@@ -296,6 +323,12 @@ summarizes counts, critical failures, weighted coverage, and confidence.
 or conflict lowers coverage/confidence. Critical failures such as current
 price or unresolved material security status block high-conviction trades.
 Missing data is never converted into a favorable score.
+
+Event criticality is review-aware. Security and chain liveness are hard
+critical for `SNAPSHOT_REVIEW`, `FULL_REVIEW`, and `EVENT_REVIEW`. Governance
+and regulatory metrics remain requested in all reviews, but are not hard
+critical in snapshot/full reviews; an event review treats them as hard
+critical. Their failures still reduce coverage and remain visible.
 
 The normalized observation retains source, observed time, fetched time,
 freshness, confidence, unit, period, summary, and optional metadata. Its
@@ -634,6 +667,7 @@ and uncertainty, but it must not recompute or alter the finalized values.
 | Metric registry | [`metrics_registry.py`](crypto_portfolio/metrics_registry.py) |
 | Metric collection planning | [`engine/metric_plan.py`](crypto_portfolio/engine/metric_plan.py) |
 | Metric normalization/history | [`engine/metric_normalization.py`](crypto_portfolio/engine/metric_normalization.py), [`engine/metric_history.py`](crypto_portfolio/engine/metric_history.py), [`state/metrics.py`](crypto_portfolio/state/metrics.py) |
+| Event scanning | [`events/sources.py`](crypto_portfolio/events/sources.py), [`events/scanner.py`](crypto_portfolio/events/scanner.py), [`models/events.py`](crypto_portfolio/models/events.py) |
 | Facts | [`facts/`](crypto_portfolio/facts/), [`engine/facts.py`](crypto_portfolio/engine/facts.py) |
 | Positioning overlay | [`engine/positioning.py`](crypto_portfolio/engine/positioning.py), [`models/positioning.py`](crypto_portfolio/models/positioning.py) |
 | BTC cycle context | [`engine/cycle.py`](crypto_portfolio/engine/cycle.py), [`models/cycle.py`](crypto_portfolio/models/cycle.py) |
@@ -648,7 +682,7 @@ and uncertainty, but it must not recompute or alter the finalized values.
 | Execution | [`engine/entry.py`](crypto_portfolio/engine/entry.py), [`engine/execution.py`](crypto_portfolio/engine/execution.py), [`models/execution.py`](crypto_portfolio/models/execution.py) |
 | Packets | [`models/factor_packet.py`](crypto_portfolio/models/factor_packet.py), [`models/decision_packet.py`](crypto_portfolio/models/decision_packet.py), [`models/report_packet.py`](crypto_portfolio/models/report_packet.py) |
 | Runtime state | [`crypto_portfolio/state/`](crypto_portfolio/state/) |
-| Providers | [`providers/base.py`](crypto_portfolio/providers/base.py) |
+| Providers | [`providers/base.py`](crypto_portfolio/providers/base.py), [`providers/coinglass.py`](crypto_portfolio/providers/coinglass.py) |
 | Validation contracts | [`schemas/`](schemas/) |
 
 The runtime instructions that connect these pieces are in
@@ -663,13 +697,17 @@ capabilities, fetch modes, and handled provider errors. The concrete public
 adapters use the stdlib HTTP client and normalize into registry/model
 contracts. Binance and Bybit are public market/derivatives sources;
 DeFiLlama, Alternative.me, and catalog-aware Coin Metrics cover selected
-structured context. The adapters never expose private account or trading
-endpoints.
+structured context. The optional CoinGlass V4 adapter uses an environment-only
+API key for ETF flow and historical liquidation bundles. The adapters never
+expose private account or trading endpoints.
 
 `AcquisitionManager` owns the order `observation -> provider cache -> free API
 -> optional API-key provider -> Web fallback`. The Skill maps only unresolved
-fallback work into model stages before portfolio logic. `scripts/` contains
-read-only provider and cache diagnostics.
+fallback work into model stages before portfolio logic. Event metrics use the
+dedicated allowlisted EventScanner boundary and return typed source requests;
+they are not generic one-line web fallbacks. `scripts/` contains read-only
+provider and cache diagnostics. Provider status distinguishes configuration,
+adapter availability, credential presence, and runtime readiness offline.
 
 ## Persistence and Replay
 

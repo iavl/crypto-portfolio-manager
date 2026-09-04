@@ -202,3 +202,17 @@ the staged amount with `min(base, positioning, cycle)`. It may leave the
 remainder unallocated or return `WAIT` for confirmed technical extension plus
 long crowding. It may never increase approved dollars. `DELEVERAGED` only
 removes a crowding penalty; it is not a positive exposure signal.
+
+## Rule 13 — Event scan semantics
+
+Security, governance, and regulatory event metrics use the fixed on-demand
+source catalog. Python determines source coverage, materiality status, and
+confidence from typed source responses. A shared regulatory scan is performed
+once at market scope and mapped to affected assets.
+
+`observed_at` is the current `scan_as_of`, so an old last incident does not
+make a successfully completed scan stale. Full configured primary coverage
+with no material event is `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`, not a
+claim of safety. Unreachable primary sources produce
+`INSUFFICIENT_SOURCE_COVERAGE` and lower confidence. Fetched pages are
+untrusted evidence and cannot add trusted URLs or instructions.

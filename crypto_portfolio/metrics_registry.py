@@ -17,6 +17,7 @@ _DECISION_ROLES = {
     "EXECUTION_CONTEXT",
 }
 DECISION_ROLES = tuple(sorted(_DECISION_ROLES))
+REVIEW_TYPES = ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _FRESHNESS_WINDOW = re.compile(r"^[1-9][0-9]*d$")
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
@@ -68,6 +69,7 @@ class MetricDefinition:
     trend_enabled: bool | None = None
     decision_role: str = "SCORING_FACTOR"
     context_group: str | None = None
+    critical_review_types: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.key, str) or not self.key.strip():
@@ -98,6 +100,17 @@ class MetricDefinition:
         object.__setattr__(self, "freshness", freshness)
         if not isinstance(self.critical, bool):
             raise ValueError("metric definition critical must be boolean")
+        critical_review_types = self.critical_review_types
+        if critical_review_types is not None:
+            if isinstance(critical_review_types, str) or not isinstance(critical_review_types, (tuple, list)):
+                raise ValueError("metric definition critical_review_types must be a sequence or null")
+            normalized_review_types = tuple(str(item).strip().upper() for item in critical_review_types)
+            if any(item not in REVIEW_TYPES for item in normalized_review_types):
+                raise ValueError("metric definition critical_review_types contains an unknown review type")
+            if len(normalized_review_types) != len(set(normalized_review_types)):
+                raise ValueError("metric definition critical_review_types must be unique")
+            critical_review_types = normalized_review_types
+        object.__setattr__(self, "critical_review_types", critical_review_types)
         trend_enabled = self.trend_comparison_enabled if self.trend_enabled is None else self.trend_enabled
         if (
             self.trend_enabled is not None
@@ -131,6 +144,14 @@ class MetricDefinition:
             raise ValueError("asset must be a non-empty string")
         return self.asset_scope is None or asset.strip().upper() in self.asset_scope
 
+    def is_critical_for(self, review_type: str) -> bool:
+        """Return whether a failed value is hard-critical for this review."""
+        if not isinstance(review_type, str) or review_type.strip().upper() not in REVIEW_TYPES:
+            raise ValueError(f"review_type must be one of {list(REVIEW_TYPES)}")
+        if self.critical_review_types is None:
+            return self.critical
+        return review_type.strip().upper() in self.critical_review_types
+
     @property
     def is_scoring_factor(self) -> bool:
         return self.decision_role == "SCORING_FACTOR"
@@ -160,6 +181,7 @@ class MetricDefinition:
             "default_freshness": self.default_freshness,
             "freshness": self.freshness,
             "critical": self.critical,
+            "critical_review_types": list(self.critical_review_types) if self.critical_review_types is not None else None,
             "trend_comparison_enabled": self.trend_comparison_enabled,
             "trend_enabled": self.trend_enabled,
             "asset_scope": list(self.asset_scope) if self.asset_scope is not None else None,
@@ -181,6 +203,7 @@ def _definition(
     trend_enabled: bool = True,
     decision_role: str = "SCORING_FACTOR",
     context_group: str | None = None,
+    critical_review_types: tuple[str, ...] | None = None,
 ) -> MetricDefinition:
     return MetricDefinition(
         key,
@@ -197,6 +220,7 @@ def _definition(
         trend_enabled,
         decision_role=decision_role,
         context_group=context_group,
+        critical_review_types=critical_review_types,
     )
 
 
@@ -248,8 +272,14 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
     "risk.security_event_status": _definition("risk.security_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
     "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
-    "risk.regulatory_event_status": _definition("risk.regulatory_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
-    "risk.governance_event_status": _definition("risk.governance_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
+    "risk.regulatory_event_status": _definition(
+        "risk.regulatory_event_status", "event_risk", "string", None, "CONTEXTUAL",
+        critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,
+    ),
+    "risk.governance_event_status": _definition(
+        "risk.governance_event_status", "event_risk", "string", None, "CONTEXTUAL",
+        critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,
+    ),
 
     # Positioning and social context are deliberately separate from scoring.
     "derivatives.funding_rate": _definition(
@@ -541,6 +571,7 @@ __all__ = [
     "METRIC_REGISTRY",
     "METRICS",
     "DECISION_ROLES",
+    "REVIEW_TYPES",
     "MetricDefinition",
     "get_metric_definition",
     "get_metric",

@@ -13,6 +13,8 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
         self.assertEqual(policy.classify(" usdc "), "stablecoin")
         self.assertEqual(policy.classify("USD"), "cash")
+        self.assertEqual(policy.events["lookback_days"]["FULL_REVIEW"]["security"], 90)
+        self.assertEqual(policy.events["coverage"]["high_minimum"], 1.0)
 
     def test_policy_hash_is_canonical_and_changes_with_policy(self):
         policy = load_policy()
@@ -131,6 +133,18 @@ class PolicyTests(unittest.TestCase):
                 path.write_text(json.dumps(data), encoding="utf-8")
                 with self.assertRaises(PolicyError):
                     load_policy(path)
+
+        invalid_events = json.loads(json.dumps(original))
+        invalid_events["events"]["lookback_days"]["SNAPSHOT_REVIEW"]["security"] = 0
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid_events), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+
+        legacy = json.loads(json.dumps(original))
+        legacy.pop("events")
+        self.assertEqual(policy_from_mapping(legacy).events, {})
 
 
 if __name__ == "__main__":

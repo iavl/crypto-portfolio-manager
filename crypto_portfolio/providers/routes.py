@@ -17,6 +17,7 @@ DEFAULT_TTL_SECONDS = {
     "ratios": 3600,
     "basis": 3600,
     "liquidations": 3600,
+    "etf": 86400,
     "sentiment": 43200,
     "protocol": 21600,
     "onchain": 86400,
@@ -45,6 +46,10 @@ def provider_chain(metric_key: str) -> tuple[str, ...]:
         return ()
     if key == "market.spot_price" or key.startswith("market."):
         return ("binance", "bybit")
+    if key.startswith("flows.etf_"):
+        return ("coinglass",)
+    if "liquidations" in key:
+        return ("coinglass",)
     if key.startswith("derivatives."):
         return ("binance", "bybit")
     if key == "sentiment.market_fear_greed":
@@ -55,8 +60,6 @@ def provider_chain(metric_key: str) -> tuple[str, ...]:
         return ("defillama",)
     if key.startswith("onchain.btc."):
         return ("coinmetrics_community", "coinmetrics_pro")
-    if key.startswith("flows.etf_") or key.startswith("derivatives.total_liquidations"):
-        return ("coinglass",)
     # Exchange netflow requires on-chain attribution and event metrics require
     # current source scans; neither is fabricated from market endpoints.
     return ()
@@ -83,6 +86,8 @@ def dataset_for_metric(metric_key: str) -> str:
         return "basis"
     if key.startswith("derivatives.") and "liquidations" in key:
         return "liquidations"
+    if key.startswith("flows.etf_"):
+        return "etf"
     if key.startswith("sentiment."):
         return "sentiment"
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
@@ -127,7 +132,7 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
-    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations"}:
+    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf"}:
         result.update({
             "start": normalize_timestamp(start.isoformat(), "start"),
             "end": normalize_timestamp(end.isoformat(), "end"),

@@ -28,8 +28,10 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Protocol TVL/fees/revenue | DeFiLlama | None | Asset-to-protocol identifiers are explicit. |
 | Market Fear & Greed | Alternative.me | None | Market-wide context, not per-asset sentiment. |
 | BTC cycle/on-chain | Coin Metrics Community, optional authenticated tier | Optional environment key | Catalog availability is checked; unsupported metrics stay unknown. |
-| ETF/liquidations/social/netflow | Web; optional provider extension point | Optional environment key | No vendor-heavy adapter is required; not fabricated from exchange trading data. |
-| Security/governance/regulatory events | Current source scan | None | A scan timestamp, lookback, source coverage, and material results are retained. |
+| ETF flows | CoinGlass API V4 when configured; Web only for unresolved non-provider work | `COINGLASS_API_KEY` | Bitcoin ETF history is bundled into 1D/7D/30D values; endpoint access is plan-dependent. |
+| Historical liquidations | CoinGlass API V4 when configured | `COINGLASS_API_KEY` | Aggregated daily history is used for 24H/7D values; realtime snapshots are not substituted. |
+| Social/netflow | Web; optional provider extension point | Optional environment key | Not fabricated from exchange trading data. |
+| Security/governance/regulatory events | Deterministic source catalog plus on-demand scan | None | A scan timestamp, lookback, primary-source coverage, and material results are retained. |
 
 The repository config is `config/data-providers.json`. User-local overrides
 are read from `~/.config/crypto-portfolio-manager/data-providers.json` or the
@@ -62,6 +64,11 @@ python3 scripts/providers.py --status
 python3 scripts/providers.py --list
 python3 scripts/provider_cache.py --stats
 ```
+
+`--status` is an offline readiness table showing resolved configuration,
+registered adapter, credential presence, and runtime readiness. `--list` shows
+capabilities only for adapters registered in this process; it is not a network
+probe. CoinGlass is registered only when `COINGLASS_API_KEY` is present.
 
 Use `--prune-expired` only as an explicit manual cleanup. It removes expired
 mutable response entries and preserves immutable history.
