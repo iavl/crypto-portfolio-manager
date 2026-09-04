@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import METRIC_REGISTRY, MetricDefinition, metric_definition
@@ -426,13 +426,16 @@ def _fresh_enough(observation: MetricObservation, definition: MetricDefinition, 
     if observation.freshness != "CURRENT":
         return False
     if as_of is None:
-        return True
+        cutoff = datetime.now(timezone.utc)
+    else:
+        cutoff = parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of)
+    age = (cutoff - parse_timestamp(observation.observed_at)).total_seconds()
+    if age < 0:
+        return False
     window = definition.freshness
     if not isinstance(window, str) or not window.lower().endswith("d"):
         return True
-    days = int(window[:-1])
-    age = (parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of) - parse_timestamp(observation.observed_at)).total_seconds()
-    return 0 <= age <= days * 86400
+    return age <= int(window[:-1]) * 86400
 
 
 def _latest_cached(

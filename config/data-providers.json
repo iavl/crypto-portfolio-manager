@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "providers": {
+    "binance": {"enabled": true},
+    "bybit": {"enabled": true},
+    "coinmetrics_community": {"enabled": true},
+    "defillama": {"enabled": true},
+    "alternative_me": {"enabled": true},
+    "coinglass": {
+      "enabled": "AUTO",
+      "api_key_env": "COINGLASS_API_KEY"
+    },
+    "lunarcrush": {
+      "enabled": "AUTO",
+      "api_key_env": "LUNARCRUSH_API_KEY"
+    },
+    "coinmetrics_pro": {
+      "enabled": "AUTO",
+      "api_key_env": "COINMETRICS_API_KEY"
+    }
+  },
+  "cache_ttl_seconds": {
+    "spot": 600,
+    "funding": 3600,
+    "open_interest": 3600,
+    "ratios": 3600,
+    "basis": 3600,
+    "sentiment": 43200,
+    "protocol": 21600,
+    "onchain": 86400,
+    "default": 3600
+  },
+  "network": {
+    "max_requests_per_review": 60,
+    "max_requests_per_provider": 30
+  },
+  "fallback": {
+    "allow_web": true
+  }
+}

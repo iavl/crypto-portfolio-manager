@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/data-providers.schema.json",
+  "title": "Data provider configuration",
+  "type": "object",
+  "required": ["version", "providers", "cache_ttl_seconds", "network", "fallback"],
+  "properties": {
+    "version": {"const": 1},
+    "providers": {"type": "object", "additionalProperties": {"type": "object"}},
+    "cache_ttl_seconds": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+    "network": {
+      "type": "object",
+      "required": ["max_requests_per_review", "max_requests_per_provider"],
+      "properties": {
+        "max_requests_per_review": {"type": "integer", "minimum": 1},
+        "max_requests_per_provider": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "fallback": {"type": "object", "required": ["allow_web"], "properties": {"allow_web": {"type": "boolean"}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

@@ -396,10 +396,10 @@ them to `snapshots.jsonl`.
 
 ## How Current Data Is Used
 
-The repository has provider interfaces in
-`crypto_portfolio/providers/base.py`, but no live provider implementations.
-The running Codex environment uses its available web/data capabilities for
-current public information.
+The repository uses `AcquisitionManager` for on-demand, cache-first public
+data collection. It checks fresh normalized observations, then provider cache
+entries, then free structured APIs. Web/LLM retrieval receives only explicit
+unresolved `WebFallbackRequest`s.
 
 Depending on the review, the Skill may need:
 
@@ -410,24 +410,69 @@ Depending on the review, the Skill may need:
 - exploits, outages, governance, regulatory, and other material events.
 
 The repository does not directly connect to Binance, OKX, CoinGecko,
-DefiLlama, Token Terminal, Glassnode, or CryptoQuant. See
-`references/data-sources.md` for source hierarchy, freshness, and
+or private exchange endpoints. It has public Binance/Bybit market adapters,
+DeFiLlama protocol data, Alternative.me Fear & Greed, and catalog-aware Coin
+Metrics Community support. See [Data Providers](references/data-providers.md)
+and `references/data-sources.md` for source hierarchy, freshness, and
 missing-data rules.
 
 If critical information is unavailable, the Skill lowers confidence or
 declines to make a strong actionable recommendation. Missing data is not
 positive evidence.
 
+## Data Fetching and Cache
+
+The default mode is `AUTO`:
+
+```text
+fresh MetricObservation
+→ provider cache / immutable OHLCV history
+→ free public API
+→ optional API-key provider
+→ Web fallback for genuinely unresolved metrics
+```
+
+Use `CACHE_ONLY` for offline or historical inspection, and `REFRESH` when
+mutable current values must be fetched again:
+
+```bash
+export CRYPTO_PORTFOLIO_FETCH_MODE=CACHE_ONLY
+export CRYPTO_PORTFOLIO_FETCH_MODE=REFRESH
+```
+
+An explicit run-level mode overrides the environment. Completed OHLCV and
+historical series are reused; a refresh fetches only a missing tail. The
+normalized metric history remains the decision record, while provider cache
+files are acquisition infrastructure. No daemon, cron job, database, or
+24/7 collector is required.
+
+Inspect or manually clean the cache:
+
+```bash
+python3 scripts/providers.py --status
+python3 scripts/providers.py --list
+python3 scripts/provider_cache.py --stats
+python3 scripts/provider_cache.py --prune-expired
+```
+
 ## API Keys
 
-No third-party API key is required by this repository because it does not yet
-ship live external provider adapters. Current public information is obtained
-through the running Codex environment's available web/data capabilities.
+Free public providers require no key. The authenticated Coin Metrics adapter
+is enabled only when its environment variable is present:
+
+```text
+COINMETRICS_API_KEY
+```
+
+CoinGlass and LunarCrush remain key-gated extension slots in the provider
+config, but no vendor-specific adapter is shipped yet; unresolved metrics use
+the normal Web fallback.
 
 If a future provider needs credentials, supply them through environment
 variables or a secret store. Never put keys in policy files, Skill files,
 README examples, source files, or Git-tracked `.env` files. Provider-specific
-variable names will be documented only when that provider exists.
+names are configured in `config/data-providers.json`; exchange trading,
+withdrawal, and account keys are never required.
 
 ## Local History
 
@@ -450,7 +495,10 @@ Current state files are:
 │   ├── observations.jsonl
 │   └── collection-events.jsonl
 ├── market-data/sha256/<ohlcv_hash>.json
-└── volume-profiles/sha256/<profile_hash>.json
+├── volume-profiles/sha256/<profile_hash>.json
+└── provider-cache/
+    ├── responses/
+    └── series/
 ```
 
 History supports comparison with previous holdings, cash-flow-aware NAV and
@@ -511,9 +559,11 @@ install`; package installation is for development checks.
 
 ### Live market information is unavailable
 
-The repository does not ship live provider adapters. Ensure the running Codex
-environment has suitable web/data access. The Skill should lower confidence or
-stop a strong entry recommendation when critical data is missing.
+Use `python3 scripts/providers.py --status` to confirm provider configuration.
+Try `AUTO` or `REFRESH` when network access is available, or `CACHE_ONLY` for
+an explicit offline review. The Skill should lower confidence or stop a strong
+entry recommendation when critical data is missing; it must not fabricate a
+metric to improve coverage.
 
 ### History is not being saved
 

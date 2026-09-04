@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/event-scan-result.schema.json",
+  "title": "Current event scan result",
+  "type": "object",
+  "required": ["asset", "category", "scan_as_of", "lookback_days", "sources_checked", "material_events", "coverage", "confidence", "status"],
+  "properties": {
+    "asset": {"type": "string", "minLength": 1},
+    "category": {"type": "string", "minLength": 1},
+    "scan_as_of": {"type": "string", "format": "date-time"},
+    "lookback_days": {"type": "integer", "minimum": 1},
+    "sources_checked": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "material_events": {"type": "array"},
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+    "status": {"enum": ["NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES", "MATERIAL_EVENT_FOUND", "INSUFFICIENT_SOURCE_COVERAGE"]}
+  },
+  "additionalProperties": false
+}

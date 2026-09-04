@@ -133,7 +133,7 @@ def normalize_metric_observation(
     if not isinstance(value, Mapping):
         raise ValueError("metric observation must be an object")
     allowed = {
-        "observation_id", "asset", "metric_key", "status", "value", "unit", "period",
+        "observation_id", "asset", "metric_key", "factor", "status", "value", "unit", "period",
         "observed_at", "fetched_at", "source", "freshness", "confidence", "decision_id",
         "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason",
         "timestamp", "event_id", "venue", "aggregation_scope", "scope", "funding_interval",
@@ -149,7 +149,20 @@ def normalize_metric_observation(
     definition = metric_definition(value.get("metric_key"))
     if not definition.applies_to(asset):
         raise ValueError(f"metric {definition.key} is not applicable to {asset}")
+    if "factor" in value and str(value["factor"]).strip().lower() != definition.factor:
+        raise ValueError(f"metric {definition.key} must use factor {definition.factor}")
+    metadata = dict(value.get("metadata") or {})
+    for field in ("venue", "aggregation_scope", "scope", "funding_interval", "interval", "methodology", "method"):
+        if field in value:
+            metadata[field] = value[field]
+    # Event source pages may be old while the scan itself is current.  Bind
+    # freshness to the scan timestamp when the caller provides one.
     observed_at = _timestamp(value.get("observed_at"), "observed_at")
+    scan_as_of = metadata.get("scan_as_of") if definition.key.startswith("risk.") else None
+    if scan_as_of is not None:
+        scan_timestamp = _timestamp(scan_as_of, "scan_as_of")
+        if parse_timestamp(scan_timestamp) >= parse_timestamp(observed_at):
+            observed_at = scan_timestamp
     now_value = _now(now)
     fetched_at = _timestamp(value.get("fetched_at"), "fetched_at", fallback=now_value or observed_at)
     observation_value, unit = _unit_and_value(value.get("value"), value.get("unit"), definition)
@@ -171,10 +184,6 @@ def normalize_metric_observation(
         observation_value,
         value.get("period"),
     )
-    metadata = dict(value.get("metadata") or {})
-    for field in ("venue", "aggregation_scope", "scope", "funding_interval", "interval", "methodology", "method"):
-        if field in value:
-            metadata[field] = value[field]
     return MetricObservation(
         observation_id=observation_id,
         asset=asset,

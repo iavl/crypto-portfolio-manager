@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/provider-request.schema.json",
+  "title": "Provider bundle request",
+  "type": "object",
+  "required": ["provider", "dataset", "asset", "parameters", "metric_keys", "mutable", "freshness_seconds"],
+  "properties": {
+    "provider": {"type": "string", "minLength": 1},
+    "dataset": {"type": "string", "minLength": 1},
+    "asset": {"type": "string", "minLength": 1},
+    "parameters": {"type": "object"},
+    "metric_keys": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "mutable": {"type": "boolean"},
+    "freshness_seconds": {"type": ["integer", "null"], "minimum": 1}
+  },
+  "additionalProperties": false
+}

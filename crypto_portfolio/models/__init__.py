@@ -1,6 +1,7 @@
 """Typed portfolio and execution domain models."""
 
 from .execution import ExecutionPlan, ExecutionTranche, Invalidation, PriceZone
+from .events import EventScanResult, build_event_scan_result, event_scan_observation, normalize_event_scan
 from ..facts.models import EventFacts, FactBase, FlowFacts, FundamentalFacts, OnchainFacts, RelativeStrengthFacts, TrendFacts, ValuationFacts
 from .decision_packet import AssetDecisionSummary, DecisionReviewPacket, SolReview
 from .cycle import (
@@ -39,6 +40,7 @@ __all__ = [
     "CollectionEvent",
     "DecisionReviewPacket",
     "ExecutionPlan",
+    "EventScanResult",
     "ExecutionTranche",
     "Invalidation",
     "FactorJudgment",
@@ -73,4 +75,7 @@ __all__ = [
     "VolumeNode",
     "VolumeProfile",
     "VolumeProfileBin",
+    "build_event_scan_result",
+    "event_scan_observation",
+    "normalize_event_scan",
 ]

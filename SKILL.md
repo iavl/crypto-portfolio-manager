@@ -21,6 +21,7 @@ judgment and user-facing decisions:
 - `references/risk-model.md`
 - `references/decision-rules.md`
 - `references/data-sources.md`
+- `references/data-providers.md`
 - `references/output-template.md`
 - `references/model-routing.md`
 
@@ -91,13 +92,18 @@ display data, so the engine uses value ÷ quantity and records a note.
 5. Build cash-flow-aware NAV and drawdown history.
 6. Select `SNAPSHOT_REVIEW`, `FULL_REVIEW`, or `EVENT_REVIEW`; recommend a
    `FULL_REVIEW` when at least 14 days have passed since the last one.
-7. Let Python build the validated metric collection plan, then use `LUNA_MAX`
-   only to retrieve/extract those requested observations. Emit a visible `Data
-   Collection Log` for every requested metric, including `FAILED`, `STALE`,
-   `CONFLICT`, and `NOT_APPLICABLE`.
-8. Validate evidence completeness, preserve provenance, and persist successful
-   normalized `MetricObservation` records plus every `CollectionEvent`.
-   Never silently omit a requested metric; retain its status and scoring effect.
+7. Let Python build the validated metric collection plan, then run the
+   `AcquisitionManager` in `AUTO` (or the explicit `CACHE_ONLY`/
+   `REFRESH`) mode. It checks fresh normalized observations, provider cache,
+   and free structured APIs before producing unresolved work for `LUNA_MAX`.
+   Emit a visible `Data Collection Log` for every requested metric, including
+   `FAILED`, `STALE`, `CONFLICT`, and `NOT_APPLICABLE`.
+8. Use `LUNA_MAX`/Web only for the returned `WebFallbackRequest`s. Do not
+   browse for a metric already resolved by a fresh observation, provider
+   cache, or structured API. Validate evidence completeness, preserve
+   provenance, and persist successful normalized `MetricObservation` records
+   plus every `CollectionEvent`. Never silently omit a requested metric;
+   retain its status and scoring effect.
 9. Compare current observations with previous observations and build
    `Evidence`, `FactorScore`, and `AssetAssessment` records. Keep complete
    Evidence embedded in the Decision.
@@ -287,17 +293,23 @@ fake fixtures and `.gitkeep` files only. Metric history is stored under
 `metrics/observations.jsonl` and `metrics/collection-events.jsonl`; normalized
 public market/profile artifacts use
 `market-data/sha256/<ohlcv_hash>.json` and
-`volume-profiles/sha256/<profile_hash>.json`.
+`volume-profiles/sha256/<profile_hash>.json`. Provider acquisition artifacts
+use `provider-cache/responses/` and `provider-cache/series/`.
 
 For a compatibility normalization check, run:
 
 ```bash
-python scripts/portfolio_snapshot.py path/to/fake-snapshot.json
+python3 scripts/portfolio_snapshot.py path/to/fake-snapshot.json
 ```
 
 If no prior history exists, establish the baseline with an initial validated
 snapshot and current review; do not claim historical performance without
 sufficient history.
+
+`metrics/observations.jsonl` remains decision-history canonical. Provider cache
+files only accelerate acquisition; they do not replace observations or
+portfolio history. Set `CRYPTO_PORTFOLIO_FETCH_MODE=AUTO|CACHE_ONLY|REFRESH`
+or pass a run-level mode, with the run-level choice taking precedence.
 
 The report writer uses only finalized packet values. It must not recalculate
 scores, weights, amounts, zones, or missing evidence, and it must not persist

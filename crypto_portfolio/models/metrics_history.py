@@ -17,6 +17,7 @@ _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"}
 _REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
 _PRIVATE_REASONING_FIELDS = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
+_SECRET_FIELDS = {"api_key", "apikey", "api_secret", "authorization", "cookie", "password", "secret", "token"}
 
 
 def _text(value: Any, field: str) -> str:
@@ -42,6 +43,23 @@ def _json_value(value: Any, field: str) -> Any:
     if isinstance(value, (int, float)) and not math.isfinite(float(value)):
         raise ValueError(f"{field} must be finite")
     return value
+
+
+def _contains_credential_key(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            normalized = str(key).strip().lower().replace("-", "_")
+            if (
+                normalized in _SECRET_FIELDS
+                or "api_key" in normalized
+                or normalized.endswith(("_secret", "_token"))
+                or "authorization" in normalized
+                or _contains_credential_key(item)
+            ):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_contains_credential_key(item) for item in value)
+    return False
 
 
 def stable_observation_id(
@@ -150,6 +168,8 @@ class MetricObservation:
             metadata = dict(self.metadata)
             if any(str(key).strip().lower() in _PRIVATE_REASONING_FIELDS for key in metadata):
                 raise ValueError("metadata must not contain private reasoning")
+            if _contains_credential_key(metadata):
+                raise ValueError("metadata must not contain credentials")
             try:
                 json.dumps(metadata, ensure_ascii=False, allow_nan=False)
             except (TypeError, ValueError) as exc:

@@ -1,14 +1,26 @@
 # Data Source Policy
 
 Collection is registry-driven. Python selects applicable metrics and freshness
-requirements; `LUNA_MAX` retrieves only those requests and returns normalized
-observations with source and timestamps. Python validates units, timestamps,
-freshness, conflicts, and history. Downstream semantic stages consume the
-normalized records/Facts rather than repeatedly reading raw webpages.
+requirements; `AcquisitionManager` first reuses fresh observations and local
+cache, then routes grouped requests through free structured providers. Only
+unresolved requests reach `LUNA_MAX`/Web, which returns normalized observations
+with source and timestamps. Python validates units, timestamps, freshness,
+conflicts, and history. Downstream semantic stages consume the normalized
+records/Facts rather than repeatedly reading raw webpages.
 
 ## Principle
 
 Current portfolio recommendations require current data. Prefer authoritative primary sources and triangulate material claims.
+
+## Provider hierarchy
+
+For acquisition, use structured public exchange APIs for market and
+derivatives data, structured analytics APIs for protocol fundamentals, a
+catalog-checked on-chain API for BTC cycle context, and current official/Web
+scans for security, governance, and regulatory events. Optional API-key
+providers may fill advanced ETF, liquidation, social, or exchange-attribution
+gaps; they are never required for a normal review. See
+`references/data-providers.md` for routing and cache details.
 
 ## Source hierarchy
 

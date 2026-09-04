@@ -33,6 +33,8 @@ Trading:  advisory only; no automatic execution
 - Preserves evidence, factor scores, and append-only decision history.
 - Persists decision-relevant `MetricObservation` history and collection
   failures for compact current-vs-previous trend comparisons.
+- Acquires data on demand through free structured public APIs first, with
+  freshness-aware local provider caching; no background service is required.
 - Adds derivatives/social positioning and BTC cycle context as non-scoring
   overlays that can conservatively cap immediate deployment.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.
@@ -65,7 +67,8 @@ the matching rebalance approval, may stage less, and does not place orders.
 - Codex with Agent Skills support.
 - Python 3.11 or newer for the included scripts and development checks.
 - Git for GitHub/manual installation and development.
-- Network/web access in the running Codex environment for live research.
+- Network/web access in the running Codex environment for live research or
+  on-demand public-provider refreshes.
 
 Normal Skill use does not require installing Python packages. The repository
 has no runtime Python dependencies; `jsonschema` and `ruff` are development
@@ -143,9 +146,9 @@ Runtime history is outside the Git checkout by default:
 ~/.local/share/crypto-portfolio-manager/
 ```
 
-Set `CRYPTO_PORTFOLIO_DATA_DIR` to use another directory. No third-party API
-key is required by the repository itself because it has no live provider
-adapters. Never commit real balances, quantities, cost basis, transaction
+Set `CRYPTO_PORTFOLIO_DATA_DIR` to use another directory. Free public
+providers work without API keys; optional provider keys are environment-only.
+Never commit real balances, quantities, cost basis, transaction
 history, account identifiers, credentials, private keys, or seed phrases.
 Content-addressed public OHLCV replay data is stored under
 `market-data/sha256/<ohlcv_hash>.json` in that same runtime directory.
@@ -153,6 +156,8 @@ Metric observations and collection events are stored under `metrics/`; cached
 Volume Profile results are stored under
 `volume-profiles/sha256/<profile_hash>.json`. Volume Profile is a historical
 traded-volume concentration proxy, not exact holder cost basis.
+Provider responses and series manifests are cached under `provider-cache/`;
+see [Data Providers](references/data-providers.md) for modes and cleanup.
 Position P&L is unrealized performance for the remaining position only; this
 feature does not claim realized P&L, fees, tax lots, or lifetime return.
 

@@ -5,10 +5,11 @@ This is the architecture and implementation guide for
 and the records that make a review auditable.
 
 The Skill is Python-first. The running Skill uses models for screenshot
-extraction, public-source acquisition, bounded semantic interpretation, and
-prose, while Python validates inputs and owns deterministic portfolio
-mathematics. The system is advisory-only: it can calculate proposed exposure
-and staged execution zones, but it never places trades.
+extraction, bounded semantic interpretation, unresolved web fallback, and
+prose, while Python validates inputs, routes on-demand structured providers,
+and owns deterministic portfolio mathematics. The system is advisory-only: it
+can calculate proposed exposure and staged execution zones, but it never
+places trades.
 
 The documentation map is:
 
@@ -21,7 +22,8 @@ The documentation map is:
 ## System at a Glance
 
 `SKILL.md` orchestrates the review and calls the typed models and deterministic
-engines below. Acquisition is model work; normalization, calculations, gates,
+engines below. `AcquisitionManager` and `ProviderRouter` perform the
+cache-first structured acquisition; normalization, calculations, gates,
 packets, and persistence are Python work.
 
 ```mermaid
@@ -30,31 +32,35 @@ flowchart TD
     B --> C[Python snapshot validation and Position PnL]
     C --> D[Python history context and resolved policy]
     D --> E[Python metric collection plan]
-    E --> F[LUNA_MAX requested public observations]
-    F --> G[Python normalization, MetricObservation, CollectionEvent]
-    G --> H[Python metric history and deterministic Facts]
-    H --> I[Python deterministic factors]
-    H --> J[LUNA_MAX bounded semantic factor judgment]
-    I --> K[Python weighted scoring]
-    J --> K
-    K --> L[Python market regime]
-    L --> M[Python target allocation]
-    M --> N[Python portfolio risk gate]
-    N --> O[Python rebalance and dollar reconciliation]
-    O --> P{Approved INCREASE?}
-    P -- No --> Q[NO_TRADE / HOLD / WAIT / REDUCE / EXIT]
-    P -- Yes --> R[LUNA_MAX spot and OHLCV acquisition]
-    R --> S[Python TechnicalSnapshot and Volume Profile]
-    S --> T[Python pullback ExecutionPlan]
-    Q --> U[DecisionReviewPacket]
-    T --> U
-    U --> V{Python Sol review predicate}
-    V -- Required --> W[SOL high-impact critique]
-    V -- Skipped --> X[No Sol review]
-    W --> Y[Immutable ReportPacket]
+    E --> F[Fresh observation cache]
+    F --> G[Provider Router and provider cache]
+    G --> H[Free public APIs]
+    H --> I[Optional API-key providers]
+    I --> J[Web fallback requests only]
+    J --> K[Python normalization, MetricObservation, CollectionEvent]
+    K --> L[Python metric history and deterministic Facts]
+    L --> M[Python deterministic factors]
+    L --> N[LUNA_MAX bounded semantic factor judgment]
+    M --> O[Python weighted scoring]
+    N --> O
+    O --> P[Python market regime]
+    P --> Q[Python target allocation]
+    Q --> R[Python portfolio risk gate]
+    R --> S[Python rebalance and dollar reconciliation]
+    S --> T{Approved INCREASE?}
+    T -- No --> U[NO_TRADE / HOLD / WAIT / REDUCE / EXIT]
+    T -- Yes --> V[Structured spot and OHLCV acquisition]
+    V --> W[Python TechnicalSnapshot and Volume Profile]
+    W --> X[Python pullback ExecutionPlan]
+    U --> Y[DecisionReviewPacket]
     X --> Y
-    Y --> Z[LUNA_MAX Chinese report]
-    Z --> AA[Validated append-only local state]
+    Y --> Z{Python Sol review predicate}
+    Z -- Required --> AA[SOL high-impact critique]
+    Z -- Skipped --> AB[No Sol review]
+    AA --> AC[Immutable ReportPacket]
+    AB --> AC
+    AC --> AD[LUNA_MAX Chinese report]
+    AD --> AE[Validated append-only local state]
 ```
 
 Allocation and rebalance approve an `INCREASE` amount first. Technical planning
@@ -72,7 +78,7 @@ finalized amount.
 | Responsibility | Owner | Current boundary |
 |---|---|---|
 | Screenshot field extraction | `LUNA_MAX` | Reads the visible Binance table or equivalent supplied image. |
-| Public metric retrieval | `LUNA_MAX` | Returns only the requests in the Python-built collection plan. |
+| Public metric retrieval | Python providers first | `AcquisitionManager` reuses observations/cache and returns only unresolved requests to `LUNA_MAX`/Web. |
 | Metric validation, normalization, and history deltas | Python | Registry types/units, timestamps, freshness, IDs, comparisons, and persistence. |
 | Position P&L | Python | `position_pnl.py` calculates remaining-position cost basis and unrealized results. |
 | MA / ATR / returns / volatility | Python | `technical.py` and `metrics.py` perform the arithmetic. |
@@ -208,7 +214,10 @@ can replace the default root:
 │   ├── observations.jsonl
 │   └── collection-events.jsonl
 ├── market-data/sha256/<ohlcv_hash>.json
-└── volume-profiles/sha256/<profile_hash>.json
+├── volume-profiles/sha256/<profile_hash>.json
+└── provider-cache/
+    ├── responses/<provider>/sha256/<request_hash>.json
+    └── series/<provider>/<series_key_hash>/manifest.json
 ```
 
 The state modules have separate responsibilities:
@@ -255,12 +264,14 @@ non-stable assets, BTC-relative requests for non-BTC assets, and discovery
 candidates for unknown policy assets. Stablecoin/cash rows are skipped, and
 registry scopes remove inapplicable metrics.
 
-The plan is deterministic and review-type validated. A current cached
-observation can be marked reusable when it is still `CURRENT` and within the
-definition's freshness window, but the plan does not let a model invent a new
-metric key. `normalize_collection_results()` requires exactly one result for
-each planned `(asset, metric_key)` pair; omissions, extras, and duplicates
-fail closed.
+The plan is deterministic and review-type validated. `AcquisitionManager` then
+checks current `MetricObservation` history, groups unresolved requests into
+provider bundles, reuses immutable series, and performs only the missing
+on-demand calls. A current cached observation can be marked reusable when it
+is still `CURRENT` and within the definition's freshness window, but the plan
+does not let a model invent a new metric key. `normalize_collection_results()`
+requires exactly one result for each planned `(asset, metric_key)` pair;
+omissions, extras, and duplicates fail closed.
 
 The registry also includes derivatives (`derivatives.*`), structured social
 (`sentiment.*`), and BTC on-chain (`onchain.btc.*`) observations. They are
@@ -647,15 +658,18 @@ documents, including [decision rules](references/decision-rules.md) and
 
 ## Provider Boundary
 
-`crypto_portfolio/providers/base.py` defines protocols for market,
-fundamental, on-chain, event, and metric data. They describe normalized engine
-inputs but ship no live authenticated adapters or network clients; the
-repository does not directly connect to exchanges or analytics services.
+`crypto_portfolio/providers/base.py` defines protocols, typed requests,
+capabilities, fetch modes, and handled provider errors. The concrete public
+adapters use the stdlib HTTP client and normalize into registry/model
+contracts. Binance and Bybit are public market/derivatives sources;
+DeFiLlama, Alternative.me, and catalog-aware Coin Metrics cover selected
+structured context. The adapters never expose private account or trading
+endpoints.
 
-During a Codex review, the running environment's web/data capabilities acquire
-current public information. The Skill maps it into registry/model contracts
-before portfolio logic. `scripts/` contains compatibility/normalization
-helpers, not live providers.
+`AcquisitionManager` owns the order `observation -> provider cache -> free API
+-> optional API-key provider -> Web fallback`. The Skill maps only unresolved
+fallback work into model stages before portfolio logic. `scripts/` contains
+read-only provider and cache diagnostics.
 
 ## Persistence and Replay
 
@@ -767,7 +781,7 @@ and actions come from current inputs and canonical configuration.
 
 These are interfaces for future work, not implemented promises:
 
-- read-only live provider adapters behind the provider protocols;
+- additional read-only provider adapters behind the provider protocols;
 - additional registry-defined metrics and deterministic factors;
 - additional policy-defined benchmarks;
 - a breakout/retest planner with its own evidence gates and invalidation;
@@ -780,8 +794,9 @@ require explicit confirmation, and receive a separate security review.
 
 ## Reliability and Tests
 
-The existing test suite covers the principal deterministic contracts: typed
-model and schema validation, metric normalization/history, Position P&L,
+The test suite covers the principal deterministic contracts: typed
+model and schema validation, metric normalization/history, provider HTTP/cache
+and fallback behavior, Position P&L,
 cash-flow-aware NAV, benchmark alignment, scoring, regime, allocation, risk,
 rebalance thresholds, time/replay guards, Volume Profile, execution
 reconciliation, model routing, and packet boundaries.

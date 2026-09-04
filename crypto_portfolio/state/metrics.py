@@ -215,6 +215,62 @@ def latest_metric(
     return values[-1] if values else None
 
 
+def observation_is_fresh(
+    observation: MetricObservation,
+    *,
+    as_of: str | datetime | None = None,
+) -> bool:
+    """Check registry freshness without trusting JSONL file order."""
+    if not isinstance(observation, MetricObservation) or observation.freshness != "CURRENT":
+        return False
+    cutoff = parse_timestamp(
+        normalize_timestamp(
+            as_of.isoformat() if isinstance(as_of, datetime) else as_of,
+            "as_of",
+        )
+    ) if as_of is not None else datetime.now().astimezone()
+    observed = parse_timestamp(observation.observed_at)
+    age = (cutoff - observed).total_seconds()
+    if age < 0:
+        return False
+    definition = metric_definition(observation.metric_key)
+    days = definition.freshness_days
+    return days is None or age <= days * 86400
+
+
+def latest_usable_observation(
+    asset: str,
+    metric_key: str,
+    *,
+    as_of: str | datetime | None = None,
+    path: str | Path | None = None,
+    observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
+    invalid: list[str] | None = None,
+) -> MetricObservation | None:
+    """Return the newest compatible observation, not merely the newest line."""
+    normalized_asset = asset.strip().upper()
+    normalized_key = metric_definition(metric_key).key
+    if observations is None:
+        values = metric_series(normalized_asset, normalized_key, path=path, invalid=invalid)
+    else:
+        source: Any = observations
+        if isinstance(source, Mapping):
+            source = source.get("observations", source.values())
+        if isinstance(source, MetricObservation):
+            source = (source,)
+        values = [
+            item if isinstance(item, MetricObservation) else MetricObservation.from_mapping(item)
+            for item in source
+        ]
+    candidates = [
+        item for item in values
+        if item.asset == normalized_asset
+        and item.metric_key == normalized_key
+        and observation_is_fresh(item, as_of=as_of)
+    ]
+    return max(candidates, key=lambda item: (parse_timestamp(item.observed_at), item.observation_id), default=None)
+
+
 def previous_metric(
     asset: str,
     metric_key: str,
@@ -375,8 +431,10 @@ __all__ = [
     "default_metric_observation_path",
     "default_collection_event_path",
     "latest_metric",
+    "latest_usable_observation",
     "metric_history_context",
     "metric_series",
+    "observation_is_fresh",
     "previous_metric",
     "read_collection_events",
     "read_metric_observations",
