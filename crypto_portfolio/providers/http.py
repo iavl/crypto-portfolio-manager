@@ -219,21 +219,23 @@ def _diagnostic(
     error: BaseException,
     *,
     endpoint: str,
+    method: str = "GET",
     attempt: int,
     phase: str | None = None,
     status_code: int | None = None,
     error_code: str | None = None,
     secrets: tuple[str, ...] = (),
+    retryable: bool | None = None,
 ) -> ProviderDiagnostic:
     code = error_code or classify_transport_error(error, phase=phase)
     return ProviderDiagnostic(
-        endpoint=redact_url(endpoint),
-        method="GET",
+        endpoint=redact_url(endpoint, secrets),
+        method=method,
         attempt=attempt,
         error_code=code,
         exception_class=error.__class__.__name__,
         detail=_detail(error, secrets),
-        retryable=_retryable(code),
+        retryable=_retryable(code) if retryable is None else bool(retryable and _retryable(code)),
         status_code=status_code,
     )
 
@@ -242,11 +244,21 @@ def _with_diagnostic(
     error: ProviderError,
     *,
     endpoint: str,
+    method: str = "GET",
     attempt: int,
     phase: str | None = None,
     status_code: int | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> ProviderError:
-    diagnostic = _diagnostic(error, endpoint=endpoint, attempt=attempt, phase=phase, status_code=status_code)
+    diagnostic = _diagnostic(
+        error,
+        endpoint=endpoint,
+        method=method,
+        attempt=attempt,
+        phase=phase,
+        status_code=status_code,
+        secrets=secrets,
+    )
     if isinstance(error.diagnostic, ProviderDiagnostic):
         diagnostic = error.diagnostic
     return error.__class__(str(error), diagnostic=diagnostic)
@@ -278,7 +290,7 @@ classify_exception = classify_transport_error
 
 
 class HttpClient:
-    """GET-only JSON client with bounded retries and response-size checks."""
+    """Small JSON client with bounded retries and response-size checks."""
 
     def __init__(
         self,
@@ -327,13 +339,21 @@ class HttpClient:
             "check_hostname": self.ssl_context.check_hostname,
         }
 
-    def get_json(
+    def request_json(
         self,
+        method: str,
         url: str,
         *,
         params: Mapping[str, Any] | None = None,
+        json_body: Any = None,
         headers: Mapping[str, str] | None = None,
+        idempotent: bool = False,
     ) -> Any:
+        if not isinstance(method, str) or not method.strip():
+            raise ValueError("provider HTTP method must be a non-empty string")
+        method = method.strip().upper()
+        if not isinstance(idempotent, bool):
+            raise ValueError("provider request idempotent must be boolean")
         if not isinstance(url, str) or urlsplit(url).scheme not in {"http", "https"}:
             raise ProviderResponseError("provider URL must use http or https")
         if params:
@@ -343,11 +363,33 @@ class HttpClient:
         safe_headers = {str(key): str(value) for key, value in (headers or {}).items()}
         safe_headers.setdefault("Accept", "application/json")
         safe_headers.setdefault("User-Agent", self.user_agent)
+        body = None
+        if json_body is not None:
+            try:
+                body = json.dumps(
+                    json_body,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            except (TypeError, ValueError) as exc:
+                raise ProviderResponseError(
+                    "provider request body is not finite JSON",
+                    diagnostic=_diagnostic(
+                        exc,
+                        endpoint=url,
+                        method=method,
+                        attempt=1,
+                        error_code="PROVIDER_SCHEMA_ERROR",
+                    ),
+                ) from exc
+            safe_headers.setdefault("Content-Type", "application/json")
         request_secrets = tuple(
             value for key, value in safe_headers.items()
             if _secret_name(key)
         )
-        request = Request(redact_url(url), headers=safe_headers, method="GET")
+        request = Request(redact_url(url, request_secrets), data=body, headers=safe_headers, method=method)
+        retry_allowed = method == "GET" or idempotent
         last_error: Exception | None = None
         for attempt in range(self.max_attempts):
             self.request_count += 1
@@ -365,6 +407,7 @@ class HttpClient:
                         diagnostic=_diagnostic(
                             exc,
                             endpoint=request.full_url,
+                            method=method,
                             attempt=attempt + 1,
                             error_code="INVALID_JSON",
                             secrets=request_secrets,
@@ -372,14 +415,16 @@ class HttpClient:
                     ) from exc
             except HTTPError as exc:
                 last_error = exc
-                retryable = exc.code == 429 or 500 <= exc.code <= 599
+                retryable = retry_allowed and (exc.code == 429 or 500 <= exc.code <= 599)
                 if not retryable or attempt + 1 >= self.max_attempts:
                     diagnostic = _diagnostic(
                         exc,
                         endpoint=request.full_url,
+                        method=method,
                         attempt=attempt + 1,
                         status_code=exc.code,
                         secrets=request_secrets,
+                        retryable=retry_allowed,
                     )
                     if exc.code == 429:
                         raise ProviderRateLimited(f"provider rate limited request ({exc.code})", diagnostic=diagnostic) from exc
@@ -391,8 +436,16 @@ class HttpClient:
                 self._sleep(attempt, getattr(exc, "headers", None))
             except (TimeoutError, socket.timeout, URLError, OSError) as exc:
                 last_error = exc
-                if attempt + 1 >= self.max_attempts:
-                    diagnostic = _diagnostic(exc, endpoint=request.full_url, attempt=attempt + 1, secrets=request_secrets)
+                retryable = retry_allowed and _retryable(classify_transport_error(exc))
+                if not retryable or attempt + 1 >= self.max_attempts:
+                    diagnostic = _diagnostic(
+                        exc,
+                        endpoint=request.full_url,
+                        method=method,
+                        attempt=attempt + 1,
+                        secrets=request_secrets,
+                        retryable=retry_allowed,
+                    )
                     raise ProviderUnavailable(
                         f"provider network request failed: {diagnostic.error_code}: {diagnostic.detail}",
                         diagnostic=diagnostic,
@@ -400,9 +453,42 @@ class HttpClient:
                 self._sleep(attempt, None)
             except ProviderResponseError as exc:
                 if exc.diagnostic is None:
-                    raise _with_diagnostic(exc, endpoint=request.full_url, attempt=attempt + 1) from exc
+                    raise _with_diagnostic(
+                        exc,
+                        endpoint=request.full_url,
+                        method=method,
+                        attempt=attempt + 1,
+                        secrets=request_secrets,
+                    ) from exc
                 raise
         raise ProviderUnavailable("provider request failed") from last_error
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> Any:
+        return self.request_json("GET", url, params=params, headers=headers)
+
+    def post_json(
+        self,
+        url: str,
+        *,
+        json_body: Any = None,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+        idempotent: bool = False,
+    ) -> Any:
+        return self.request_json(
+            "POST",
+            url,
+            params=params,
+            json_body=json_body,
+            headers=headers,
+            idempotent=idempotent,
+        )
 
     def _open(self, request: Request) -> Any:
         if self.opener is not None:

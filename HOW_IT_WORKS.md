@@ -694,7 +694,7 @@ and uncertainty, but it must not recompute or alter the finalized values.
 | Execution | [`engine/entry.py`](crypto_portfolio/engine/entry.py), [`engine/execution.py`](crypto_portfolio/engine/execution.py), [`models/execution.py`](crypto_portfolio/models/execution.py) |
 | Packets | [`models/factor_packet.py`](crypto_portfolio/models/factor_packet.py), [`models/decision_packet.py`](crypto_portfolio/models/decision_packet.py), [`models/report_packet.py`](crypto_portfolio/models/report_packet.py) |
 | Runtime state | [`crypto_portfolio/state/`](crypto_portfolio/state/) |
-| Providers | [`providers/base.py`](crypto_portfolio/providers/base.py), [`providers/coinglass.py`](crypto_portfolio/providers/coinglass.py) |
+| Providers | [`providers/base.py`](crypto_portfolio/providers/base.py), [`providers/sosovalue.py`](crypto_portfolio/providers/sosovalue.py) |
 | Validation contracts | [`schemas/`](schemas/) |
 
 The runtime instructions that connect these pieces are in
@@ -709,9 +709,15 @@ capabilities, fetch modes, and handled provider errors. The concrete public
 adapters use the stdlib HTTP client and normalize into registry/model
 contracts. Binance and Bybit are public market/derivatives sources;
 DeFiLlama, Alternative.me, and catalog-aware Coin Metrics cover selected
-structured context. The optional CoinGlass V4 adapter uses an environment-only
-API key for ETF flow and historical liquidation bundles. The adapters never
-expose private account or trading endpoints.
+structured context. The optional SoSoValue adapter uses an environment-only
+API key for documented U.S. BTC/ETH ETF summary history. The current official
+SoSoValue API does not document liquidation history, so those metrics remain
+context-only. The adapters never expose private account or trading endpoints.
+
+The shared `HttpClient` supports both GET JSON and explicit idempotent JSON
+POST calls through the same verified TLS, timeout, retry, response-size, and
+diagnostic path. The current SoSoValue ETF endpoint is documented as GET, so
+the adapter does not use an undocumented POST endpoint.
 
 `AcquisitionManager` owns the order `observation -> provider cache -> free API
 -> optional API-key provider -> Web fallback`. The Skill maps only unresolved

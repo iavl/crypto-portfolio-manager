@@ -30,8 +30,8 @@ from .alternative_me import AlternativeMeProvider
 from .binance import BinanceProvider
 from .bybit import BybitProvider
 from .coinmetrics import CoinMetricsAuthenticatedProvider, CoinMetricsProvider
-from .coinglass import CoinGlassProvider, CoinglassProvider
 from .defillama import DeFiLlamaProvider, DefiLlamaProvider
+from .sosovalue import SoSoValueProvider
 
 __all__ = [
     "EventDataProvider",
@@ -66,8 +66,7 @@ __all__ = [
     "BybitProvider",
     "CoinMetricsAuthenticatedProvider",
     "CoinMetricsProvider",
-    "CoinGlassProvider",
-    "CoinglassProvider",
     "DeFiLlamaProvider",
     "DefiLlamaProvider",
+    "SoSoValueProvider",
 ]

@@ -6,9 +6,9 @@
     "coinmetrics_community": {"enabled": true},
     "defillama": {"enabled": true},
     "alternative_me": {"enabled": true},
-    "coinglass": {
+    "sosovalue": {
       "enabled": "AUTO",
-      "api_key_env": "COINGLASS_API_KEY"
+      "api_key_env": "SOSOVALUE_API_KEY"
     },
     "lunarcrush": {
       "enabled": "AUTO",

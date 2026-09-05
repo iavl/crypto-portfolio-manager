@@ -27,6 +27,8 @@ PROVIDER_ROUTES = {
     "market": ("binance", "bybit"),
     "derivatives": ("binance", "bybit"),
     "fundamentals": ("defillama",),
+    "etf": ("sosovalue",),
+    "liquidations": (),
     "sentiment.market": ("alternative_me",),
     "sentiment.social": ("lunarcrush",),
     "btc_cycle": ("coinmetrics_community", "coinmetrics_pro"),
@@ -47,9 +49,9 @@ def provider_chain(metric_key: str) -> tuple[str, ...]:
     if key == "market.spot_price" or key.startswith("market."):
         return ("binance", "bybit")
     if key.startswith("flows.etf_"):
-        return ("coinglass",)
+        return ("sosovalue",)
     if "liquidations" in key:
-        return ("coinglass",)
+        return ()
     if key.startswith("derivatives."):
         return ("binance", "bybit")
     if key == "sentiment.market_fear_greed":

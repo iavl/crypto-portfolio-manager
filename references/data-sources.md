@@ -121,6 +121,13 @@ Primarily relevant to BTC and ETH where spot products exist.
 
 Use daily and multi-week context; avoid overreacting to one day of flow unless exceptional.
 
+The optional SoSoValue adapter uses the documented v1 ETF summary-history
+endpoint for U.S. BTC and ETH products. Python derives 1D, 7D, and 30D values
+from completed trading-date rows; `MARKET` is the complete-date BTC+ETH sum,
+not BTC-only flow. The current official SoSoValue API does not document
+liquidation history, so liquidation metrics remain context-only and are never
+sent to SoSoValue.
+
 ### Fundamentals
 
 Use asset-appropriate metrics, not one universal template.

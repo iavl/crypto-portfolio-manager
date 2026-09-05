@@ -463,7 +463,7 @@ error diagnostics without response payloads or credentials:
 python3 scripts/providers.py --probe binance
 python3 scripts/providers.py --probe defillama
 python3 scripts/providers.py --probe alternative_me
-python3 scripts/providers.py --probe coinglass
+python3 scripts/providers.py --probe sosovalue
 ```
 
 ### TLS troubleshooting
@@ -490,24 +490,29 @@ is enabled only when its environment variable is present:
 COINMETRICS_API_KEY
 ```
 
-CoinGlass API V4 is an optional read-only provider for Bitcoin ETF flows and
-aggregated historical liquidations. Configure its key only in the environment:
+SoSoValue is an optional read-only provider for U.S. BTC/ETH spot ETF summary
+flows. Configure its key only in the environment:
 
 ```bash
-export COINGLASS_API_KEY='...'
+export SOSOVALUE_API_KEY='...'
 python3 scripts/providers.py --status
+python3 scripts/providers.py --probe sosovalue
 ```
 
-The adapter uses the official `CG-API-KEY` header and is registered only when
-the key is present. Endpoint access and interval limits depend on the
-CoinGlass plan; a present credential does not guarantee every endpoint is
-available. `runtime=READY` in the offline status table means configuration,
-adapter, and credential readiness only; run `--probe coinglass` to distinguish
-network reachability, authentication, plan entitlement, schema compatibility,
-and sufficient historical range for ETF/liquidation endpoints. Keys never
-enter repository JSON, request identities, cache files, history, logs, or
-reports. LunarCrush remains a key-gated extension slot without a shipped
-adapter.
+The current official contract is `GET /openapi/v1/etfs/summary-history` on
+`https://openapi.sosovalue.com`, with the `x-soso-api-key` header. The response
+uses the documented `{code, message, data}` envelope; Python derives 1D/7D/30D
+calendar windows from settled U.S. trading-date rows. SoSoValue's current docs
+describe a one-month history window, 20 requests per minute, and 100,000
+requests per month; actual access remains key/plan dependent. `runtime=READY`
+in the offline status table means configuration, adapter, and credential
+readiness only; `--probe sosovalue` checks live reachability and schema without
+printing the key or raw response. Historical CoinGlass observations remain
+readable for audit but are not current ETF cache. The current official
+SoSoValue API does not document liquidation history, so liquidation metrics
+remain optional context and are not routed to SoSoValue. Keys never enter
+repository JSON, request identities, cache files, history, logs, or reports.
+LunarCrush remains a key-gated extension slot without a shipped adapter.
 
 ## Event Scanner
 

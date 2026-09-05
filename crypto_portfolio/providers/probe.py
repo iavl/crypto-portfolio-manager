@@ -10,10 +10,10 @@ from .base import ProviderRequest
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
 from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, catalog_metrics
-from .coinglass import CoinGlassProvider
 from .defillama import BASE_URL as DEFILLAMA_BASE_URL
 from .http import classify_transport_error, redact_secrets, redact_url
 from .router import ProviderRouter
+from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_SUMMARY_HISTORY_PATH, SoSoValueProvider
 
 
 _NETWORK_FAILURES = {
@@ -51,12 +51,14 @@ def _probe_call(
     endpoint: str,
     call: Callable[[], Any],
     *,
+    method: str = "GET",
     authenticated: bool = False,
     validate: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "provider": provider,
         "endpoint": redact_url(endpoint),
+        "method": method,
         "checked_at": _now(),
         "network": "OK",
         "auth": "OK" if authenticated else "NOT_REQUIRED",
@@ -96,33 +98,47 @@ def _require_list(value: Any) -> None:
         raise ValueError("probe response schema has no data list")
 
 
-def _coinglass_probes(provider: CoinGlassProvider) -> tuple[dict[str, Any], ...]:
-    # Probe through the existing adapter so endpoint/auth/parsing semantics do not diverge.
-    etf = _probe_call(
-        "coinglass",
-        "https://open-api-v4.coinglass.com/api/etf/bitcoin/flow-history",
-        lambda: provider.collect(ProviderRequest("coinglass", "etf", "MARKET", {}, ("flows.etf_net_1d",))),
+def _require_observations(value: Any) -> None:
+    observations = getattr(value, "observations", value)
+    if isinstance(observations, (str, bytes)) or not isinstance(observations, Iterable) or not tuple(observations):
+        raise ValueError("probe response schema has no normalized observations")
+
+
+def _sosovalue_probe(provider: SoSoValueProvider) -> dict[str, Any]:
+    endpoint = SOSOVALUE_BASE_URL + ETF_SUMMARY_HISTORY_PATH
+    captured: dict[str, Any] = {}
+
+    def call() -> Any:
+        value = provider.collect(ProviderRequest(
+            "sosovalue",
+            "etf",
+            "BTC",
+            {"as_of": _now()},
+            ("flows.etf_net_1d",),
+        ))
+        captured["value"] = value
+        return value
+
+    result = _probe_call(
+        "sosovalue",
+        endpoint,
+        call,
         authenticated=True,
-        validate=lambda value: _require_list({"data": value}) if not isinstance(value, list) else None,
+        validate=_require_observations,
     )
-    liquidation = _probe_call(
-        "coinglass",
-        "https://open-api-v4.coinglass.com/api/futures/liquidation/aggregated-history",
-        lambda: provider.collect(ProviderRequest("coinglass", "liquidations", "BTC", {}, ("derivatives.total_liquidations_24h_usd",))),
-        authenticated=True,
-        validate=lambda value: _require_list({"data": value}) if not isinstance(value, list) else None,
-    )
-    etf["endpoint_name"] = "ETF flow history"
-    liquidation["endpoint_name"] = "Aggregated liquidation history"
+    result["endpoint_name"] = "ETF summary history"
+    if result["network"] == "OK":
+        observations = tuple(getattr(captured["value"], "observations", ()))
+        result["history_rows"] = len(observations)
+        result["latest_source_date"] = (observations[0].get("metadata", {}).get("source_end_date") if observations else None)
     transport = getattr(provider.client, "transport_metadata", lambda: {})()
-    for result in (etf, liquidation):
-        result.update({
-            "python_ssl": transport.get("python_ssl"),
-            "ca_file": transport.get("ca_source"),
-            "proxy": transport.get("proxy"),
-            "tls_verification": transport.get("verify_mode") == "CERT_REQUIRED" and transport.get("check_hostname") is True,
-        })
-    return etf, liquidation
+    result.update({
+        "python_ssl": transport.get("python_ssl"),
+        "ca_file": transport.get("ca_source"),
+        "proxy": transport.get("proxy"),
+        "tls_verification": transport.get("verify_mode") == "CERT_REQUIRED" and transport.get("check_hostname") is True,
+    })
+    return result
 
 
 def probe_provider(router: ProviderRouter, provider_name: str) -> tuple[dict[str, Any], ...]:
@@ -141,8 +157,8 @@ def probe_provider(router: ProviderRouter, provider_name: str) -> tuple[dict[str
     client = getattr(provider, "client", None)
     if client is None or not hasattr(client, "get_json"):
         return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
-    if name == "coinglass" and isinstance(provider, CoinGlassProvider):
-        return tuple({"config": "READY", **item} for item in _coinglass_probes(provider))
+    if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
+        return (_with_config(_sosovalue_probe(provider), client),)
     if name == "binance":
         endpoint = SPOT_BASE_URL + "/api/v3/ticker/price"
         return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"symbol": "BTCUSDT"}), validate=lambda value: _require_mapping(value)), client),)

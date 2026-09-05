@@ -282,8 +282,10 @@ def previous_metric(
     if not values:
         return None
     latest_time = values[-1].observed_at
+    latest_source = values[-1].source
+    source_transition_guard = metric_definition(metric_key).key.startswith("flows.etf_")
     for item in reversed(values[:-1]):
-        if item.observed_at != latest_time:
+        if item.observed_at != latest_time and (not source_transition_guard or item.source == latest_source):
             return item
     return None
 
@@ -325,6 +327,14 @@ def trend_summary(
     invalid: list[str] | None = None,
 ) -> dict[str, Any]:
     values = metric_series(asset, metric_key, path=path, invalid=invalid)
+    if values and metric_definition(metric_key).key.startswith("flows.etf_"):
+        source = values[-1].source
+        compatible: list[MetricObservation] = []
+        for item in reversed(values):
+            if item.source != source:
+                break
+            compatible.append(item)
+        values = list(reversed(compatible))
     if limit is not None:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive integer or null")

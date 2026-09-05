@@ -12,7 +12,7 @@ from .base import ProviderCapabilities, ProviderRuntimeStatus
 
 _ROOT_CONFIG = Path(__file__).resolve().parents[2] / "config" / "data-providers.json"
 _DEFAULT_LOCAL_CONFIG = Path.home() / ".config" / "crypto-portfolio-manager" / "data-providers.json"
-_SECRET_FIELDS = {"api_key", "api_secret", "authorization", "password", "token"}
+_SECRET_FIELDS = {"api_key", "api_secret", "authorization", "password", "token", "x_soso_api_key"}
 
 
 def _read(path: Path) -> dict[str, Any]:

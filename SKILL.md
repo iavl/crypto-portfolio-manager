@@ -179,6 +179,15 @@ deployment, retain the remainder as unallocated, reject chasing when extension
 and confirmed long crowding agree, or return `WAIT`. A deleveraged state only
 removes a crowding penalty; it never boosts exposure.
 
+Structured ETF flow data is optional and comes from the current documented
+SoSoValue v1 U.S. ETF summary-history endpoint when `SOSOVALUE_API_KEY` is
+configured. Python maps BTC and ETH flows separately and defines MARKET as the
+complete-date BTC+ETH aggregate, then derives 1D/7D/30D calendar windows. If
+SoSoValue is unavailable, preserve an explicit fallback or UNKNOWN result; do
+not request duplicate ETF web data after a successful structured result. The
+current official SoSoValue API does not establish liquidation history, so
+liquidation metrics remain optional context and must not be routed to it.
+
 ## Visible evidence collection
 
 During workflow steps 7–10, show a compact `Data Collection Log` to the user as

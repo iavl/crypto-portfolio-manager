@@ -35,6 +35,8 @@ Trading:  advisory only; no automatic execution
   failures for compact current-vs-previous trend comparisons.
 - Acquires data on demand through free structured public APIs first, with
   freshness-aware local provider caching; no background service is required.
+- When configured, uses SoSoValue's documented U.S. BTC/ETH ETF summary history
+  for structured ETF-flow context; liquidation data is not attributed to it.
 - Adds derivatives/social positioning and BTC cycle context as non-scoring
   overlays that can conservatively cap immediate deployment.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.

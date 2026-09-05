@@ -198,6 +198,11 @@ def _observations(value: Any) -> list[MetricObservation]:
     return [item if isinstance(item, MetricObservation) else MetricObservation.from_mapping(item) for item in value]
 
 
+def _active_observation_source(observation: MetricObservation) -> bool:
+    """Keep retired CoinGlass points readable without using them as live cache."""
+    return observation.source.strip().lower() != "coinglass"
+
+
 def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
     """Render compact acquisition telemetry without raw provider payloads."""
     return "\n".join((
@@ -271,7 +276,11 @@ class AcquisitionManager:
                 as_of=cutoff,
                 observations=local,
             )
-            if candidate is not None and (selected_mode != FetchMode.REFRESH or not metric_is_mutable(request.metric_key)):
+            if (
+                candidate is not None
+                and _active_observation_source(candidate)
+                and (selected_mode != FetchMode.REFRESH or not metric_is_mutable(request.metric_key))
+            ):
                 reusable[identity] = candidate
                 fresh_hits += 1
                 continue

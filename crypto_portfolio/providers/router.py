@@ -168,8 +168,8 @@ class ProviderRouter:
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
-        from .coinglass import CoinglassProvider
         from .defillama import DeFiLlamaProvider
+        from .sosovalue import SoSoValueProvider
 
         client = self.http_client or HttpClient()
         self.http_client = client
@@ -187,10 +187,10 @@ class ProviderRouter:
                 client=client,
                 api_key=provider_api_key("coinmetrics_pro", self.config),
             )
-        if provider_enabled("coinglass", self.config):
-            providers["coinglass"] = CoinglassProvider(
+        if provider_enabled("sosovalue", self.config):
+            providers["sosovalue"] = SoSoValueProvider(
                 client=client,
-                api_key=provider_api_key("coinglass", self.config),
+                api_key=provider_api_key("sosovalue", self.config),
             )
         return providers
 

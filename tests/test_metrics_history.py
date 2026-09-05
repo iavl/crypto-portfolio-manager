@@ -149,6 +149,29 @@ class MetricHistoryTests(unittest.TestCase):
             self.assertIn("ETH", context["metric_history_summary"])
             self.assertIn("fundamentals.tvl", context["metric_history_summary"]["ETH"])
 
+    def test_etf_source_transition_does_not_create_false_trend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+
+            def etf(value, observed_at, source):
+                return MetricObservation(
+                    stable_observation_id("BTC", "flows.etf_net_1d", observed_at, source, value, "1d"),
+                    "BTC", "flows.etf_net_1d", "capital_flows", value, "USD", "1d",
+                    observed_at, observed_at, source, "CURRENT", "MEDIUM",
+                )
+
+            append_metric_observation(etf(10, "2026-09-04T20:00:00Z", "coinglass"), path)
+            append_metric_observation(etf(20, "2026-09-05T20:00:00Z", "sosovalue"), path)
+            self.assertEqual(len(metric_series("BTC", "flows.etf_net_1d", path=path)), 2)
+            comparison = compare_latest_metric("BTC", "flows.etf_net_1d", path=path)
+            self.assertIsNone(comparison["previous_value"])
+            self.assertEqual(comparison["trend"], "INSUFFICIENT_HISTORY")
+
+            append_metric_observation(etf(30, "2026-09-06T20:00:00Z", "sosovalue"), path)
+            comparison = compare_latest_metric("BTC", "flows.etf_net_1d", path=path)
+            self.assertEqual(comparison["previous_value"], 20)
+            self.assertEqual(comparison["trend"], "IMPROVING")
+
     def test_collection_events_and_reporter(self):
         with tempfile.TemporaryDirectory() as directory:
             observation_path = Path(directory) / "observations.jsonl"

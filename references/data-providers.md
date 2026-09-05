@@ -28,8 +28,8 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Protocol TVL/fees/revenue | DeFiLlama | None | Asset-to-protocol identifiers are explicit. |
 | Market Fear & Greed | Alternative.me | None | Market-wide context, not per-asset sentiment. |
 | BTC cycle/on-chain | Coin Metrics Community, optional authenticated tier | Optional environment key | Catalog availability is checked; unsupported metrics stay unknown. |
-| ETF flows | CoinGlass API V4 when configured; Web only for unresolved non-provider work | `COINGLASS_API_KEY` | Bitcoin ETF history is bundled into 1D/7D/30D values; endpoint access is plan-dependent. |
-| Historical liquidations | CoinGlass API V4 when configured | `COINGLASS_API_KEY` | Aggregated daily history is used for 24H/7D values; realtime snapshots are not substituted. |
+| ETF flows | SoSoValue API v1 when configured; Web only for unresolved non-provider work | `SOSOVALUE_API_KEY` | U.S. BTC/ETH ETF summary history is bundled into 1D/7D/30D values; current access and limits are controlled by SoSoValue. |
+| Historical liquidations | No configured structured provider; Web only when explicitly allowed | None | SoSoValue's current official API documents ETF data, not liquidation history. Historical CoinGlass points remain audit-only; realtime snapshots are not substituted. |
 | Social/netflow | Web; optional provider extension point | Optional environment key | Not fabricated from exchange trading data. |
 | Security/governance/regulatory events | Deterministic source catalog plus on-demand scan | None | A scan timestamp, lookback, primary-source coverage, and material results are retained. |
 
@@ -68,7 +68,7 @@ python3 scripts/provider_cache.py --stats
 `--status` is an offline readiness table showing resolved configuration,
 registered adapter, credential presence, and runtime readiness. `--list` shows
 capabilities only for adapters registered in this process; it is not a network
-probe. CoinGlass is registered only when `COINGLASS_API_KEY` is present.
+probe. SoSoValue is registered only when `SOSOVALUE_API_KEY` is present.
 
 Runtime readiness is intentionally separate from endpoint health. Use the
 explicit probe for network, authentication, plan entitlement, schema, and
@@ -78,8 +78,17 @@ history diagnostics:
 python3 scripts/providers.py --probe binance
 python3 scripts/providers.py --probe defillama
 python3 scripts/providers.py --probe alternative_me
-python3 scripts/providers.py --probe coinglass
+python3 scripts/providers.py --probe sosovalue
 ```
+
+SoSoValue's current official documentation is at
+[`sosovalue-1.gitbook.io/sosovalue-api-doc`](https://sosovalue-1.gitbook.io/sosovalue-api-doc).
+The active ETF route is `GET /openapi/v1/etfs/summary-history` on
+`https://openapi.sosovalue.com`, authenticated with `x-soso-api-key`. The
+documented v1 history window is one month; settled flow rows are normalized by
+their U.S. trading date. The shared HTTP client also supports explicit
+idempotent JSON POST calls for read-only endpoints, but the current SoSoValue
+ETF contract is GET.
 
 The Python client uses verified TLS. `CRYPTO_PORTFOLIO_CA_BUNDLE` overrides
 `SSL_CERT_FILE`/`SSL_CERT_DIR`, and no normal configuration disables
