@@ -168,7 +168,6 @@ class CoinMetricsProvider:
         if self._catalog is None:
             payload = self.client.get_json(
                 self.base_url + "/v4/catalog/asset-metrics",
-                params={"assets": "btc"},
                 headers=self._headers(),
             )
             self._catalog = catalog_metrics(payload)

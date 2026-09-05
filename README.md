@@ -37,6 +37,8 @@ Trading:  advisory only; no automatic execution
   freshness-aware local provider caching; no background service is required.
 - When configured, uses SoSoValue's documented U.S. BTC/ETH ETF summary history
   for structured ETF-flow context; liquidation data is not attributed to it.
+  Annualized basis uses Binance's nearest trading USDT delivery contract and
+  exact-symbol mark/index prices; unsupported assets remain unavailable.
 - Adds derivatives/social positioning and BTC cycle context as non-scoring
   overlays that can conservatively cap immediate deployment.
 - Benchmarks aligned periods against 100% BTC and 70/30 BTC/ETH buy-and-hold.

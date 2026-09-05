@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
@@ -21,7 +21,7 @@ from .base import (
 from .cache import CacheCorruption, CacheExpired, ProviderCache, merge_ohlcv_series, missing_series_range, request_hash
 from .config import load_provider_config, provider_api_key, provider_enabled
 from .http import HttpClient, classify_transport_error, redact_secrets
-from .routes import build_provider_requests, provider_chain
+from .routes import BASIS_METHODOLOGY, build_provider_requests, current_delivery_basis, provider_chain
 
 
 @dataclass(frozen=True)
@@ -261,6 +261,12 @@ class ProviderRouter:
 
         pending: dict[tuple[str, str], dict[str, Any]] = {}
         for request in supplied:
+            if request.dataset == "basis" and request.provider == "binance":
+                cutoff = as_of if as_of is not None else request.parameters.get("as_of")
+                request = replace(request, parameters={
+                    **request.parameters, "market": "delivery", "methodology": BASIS_METHODOLOGY,
+                    "as_of": _now(cutoff) if cutoff is not None else None,
+                })
             for key in request.metric_keys:
                 if (request.asset, key) in pending:
                     raise ValueError("router requests contain duplicate asset/metric keys")
@@ -317,10 +323,12 @@ class ProviderRouter:
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, tuple(identity[1] for identity in unsupported),
                         "UNSUPPORTED", "NONE", "capability declaration does not include metric", request_hash(request),
+                        error_code="PROVIDER_UNSUPPORTED",
                     ))
                     self._advance(
                         pending, unsupported, exhausted=exhausted, provider=provider_name,
                         status="UNSUPPORTED", reason="capability declaration does not include metric",
+                        diagnostic={"error_code": "PROVIDER_UNSUPPORTED", "detail": "capability declaration does not include metric"},
                     )
                     progressed = True
                 if not supported:
@@ -353,6 +361,7 @@ class ProviderRouter:
                             pending.pop(identity, None)
                     missing = [identity for identity in identities if identity not in found]
                     status = "SUCCESS" if not missing else "PARTIAL"
+                    partial_diagnostic = {}
                     partial_reason = None
                     if missing:
                         partial_diagnostic = next(
@@ -403,6 +412,8 @@ class ProviderRouter:
                 except Exception as exc:  # provider boundaries must not abort an entire review
                     secret = provider_api_key(provider_name, self.config)
                     diagnostic = self._diagnostic_for(exc)
+                    if not diagnostic:
+                        diagnostic = {"error_code": classify_transport_error(exc), "detail": redact_secrets(str(exc), (secret,) if secret else ())}
                     reason = self._format_diagnostic(diagnostic, fallback=redact_secrets(str(exc), (secret,) if secret else ()) or exc.__class__.__name__)
                     failed_network_requests = self._last_network_requests
                     attempts.append(ProviderAttempt(
@@ -511,8 +522,7 @@ class ProviderRouter:
             attempted.append(provider)
             item["last_status"] = status
             item["last_reason"] = reason
-            if diagnostic:
-                item["last_diagnostic"] = dict(diagnostic)
+            item["last_diagnostic"] = dict(diagnostic or {})
             item["index"] += 1
             if item["index"] >= len(item["chain"]):
                 pending.pop(identity, None)
@@ -539,6 +549,8 @@ class ProviderRouter:
         self._last_metric_diagnostics = {}
         if request.dataset == "ohlcv" and hasattr(provider, "candles"):
             return self._collect_ohlcv(provider_name, provider, request, mode, as_of=as_of, now=now)
+        if request.dataset == "basis" and as_of is None:
+            as_of = request.parameters.get("as_of")
         if mode != FetchMode.REFRESH or not request.mutable:
             try:
                 cached = self.cache.load_response(request, now=now, as_of=as_of)
@@ -550,7 +562,11 @@ class ProviderRouter:
                 self.cache.quarantine(request)
                 cached = None
             if cached is not None:
-                return _mapping_observations(cached), "CACHE_PROVIDER", True, 0
+                values = _mapping_observations(cached)
+                if request.dataset != "basis" or all(
+                    current_delivery_basis(value.get("metadata"), as_of or now) for value in values
+                ):
+                    return values, "CACHE_PROVIDER", True, 0
         if mode == FetchMode.CACHE_ONLY:
             raise ProviderUnavailable("CACHE_ONLY has no usable provider cache")
         self._budget(provider_name)

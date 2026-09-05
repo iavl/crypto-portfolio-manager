@@ -20,7 +20,7 @@ from .models.time import normalize_timestamp, parse_timestamp
 from .providers.base import FetchMode
 from .providers.config import load_provider_config
 from .providers.http import redact_secrets
-from .providers.routes import metric_is_mutable, provider_chain
+from .providers.routes import current_delivery_basis, metric_is_mutable, provider_chain
 from .providers.router import ProviderRouter
 from .state.metrics import latest_usable_observation, read_metric_observations
 
@@ -198,9 +198,14 @@ def _observations(value: Any) -> list[MetricObservation]:
     return [item if isinstance(item, MetricObservation) else MetricObservation.from_mapping(item) for item in value]
 
 
-def _active_observation_source(observation: MetricObservation) -> bool:
-    """Keep retired CoinGlass points readable without using them as live cache."""
-    return observation.source.strip().lower() != "coinglass"
+def _active_observation_source(observation: MetricObservation, as_of: str | datetime) -> bool:
+    """Keep retired provider/methodology points readable but out of live cache."""
+    source = observation.source.strip().lower()
+    if source == "coinglass":
+        return False
+    if source == "binance" and observation.metric_key == "derivatives.futures_basis_annualized":
+        return current_delivery_basis(observation.metadata, as_of)
+    return True
 
 
 def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
@@ -278,7 +283,7 @@ class AcquisitionManager:
             )
             if (
                 candidate is not None
-                and _active_observation_source(candidate)
+                and _active_observation_source(candidate, cutoff)
                 and (selected_mode != FetchMode.REFRESH or not metric_is_mutable(request.metric_key))
             ):
                 reusable[identity] = candidate
@@ -492,6 +497,7 @@ class AcquisitionManager:
                         normalized = self._failure(request, current, reason, stale=True)
             else:
                 old = stale.get(identity)
+                diagnostic = routed_diagnostics.get(identity)
                 category = event_metric_category(request.metric_key)
                 if category is not None:
                     reason = event_errors.get(
@@ -500,6 +506,9 @@ class AcquisitionManager:
                     )
                 elif request.metric_key == "risk.chain_liveness_status":
                     reason = "chain liveness requires a separate structured status check"
+                elif not provider_chain(request.metric_key):
+                    reason = "no configured structured provider route for this metric"
+                    diagnostic = {"error_code": "NO_PROVIDER_ROUTE", "detail": reason}
                 else:
                     reason = routed_reasons.get(identity, "no configured provider returned a usable observation")
                 if old is not None:
@@ -516,7 +525,7 @@ class AcquisitionManager:
                     current,
                     reason,
                     stale=old is not None,
-                    diagnostic=routed_diagnostics.get(identity),
+                    diagnostic=diagnostic,
                     previous=old,
                 )
             if should_persist:

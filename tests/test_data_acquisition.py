@@ -22,6 +22,7 @@ from crypto_portfolio.providers.base import (
     ProviderUnavailable,
 )
 from crypto_portfolio.providers.binance import BinanceProvider
+from crypto_portfolio.providers.bybit import BybitProvider
 from crypto_portfolio.providers.cache import CacheExpired, ProviderCache, request_hash
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider, catalog_metrics, parse_timeseries
 from crypto_portfolio.providers.sosovalue import (
@@ -202,8 +203,8 @@ class DataAcquisitionTests(unittest.TestCase):
     def test_defillama_partial_bundle_keeps_fee_subrequest_failure(self):
         class PartialClient:
             def get_json(self, url, *, params=None, headers=None):
-                if "/protocol/" in url:
-                    return {"tvl": [{"date": 1788476400, "totalLiquidityUSD": 123}], "mcap": 456}
+                if "/tvl/" in url:
+                    return 123
                 raise ProviderUnavailable(
                     "fees TLS failure",
                     diagnostic=ProviderDiagnostic(
@@ -227,6 +228,65 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual([item["metric_key"] for item in response.observations], ["fundamentals.tvl"])
         self.assertEqual(response.diagnostics["fundamentals.fees_30d"]["error_code"], "TLS_CERTIFICATE_VERIFY_FAILED")
         self.assertIn("summary/fees/aave", response.diagnostics["fundamentals.fees_30d"]["endpoint"])
+
+    def test_defillama_aave_uses_lightweight_tvl_endpoint(self):
+        class AaveClient:
+            def __init__(self):
+                self.urls = []
+
+            def get_json(self, url, *, params=None, headers=None):
+                self.urls.append(url)
+                if url.endswith("/tvl/aave"):
+                    return 123
+                if url.endswith("/summary/fees/aave"):
+                    return {"total30d": 10}
+                raise AssertionError(f"unexpected endpoint: {url}")
+
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        client = AaveClient()
+        response = DeFiLlamaProvider(client=client).collect(
+            ProviderRequest(
+                "defillama",
+                "protocol",
+                "AAVE",
+                {},
+                ("fundamentals.tvl", "fundamentals.fees_30d"),
+            )
+        )
+        self.assertEqual([item["metric_key"] for item in response.observations], ["fundamentals.tvl", "fundamentals.fees_30d"])
+        self.assertNotIn("/protocol/aave", client.urls)
+
+    def test_defillama_probe_uses_lightweight_tvl_endpoint(self):
+        class TvlClient:
+            def get_json(self, url, *, params=None, headers=None):
+                self.url = url
+                return 123
+
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        client = TvlClient()
+        router = ProviderRouter(
+            {"defillama": DeFiLlamaProvider(client=client)},
+            config=config_for("defillama"),
+        )
+        result = probe_provider(router, "defillama")[0]
+        self.assertEqual(result["network"], "OK")
+        self.assertEqual(result["schema"], "OK")
+        self.assertEqual(client.url, "https://api.llama.fi/tvl/aave")
+
+    def test_coinmetrics_catalog_omits_unsupported_assets_filter(self):
+        class CatalogClient:
+            def __init__(self):
+                self.calls = []
+
+            def get_json(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return {"data": [{"metric": "CapMVRVCur"}]}
+
+        client = CatalogClient()
+        CoinMetricsProvider(client=client).catalog()
+        self.assertNotIn("assets", client.calls[0][1].get("params", {}))
 
     def test_http_retry_size_and_redaction(self):
         sleeper = []
@@ -540,6 +600,43 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result.observations[0].value, 99)
         self.assertEqual(result.web_fallbacks, ())
 
+    def test_router_records_a_complete_provider_bundle_as_success(self):
+        provider = StructuredProvider(value=7, source="sosovalue")
+        with TemporaryDirectory() as directory:
+            router = ProviderRouter(
+                {"sosovalue": provider},
+                config=config_for("sosovalue"),
+                cache=ProviderCache(Path(directory) / "cache"),
+            )
+            result = AcquisitionManager(router, persist=False).run(
+                MetricCollectionPlan(
+                    "SNAPSHOT_REVIEW",
+                    (MetricRequest("BTC", "flows.etf_net_1d"),),
+                ),
+                mode=FetchMode.REFRESH,
+                as_of=None,
+                now="2026-09-05T00:00:00Z",
+                cached_observations=(),
+            )
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(result.results[0].status, "SUCCESS")
+        self.assertEqual(result.summary["counts"]["SUCCESS"], 1)
+        self.assertEqual(result.attempts[0]["status"], "SUCCESS")
+
+    def test_bybit_candles_accept_numeric_timestamp_strings(self):
+        class BybitClient:
+            def get_json(self, url, *, params=None, headers=None):
+                return {"retCode": 0, "result": {"list": [[
+                    "1767225600000", "100", "101", "99", "100.5", "10", "1005"
+                ] ]}}
+
+        provider = BybitProvider(
+            client=BybitClient(),
+            clock=lambda: datetime(2026, 1, 3, tzinfo=timezone.utc),
+        )
+        series = provider.candles("BTC", timeframe="1D")
+        self.assertEqual(series.candles[0].timestamp, "2026-01-01T00:00:00Z")
+
     def test_modes_and_normalized_observation_reuse(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("ETH", "fundamentals.tvl"),))
         fresh = normalize_metric_result({
@@ -806,6 +903,17 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(provider.spot_price("BTC").price, 100)
         self.assertTrue(provider.candles("BTC").candles[0].completed)
         self.assertEqual([url.split("//", 1)[1].split("/", 1)[0] for url, _ in client.urls], ["api.binance.com", "api.binance.com"])
+
+    def test_binance_supports_lunc_public_pair(self):
+        class FakeClient:
+            def get_json(self, url, *, params=None, headers=None):
+                self.params = params
+                return {"symbol": "LUNCUSDT", "price": "0.00005"}
+
+        client = FakeClient()
+        price = BinanceProvider(client=client).spot_price("LUNC")
+        self.assertEqual(price.symbol, "LUNC")
+        self.assertEqual(client.params["symbol"], "LUNCUSDT")
 
 
 if __name__ == "__main__":

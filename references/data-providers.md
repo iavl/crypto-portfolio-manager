@@ -24,7 +24,8 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Category | Default priority | Authentication | Caveat |
 |---|---|---|---|
 | Spot/OHLCV | Binance, Bybit | None | Only approved public USDT mappings are used. |
-| Funding/OI/ratios/basis | Binance, Bybit | None | Venue and methodology stay in provenance. |
+| Funding/OI/ratios | Binance, Bybit | None | Venue and methodology stay in provenance. |
+| Annualized futures basis | Binance | None | Nearest trading USDT delivery contract; exact-symbol mark/index basis, ACT/365. Bybit has no implemented basis adapter. |
 | Protocol TVL/fees/revenue | DeFiLlama | None | Asset-to-protocol identifiers are explicit. |
 | Market Fear & Greed | Alternative.me | None | Market-wide context, not per-asset sentiment. |
 | BTC cycle/on-chain | Coin Metrics Community, optional authenticated tier | Optional environment key | Catalog availability is checked; unsupported metrics stay unknown. |
@@ -38,6 +39,44 @@ are read from `~/.config/crypto-portfolio-manager/data-providers.json` or the
 path in `CRYPTO_PORTFOLIO_PROVIDER_CONFIG`. API keys are referenced only by
 environment-variable name and are never written to config, cache, history, or
 logs.
+
+### Delivery basis and unavailable metrics
+
+Binance's public `GET /fapi/v1/exchangeInfo` identifies the nearest unexpired,
+trading `CURRENT_QUARTER` or `NEXT_QUARTER` USDT delivery contract. Its exact
+symbol is passed to `GET /fapi/v1/premiumIndex`; the returned symbol must match.
+Python calculates:
+
+```text
+annualized_basis = (markPrice / indexPrice - 1) * 365 * 86400 / seconds_to_expiry
+```
+
+Remaining time is measured from the quote's observation time to `deliveryDate`.
+The value is a signed fraction (0.10 means 10% annualized), using the delivery
+mark price rather than the last traded futures price. It is contextual evidence,
+not an executable yield. Metadata retains both prices, the exact contract,
+delivery date, observation time, remaining seconds, venue, and methodology.
+The official [mark-price endpoint](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Mark-Price)
+and [exchange information](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Exchange-Information)
+define these public inputs.
+
+Live collection uses no historical `as_of`. Historical requests only reuse
+previously verified compatible observations/caches: today's contract catalogue
+cannot prove which contract was nearest and trading in the past. No suitable
+contract, invalid prices, expired contracts, future quotes, or quotes older than
+the registry's one-day freshness window remain unavailable. Perpetual premiums,
+funding rates, and zero are never substitutes.
+
+Delivery requests carry a methodology marker in their cache identity. Old
+Binance perpetual-basis observations remain readable history, but cannot satisfy
+current acquisition; expired delivery observations cannot either.
+
+Liquidations still have no configured structured route. Their collection status
+remains `FAILED`, with no observation/value and `NO_PROVIDER_ROUTE` in the
+diagnostic. This differs from `PROVIDER_UNSUPPORTED` (adapter capability) and
+transport/schema failures. Existing allowed Web fallback behavior is unchanged;
+`CACHE_ONLY` performs no network work. Missing liquidation evidence remains
+missing coverage, not a zero-liquidation claim.
 
 ## Cache layers
 

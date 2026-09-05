@@ -134,8 +134,9 @@ def parse_protocol_payload(
     tvl = _latest_series_value(payload.get("tvl"), as_of=as_of, fetched_at=fetched_at)
     if tvl is None:
         for key in ("tvl", "tvlUsd", "totalLiquidityUSD"):
-            if key in payload:
-                tvl = (_number(payload[key], f"DeFiLlama {key}"), fetched_at)
+            raw = payload.get(key)
+            if key in payload and not isinstance(raw, (list, Mapping)):
+                tvl = (_number(raw, f"DeFiLlama {key}"), fetched_at)
                 break
     values: dict[str, tuple[float, str]] = {}
     if tvl is not None:
@@ -214,7 +215,17 @@ class DeFiLlamaProvider:
         identifier = identifier_for_asset(request.asset)
         url = BASE_URL + "/protocol/" + quote(identifier, safe="")
         fetched = _now(self.clock)
-        payload = self.client.get_json(url)
+        # The Aave protocol payload is a multi-chain historical document that
+        # exceeds the bounded HTTP response limit. Its lightweight TVL route
+        # is sufficient for the metric this provider can safely derive.
+        if identifier == "aave":
+            payload: Mapping[str, Any] = {}
+            if "fundamentals.tvl" in request.metric_keys:
+                tvl_payload = self.client.get_json(BASE_URL + "/tvl/" + quote(identifier, safe=""))
+                if isinstance(tvl_payload, (int, float, str)) and not isinstance(tvl_payload, bool):
+                    payload = {"tvl": tvl_payload}
+        else:
+            payload = self.client.get_json(url)
         fees_payload = None
         fees_error: Exception | None = None
         if any(key in request.metric_keys for key in ("fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple")):

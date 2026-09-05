@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import normalize_metric_key
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import ProviderRequest
+
+
+BASIS_METHODOLOGY = "delivery_mark_index_act365_v1"
+
+
+def current_delivery_basis(metadata: Mapping[str, Any] | None, as_of: str | datetime) -> bool:
+    """Old perpetual observations and expired contracts are history only."""
+    metadata = metadata or {}
+    if metadata.get("methodology") != BASIS_METHODOLOGY:
+        return False
+    try:
+        cutoff = parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of)
+        return parse_timestamp(metadata.get("delivery_at")) > cutoff
+    except ValueError:
+        return False
 
 
 DEFAULT_TTL_SECONDS = {
@@ -26,6 +41,7 @@ DEFAULT_TTL_SECONDS = {
 PROVIDER_ROUTES = {
     "market": ("binance", "bybit"),
     "derivatives": ("binance", "bybit"),
+    "basis": ("binance",),
     "fundamentals": ("defillama",),
     "etf": ("sosovalue",),
     "liquidations": (),
@@ -52,6 +68,8 @@ def provider_chain(metric_key: str) -> tuple[str, ...]:
         return ("sosovalue",)
     if "liquidations" in key:
         return ()
+    if key == "derivatives.futures_basis_annualized":
+        return PROVIDER_ROUTES["basis"]
     if key.startswith("derivatives."):
         return ("binance", "bybit")
     if key == "sentiment.market_fear_greed":
@@ -130,7 +148,7 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
         "symbol": asset,
         "market": "spot" if dataset == "ohlcv" or dataset == "spot" else "perpetual",
         "quote_currency": "USDT",
-        "as_of": normalize_timestamp(end.isoformat(), "as_of"),
+        "as_of": None if dataset == "basis" and as_of is None else normalize_timestamp(end.isoformat(), "as_of"),
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
@@ -167,6 +185,11 @@ def build_provider_requests(
         parameters["timeframe"] = timeframe if dataset == "ohlcv" else parameters.get("timeframe")
         if hasattr(items[0], "parameters"):
             parameters.update({key: value for key, value in items[0].parameters.items() if key not in {"api_key", "api_secret", "authorization", "token"}})
+        if dataset == "basis":
+            parameters.update({
+                "market": "delivery",
+                "methodology": BASIS_METHODOLOGY,
+            })
         keys = tuple(item.metric_key for item in items)
         mutable = any(metric_is_mutable(key) for key in keys) and dataset != "ohlcv"
         result.append(

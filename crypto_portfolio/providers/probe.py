@@ -98,6 +98,15 @@ def _require_list(value: Any) -> None:
         raise ValueError("probe response schema has no data list")
 
 
+def _require_number(value: Any) -> None:
+    if isinstance(value, bool):
+        raise ValueError("probe response schema is not numeric")
+    try:
+        float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("probe response schema is not numeric") from exc
+
+
 def _require_observations(value: Any) -> None:
     observations = getattr(value, "observations", value)
     if isinstance(observations, (str, bytes)) or not isinstance(observations, Iterable) or not tuple(observations):
@@ -163,8 +172,8 @@ def probe_provider(router: ProviderRouter, provider_name: str) -> tuple[dict[str
         endpoint = SPOT_BASE_URL + "/api/v3/ticker/price"
         return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"symbol": "BTCUSDT"}), validate=lambda value: _require_mapping(value)), client),)
     if name == "defillama":
-        endpoint = DEFILLAMA_BASE_URL + "/protocol/aave"
-        return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint), validate=lambda value: _require_mapping(value)), client),)
+        endpoint = DEFILLAMA_BASE_URL + "/tvl/aave"
+        return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint), validate=_require_number), client),)
     if name == "bybit":
         endpoint = BYBIT_BASE_URL + "/v5/market/tickers"
         return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"category": "spot", "symbol": "BTCUSDT"}), validate=lambda value: _require_mapping(value)), client),)
@@ -174,7 +183,7 @@ def probe_provider(router: ProviderRouter, provider_name: str) -> tuple[dict[str
     if name in {"coinmetrics_community", "coinmetrics_pro"}:
         base_url = AUTHENTICATED_BASE_URL if name == "coinmetrics_pro" else COMMUNITY_BASE_URL
         endpoint = base_url + "/v4/catalog/asset-metrics"
-        return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"assets": "btc"}), validate=lambda value: catalog_metrics(value), authenticated=name == "coinmetrics_pro"), client),)
+        return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint), validate=lambda value: catalog_metrics(value), authenticated=name == "coinmetrics_pro"), client),)
     return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
 
 

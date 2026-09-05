@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import math
 from typing import Any, Iterable, Mapping
 
+from ..engine.metrics import annualized_futures_basis
 from ..engine.technical import (
     average_true_range,
     calendar_lookback_return,
@@ -28,13 +29,14 @@ from .base import (
     ProviderUnsupportedMetric,
 )
 from .http import HttpClient
+from .routes import BASIS_METHODOLOGY
 
 
 SPOT_BASE_URL = "https://api.binance.com"
 FUTURES_BASE_URL = "https://fapi.binance.com"
 _INTERVALS = {"1H": "1h", "4H": "4h", "1D": "1d"}
 _QUOTE = "USDT"
-BINANCE_SYMBOLS = {symbol: f"{symbol}{_QUOTE}" for symbol in ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")}
+BINANCE_SYMBOLS = {symbol: f"{symbol}{_QUOTE}" for symbol in ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE", "LUNC")}
 
 
 def _now(clock: Any | None = None) -> str:
@@ -371,7 +373,10 @@ class BinanceProvider:
         if request.dataset == "ratios":
             return self._ratios(request)
         if request.dataset == "basis":
-            return self._basis(request)
+            try:
+                return self._basis(request)
+            except ValueError as exc:
+                raise ProviderDataError(str(exc)) from exc
         raise ProviderUnsupportedMetric(f"Binance does not support dataset {request.dataset}")
 
     def observations_from_series(self, series: OHLCVSeries, metric_keys: Iterable[str], *, as_of: str | datetime | None = None) -> tuple[Mapping[str, Any], ...]:
@@ -478,14 +483,70 @@ class BinanceProvider:
 
     def _basis(self, request: ProviderRequest) -> list[Mapping[str, Any]]:
         pair = binance_symbol(request.asset)
-        rows = _list_response(self._get(FUTURES_BASE_URL, "/futures/data/basis", {"pair": pair, "contractType": "PERPETUAL", "period": "1d", "limit": 1}), "basis")
-        if not rows or not isinstance(rows[-1], Mapping):
-            raise ProviderDataError("Binance basis response is empty")
-        item = rows[-1]
-        observed = _timestamp(item.get("timestamp"), "basis timestamp")
-        raw = item.get("annualizedBasisRate", item.get("basisRateAnnualized"))
-        value = _number(raw, "annualized basis")
-        return [_observation(request.asset, "derivatives.futures_basis_annualized", value, observed_at=observed, fetched_at=_now(self.clock), metadata={"source_dataset": "basis", "contract": "PERPETUAL"})] if "derivatives.futures_basis_annualized" in request.metric_keys else []
+        started = parse_timestamp(_now(self.clock))
+        as_of = request.parameters.get("as_of")
+        cutoff = parse_timestamp(as_of) if as_of is not None else started
+        # exchangeInfo is a current instrument catalogue, not a historical one.
+        if cutoff < started:
+            raise ProviderUnsupportedMetric("historical delivery basis requires a previously verified cached observation")
+        info = _mapping_response(self._get(FUTURES_BASE_URL, "/fapi/v1/exchangeInfo", {}), "exchange information")
+        contracts = _list_response(info.get("symbols"), "exchange information symbols")
+        eligible = []
+        for contract in contracts:
+            if not isinstance(contract, Mapping):
+                raise ProviderDataError("Binance contract is malformed")
+            if (
+                contract.get("pair") != pair or contract.get("baseAsset") != request.asset
+                or contract.get("quoteAsset") != "USDT" or contract.get("status") != "TRADING"
+                or contract.get("contractType") not in {"CURRENT_QUARTER", "NEXT_QUARTER"}
+            ):
+                continue
+            expiry = parse_timestamp(_timestamp(contract.get("deliveryDate"), "delivery date"))
+            onboard = parse_timestamp(_timestamp(contract.get("onboardDate"), "onboard date"))
+            symbol = contract.get("symbol")
+            if not isinstance(symbol, str) or not symbol.startswith(pair + "_"):
+                raise ProviderDataError("Binance delivery symbol does not match pair")
+            if onboard >= expiry:
+                raise ProviderDataError("Binance delivery contract has invalid lifetime")
+            if onboard <= started < expiry:
+                eligible.append((expiry, symbol, onboard, contract["contractType"]))
+        if not eligible:
+            raise ProviderUnsupportedMetric(f"Binance has no trading USDT delivery contract for {request.asset}")
+        expiry, symbol, onboard, contract_type = min(eligible)
+        # Request an exact symbol: a rotating CURRENT_QUARTER basis series does
+        # not identify its delivery date across a rollover.
+        quote = _mapping_response(self._get(
+            FUTURES_BASE_URL, "/fapi/v1/premiumIndex", {"symbol": symbol},
+        ), "delivery mark/index price")
+        if quote.get("symbol") != symbol:
+            raise ProviderDataError("Binance basis quote does not match delivery contract")
+        observed = _timestamp(quote.get("time"), "basis timestamp")
+        observed_time = parse_timestamp(observed)
+        fetched = _now(self.clock)
+        current = parse_timestamp(fetched)
+        cutoff = min(cutoff, current) if as_of is not None else current
+        if observed_time > cutoff or observed_time < onboard or expiry <= current:
+            raise ProviderDataError("Binance basis quote is outside the requested contract/time window")
+        key = "derivatives.futures_basis_annualized"
+        max_age = int(metric_definition(key).freshness[:-1]) * 86400
+        if (cutoff - observed_time).total_seconds() > max_age:
+            raise ProviderDataError("Binance delivery basis quote is stale")
+        if isinstance(quote.get("markPrice"), bool) or isinstance(quote.get("indexPrice"), bool):
+            raise ProviderDataError("Binance basis prices must not be boolean")
+        mark_price = _number(quote.get("markPrice"), "delivery mark price", positive=True)
+        index_price = _number(quote.get("indexPrice"), "index price", positive=True)
+        remaining = (expiry - observed_time).total_seconds()
+        value = annualized_futures_basis(mark_price, index_price, remaining)
+        return [_observation(
+            request.asset, key, value, observed_at=observed, fetched_at=fetched,
+            metadata={
+                "source_dataset": "exchangeInfo+premiumIndex", "venue": "BINANCE",
+                "market": "delivery", "quote_currency": "USDT", "contract": symbol,
+                "contract_type": contract_type, "delivery_at": normalize_timestamp(expiry.isoformat()),
+                "methodology": BASIS_METHODOLOGY, "mark_price": mark_price,
+                "index_price": index_price, "seconds_to_expiry": remaining,
+            },
+        )] if key in request.metric_keys else []
 
     def _now(self) -> str:
         return _now(self.clock)

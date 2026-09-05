@@ -8,13 +8,23 @@ from typing import Any, Iterable, Mapping
 from ..models.market import Candle, OHLCVSeries
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import ProviderCapabilities, ProviderDataError, ProviderRequest, ProviderResponseError, ProviderUnsupportedMetric
-from .binance import _asset_symbol, _epoch_millis, _number, _observation, _timestamp, observations_from_ohlcv
+from .binance import _asset_symbol, _epoch_millis, _number, _observation, _timestamp as _binance_timestamp, observations_from_ohlcv
 from .http import HttpClient
 
 
 BASE_URL = "https://api.bybit.com"
 _INTERVALS = {"1H": "60", "4H": "240", "1D": "D"}
 BYBIT_SYMBOLS = {symbol: f"{symbol}USDT" for symbol in ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")}
+
+
+def _timestamp(value: Any, field: str) -> str:
+    """Normalize Bybit's numeric timestamp strings as epoch milliseconds."""
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            pass
+    return _binance_timestamp(value, field)
 
 
 def _now(clock: Any | None = None) -> str:

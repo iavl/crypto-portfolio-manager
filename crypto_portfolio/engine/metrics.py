@@ -26,6 +26,19 @@ def simple_return(start: float, end: float) -> float:
     return end / start - 1.0
 
 
+def annualized_futures_basis(futures_price: float, index_price: float, seconds_to_expiry: float) -> float:
+    """Simple ACT/365 delivery basis, as a signed decimal fraction."""
+    futures_price, index_price, seconds_to_expiry = _clean(
+        (futures_price, index_price, seconds_to_expiry)
+    )
+    if min(futures_price, index_price, seconds_to_expiry) <= 0:
+        raise ValueError("basis prices and remaining expiry must be positive")
+    result = (futures_price / index_price - 1.0) * (365 * 86400 / seconds_to_expiry)
+    if not math.isfinite(result):
+        raise ValueError("annualized basis must be finite")
+    return result
+
+
 def period_returns(prices: Sequence[float]) -> list[float]:
     values = _clean(prices)
     if len(values) < 2:
@@ -136,6 +149,7 @@ def benchmark_70_30(btc_return: float, eth_return: float) -> float:
 
 
 __all__ = [
+    "annualized_futures_basis",
     "annualized_volatility",
     "benchmark_70_30",
     "current_drawdown",
