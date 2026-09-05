@@ -20,6 +20,7 @@ DECISION_ROLES = tuple(sorted(_DECISION_ROLES))
 REVIEW_TYPES = ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _FRESHNESS_WINDOW = re.compile(r"^[1-9][0-9]*d$")
+_CHAIN_NATIVE_ASSETS = ("BTC", "ETH", "SOL", "BNB")
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
 _APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
 _DERIVATIVES_ASSETS = _PROTOCOL_ASSETS
@@ -271,7 +272,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
     "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
     "risk.security_event_status": _definition("risk.security_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
-    "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
+    "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_CHAIN_NATIVE_ASSETS),
     "risk.regulatory_event_status": _definition(
         "risk.regulatory_event_status", "event_risk", "string", None, "CONTEXTUAL",
         critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,

@@ -21,7 +21,7 @@ from .models.time import normalize_timestamp, parse_timestamp
 from .providers.base import FetchMode
 from .providers.config import load_provider_config
 from .providers.http import redact_secrets
-from .providers.routes import current_delivery_basis, metric_is_mutable, provider_chain
+from .providers.routes import current_delivery_basis, metric_is_mutable, metric_reuse_ttl_seconds, provider_chain
 from .providers.router import ProviderRouter
 from .state.metrics import latest_usable_observation, read_metric_observations
 
@@ -281,6 +281,14 @@ class AcquisitionManager:
                 request.metric_key,
                 as_of=cutoff,
                 observations=local,
+                max_age_seconds=(
+                    metric_reuse_ttl_seconds(
+                        request.metric_key,
+                        self.router.config.get("cache_ttl_seconds"),
+                    )
+                    if metric_is_mutable(request.metric_key) and provider_chain(request.metric_key)
+                    else None
+                ),
             )
             if (
                 candidate is not None

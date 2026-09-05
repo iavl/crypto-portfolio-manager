@@ -18,6 +18,7 @@ class DocumentationTests(unittest.TestCase):
 
         required_paths = (
             "USAGE.md",
+            "README.zh-CN.md",
             "config/policy.json",
             "references/investment-policy.md",
             "references/scoring-model.md",
@@ -90,6 +91,7 @@ class DocumentationTests(unittest.TestCase):
             for relative_path in (
                 "SKILL.md",
                 "README.md",
+                "README.zh-CN.md",
                 "USAGE.md",
                 "HOW_IT_WORKS.md",
                 "config/policy.json",

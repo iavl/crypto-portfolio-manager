@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
-from ..metrics_registry import normalize_metric_key
+from ..metrics_registry import metric_definition, normalize_metric_key
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import ProviderRequest
 
@@ -125,6 +125,24 @@ def cache_ttl_seconds(dataset: str, configured: dict[str, Any] | None = None) ->
     return value
 
 
+def metric_reuse_ttl_seconds(
+    metric_key: str,
+    configured: Mapping[str, Any] | None = None,
+) -> int | float | None:
+    """Return the shortest configured window for mutable structured data."""
+    definition = metric_definition(metric_key)
+    registry_ttl = (
+        definition.freshness_days * 86400
+        if definition.freshness_days is not None
+        else None
+    )
+    dataset = dataset_for_metric(definition.key)
+    provider_ttl = cache_ttl_seconds(dataset, dict(configured or {}))
+    if registry_ttl is None:
+        return provider_ttl
+    return min(registry_ttl, provider_ttl)
+
+
 def metric_is_mutable(metric_key: str) -> bool:
     key = normalize_metric_key(metric_key)
     if key == "market.spot_price":
@@ -213,6 +231,7 @@ __all__ = [
     "cache_ttl_seconds",
     "dataset_for_metric",
     "metric_is_mutable",
+    "metric_reuse_ttl_seconds",
     "provider_chain",
     "provider_priority",
     "get_provider_chain",

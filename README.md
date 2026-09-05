@@ -1,3 +1,5 @@
+[English (default)](README.md) · [简体中文](README.zh-CN.md)
+
 # crypto-portfolio-manager
 
 `crypto-portfolio-manager` is a Codex Skill for conservative-balanced,

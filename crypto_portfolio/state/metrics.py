@@ -219,10 +219,19 @@ def observation_is_fresh(
     observation: MetricObservation,
     *,
     as_of: str | datetime | None = None,
+    max_age_seconds: int | float | None = None,
 ) -> bool:
     """Check registry freshness without trusting JSONL file order."""
     if not isinstance(observation, MetricObservation) or observation.freshness != "CURRENT":
         return False
+    if max_age_seconds is not None:
+        if (
+            isinstance(max_age_seconds, bool)
+            or not isinstance(max_age_seconds, (int, float))
+            or not math.isfinite(float(max_age_seconds))
+            or max_age_seconds <= 0
+        ):
+            raise ValueError("max_age_seconds must be a positive finite number or null")
     cutoff = parse_timestamp(
         normalize_timestamp(
             as_of.isoformat() if isinstance(as_of, datetime) else as_of,
@@ -232,6 +241,8 @@ def observation_is_fresh(
     observed = parse_timestamp(observation.observed_at)
     age = (cutoff - observed).total_seconds()
     if age < 0:
+        return False
+    if max_age_seconds is not None and age > float(max_age_seconds):
         return False
     definition = metric_definition(observation.metric_key)
     days = definition.freshness_days
@@ -246,6 +257,7 @@ def latest_usable_observation(
     path: str | Path | None = None,
     observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
     invalid: list[str] | None = None,
+    max_age_seconds: int | float | None = None,
 ) -> MetricObservation | None:
     """Return the newest compatible observation, not merely the newest line."""
     normalized_asset = asset.strip().upper()
@@ -266,7 +278,7 @@ def latest_usable_observation(
         item for item in values
         if item.asset == normalized_asset
         and item.metric_key == normalized_key
-        and observation_is_fresh(item, as_of=as_of)
+        and observation_is_fresh(item, as_of=as_of, max_age_seconds=max_age_seconds)
     ]
     return max(candidates, key=lambda item: (parse_timestamp(item.observed_at), item.observation_id), default=None)
 
