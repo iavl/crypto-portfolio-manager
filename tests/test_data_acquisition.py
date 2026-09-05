@@ -97,6 +97,60 @@ class StructuredProvider:
 
 
 class DataAcquisitionTests(unittest.TestCase):
+    def test_macos_missing_default_ca_uses_system_bundle_without_weakening_tls(self):
+        paths = ssl.get_default_verify_paths()._replace(cafile=None, capath=None)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory) / "system.pem"
+            bundle.touch()
+            with patch("crypto_portfolio.providers.http.sys.platform", "darwin"), patch(
+                "crypto_portfolio.providers.http._MACOS_CA_BUNDLE", bundle,
+            ), patch("ssl.get_default_verify_paths", return_value=paths), patch(
+                "ssl.create_default_context", return_value=context,
+            ) as create:
+                client = HttpClient(environ={})
+                create.assert_called_once_with(cafile=str(bundle))
+                self.assertEqual(client.ca_source, "system")
+                self.assertEqual(client.ssl_context.verify_mode, ssl.CERT_REQUIRED)
+                self.assertTrue(client.ssl_context.check_hostname)
+                create.reset_mock()
+                HttpClient(ca_bundle=bundle, environ={})
+                create.assert_called_once_with(cafile=str(bundle))
+                with self.assertRaises(ValueError):
+                    HttpClient(ca_bundle=Path(directory) / "missing.pem", environ={})
+                create.reset_mock()
+                with patch("ssl.get_default_verify_paths", return_value=paths._replace(cafile="configured.pem")):
+                    self.assertEqual(HttpClient(environ={}).ca_source, "default")
+                    create.assert_called_once_with()
+
+    def test_sosovalue_probe_failure_does_not_crash_or_claim_schema_success(self):
+        class ProbeClient:
+            def get_json(self, *_args, **_kwargs):
+                raise ProviderAuthenticationError("rejected")
+
+        provider = SoSoValueProvider(client=ProbeClient(), api_key="fake-secret")
+        router = ProviderRouter({"sosovalue": provider}, config=config_for("sosovalue"))
+        # This provider requires a credential even with an injected adapter.
+        router.config["providers"]["sosovalue"]["api_key_env"] = "SOSOVALUE_API_KEY"
+        with patch.dict("os.environ", {"SOSOVALUE_API_KEY": "fake-secret"}):
+            result = probe_provider(router, "sosovalue")[0]
+        self.assertEqual(result["auth"], "REJECTED")
+        self.assertEqual(result["schema"], "NOT_TESTED")
+        self.assertNotIn("history_rows", result)
+        self.assertNotIn("fake-secret", str(result))
+
+    def test_probe_schema_failure_is_not_a_network_failure(self):
+        class ProbeClient:
+            def get_json(self, *_args, **_kwargs):
+                return []
+
+        provider = type("Provider", (), {"client": ProbeClient()})()
+        router = ProviderRouter({"binance": provider}, config=config_for("binance"))
+        result = probe_provider(router, "binance")[0]
+        self.assertEqual(result["network"], "OK")
+        self.assertEqual(result["schema"], "ERROR")
+        self.assertEqual(result["error_code"], "PROVIDER_SCHEMA_ERROR")
+
     def test_probe_is_explicit_and_reports_network_state(self):
         class ProbeClient:
             def __init__(self, value):
@@ -228,6 +282,45 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual([item["metric_key"] for item in response.observations], ["fundamentals.tvl"])
         self.assertEqual(response.diagnostics["fundamentals.fees_30d"]["error_code"], "TLS_CERTIFICATE_VERIFY_FAILED")
         self.assertIn("summary/fees/aave", response.diagnostics["fundamentals.fees_30d"]["endpoint"])
+
+    def test_defillama_chain_tvl_and_revenue_use_distinct_endpoints(self):
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        class ChainClient:
+            def get_json(self, url, *, params=None, headers=None):
+                if url.endswith("/v2/chains"):
+                    return [{"name": "Ethereum", "tvl": 1000}]
+                if url.endswith("/summary/fees/ethereum"):
+                    return {"total30d": 20 if params == {"dataType": "dailyRevenue"} else 100}
+                raise AssertionError(f"unexpected endpoint: {url}")
+
+        response = DeFiLlamaProvider(client=ChainClient()).collect(ProviderRequest(
+            "defillama", "protocol", "ETH", {},
+            ("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple"),
+        ))
+        self.assertEqual({x["metric_key"]: x["value"] for x in response.observations}, {
+            "fundamentals.tvl": 1000, "fundamentals.fees_30d": 100,
+            "fundamentals.revenue_30d": 20, "valuation.fee_revenue_multiple": 5,
+        })
+        self.assertEqual(response.diagnostics, {})
+
+    def test_defillama_tvl_failure_does_not_discard_fees_and_revenue(self):
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        class PartialClient:
+            def get_json(self, url, *, params=None, headers=None):
+                if "/tvl/" in url:
+                    raise ProviderUnavailable("TVL unavailable")
+                return {"total30d": 2 if params else 10}
+
+        response = DeFiLlamaProvider(client=PartialClient()).collect(ProviderRequest(
+            "defillama", "protocol", "AAVE", {},
+            ("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d"),
+        ))
+        self.assertEqual({x["metric_key"]: x["value"] for x in response.observations}, {
+            "fundamentals.fees_30d": 10, "fundamentals.revenue_30d": 2,
+        })
+        self.assertIn("TVL unavailable", response.diagnostics["fundamentals.tvl"]["detail"])
 
     def test_defillama_aave_uses_lightweight_tvl_endpoint(self):
         class AaveClient:
@@ -656,6 +749,8 @@ class DataAcquisitionTests(unittest.TestCase):
             fetched = manager.run(plan, mode=FetchMode.CACHE_ONLY, as_of="2026-09-04T00:02:00Z", now="2026-09-04T00:02:00Z", cached_observations=())
             self.assertEqual(provider.calls, 0)
             self.assertEqual(fetched.results[0].status, "FAILED")
+            self.assertEqual(fetched.results[0].event.refresh_error_code, "CACHE_MISS")
+            self.assertEqual(fetched.summary["api_requests"], 0)
             self.assertEqual(fetched.web_fallbacks, ())
 
             fetched = manager.run(plan, mode=FetchMode.AUTO, as_of="2026-09-04T00:02:00Z", now="2026-09-04T00:02:00Z", cached_observations=())
@@ -680,6 +775,44 @@ class DataAcquisitionTests(unittest.TestCase):
             self.assertEqual(relative.value, 0)
             self.assertEqual(relative.source, "python-derived")
             self.assertEqual(result.web_fallbacks, ())
+
+    def test_market_flow_state_is_python_derived_from_etf_flow(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("MARKET", "market.flow_state"),
+            MetricRequest("MARKET", "flows.etf_net_1d"),
+        ))
+        provider = StructuredProvider(value=100, source="sosovalue")
+        result = AcquisitionManager(
+            ProviderRouter({"sosovalue": provider}, config=config_for("sosovalue")),
+            persist=False,
+        ).run(plan, mode="AUTO", cached_observations=())
+        by_key = {item.metric_key: item for item in result.observations}
+        self.assertEqual(by_key["flows.etf_net_1d"].value, 100)
+        self.assertEqual(by_key["market.flow_state"].value, "POSITIVE")
+        self.assertEqual(by_key["market.flow_state"].source, "python-derived")
+        self.assertEqual(result.summary["counts"]["FAILED"], 0)
+
+    def test_disabled_provider_failure_keeps_a_stable_diagnostic_code(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("BTC", "sentiment.social_mentions_24h"),
+        ))
+        config = config_for("lunarcrush")
+        config["providers"]["lunarcrush"]["enabled"] = False
+        result = AcquisitionManager(
+            ProviderRouter({"lunarcrush": StructuredProvider()}, config=config),
+            persist=False,
+        ).run(plan, mode="AUTO", cached_observations=())
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertEqual(result.results[0].event.refresh_error_code, "PROVIDER_DISABLED")
+        self.assertEqual(result.attempts[0]["error_code"], "PROVIDER_DISABLED")
+
+    def test_chain_liveness_gap_keeps_a_stable_diagnostic_code(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("BTC", "risk.chain_liveness_status"),
+        ))
+        result = AcquisitionManager(persist=False).run(plan, mode="AUTO", cached_observations=())
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertEqual(result.results[0].event.refresh_error_code, "NO_CHAIN_LIVENESS_SOURCE")
 
     def test_cache_identity_expiry_and_secret_exclusion(self):
         request_a = ProviderRequest("test", "spot", "BTC", {"symbol": "BTCUSDT", "api_key": "one"}, ("market.spot_price",), True, 60)

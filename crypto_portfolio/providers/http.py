@@ -10,6 +10,7 @@ import os
 import re
 import socket
 import ssl
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,18 @@ from .base import (
 
 
 _SECRET_NAMES = {"api_key", "apikey", "api-secret", "api_secret", "authorization", "cookie", "password", "secret", "token"}
+_MACOS_CA_BUNDLE = Path("/etc/ssl/cert.pem")
+
+
+def _system_ca_bundle() -> Path | None:
+    # python.org macOS installs can have no OpenSSL CA files until their
+    # certificate installer runs. Reuse the OS bundle, never an unverified TLS context.
+    paths = ssl.get_default_verify_paths()
+    if sys.platform == "darwin" and not paths.cafile and not paths.capath and _MACOS_CA_BUNDLE.is_file():
+        return _MACOS_CA_BUNDLE
+    return None
+
+
 TRANSPORT_ERROR_CODES = (
     "TLS_CERTIFICATE_VERIFY_FAILED",
     "TLS_HANDSHAKE_FAILED",
@@ -137,7 +150,8 @@ def build_ssl_context(
                 capath=str(dir_path) if dir_path else None,
             )
         else:
-            context = ssl.create_default_context()
+            system_bundle = _system_ca_bundle()
+            context = ssl.create_default_context(cafile=str(system_bundle)) if system_bundle else ssl.create_default_context()
     except (OSError, ssl.SSLError) as exc:
         source = "CRYPTO_PORTFOLIO_CA_BUNDLE" if configured_bundle else "SSL_CERT_FILE/SSL_CERT_DIR"
         raise ValueError(f"invalid {source} trust configuration: {redact_secrets(str(exc))}") from exc
@@ -325,6 +339,7 @@ class HttpClient:
             "explicit_context" if ssl_context is not None else
             "configured" if ca_bundle or self.environ.get("CRYPTO_PORTFOLIO_CA_BUNDLE") else
             "environment" if self.environ.get("SSL_CERT_FILE") or self.environ.get("SSL_CERT_DIR") else
+            "system" if _system_ca_bundle() else
             "default"
         )
         self.request_count = 0

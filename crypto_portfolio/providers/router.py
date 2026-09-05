@@ -11,6 +11,7 @@ from ..models.time import normalize_timestamp
 from .base import (
     FetchMode,
     ProviderCapabilities,
+    ProviderDiagnostic,
     ProviderError,
     ProviderRequest,
     ProviderResponse,
@@ -302,13 +303,18 @@ class ProviderRouter:
                 )
                 provider = self.providers.get(provider_name)
                 if provider is None or not self._enabled(provider_name):
+                    diagnostic = {
+                        "error_code": "PROVIDER_DISABLED",
+                        "detail": "provider disabled or unavailable",
+                    }
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, request.metric_keys,
-                        "DISABLED", "NONE", "provider disabled or unavailable", request_hash(request),
+                        "DISABLED", "NONE", diagnostic["detail"], request_hash(request),
+                        error_code=diagnostic["error_code"],
                     ))
                     self._advance(
                         pending, identities, exhausted=exhausted, provider=provider_name,
-                        status="DISABLED", reason="provider disabled or unavailable",
+                        status="DISABLED", reason=diagnostic["detail"], diagnostic=diagnostic,
                     )
                     progressed = True
                     continue
@@ -568,7 +574,9 @@ class ProviderRouter:
                 ):
                     return values, "CACHE_PROVIDER", True, 0
         if mode == FetchMode.CACHE_ONLY:
-            raise ProviderUnavailable("CACHE_ONLY has no usable provider cache")
+            raise ProviderUnavailable("CACHE_ONLY has no usable provider cache", diagnostic=ProviderDiagnostic(
+                error_code="CACHE_MISS", detail="CACHE_ONLY has no usable provider cache",
+            ))
         self._budget(provider_name)
         self._review_requests += 1
         self._provider_requests[provider_name] = self._provider_requests.get(provider_name, 0) + 1
@@ -637,7 +645,9 @@ class ProviderRouter:
             return values, "CACHE_PROVIDER", True, 0
         if mode == FetchMode.CACHE_ONLY:
             if existing is None:
-                raise ProviderUnavailable("CACHE_ONLY has no cached OHLCV series")
+                raise ProviderUnavailable("CACHE_ONLY has no cached OHLCV series", diagnostic=ProviderDiagnostic(
+                    error_code="CACHE_MISS", detail="CACHE_ONLY has no cached OHLCV series",
+                ))
             values = self._series_values(provider, request, existing, as_of=effective_as_of)
             return values, "CACHE_PROVIDER", True, 0
         self._budget(provider_name)

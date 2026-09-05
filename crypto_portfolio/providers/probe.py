@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Mapping
 
 from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
-from .base import ProviderRequest
+from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
 from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, catalog_metrics
@@ -90,27 +90,27 @@ def _probe_call(
 
 def _require_mapping(value: Any) -> None:
     if not isinstance(value, Mapping):
-        raise ValueError("probe response schema is not an object")
+        raise ProviderResponseError("probe response schema is not an object")
 
 
 def _require_list(value: Any) -> None:
     if not isinstance(value, Mapping) or not isinstance(value.get("data"), list):
-        raise ValueError("probe response schema has no data list")
+        raise ProviderResponseError("probe response schema has no data list")
 
 
 def _require_number(value: Any) -> None:
     if isinstance(value, bool):
-        raise ValueError("probe response schema is not numeric")
+        raise ProviderResponseError("probe response schema is not numeric")
     try:
         float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("probe response schema is not numeric") from exc
+        raise ProviderResponseError("probe response schema is not numeric") from exc
 
 
 def _require_observations(value: Any) -> None:
     observations = getattr(value, "observations", value)
     if isinstance(observations, (str, bytes)) or not isinstance(observations, Iterable) or not tuple(observations):
-        raise ValueError("probe response schema has no normalized observations")
+        raise ProviderResponseError("probe response schema has no normalized observations")
 
 
 def _sosovalue_probe(provider: SoSoValueProvider) -> dict[str, Any]:
@@ -136,7 +136,7 @@ def _sosovalue_probe(provider: SoSoValueProvider) -> dict[str, Any]:
         validate=_require_observations,
     )
     result["endpoint_name"] = "ETF summary history"
-    if result["network"] == "OK":
+    if "error_code" not in result:
         observations = tuple(getattr(captured["value"], "observations", ()))
         result["history_rows"] = len(observations)
         result["latest_source_date"] = (observations[0].get("metadata", {}).get("source_end_date") if observations else None)

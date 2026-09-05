@@ -1,4 +1,7 @@
+import os
+import subprocess
 import tomllib
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -56,6 +59,93 @@ class DocumentationTests(unittest.TestCase):
             project = tomllib.load(stream)
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
         self.assertIn("Python 3.11 or newer", (ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_install_script_copies_payload_and_refuses_existing_destination(self):
+        script = ROOT / "install.sh"
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertTrue(script.is_file())
+        self.assertTrue(os.access(script, os.X_OK))
+        self.assertIn("./install.sh", readme)
+        self.assertIn("refuses to overwrite", readme)
+
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_root = Path(directory)
+            environment = os.environ.copy()
+            environment["CODEX_HOME"] = str(temporary_root / "codex")
+            environment["HOME"] = str(temporary_root / "home")
+
+            first = subprocess.run(
+                [str(script)],
+                cwd=temporary_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            installed = Path(environment["CODEX_HOME"]) / "skills" / "crypto-portfolio-manager"
+            self.assertTrue(installed.is_dir())
+            self.assertFalse(installed.is_symlink())
+            for relative_path in (
+                "SKILL.md",
+                "README.md",
+                "USAGE.md",
+                "HOW_IT_WORKS.md",
+                "config/policy.json",
+                "references/risk-model.md",
+                "schemas/decision.schema.json",
+                "crypto_portfolio/__init__.py",
+                "scripts/portfolio_snapshot.py",
+            ):
+                with self.subTest(relative_path=relative_path):
+                    self.assertTrue((installed / relative_path).is_file())
+
+            for excluded_path in (
+                ".git",
+                "tests",
+                "data",
+                "install.sh",
+                "pyproject.toml",
+                "AGENTS.md",
+                "plan.md",
+            ):
+                with self.subTest(excluded_path=excluded_path):
+                    self.assertFalse((installed / excluded_path).exists())
+            self.assertFalse(any(installed.rglob("__pycache__")))
+
+            marker = installed / "install-smoke-marker"
+            marker.write_text("preserve", encoding="utf-8")
+            second = subprocess.run(
+                [str(script)],
+                cwd=temporary_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("already exists", second.stderr)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+
+            broken_home = temporary_root / "broken-codex"
+            broken_skills = broken_home / "skills"
+            broken_skills.mkdir(parents=True)
+            broken_destination = broken_skills / "crypto-portfolio-manager"
+            broken_destination.symlink_to(temporary_root / "missing-skill", target_is_directory=True)
+            broken_environment = environment.copy()
+            broken_environment["CODEX_HOME"] = str(broken_home)
+            broken = subprocess.run(
+                [str(script)],
+                cwd=temporary_root,
+                env=broken_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(broken.returncode, 0)
+            self.assertIn("already exists", broken.stderr)
+            self.assertTrue(broken_destination.is_symlink())
 
     def test_evidence_collection_and_decision_chain_are_documented(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

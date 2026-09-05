@@ -21,6 +21,7 @@ ASSET_IDENTIFIERS = {
     "BNB": "bsc",
     "LINK": "chainlink",
 }
+CHAIN_NAMES = {"ETH": "Ethereum", "SOL": "Solana", "BNB": "BSC"}
 
 
 def identifier_for_asset(asset: str) -> str:
@@ -126,6 +127,7 @@ def parse_protocol_payload(
     fetched_at: str,
     as_of: str | None = None,
     fees_payload: Mapping[str, Any] | None = None,
+    revenue_payload: Mapping[str, Any] | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(payload, Mapping):
         raise ProviderResponseError("DeFiLlama protocol response must be an object")
@@ -149,7 +151,12 @@ def parse_protocol_payload(
         "valuation.fdv": ("fdv", "fullyDilutedValuation"),
     }
     for metric, names in scalar_names.items():
-        for source in tuple(item for item in (fees_payload, payload) if isinstance(item, Mapping)):
+        if metric == "fundamentals.revenue_30d" and revenue_payload is not None:
+            sources = (revenue_payload, payload)
+            names = ("total30d", *names)
+        else:
+            sources = (fees_payload, payload)
+        for source in tuple(item for item in sources if isinstance(item, Mapping)):
             for name in names:
                 if name not in source or source[name] is None:
                     continue
@@ -215,25 +222,43 @@ class DeFiLlamaProvider:
         identifier = identifier_for_asset(request.asset)
         url = BASE_URL + "/protocol/" + quote(identifier, safe="")
         fetched = _now(self.clock)
-        # The Aave protocol payload is a multi-chain historical document that
-        # exceeds the bounded HTTP response limit. Its lightweight TVL route
-        # is sufficient for the metric this provider can safely derive.
-        if identifier == "aave":
-            payload: Mapping[str, Any] = {}
-            if "fundamentals.tvl" in request.metric_keys:
-                tvl_payload = self.client.get_json(BASE_URL + "/tvl/" + quote(identifier, safe=""))
-                if isinstance(tvl_payload, (int, float, str)) and not isinstance(tvl_payload, bool):
-                    payload = {"tvl": tvl_payload}
-        else:
-            payload = self.client.get_json(url)
+        fee_keys = {"fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple"}
+        payload: Mapping[str, Any] = {}
+        payload_error: Exception | None = None
+        try:
+            if request.asset in CHAIN_NAMES:
+                if "fundamentals.tvl" in request.metric_keys:
+                    chains = self.client.get_json(BASE_URL + "/v2/chains")
+                    if not isinstance(chains, list):
+                        raise ProviderResponseError("DeFiLlama chains response must be a list")
+                    chain = next((item for item in chains if isinstance(item, Mapping) and item.get("name") == CHAIN_NAMES[request.asset]), {})
+                    payload = {"tvl": chain["tvl"]} if chain.get("tvl") is not None else {}
+            elif identifier == "aave":
+                # Avoid the oversized multi-chain protocol history payload.
+                if "fundamentals.tvl" in request.metric_keys:
+                    payload = {"tvl": self.client.get_json(BASE_URL + "/tvl/" + quote(identifier, safe=""))}
+            elif any(key not in fee_keys for key in request.metric_keys):
+                payload = self.client.get_json(url)
+        except Exception as exc:
+            payload_error = exc
         fees_payload = None
         fees_error: Exception | None = None
-        if any(key in request.metric_keys for key in ("fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple")):
+        if any(key in request.metric_keys for key in ("fundamentals.fees_30d", "valuation.fee_revenue_multiple")):
             try:
                 fees_payload = self.client.get_json(BASE_URL + "/summary/fees/" + quote(identifier, safe=""))
             except Exception as exc:
                 # The protocol response is still useful for TVL/valuation.
                 fees_payload, fees_error = None, exc
+        revenue_payload = None
+        revenue_error: Exception | None = None
+        if any(key in request.metric_keys for key in ("fundamentals.revenue_30d", "valuation.fee_revenue_multiple")):
+            try:
+                revenue_payload = self.client.get_json(
+                    BASE_URL + "/summary/fees/" + quote(identifier, safe=""),
+                    params={"dataType": "dailyRevenue"},
+                )
+            except Exception as exc:
+                revenue_error = exc
 
         values: list[Mapping[str, Any]] = []
         diagnostics: dict[str, Mapping[str, Any]] = {}
@@ -246,11 +271,15 @@ class DeFiLlamaProvider:
                     fetched_at=fetched,
                     as_of=request.parameters.get("as_of"),
                     fees_payload=fees_payload,
+                    revenue_payload=revenue_payload,
                 ))
             except (ProviderDataError, ProviderResponseError, ProviderUnsupportedMetric) as exc:
-                source_error = fees_error if fees_error is not None and key in {
-                    "fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple",
-                } else exc
+                source_error = (
+                    fees_error if key == "fundamentals.fees_30d" else
+                    revenue_error if key == "fundamentals.revenue_30d" else
+                    fees_error or revenue_error if key == "valuation.fee_revenue_multiple" else
+                    payload_error
+                ) or exc
                 diagnostic = getattr(source_error, "diagnostic", None)
                 if hasattr(diagnostic, "as_dict"):
                     details = dict(diagnostic.as_dict())

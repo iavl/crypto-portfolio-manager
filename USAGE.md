@@ -476,7 +476,10 @@ export CRYPTO_PORTFOLIO_CA_BUNDLE=/path/to/trusted-ca-bundle.pem
 ```
 
 `CRYPTO_PORTFOLIO_CA_BUNDLE` takes precedence over `SSL_CERT_FILE` and
-`SSL_CERT_DIR`; otherwise Python's default trust configuration is used.
+`SSL_CERT_DIR`; otherwise Python's default trust configuration is used. On
+macOS, if OpenSSL has neither a default CA file nor directory, the provider
+client uses `/etc/ssl/cert.pem` when present (`ca_file: system` in probes).
+Explicit trust configuration always takes precedence and is never bypassed.
 `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` remain under the standard urllib
 environment behavior. A missing or invalid bundle fails explicitly. Do not use
 `verify=False`, an unverified SSL context, or `curl -k`.

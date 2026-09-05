@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from .data_collection import collection_summary
+from .engine.factors.flows import classify_flow_state
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
 from .engine.metric_plan import MetricCollectionPlan, MetricRequest
 from .events import EventScanner, EventSourceScanRequest, EventSourceScanResponse, event_metric_category
@@ -310,6 +311,12 @@ class AcquisitionManager:
             routed_values,
             fetched_at=current,
         ))
+        routed_values.update(self._derive_flow_state_observation(
+            model.requests,
+            reusable,
+            routed_values,
+            fetched_at=current,
+        ))
         routed_reasons = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): str(item.get("reason", ""))
             for item in routed.unresolved_details
@@ -506,6 +513,10 @@ class AcquisitionManager:
                     )
                 elif request.metric_key == "risk.chain_liveness_status":
                     reason = "chain liveness requires a separate structured status check"
+                    diagnostic = {
+                        "error_code": "NO_CHAIN_LIVENESS_SOURCE",
+                        "detail": reason,
+                    }
                 elif not provider_chain(request.metric_key):
                     reason = "no configured structured provider route for this metric"
                     diagnostic = {"error_code": "NO_PROVIDER_ROUTE", "detail": reason}
@@ -715,6 +726,65 @@ class AcquisitionManager:
             coverage=scan.coverage,
             confidence=scan.confidence,
         )
+
+    @staticmethod
+    def _derive_flow_state_observation(
+        requests: Iterable[MetricRequest],
+        reusable: Mapping[tuple[str, str], MetricObservation],
+        routed: Mapping[tuple[str, str], Mapping[str, Any]],
+        *,
+        fetched_at: str,
+    ) -> dict[tuple[str, str], Mapping[str, Any]]:
+        identity = ("MARKET", "market.flow_state")
+        if not any((request.asset, request.metric_key) == identity for request in requests):
+            return {}
+        flow_identity = ("MARKET", "flows.etf_net_1d")
+        observation = reusable.get(flow_identity)
+        if observation is not None:
+            value, observed_at, observation_id, source, metadata, confidence = (
+                observation.value,
+                observation.observed_at,
+                observation.observation_id,
+                observation.source,
+                dict(observation.metadata or {}),
+                observation.confidence,
+            )
+        else:
+            raw = routed.get(flow_identity)
+            if raw is None:
+                return {}
+            value = raw.get("value")
+            observed_at = raw.get("observed_at")
+            observation_id = raw.get("observation_id")
+            source = raw.get("source")
+            metadata = dict(raw.get("metadata") or {})
+            confidence = str(raw.get("confidence", "MEDIUM")).upper()
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or not isinstance(observed_at, str)
+            or not isinstance(source, str)
+        ):
+            return {}
+        return {identity: {
+            "asset": "MARKET",
+            "metric_key": "market.flow_state",
+            "value": classify_flow_state(value),
+            "period": "1d",
+            "observed_at": observed_at,
+            "fetched_at": fetched_at,
+            "source": "python-derived",
+            "confidence": confidence,
+            "summary": "Derived from the latest completed MARKET ETF 1D net flow.",
+            "metadata": {
+                "source_mode": "DERIVED",
+                "calculation": "classify_flow_state(flows.etf_net_1d)",
+                "source_observation_id": observation_id,
+                "source": source,
+                "source_metadata": metadata,
+            },
+        }}
 
     @staticmethod
     def _derive_relative_observations(

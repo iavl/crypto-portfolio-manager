@@ -1,6 +1,8 @@
 import unittest
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -30,6 +32,10 @@ def responses(scanner, asset, category, *, reachable_ids=None, items_by_id=None)
 
 
 class EventScannerTests(unittest.TestCase):
+    def setUp(self):
+        directory = self.enterContext(TemporaryDirectory())
+        self.enterContext(patch.dict("os.environ", {"CRYPTO_PORTFOLIO_DATA_DIR": directory}))
+
     def test_catalog_has_fixed_btc_eth_and_shared_regulatory_sources(self):
         btc = source_catalog("security", "BTC")
         eth = source_catalog("security", "ETH")
