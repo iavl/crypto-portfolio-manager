@@ -28,9 +28,11 @@ from .positioning import (
 from .volume_profile import VolumeNode, VolumeProfile, VolumeProfileBin
 from .performance import PortfolioPerformanceSummary, PositionPerformance
 from .report_packet import ReportPacket
+from .portfolio import EXTERNAL_CASH_FLOW_TYPES, Position, PortfolioSnapshot
 
 __all__ = [
     "Candle",
+    "EXTERNAL_CASH_FLOW_TYPES",
     "AssetDecisionSummary",
     "BTCCycleContext",
     "BTCCycle",
@@ -50,6 +52,8 @@ __all__ = [
     "EventFacts",
     "OHLCVSeries",
     "PortfolioPerformanceSummary",
+    "Position",
+    "PortfolioSnapshot",
     "PriceZone",
     "PositionPerformance",
     "OnchainFacts",

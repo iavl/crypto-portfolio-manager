@@ -70,5 +70,21 @@ registered adapter, credential presence, and runtime readiness. `--list` shows
 capabilities only for adapters registered in this process; it is not a network
 probe. CoinGlass is registered only when `COINGLASS_API_KEY` is present.
 
+Runtime readiness is intentionally separate from endpoint health. Use the
+explicit probe for network, authentication, plan entitlement, schema, and
+history diagnostics:
+
+```bash
+python3 scripts/providers.py --probe binance
+python3 scripts/providers.py --probe defillama
+python3 scripts/providers.py --probe alternative_me
+python3 scripts/providers.py --probe coinglass
+```
+
+The Python client uses verified TLS. `CRYPTO_PORTFOLIO_CA_BUNDLE` overrides
+`SSL_CERT_FILE`/`SSL_CERT_DIR`, and no normal configuration disables
+certificate or hostname verification. Probe failures retain a safe endpoint
+and stable error code; credentials and response bodies are not printed.
+
 Use `--prune-expired` only as an explicit manual cleanup. It removes expired
 mutable response entries and preserves immutable history.

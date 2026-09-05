@@ -14,7 +14,13 @@
     "source": {"type": ["string", "null"], "minLength": 1},
     "observed_at": {"type": ["string", "null"], "format": "date-time"},
     "decision_id": {"type": ["string", "null"], "minLength": 1},
-    "fetched_at": {"type": ["string", "null"], "format": "date-time"}
+    "fetched_at": {"type": ["string", "null"], "format": "date-time"},
+    "last_observation_id": {"type": ["string", "null"], "minLength": 1},
+    "last_observation_at": {"type": ["string", "null"], "format": "date-time"},
+    "refresh_provider": {"type": ["string", "null"], "minLength": 1},
+    "refresh_endpoint": {"type": ["string", "null"], "format": "uri"},
+    "refresh_error_code": {"type": ["string", "null"], "minLength": 1},
+    "refresh_error_detail": {"type": ["string", "null"], "minLength": 1}
   },
   "allOf": [
     {

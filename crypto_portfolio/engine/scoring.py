@@ -13,6 +13,18 @@ from ..models.policy import Policy, resolve_policy
 _CONFIDENCE_ORDER = ("LOW", "MEDIUM", "HIGH")
 
 
+def ensure_acquisition_ready(acquisition: Any) -> None:
+    """Stop scoring until hard-critical external evidence is resolved."""
+    if hasattr(acquisition, "require_scoring_ready"):
+        acquisition.require_scoring_ready()
+        return
+    if isinstance(acquisition, Mapping) and acquisition.get("ready_for_scoring") is False:
+        from ..acquisition import AcquisitionResolutionRequired
+
+        raise AcquisitionResolutionRequired("hard-critical event scan resolution required")
+    raise ValueError("acquisition must expose ready_for_scoring")
+
+
 @dataclass(frozen=True)
 class ScoreResult:
     score: float
@@ -79,7 +91,10 @@ def score_factors(
     confidence: str | None = None,
     critical_data_complete: bool = True,
     policy: Policy | None = None,
+    acquisition: Any | None = None,
 ) -> ScoreResult:
+    if acquisition is not None:
+        ensure_acquisition_ready(acquisition)
     raw_weights = (policy or resolve_policy()).scoring_weights if weights is None else weights
     if not isinstance(raw_weights, Mapping):
         raise ValueError("scoring weights must be an object")
@@ -148,13 +163,14 @@ def score_factors(
 
 
 def score_assessment(
-    assessment: AssetAssessment, *, policy: Policy | None = None
+    assessment: AssetAssessment, *, policy: Policy | None = None, acquisition: Any | None = None
 ) -> tuple[AssetAssessment, ScoreResult]:
     result = score_factors(
         assessment.factor_scores,
         policy=policy,
         confidence=assessment.confidence,
         critical_data_complete=assessment.critical_data_complete,
+        acquisition=acquisition,
     )
     updated = AssetAssessment(
         symbol=assessment.symbol,
@@ -178,6 +194,7 @@ def weighted_score(
     confidence: str | None = None,
     critical_data_complete: bool = True,
     policy: Policy | None = None,
+    acquisition: Any | None = None,
 ) -> ScoreResult:
     return score_factors(
         factor_scores,
@@ -185,7 +202,8 @@ def weighted_score(
         confidence=confidence,
         critical_data_complete=critical_data_complete,
         policy=policy,
+        acquisition=acquisition,
     )
 
 
-__all__ = ["ScoreResult", "score_assessment", "score_factors", "weighted_score"]
+__all__ = ["ScoreResult", "ensure_acquisition_ready", "score_assessment", "score_factors", "weighted_score"]

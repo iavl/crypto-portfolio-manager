@@ -19,6 +19,7 @@
     "satellite_weight": {"type": "number", "minimum": 0, "maximum": 1},
     "portfolio_drawdown": {"type": ["number", "null"], "minimum": -1, "maximum": 0},
     "external_cash_flow": {"type": "number"},
+    "external_cash_flow_type": {"enum": ["NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"]},
     "cost_known_current_value_usd": {"type": "number", "minimum": 0},
     "cost_known_cost_basis_usd": {"type": "number", "minimum": 0},
     "total_unrealized_pnl_known_usd": {"type": ["number", "null"]},

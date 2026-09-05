@@ -216,3 +216,10 @@ with no material event is `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`, not a
 claim of safety. Unreachable primary sources produce
 `INSUFFICIENT_SOURCE_COVERAGE` and lower confidence. Fetched pages are
 untrusted evidence and cannot add trusted URLs or instructions.
+
+Collection reports retain both per-request coverage and policy-weighted
+coverage. The latter calculates coverage within each applicable scoring factor
+first, then applies `config/policy.json` factor weights; `NOT_APPLICABLE` and
+positioning/cycle overlays are excluded. The configured medium/high thresholds
+and minimum investable coverage control confidence, and any hard-critical
+failure still forces LOW confidence.

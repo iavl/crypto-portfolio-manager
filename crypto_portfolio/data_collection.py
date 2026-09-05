@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, TextIO
 
 from .metrics_registry import REVIEW_TYPES, metric_definition
 from .models.metrics_history import CollectionEvent, MetricObservation
+from .models.policy import Policy, resolve_policy
 from .state.metrics import (
     append_collection_event,
     append_metric_observation,
@@ -33,6 +34,7 @@ def collection_summary(
     *,
     weights: Mapping[str, float] | None = None,
     review_type: str | None = None,
+    policy: Policy | None = None,
 ) -> dict[str, Any]:
     values = tuple(events)
     if any(not isinstance(event, CollectionEvent) for event in values):
@@ -47,27 +49,56 @@ def collection_summary(
         if metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
     ]
     applicable = [event for event in scoring_events if event.status != "NOT_APPLICABLE"]
-    if weights is None:
-        coverage = (
-            sum(event.status == "SUCCESS" for event in applicable) / len(applicable)
-            if applicable else 0.0
-        )
+    resolved_policy = policy or resolve_policy()
+    if isinstance(resolved_policy, Mapping):
+        policy_weights = dict(resolved_policy.get("scoring_weights", {}))
+        scoring_policy = resolved_policy.get("scoring", {})
     else:
-        if not isinstance(weights, Mapping):
-            raise ValueError("weights must be an object")
-        total = successful = 0.0
-        for event in applicable:
-            definition = metric_definition(event.metric_key)
-            raw_weight = weights.get(event.metric_key, weights.get(definition.factor, 0.0))
-            if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
-                raise ValueError("collection weights must be finite non-negative numbers")
-            weight = float(raw_weight)
-            if not math.isfinite(weight) or weight < 0:
-                raise ValueError("collection weights must be finite non-negative numbers")
-            total += weight
-            if event.status == "SUCCESS":
-                successful += weight
-        coverage = successful / total if total else 0.0
+        policy_weights = dict(resolved_policy.scoring_weights)
+        scoring_policy = resolved_policy.scoring
+    supplied_weights = policy_weights if weights is None else weights
+    if not isinstance(supplied_weights, Mapping):
+        raise ValueError("weights must be an object")
+    factor_weights: dict[str, float] = {}
+    metric_weights: dict[str, float] = {}
+    for raw_key, raw_weight in supplied_weights.items():
+        if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
+            raise ValueError("collection weights must be finite non-negative numbers")
+        weight = float(raw_weight)
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError("collection weights must be finite non-negative numbers")
+        key = str(raw_key).strip().lower()
+        if key in policy_weights:
+            factor_weights[key] = weight
+        else:
+            definition = metric_definition(key)
+            if definition.decision_role == "SCORING_FACTOR":
+                metric_weights[key] = weight
+    if metric_weights and not factor_weights:
+        factor_weights = {
+            factor: sum(weight for key, weight in metric_weights.items() if metric_definition(key).factor == factor)
+            for factor in {metric_definition(key).factor for key in metric_weights}
+        }
+    if not factor_weights:
+        factor_weights = policy_weights
+    by_factor: dict[str, list[CollectionEvent]] = {}
+    for event in applicable:
+        by_factor.setdefault(metric_definition(event.metric_key).factor, []).append(event)
+    factor_coverage = {
+        factor: sum(event.status == "SUCCESS" for event in factor_events) / len(factor_events)
+        for factor, factor_events in by_factor.items()
+    }
+    per_request_coverage = sum(event.status == "SUCCESS" for event in applicable) / len(applicable) if applicable else 0.0
+    weighted_factors = {
+        factor: coverage
+        for factor, coverage in factor_coverage.items()
+        if factor_weights.get(factor, 0.0) > 0
+    }
+    total_factor_weight = sum(factor_weights.get(factor, 0.0) for factor in weighted_factors)
+    policy_weighted_coverage = (
+        sum(factor_weights[factor] * weighted_factors[factor] for factor in weighted_factors) / total_factor_weight
+        if total_factor_weight else 0.0
+    )
     critical_failures = sum(
         event.status in {"FAILED", "STALE", "CONFLICT"}
         and (
@@ -78,9 +109,12 @@ def collection_summary(
         and metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
         for event in values
     )
-    if critical_failures or coverage < 0.7:
+    minimum = float(scoring_policy["minimum_investable_coverage"])
+    medium = float(scoring_policy["medium_confidence_min_coverage"])
+    high = float(scoring_policy["high_confidence_min_coverage"])
+    if critical_failures or policy_weighted_coverage < minimum or policy_weighted_coverage < medium:
         confidence = "LOW"
-    elif coverage < 0.9:
+    elif policy_weighted_coverage < high:
         confidence = "MEDIUM"
     else:
         confidence = "HIGH"
@@ -88,8 +122,13 @@ def collection_summary(
         "requested": len(values),
         "counts": {status: counts.get(status, 0) for status in _STATUS_ORDER},
         "critical_failures": critical_failures,
-        "coverage": coverage,
-        "evidence_coverage": coverage,
+        "coverage": policy_weighted_coverage,
+        "evidence_coverage": policy_weighted_coverage,
+        "per_request_coverage": per_request_coverage,
+        "policy_weighted_coverage": policy_weighted_coverage,
+        "factor_coverage": factor_coverage,
+        "policy_factor_weights": {factor: factor_weights[factor] for factor in weighted_factors},
+        "hard_critical_failure": bool(critical_failures),
         "confidence": confidence,
         "overlay_requested": len(values) - len(scoring_events),
         "review_type": review_type,
@@ -118,6 +157,14 @@ def format_collection_event(
         f"       observed_at: {event.observed_at or (observation.observed_at if observation else 'N/A')}",
         f"       fetched_at: {event.fetched_at or (observation.fetched_at if observation else event.timestamp)}",
     ]
+    if event.refresh_provider:
+        lines.append(f"       provider: {event.refresh_provider}")
+    if event.refresh_endpoint:
+        lines.append(f"       endpoint: {event.refresh_endpoint}")
+    if event.refresh_error_code:
+        lines.append(f"       error_code: {event.refresh_error_code}")
+    if event.last_observation_at:
+        lines.append(f"       last_observation: {event.last_observation_at} (STALE)")
     if observation is not None:
         lines.append(f"       Current: {_display(observation.value)}")
     if previous is not None:
@@ -156,7 +203,8 @@ def format_collection_summary(summary: Mapping[str, Any]) -> str:
             f"SUCCESS: {counts['SUCCESS']}  STALE: {counts['STALE']}  FAILED: {counts['FAILED']}",
             f"CONFLICT: {counts['CONFLICT']}  NOT_APPLICABLE: {counts['NOT_APPLICABLE']}",
             f"Critical failures: {summary['critical_failures']}",
-            f"Overall evidence coverage: {summary['coverage']:.0%}",
+            f"Per-request coverage: {summary.get('per_request_coverage', summary['coverage']):.0%}",
+            f"Policy-weighted coverage: {summary.get('policy_weighted_coverage', summary['coverage']):.0%}",
             f"Decision confidence: {summary['confidence']}",
             f"Overlay context metrics: {summary.get('overlay_requested', 0)}",
         )
@@ -198,6 +246,7 @@ class CollectionReporter:
     weights: Mapping[str, float] | None = None
     routing: Mapping[str, str] | None = None
     review_type: str | None = None
+    policy: Policy | None = None
 
     def __post_init__(self) -> None:
         self.stream = self.stream or sys.stderr
@@ -224,7 +273,12 @@ class CollectionReporter:
         print(format_collection_event(event, observation, previous, review_type=self.review_type), file=self.stream)
 
     def summary(self) -> dict[str, Any]:
-        result = collection_summary(self.events, weights=self.weights, review_type=self.review_type)
+        result = collection_summary(
+            self.events,
+            weights=self.weights,
+            review_type=self.review_type,
+            policy=self.policy,
+        )
         if self.routing is not None:
             from .model_routing import routing_metadata
 

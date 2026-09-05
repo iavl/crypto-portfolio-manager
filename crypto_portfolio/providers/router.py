@@ -20,8 +20,7 @@ from .base import (
 )
 from .cache import CacheCorruption, CacheExpired, ProviderCache, merge_ohlcv_series, missing_series_range, request_hash
 from .config import load_provider_config, provider_api_key, provider_enabled
-from .http import redact_secrets
-from .http import HttpClient
+from .http import HttpClient, classify_transport_error, redact_secrets
 from .routes import build_provider_requests, provider_chain
 
 
@@ -36,6 +35,23 @@ class ProviderAttempt:
     reason: str | None = None
     request_hash: str | None = None
     network_requests: int = 0
+    endpoint: str | None = None
+    method: str = "GET"
+    attempt: int = 1
+    error_code: str | None = None
+    exception_class: str | None = None
+    detail: str | None = None
+    retryable: bool | None = None
+    status_code: int | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.status == "SUCCESS"
+
+    @property
+    def final(self) -> bool:
+        # HttpClient aggregates its bounded retries before the router records one outcome.
+        return True
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -44,10 +60,20 @@ class ProviderAttempt:
             "asset": self.asset,
             "metric_keys": list(self.metric_keys),
             "status": self.status,
+            "success": self.success,
+            "final": self.final,
             "source_mode": self.source_mode,
             "reason": self.reason,
             "request_hash": self.request_hash,
             "network_requests": self.network_requests,
+            "endpoint": self.endpoint,
+            "method": self.method,
+            "attempt": self.attempt,
+            "error_code": self.error_code,
+            "exception_class": self.exception_class,
+            "detail": self.detail,
+            "retryable": self.retryable,
+            "status_code": self.status_code,
         }
 
 
@@ -135,6 +161,7 @@ class ProviderRouter:
         self._review_requests = 0
         self._provider_requests: dict[str, int] = {}
         self._last_network_requests = 0
+        self._last_metric_diagnostics: dict[str, Mapping[str, Any]] = {}
 
     def _default_providers(self) -> dict[str, Any]:
         from .alternative_me import AlternativeMeProvider
@@ -182,6 +209,12 @@ class ProviderRouter:
         return provider_runtime_status(self.config, adapters=self.providers)
 
     runtime_status = provider_runtime_status
+
+    def probe(self, provider: str = "all") -> tuple[dict[str, Any], ...]:
+        """Run an explicit network probe; normal collection remains unchanged."""
+        from .probe import probe_providers
+
+        return probe_providers(self, provider)
 
     def capabilities(self, provider: str) -> ProviderCapabilities | None:
         value = self.providers.get(provider.strip().lower())
@@ -320,11 +353,37 @@ class ProviderRouter:
                             pending.pop(identity, None)
                     missing = [identity for identity in identities if identity not in found]
                     status = "SUCCESS" if not missing else "PARTIAL"
+                    partial_reason = None
+                    if missing:
+                        partial_diagnostic = next(
+                            (
+                                self._last_metric_diagnostics.get(identity[1])
+                                for identity in missing
+                                if self._last_metric_diagnostics.get(identity[1])
+                            ),
+                            {},
+                        )
+                        partial_reason = next(
+                            (
+                                self._format_diagnostic(self._last_metric_diagnostics.get(identity[1]))
+                                for identity in missing
+                                if self._last_metric_diagnostics.get(identity[1])
+                            ),
+                            "provider returned no usable value for some metrics",
+                        )
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, request.metric_keys,
                         status, source_mode,
-                        None if not missing else "provider returned no usable value for some metrics",
+                        None if not missing else partial_reason,
                         request_hash(request), network_count,
+                        endpoint=partial_diagnostic.get("endpoint"),
+                        method=str(partial_diagnostic.get("method", "GET")),
+                        attempt=int(partial_diagnostic.get("attempt", 1)),
+                        error_code=partial_diagnostic.get("error_code"),
+                        exception_class=partial_diagnostic.get("exception_class"),
+                        detail=partial_diagnostic.get("detail"),
+                        retryable=partial_diagnostic.get("retryable"),
+                        status_code=partial_diagnostic.get("status_code"),
                     ))
                     cache_hits += int(hit)
                     api_requests += network_count
@@ -332,25 +391,38 @@ class ProviderRouter:
                     if first["index"] > 0:
                         fallbacks += 1
                     if missing:
-                        self._advance(
-                            pending, missing, exhausted=exhausted, provider=provider_name,
-                            status=status, reason="provider returned no usable value for some metrics",
-                        )
+                        for identity in missing:
+                            diagnostic = self._last_metric_diagnostics.get(identity[1])
+                            self._advance(
+                                pending, (identity,), exhausted=exhausted, provider=provider_name,
+                                status=status,
+                                reason=self._format_diagnostic(diagnostic) if diagnostic else "provider returned no usable value for some metrics",
+                                diagnostic=diagnostic,
+                            )
                     progressed = True
                 except Exception as exc:  # provider boundaries must not abort an entire review
                     secret = provider_api_key(provider_name, self.config)
-                    reason = redact_secrets(str(exc), (secret,) if secret else ()) or exc.__class__.__name__
+                    diagnostic = self._diagnostic_for(exc)
+                    reason = self._format_diagnostic(diagnostic, fallback=redact_secrets(str(exc), (secret,) if secret else ()) or exc.__class__.__name__)
                     failed_network_requests = self._last_network_requests
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, request.metric_keys,
                         self._error_status(exc), "NONE", reason, request_hash(request), failed_network_requests,
+                        endpoint=diagnostic.get("endpoint"),
+                        method=str(diagnostic.get("method", "GET")),
+                        attempt=int(diagnostic.get("attempt", 1)),
+                        error_code=str(diagnostic.get("error_code")) if diagnostic.get("error_code") else classify_transport_error(exc),
+                        exception_class=str(diagnostic.get("exception_class", exc.__class__.__name__)),
+                        detail=str(diagnostic.get("detail", reason)),
+                        retryable=diagnostic.get("retryable"),
+                        status_code=diagnostic.get("status_code"),
                     ))
                     api_requests += failed_network_requests
                     if first["index"] > 0:
                         fallbacks += 1
                     self._advance(
                         pending, identities, exhausted=exhausted, provider=provider_name,
-                        status=self._error_status(exc), reason=reason,
+                        status=self._error_status(exc), reason=reason, diagnostic=diagnostic,
                     )
                     progressed = True
             if not progressed:
@@ -404,12 +476,20 @@ class ProviderRouter:
         reason: str,
     ) -> dict[str, Any]:
         attempted = tuple(dict.fromkeys(str(provider) for provider in item.get("attempted", ())))
-        return {
+        result = {
             "asset": identity[0],
             "metric_key": identity[1],
             "reason": reason,
             "providers_attempted": list(attempted),
         }
+        if attempted:
+            result["provider"] = attempted[-1]
+        diagnostic = item.get("last_diagnostic")
+        if isinstance(diagnostic, Mapping):
+            for field in ("endpoint", "method", "attempt", "error_code", "exception_class", "detail", "retryable", "status_code"):
+                if diagnostic.get(field) is not None:
+                    result[field] = diagnostic[field]
+        return result
 
     @classmethod
     def _advance(
@@ -421,6 +501,7 @@ class ProviderRouter:
         provider: str,
         status: str,
         reason: str,
+        diagnostic: Mapping[str, Any] | None = None,
     ) -> None:
         for identity in identities:
             item = pending.get(identity)
@@ -430,6 +511,8 @@ class ProviderRouter:
             attempted.append(provider)
             item["last_status"] = status
             item["last_reason"] = reason
+            if diagnostic:
+                item["last_diagnostic"] = dict(diagnostic)
             item["index"] += 1
             if item["index"] >= len(item["chain"]):
                 pending.pop(identity, None)
@@ -453,6 +536,7 @@ class ProviderRouter:
         now: str,
     ) -> tuple[tuple[Mapping[str, Any], ...], str, bool, int]:
         self._last_network_requests = 0
+        self._last_metric_diagnostics = {}
         if request.dataset == "ohlcv" and hasattr(provider, "candles"):
             return self._collect_ohlcv(provider_name, provider, request, mode, as_of=as_of, now=now)
         if mode != FetchMode.REFRESH or not request.mutable:
@@ -484,6 +568,11 @@ class ProviderRouter:
             if isinstance(before, int) and isinstance(after, int):
                 self._last_network_requests = max(0, after - before)
         values = _mapping_observations(raw)
+        if isinstance(raw, ProviderResponse) and raw.diagnostics:
+            self._last_metric_diagnostics = {
+                str(key).strip().lower(): redact_secrets(dict(value))
+                for key, value in raw.diagnostics.items()
+            }
         network_count = self._last_network_requests or (raw.network_requests if isinstance(raw, ProviderResponse) else 1)
         observed = sorted(
             str(value.get("observed_at"))
@@ -509,6 +598,7 @@ class ProviderRouter:
         as_of: str | datetime | None,
         now: str,
     ) -> tuple[tuple[Mapping[str, Any], ...], str, bool, int]:
+        self._last_metric_diagnostics = {}
         parameters = request.parameters
         effective_as_of = as_of if as_of is not None else parameters.get("as_of")
         timeframe = str(parameters.get("timeframe", "1D")).upper()
@@ -585,6 +675,29 @@ class ProviderRouter:
         from .binance import observations_from_ohlcv
 
         return observations_from_ohlcv(series, request.metric_keys, as_of=as_of)
+
+    @staticmethod
+    def _diagnostic_for(error: BaseException) -> dict[str, Any]:
+        diagnostic = getattr(error, "diagnostic", None)
+        if hasattr(diagnostic, "as_dict"):
+            return dict(redact_secrets(diagnostic.as_dict()))
+        if isinstance(diagnostic, Mapping):
+            return dict(redact_secrets(dict(diagnostic)))
+        return {}
+
+    @staticmethod
+    def _format_diagnostic(
+        diagnostic: Mapping[str, Any] | None,
+        *,
+        fallback: str = "provider returned no usable value",
+    ) -> str:
+        if not diagnostic:
+            return fallback
+        code = str(diagnostic.get("error_code", "UNKNOWN_NETWORK_ERROR"))
+        endpoint = diagnostic.get("endpoint")
+        detail = str(diagnostic.get("detail", "")).strip()
+        location = f" at {endpoint}" if endpoint else ""
+        return f"{code}{location}: {detail}" if detail else f"{code}{location}"
 
 
 __all__ = ["ProviderAttempt", "ProviderRouter", "RouterResult"]

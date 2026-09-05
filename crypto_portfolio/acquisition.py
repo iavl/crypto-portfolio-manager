@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections import Counter
 import math
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -11,7 +12,7 @@ from typing import Any, Callable, Iterable, Mapping
 from .data_collection import collection_summary
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
 from .engine.metric_plan import MetricCollectionPlan, MetricRequest
-from .events import EventScanner, EventSourceScanRequest, event_metric_category
+from .events import EventScanner, EventSourceScanRequest, EventSourceScanResponse, event_metric_category
 from .metrics_registry import metric_definition
 from .models.events import EventScanResult
 from .models.metrics_history import MetricObservation
@@ -29,6 +30,10 @@ _EVENT_METRIC_KEYS = {
     "governance": "risk.governance_event_status",
     "regulatory": "risk.regulatory_event_status",
 }
+
+
+class AcquisitionResolutionRequired(RuntimeError):
+    """Control-flow signal that hard-critical external evidence is pending."""
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,57 @@ class AcquisitionResult:
     def collection_results(self) -> tuple[NormalizedMetricResult, ...]:
         return self.results
 
+    @property
+    def pending_event_scans(self) -> tuple[EventSourceScanRequest, ...]:
+        return self.event_scan_requests
+
+    @property
+    def pending_web_fallbacks(self) -> tuple[WebFallbackRequest, ...]:
+        return self.web_fallbacks
+
+    @property
+    def hard_critical_unresolved(self) -> tuple[tuple[str, str], ...]:
+        pending_groups = {
+            (request.asset, request.category)
+            for request in self.event_scan_requests
+        }
+        completed_groups = {
+            ("MARKET" if scan.category == "regulatory" else scan.asset, scan.category)
+            for scan in self.event_scans
+        }
+        result_by_identity = {
+            (item.event.asset, item.event.metric_key): item
+            for item in self.results
+        }
+        unresolved = []
+        for request in self.plan.requests:
+            category = event_metric_category(request.metric_key)
+            if not request.critical or category is None:
+                continue
+            group = ("MARKET", category) if category == "regulatory" else (request.asset, category)
+            result = result_by_identity.get((request.asset, request.metric_key))
+            missing_resolution = group in pending_groups or (
+                group not in completed_groups and result is not None and result.status != "SUCCESS"
+            )
+            if missing_resolution and (request.asset, request.metric_key) not in unresolved:
+                unresolved.append((request.asset, request.metric_key))
+        return tuple(unresolved)
+
+    @property
+    def requires_external_resolution(self) -> bool:
+        return bool(self.pending_event_scans or self.pending_web_fallbacks or self.hard_critical_unresolved)
+
+    @property
+    def ready_for_scoring(self) -> bool:
+        return not self.hard_critical_unresolved
+
+    def require_scoring_ready(self) -> None:
+        if not self.ready_for_scoring:
+            pending = ", ".join(f"{asset}:{key}" for asset, key in self.hard_critical_unresolved)
+            raise AcquisitionResolutionRequired(f"hard-critical event scan resolution required: {pending}")
+
+    assert_ready_for_scoring = require_scoring_ready
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "plan": self.plan.as_dict(),
@@ -94,6 +150,11 @@ class AcquisitionResult:
             "attempts": [dict(item) for item in self.attempts],
             "event_scan_requests": [item.as_dict() for item in self.event_scan_requests],
             "event_scans": [item.as_dict() for item in self.event_scans],
+            "requires_external_resolution": self.requires_external_resolution,
+            "pending_event_scans": [item.as_dict() for item in self.pending_event_scans],
+            "pending_web_fallbacks": [item.as_dict() for item in self.pending_web_fallbacks],
+            "hard_critical_unresolved": [list(item) for item in self.hard_critical_unresolved],
+            "ready_for_scoring": self.ready_for_scoring,
         }
 
 
@@ -150,6 +211,7 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
         f"Web fallbacks: {summary.get('web_fallbacks', 0)}",
         f"Event scan source requests: {summary.get('event_scan_requests', 0)}",
         f"Event scans completed: {summary.get('event_scans', 0)}",
+        f"Provider failures: {summary.get('provider_failures_by_error_code', {})}",
         f"Failed after all fallbacks: {summary.get('failed_after_fallbacks', 0)}",
     ))
 
@@ -187,6 +249,7 @@ class AcquisitionManager:
         cached_observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
         persist: bool | None = None,
         event_scan_results: Mapping[Any, EventScanResult | Mapping[str, Any]] | Iterable[EventScanResult | Mapping[str, Any]] | None = None,
+        event_source_scan_responses: Mapping[Any, EventSourceScanResponse | Mapping[str, Any]] | Iterable[EventSourceScanResponse | Mapping[str, Any]] | None = None,
         event_source_fetcher: Callable[[EventSourceScanRequest], Any] | None = None,
     ) -> AcquisitionResult:
         model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
@@ -237,8 +300,20 @@ class AcquisitionManager:
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): str(item.get("reason", ""))
             for item in routed.unresolved_details
         }
+        routed_diagnostics = {
+            (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
+            for item in routed.unresolved_details
+            if isinstance(item, Mapping)
+        }
         scanner = self.event_scanner
+        if event_scan_results is not None and event_source_scan_responses is not None:
+            raise ValueError("provide only one of event_scan_results or event_source_scan_responses")
+        source_response_input = event_source_scan_responses
+        if source_response_input is None and self._contains_event_source_responses(event_scan_results):
+            source_response_input = event_scan_results
+            event_scan_results = None
         event_scans = self._coerce_event_scans(event_scan_results)
+        source_responses = self._coerce_event_source_responses(source_response_input)
         event_errors: dict[tuple[str, str], str] = {}
         missing_event_identities = [
             (request.asset, request.metric_key)
@@ -261,6 +336,41 @@ class AcquisitionManager:
             for asset in regulatory_assets:
                 event_scans[(asset, "regulatory")] = self._map_shared_regulatory(shared_regulatory, asset)
         scan_as_of = as_of if as_of is not None else current
+        if source_responses:
+            for asset, category in event_groups:
+                requests = scanner.build_requests(asset, category, scan_as_of, review_type=model.review_type)
+                responses = self._responses_for_requests(requests, source_responses)
+                if not responses:
+                    continue
+                try:
+                    event_scans[(asset, category)] = scanner.scan(
+                        asset,
+                        category,
+                        scan_as_of,
+                        responses=responses,
+                        review_type=model.review_type,
+                        fetch_mode=selected_mode,
+                    )
+                except Exception as exc:
+                    event_errors[(asset, category)] = f"event source response rejected: {redact_secrets(str(exc))}"
+            if regulatory_assets and not all((asset, "regulatory") in event_scans for asset in regulatory_assets):
+                requests = scanner.build_requests("MARKET", "regulatory", scan_as_of, review_type=model.review_type)
+                responses = self._responses_for_requests(requests, source_responses)
+                if responses:
+                    try:
+                        event_scans.update({
+                            (asset, "regulatory"): scan
+                            for asset, scan in scanner.scan_shared_regulatory(
+                                regulatory_assets,
+                                scan_as_of,
+                                responses=responses,
+                                review_type=model.review_type,
+                                fetch_mode=selected_mode,
+                            ).items()
+                        })
+                    except Exception as exc:
+                        reason = f"shared regulatory event response rejected: {redact_secrets(str(exc))}"
+                        event_errors.update({(asset, "regulatory"): reason for asset in regulatory_assets})
         if event_source_fetcher is not None and selected_mode != FetchMode.CACHE_ONLY:
             for asset, category in event_groups:
                 try:
@@ -309,6 +419,11 @@ class AcquisitionManager:
                 continue
             key = _EVENT_METRIC_KEYS.get(category)
             if key is None or (asset, key) not in request_identities:
+                continue
+            if scan.status == "INSUFFICIENT_SOURCE_COVERAGE":
+                event_errors[(asset, category)] = (
+                    "event scan returned INSUFFICIENT_SOURCE_COVERAGE; required sources were not all reachable"
+                )
                 continue
             try:
                 routed_values[(asset, key)] = scanner.observation(scan, key, fetched_at=current)
@@ -379,10 +494,22 @@ class AcquisitionManager:
                 else:
                     reason = routed_reasons.get(identity, "no configured provider returned a usable observation")
                 if old is not None:
+                    failure_reason = reason
+                    refresh = routed_diagnostics.get(identity)
+                    refresh_reason = str(refresh.get("reason", "")).strip() if refresh else failure_reason
                     reason = f"last observation is stale as of {cutoff}"
+                    if refresh_reason:
+                        reason += f"; refresh failed: {refresh_reason}"
                 if category is None and request.metric_key != "risk.chain_liveness_status":
                     add_web_fallback(request, reason)
-                normalized = self._failure(request, current, reason, stale=old is not None)
+                normalized = self._failure(
+                    request,
+                    current,
+                    reason,
+                    stale=old is not None,
+                    diagnostic=routed_diagnostics.get(identity),
+                    previous=old,
+                )
             if should_persist:
                 persist_metric_result(
                     normalized,
@@ -393,6 +520,30 @@ class AcquisitionManager:
 
         events = tuple(item.event for item in results)
         summary = collection_summary(events, review_type=model.review_type)
+        provider_failures = Counter(
+            str(attempt.error_code)
+            for attempt in routed.attempts
+            if attempt.error_code
+        )
+        completed_event_groups = {
+            ("MARKET" if scan.category == "regulatory" else scan.asset, scan.category)
+            for scan in event_scans.values()
+        }
+        event_sources_required = len(event_scan_requests)
+        event_sources_reachable = 0
+        for asset, category in completed_event_groups:
+            requests = scanner.build_requests(asset, category, scan_as_of, review_type=model.review_type)
+            event_sources_required += len(requests)
+            scan = next(
+                (
+                    item for (scan_asset, scan_category), item in event_scans.items()
+                    if scan_category == category
+                    and ("MARKET" if scan_category == "regulatory" else scan_asset) == asset
+                ),
+                None,
+            )
+            if scan is not None:
+                event_sources_reachable += round(scan.coverage * len(requests))
         summary.update({
             "metrics_requested": len(model.requests),
             "fresh_observation_hits": fresh_hits,
@@ -405,6 +556,9 @@ class AcquisitionManager:
             "fetch_mode": selected_mode.value,
             "event_scan_requests": len(event_scan_requests),
             "event_scans": len(event_scans),
+            "provider_failures_by_error_code": dict(sorted(provider_failures.items())),
+            "event_sources_reachable": event_sources_reachable,
+            "event_sources_required": event_sources_required,
         })
         return AcquisitionResult(
             model,
@@ -420,7 +574,16 @@ class AcquisitionManager:
     acquire = run
 
     @staticmethod
-    def _failure(request: MetricRequest, timestamp: str, reason: str, *, stale: bool = False) -> NormalizedMetricResult:
+    def _failure(
+        request: MetricRequest,
+        timestamp: str,
+        reason: str,
+        *,
+        stale: bool = False,
+        diagnostic: Mapping[str, Any] | None = None,
+        previous: MetricObservation | None = None,
+    ) -> NormalizedMetricResult:
+        diagnostic = diagnostic or {}
         return normalize_metric_result({
             "timestamp": timestamp,
             "asset": request.asset,
@@ -428,6 +591,12 @@ class AcquisitionManager:
             "status": "STALE" if stale else "FAILED",
             "reason": reason,
             "source": "provider-router",
+            "last_observation_id": previous.observation_id if previous else None,
+            "last_observation_at": previous.observed_at if previous else None,
+            "refresh_provider": diagnostic.get("provider"),
+            "refresh_endpoint": diagnostic.get("endpoint"),
+            "refresh_error_code": diagnostic.get("error_code"),
+            "refresh_error_detail": diagnostic.get("detail"),
         }, now=timestamp)
 
     @staticmethod
@@ -452,6 +621,59 @@ class AcquisitionManager:
                 identity = (target, category)
             result[identity] = scan
         return result
+
+    @staticmethod
+    def _contains_event_source_responses(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, EventSourceScanResponse):
+            return True
+        if isinstance(value, Mapping):
+            if "source_id" in value and "reachable" in value:
+                return True
+            return any(AcquisitionManager._contains_event_source_responses(item) for item in value.values())
+        if isinstance(value, (str, bytes)):
+            return False
+        try:
+            return any(AcquisitionManager._contains_event_source_responses(item) for item in value)
+        except TypeError:
+            return False
+
+    @staticmethod
+    def _coerce_event_source_responses(
+        value: Mapping[Any, EventSourceScanResponse | Mapping[str, Any]] | Iterable[EventSourceScanResponse | Mapping[str, Any]] | None,
+    ) -> tuple[EventSourceScanResponse, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, EventSourceScanResponse):
+            return (value,)
+        if isinstance(value, Mapping):
+            if "source_id" in value:
+                value = (value,)
+            else:
+                flattened: list[Any] = []
+                for item in value.values():
+                    if isinstance(item, Mapping) and "source_id" not in item and not isinstance(item, EventSourceScanResponse):
+                        flattened.extend(item.values())
+                    elif isinstance(item, (list, tuple)):
+                        flattened.extend(item)
+                    else:
+                        flattened.append(item)
+                value = flattened
+        if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+            raise ValueError("event source scan responses must be a sequence or source mapping")
+        return tuple(
+            item if isinstance(item, EventSourceScanResponse) else EventSourceScanResponse.from_mapping(item)
+            for item in value
+        )
+
+    @staticmethod
+    def _responses_for_requests(
+        requests: Iterable[EventSourceScanRequest],
+        responses: Iterable[EventSourceScanResponse],
+    ) -> tuple[EventSourceScanResponse, ...]:
+        source_ids = {request.source_id for request in requests}
+        return tuple(response for response in responses if response.source_id in source_ids)
 
     @staticmethod
     def _map_shared_regulatory(scan: EventScanResult, asset: str) -> EventScanResult:
@@ -541,6 +763,7 @@ MetricAcquisitionManager = AcquisitionManager
 __all__ = [
     "AcquisitionManager",
     "AcquisitionResult",
+    "AcquisitionResolutionRequired",
     "FetchMode",
     "MetricAcquisitionManager",
     "WebFallbackRequest",

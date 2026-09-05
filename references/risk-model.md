@@ -193,3 +193,8 @@ high-conviction action. A current scan with no material result is
 `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; it is risk hygiene, not bullish
 evidence. The scan timestamp controls freshness, not the date of an older
 incident article.
+
+Before scoring, a pending hard-critical event-source request is a resolution
+state, not a failed scan result. After an explicit source response is
+processed, incomplete coverage remains a critical failure and keeps the
+recommendation fail-closed.

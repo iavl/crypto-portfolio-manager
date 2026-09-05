@@ -10,6 +10,8 @@
     "base_currency": {"type": "string"},
     "policy_version": {"type": "integer", "minimum": 1},
     "external_cash_flow": {"type": "number"},
+    "external_cash_flow_usd": {"type": "number"},
+    "external_cash_flow_type": {"enum": ["NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"]},
     "total_value": {"type": ["number", "null"], "minimum": 0},
     "reported_total_value": {"type": ["number", "null"], "minimum": 0},
     "portfolio_peak_value": {"type": ["number", "null"], "minimum": 0},

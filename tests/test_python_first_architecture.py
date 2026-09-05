@@ -16,7 +16,7 @@ from crypto_portfolio.engine.factors.trend import calculate_trend_factor
 from crypto_portfolio.engine.metric_history import build_factor_facts
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result, persist_metric_result
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest, build_metric_collection_plan
-from crypto_portfolio.engine.report_packet import build_report_packet
+from crypto_portfolio.engine.report_packet import build_final_review_output, build_report_packet
 from crypto_portfolio.engine.regime_inputs import build_regime_inputs
 from crypto_portfolio.metrics_registry import METRIC_REGISTRY, MetricDefinition
 from crypto_portfolio.model_routing import RoutingError, load_model_routing, validate_stage_model
@@ -228,6 +228,19 @@ class PythonFirstArchitectureTests(unittest.TestCase):
                 actions=[{"symbol": "ETH", "action": "EXIT", "amount_usd": 100}],
             )
         )
+
+    def test_final_review_output_is_validated_before_rendering(self):
+        packet = build_decision_review_packet(
+            review_type="SNAPSHOT_REVIEW",
+            market_regime="NORMAL",
+            current_weights={"ETH": 1},
+            target_weights={"ETH": 1},
+            assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
+        )
+        report = build_report_packet(packet)
+        output = build_final_review_output(report)
+        self.assertEqual(output["report_packet"]["market_regime"], "NORMAL")
+        self.assertIn("event_scans", output)
 
     def test_routing_rejects_non_max_luna_and_schemas_validate(self):
         routing = load_model_routing()

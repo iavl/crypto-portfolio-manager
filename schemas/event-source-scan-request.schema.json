@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/event-source-scan-request.schema.json",
   "title": "Allowlisted event source scan request",
   "type": "object",
-  "required": ["asset", "category", "source_id", "source_name", "source_url", "authority", "lookback_start", "as_of", "tier", "required_for_full_coverage"],
+  "required": ["asset", "category", "source_id", "source_name", "source_url", "authority", "lookback_start", "as_of", "tier", "required_for_full_coverage", "instructions"],
   "properties": {
     "asset": {"type": "string", "minLength": 1},
     "category": {"enum": ["security", "governance", "regulatory"]},
@@ -14,7 +14,8 @@
     "lookback_start": {"type": "string", "format": "date-time"},
     "as_of": {"type": "string", "format": "date-time"},
     "tier": {"enum": [1, 2, 3]},
-    "required_for_full_coverage": {"type": "boolean"}
+    "required_for_full_coverage": {"type": "boolean"},
+    "instructions": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
 }

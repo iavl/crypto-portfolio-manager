@@ -48,8 +48,66 @@ class FetchMode(str, Enum):
             raise ValueError("fetch mode must be AUTO, CACHE_ONLY, or REFRESH") from exc
 
 
+@dataclass(frozen=True)
+class ProviderDiagnostic:
+    """Safe transport/provider context retained with a handled failure."""
+
+    endpoint: str | None = None
+    method: str = "GET"
+    attempt: int = 1
+    error_code: str = "UNKNOWN_NETWORK_ERROR"
+    exception_class: str | None = None
+    detail: str | None = None
+    retryable: bool = False
+    status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.endpoint is not None and (not isinstance(self.endpoint, str) or not self.endpoint.strip()):
+            raise ValueError("provider diagnostic endpoint must be a non-empty string or null")
+        method = str(self.method).strip().upper()
+        if not method:
+            raise ValueError("provider diagnostic method must be non-empty")
+        object.__setattr__(self, "method", method)
+        if isinstance(self.attempt, bool) or not isinstance(self.attempt, int) or self.attempt < 1:
+            raise ValueError("provider diagnostic attempt must be a positive integer")
+        code = str(self.error_code).strip().upper()
+        if not code:
+            raise ValueError("provider diagnostic error_code must be non-empty")
+        object.__setattr__(self, "error_code", code)
+        if self.exception_class is not None:
+            exception_class = str(self.exception_class).strip()
+            if not exception_class:
+                raise ValueError("provider diagnostic exception_class must be non-empty or null")
+            object.__setattr__(self, "exception_class", exception_class)
+        if self.detail is not None:
+            object.__setattr__(self, "detail", str(self.detail).strip() or None)
+        if not isinstance(self.retryable, bool):
+            raise ValueError("provider diagnostic retryable must be boolean")
+        if self.status_code is not None and (
+            isinstance(self.status_code, bool) or not isinstance(self.status_code, int)
+            or not 100 <= self.status_code <= 599
+        ):
+            raise ValueError("provider diagnostic status_code must be an HTTP status or null")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "endpoint": self.endpoint,
+            "method": self.method,
+            "attempt": self.attempt,
+            "error_code": self.error_code,
+            "exception_class": self.exception_class,
+            "detail": self.detail,
+            "retryable": self.retryable,
+            "status_code": self.status_code,
+        }
+
+
 class ProviderError(RuntimeError):
     """Base class for a provider failure that can be handled by the router."""
+
+    def __init__(self, message: str = "", *, diagnostic: ProviderDiagnostic | Mapping[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic = diagnostic
 
 
 class ProviderUnavailable(ProviderError):
@@ -216,12 +274,18 @@ class ProviderResponse:
     payload: Any = None
     observed_range: Mapping[str, Any] | None = None
     network_requests: int = 1
+    diagnostics: Mapping[str, Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.observations, (str, bytes)):
             raise ValueError("provider observations must be a sequence")
         if isinstance(self.network_requests, bool) or not isinstance(self.network_requests, int) or self.network_requests < 0:
             raise ValueError("provider network_requests must be a non-negative integer")
+        if self.diagnostics is not None:
+            if not isinstance(self.diagnostics, Mapping):
+                raise ValueError("provider diagnostics must be an object or null")
+            if any(not isinstance(key, str) or not isinstance(value, Mapping) for key, value in self.diagnostics.items()):
+                raise ValueError("provider diagnostics must map metric keys to objects")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -229,6 +293,7 @@ class ProviderResponse:
             "payload": self.payload,
             "observed_range": dict(self.observed_range) if self.observed_range else None,
             "network_requests": self.network_requests,
+            "diagnostics": {key: dict(value) for key, value in (self.diagnostics or {}).items()},
         }
 
 
@@ -303,6 +368,7 @@ __all__ = [
     "ProviderAuthenticationError",
     "ProviderCapabilities",
     "ProviderDataError",
+    "ProviderDiagnostic",
     "ProviderError",
     "ProviderRateLimited",
     "ProviderRequest",

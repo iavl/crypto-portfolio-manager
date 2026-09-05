@@ -456,6 +456,31 @@ python3 scripts/provider_cache.py --stats
 python3 scripts/provider_cache.py --prune-expired
 ```
 
+`--status` is offline. A network check is opt-in and reports safe endpoint and
+error diagnostics without response payloads or credentials:
+
+```bash
+python3 scripts/providers.py --probe binance
+python3 scripts/providers.py --probe defillama
+python3 scripts/providers.py --probe alternative_me
+python3 scripts/providers.py --probe coinglass
+```
+
+### TLS troubleshooting
+
+Python HTTPS keeps certificate and hostname verification enabled. If the local
+trust store is incomplete, provide a trusted PEM bundle for the run:
+
+```bash
+export CRYPTO_PORTFOLIO_CA_BUNDLE=/path/to/trusted-ca-bundle.pem
+```
+
+`CRYPTO_PORTFOLIO_CA_BUNDLE` takes precedence over `SSL_CERT_FILE` and
+`SSL_CERT_DIR`; otherwise Python's default trust configuration is used.
+`HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` remain under the standard urllib
+environment behavior. A missing or invalid bundle fails explicitly. Do not use
+`verify=False`, an unverified SSL context, or `curl -k`.
+
 ## API Keys
 
 Free public providers require no key. The authenticated Coin Metrics adapter
@@ -476,9 +501,13 @@ python3 scripts/providers.py --status
 The adapter uses the official `CG-API-KEY` header and is registered only when
 the key is present. Endpoint access and interval limits depend on the
 CoinGlass plan; a present credential does not guarantee every endpoint is
-available. Keys never enter repository JSON, request identities, cache files,
-history, logs, or reports. LunarCrush remains a key-gated extension slot
-without a shipped adapter.
+available. `runtime=READY` in the offline status table means configuration,
+adapter, and credential readiness only; run `--probe coinglass` to distinguish
+network reachability, authentication, plan entitlement, schema compatibility,
+and sufficient historical range for ETF/liquidation endpoints. Keys never
+enter repository JSON, request identities, cache files, history, logs, or
+reports. LunarCrush remains a key-gated extension slot without a shipped
+adapter.
 
 ## Event Scanner
 
@@ -486,6 +515,14 @@ Event scanning is on demand. Python creates requests from the fixed source
 catalog, and the runtime Web stage may check only those URLs. Results are
 validated into `EventScanResult` and then normalized as metric observations;
 raw HTML is not persisted.
+
+Acquisition is a two-pass contract: the first pass may return serializable
+`EventSourceScanRequest` values; the runtime returns matching structured
+`EventSourceScanResponse` values; the second pass supplies them through
+`event_source_scan_responses`. `ready_for_scoring` is false while a
+hard-critical event group is unresolved. Do not score or allocate from that
+first-pass result. An explicit `INSUFFICIENT_SOURCE_COVERAGE` result remains a
+visible critical failure rather than a clean no-event result.
 
 The configured source scope contains Bitcoin Core/BIPs sources, Ethereum
 Foundation, go-ethereum, consensus, EIPs, and AllCoreDevs sources for BTC/ETH,
@@ -518,6 +555,13 @@ The Skill keeps runtime state outside the Git checkout:
 default:   ~/.local/share/crypto-portfolio-manager/
 override:  $CRYPTO_PORTFOLIO_DATA_DIR
 ```
+
+If a material change between snapshots is not explicitly classified, the
+portfolio/risk review may continue but cash-flow-adjusted NAV performance is
+reported as `PROVISIONAL`. Use `external_cash_flow_usd` with
+`external_cash_flow_type: DEPOSIT` or `WITHDRAWAL`, or explicitly set
+`external_cash_flow_type: NONE` for a confirmed zero flow. Stablecoin growth
+alone is not treated as proof of a deposit or investment return.
 
 Current state files are:
 

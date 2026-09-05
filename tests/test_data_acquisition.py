@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import socket
+import ssl
 import unittest
+from urllib.error import URLError
 from unittest.mock import patch
 
 from crypto_portfolio.acquisition import AcquisitionManager, FetchMode
@@ -10,7 +13,7 @@ from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.models.events import EventScanResult
 from crypto_portfolio.models.market import Candle, OHLCVSeries
 from crypto_portfolio.providers.alternative_me import parse_fear_greed
-from crypto_portfolio.providers.base import ProviderRequest, ProviderUnavailable
+from crypto_portfolio.providers.base import ProviderDiagnostic, ProviderRequest, ProviderUnavailable, ProviderRateLimited
 from crypto_portfolio.providers.binance import BinanceProvider
 from crypto_portfolio.providers.cache import CacheExpired, ProviderCache, request_hash
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider, catalog_metrics, parse_timeseries
@@ -23,7 +26,8 @@ from crypto_portfolio.providers.coinglass import (
 )
 from crypto_portfolio.providers.config import load_provider_config, provider_enabled, provider_runtime_status, provider_status
 from crypto_portfolio.providers.defillama import identifier_for_asset
-from crypto_portfolio.providers.http import HttpClient, redact_secrets
+from crypto_portfolio.providers.http import HttpClient, build_ssl_context, classify_transport_error, redact_secrets
+from crypto_portfolio.providers.probe import probe_provider
 from crypto_portfolio.providers.router import ProviderRouter
 from crypto_portfolio.providers.routes import provider_chain
 
@@ -85,6 +89,118 @@ class StructuredProvider:
 
 
 class DataAcquisitionTests(unittest.TestCase):
+    def test_probe_is_explicit_and_reports_network_state(self):
+        class ProbeClient:
+            def __init__(self, value):
+                self.value = value
+                self.calls = 0
+
+            def get_json(self, url, *, params=None, headers=None):
+                self.calls += 1
+                return self.value
+
+        client = ProbeClient({"symbol": "BTCUSDT", "price": "100"})
+        provider = type("Provider", (), {"client": client})()
+        router = ProviderRouter({"binance": provider}, config=config_for("binance"))
+        self.assertEqual(router.provider_status()[0]["runtime_ready"], True)
+        result = probe_provider(router, "binance")[0]
+        self.assertEqual(result["config"], "READY")
+        self.assertEqual(result["network"], "OK")
+        self.assertEqual(result["auth"], "NOT_REQUIRED")
+        self.assertEqual(client.calls, 1)
+
+    def test_transport_errors_are_classified_and_tls_stays_verified(self):
+        certificate_error = URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+        self.assertEqual(classify_transport_error(certificate_error), "TLS_CERTIFICATE_VERIFY_FAILED")
+        self.assertEqual(classify_transport_error(socket.gaierror("Name or service not known")), "DNS_RESOLUTION_FAILED")
+        self.assertEqual(classify_transport_error(TimeoutError(), phase="read"), "READ_TIMEOUT")
+        self.assertEqual(classify_transport_error(ConnectionResetError()), "CONNECTION_RESET")
+        with self.assertRaises(ValueError):
+            build_ssl_context(ssl._create_unverified_context())
+        client = HttpClient(opener=Client([Response(429)]), max_attempts=1)
+        with self.assertRaises(ProviderRateLimited) as raised:
+            client.get_json("https://example.test/data?api_key=secret")
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual(diagnostic.error_code, "HTTP_429")
+        self.assertEqual(diagnostic.endpoint, "https://example.test/data?api_key=%5BREDACTED%5D")
+        self.assertNotIn("secret", str(diagnostic.as_dict()))
+
+        contexts = []
+
+        def opener(request, timeout, *, context):
+            contexts.append(context)
+            return Response(200, b"{}")
+
+        HttpClient(opener=opener).get_json("https://example.test/data")
+        self.assertEqual(contexts[0].verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(contexts[0].check_hostname)
+
+    def test_stale_observation_retains_refresh_diagnostic(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("AAVE", "fundamentals.fees_30d"),))
+
+        class FailingProvider:
+            def collect(self, request):
+                raise ProviderUnavailable(
+                    "refresh failed",
+                    diagnostic=ProviderDiagnostic(
+                        endpoint="https://api.llama.fi/summary/fees/aave",
+                        error_code="TLS_CERTIFICATE_VERIFY_FAILED",
+                        exception_class="SSLCertVerificationError",
+                        detail="unable to get local issuer certificate",
+                    ),
+                )
+
+        old = normalize_metric_result({
+            "asset": "AAVE", "metric_key": "fundamentals.fees_30d", "value": 10, "unit": "USD",
+            "observed_at": "2026-08-01T00:00:00Z", "fetched_at": "2026-08-01T00:00:00Z",
+            "source": "old", "confidence": "HIGH",
+        }).observation
+        config = config_for("defillama")
+        result = AcquisitionManager(
+            ProviderRouter({"defillama": FailingProvider()}, config=config), persist=False,
+        ).run(
+            plan,
+            as_of="2026-09-05T00:00:00Z",
+            now="2026-09-05T00:00:00Z",
+            cached_observations=(old,),
+        )
+        event = result.results[0].event
+        self.assertEqual(result.results[0].status, "STALE")
+        self.assertIn("last observation is stale", event.reason)
+        self.assertIn("TLS_CERTIFICATE_VERIFY_FAILED", event.reason)
+        self.assertEqual(event.refresh_error_code, "TLS_CERTIFICATE_VERIFY_FAILED")
+        self.assertEqual(event.refresh_endpoint, "https://api.llama.fi/summary/fees/aave")
+        self.assertEqual(event.last_observation_at, old.observed_at)
+
+    def test_defillama_partial_bundle_keeps_fee_subrequest_failure(self):
+        class PartialClient:
+            def get_json(self, url, *, params=None, headers=None):
+                if "/protocol/" in url:
+                    return {"tvl": [{"date": 1788476400, "totalLiquidityUSD": 123}], "mcap": 456}
+                raise ProviderUnavailable(
+                    "fees TLS failure",
+                    diagnostic=ProviderDiagnostic(
+                        endpoint="https://api.llama.fi/summary/fees/aave",
+                        error_code="TLS_CERTIFICATE_VERIFY_FAILED",
+                        detail="unable to get local issuer certificate",
+                    ),
+                )
+
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        response = DeFiLlamaProvider(client=PartialClient()).collect(
+            ProviderRequest(
+                "defillama",
+                "protocol",
+                "AAVE",
+                {"as_of": "2026-09-04T00:00:00Z"},
+                ("fundamentals.tvl", "fundamentals.fees_30d"),
+            )
+        )
+        self.assertEqual([item["metric_key"] for item in response.observations], ["fundamentals.tvl"])
+        self.assertEqual(response.diagnostics["fundamentals.fees_30d"]["error_code"], "TLS_CERTIFICATE_VERIFY_FAILED")
+        self.assertIn("summary/fees/aave", response.diagnostics["fundamentals.fees_30d"]["endpoint"])
+
     def test_http_retry_size_and_redaction(self):
         sleeper = []
         client = Client([

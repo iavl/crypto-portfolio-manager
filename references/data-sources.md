@@ -154,6 +154,9 @@ advisories, Core releases, and BIPs. ETH security sources are Ethereum.org
 security guidance, go-ethereum advisories, and consensus-spec advisories;
 Ethereum security is not represented by one client. ETH governance sources
 are EIPs, AllCoreDevs coordination, and Ethereum Foundation protocol notices.
+AAVE security uses the official Aave security page and the Aave V3
+repository advisories; AAVE governance uses the official governance forum and
+proposal scope.
 The compatible BTC metric key `risk.governance_event_status` means material
 protocol-development/governance-context changes, not DAO governance.
 

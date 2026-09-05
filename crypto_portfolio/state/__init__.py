@@ -3,6 +3,7 @@
 from .context import (
     build_history_context,
     build_position_pnl_context,
+    external_cash_flow_review,
     latest_position_performance,
     position_performance_history,
 )
@@ -32,6 +33,7 @@ from .metrics import (
 __all__ = [
     "build_history_context",
     "build_position_pnl_context",
+    "external_cash_flow_review",
     "append_collection_event",
     "append_metric_observation",
     "compare_latest_metric",

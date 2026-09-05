@@ -3,6 +3,7 @@
 from .base import (
     ProviderAuthenticationError,
     ProviderDataError,
+    ProviderDiagnostic,
     ProviderError,
     ProviderRateLimited,
     ProviderResponseError,
@@ -13,6 +14,7 @@ from .base import (
 __all__ = [
     "ProviderAuthenticationError",
     "ProviderDataError",
+    "ProviderDiagnostic",
     "ProviderError",
     "ProviderRateLimited",
     "ProviderResponseError",

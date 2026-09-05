@@ -1,9 +1,31 @@
 import unittest
 
+from crypto_portfolio.engine.cash_flow import cash_flow_adjusted_performance, detect_external_cash_flow
 from scripts.portfolio_snapshot import classify, normalize, resolve_config
 
 
 class PortfolioSnapshotTests(unittest.TestCase):
+    def test_unresolved_material_change_does_not_become_nav_return(self):
+        previous = {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "positions": [{"symbol": "BTC", "value_usd": 10000}, {"symbol": "USDT", "value_usd": 5000}],
+        }
+        current = {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "positions": [{"symbol": "BTC", "value_usd": 10000}, {"symbol": "USDT", "value_usd": 15000}],
+        }
+        flagged = detect_external_cash_flow(previous, current)
+        self.assertEqual(flagged["status"], "UNRESOLVED")
+        self.assertTrue(flagged["requires_confirmation"])
+        self.assertIsNone(cash_flow_adjusted_performance((previous, current))["return"])
+        confirmed = {
+            **current,
+            "external_cash_flow_usd": 10000,
+            "external_cash_flow_type": "DEPOSIT",
+        }
+        self.assertEqual(detect_external_cash_flow(previous, confirmed)["status"], "CONFIRMED")
+        self.assertAlmostEqual(cash_flow_adjusted_performance((previous, confirmed))["return"], 0.0)
+
     def test_classify_accepts_partial_config(self):
         self.assertEqual(classify("alpha", {"core_symbols": ["ALPHA"]}), "core")
 

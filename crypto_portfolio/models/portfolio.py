@@ -11,6 +11,7 @@ from .time import normalize_timestamp
 
 
 ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
+EXTERNAL_CASH_FLOW_TYPES = {"NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"}
 _LEGACY_TIMESTAMP = "UNSPECIFIED"
 
 
@@ -128,6 +129,7 @@ class PortfolioSnapshot:
     base_currency: str = "USD"
     positions: tuple[Position, ...] = ()
     external_cash_flow: float = 0.0
+    external_cash_flow_type: str | None = None
     total_value: float | None = None
     policy_version: int | None = None
     source: str | None = None
@@ -159,6 +161,23 @@ class PortfolioSnapshot:
             "external_cash_flow",
             _number(self.external_cash_flow, "external_cash_flow"),
         )
+        flow_type = self.external_cash_flow_type
+        if flow_type is None:
+            flow_type = (
+                "DEPOSIT" if self.external_cash_flow > 0 else
+                "WITHDRAWAL" if self.external_cash_flow < 0 else
+                "UNRESOLVED"
+            )
+        if not isinstance(flow_type, str) or flow_type.strip().upper() not in EXTERNAL_CASH_FLOW_TYPES:
+            raise ValueError(f"external_cash_flow_type must be one of {sorted(EXTERNAL_CASH_FLOW_TYPES)}")
+        flow_type = flow_type.strip().upper()
+        if flow_type == "NONE" and self.external_cash_flow != 0:
+            raise ValueError("external_cash_flow_type NONE requires external_cash_flow 0")
+        if flow_type == "DEPOSIT" and self.external_cash_flow <= 0:
+            raise ValueError("external_cash_flow_type DEPOSIT requires a positive external_cash_flow")
+        if flow_type == "WITHDRAWAL" and self.external_cash_flow >= 0:
+            raise ValueError("external_cash_flow_type WITHDRAWAL requires a negative external_cash_flow")
+        object.__setattr__(self, "external_cash_flow_type", flow_type)
         object.__setattr__(
             self,
             "total_value",
@@ -215,6 +234,7 @@ class PortfolioSnapshot:
             "base_currency": self.base_currency,
             "policy_version": self.policy_version,
             "external_cash_flow": self.external_cash_flow,
+            "external_cash_flow_type": self.external_cash_flow_type,
             "total_value": self.total_value,
             "policy_hash": self.policy_hash,
             "resolved_policy": self.resolved_policy,
@@ -293,11 +313,18 @@ def snapshot_from_mapping(
     reported_total_value = data.get("total_value")
     if reported_total_value is None:
         reported_total_value = data.get("reported_total_value")
+    flow_value = data.get("external_cash_flow", data.get("external_cash_flow_usd", 0.0))
+    if "external_cash_flow" in data and "external_cash_flow_usd" in data and data["external_cash_flow"] != data["external_cash_flow_usd"]:
+        raise ValueError("external_cash_flow and external_cash_flow_usd disagree")
+    flow_type = data.get("external_cash_flow_type")
+    if flow_type is None and ("external_cash_flow" in data or "external_cash_flow_usd" in data) and isinstance(flow_value, (int, float)) and not isinstance(flow_value, bool):
+        flow_type = "DEPOSIT" if flow_value > 0 else "WITHDRAWAL" if flow_value < 0 else "NONE"
     snapshot = PortfolioSnapshot(
         timestamp=_LEGACY_TIMESTAMP if legacy_timestamp else timestamp,
         positions=positions,
         base_currency=data.get("base_currency", "USD"),
-        external_cash_flow=data.get("external_cash_flow", 0.0),
+        external_cash_flow=flow_value,
+        external_cash_flow_type=flow_type,
         total_value=reported_total_value,
         policy_version=supplied_policy_version,
         source=data.get("source"),
@@ -432,6 +459,7 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
         "satellite_weight": weights["satellite"],
         "portfolio_drawdown": drawdown,
         "external_cash_flow": snapshot.external_cash_flow,
+        "external_cash_flow_type": snapshot.external_cash_flow_type,
         "cost_known_current_value_usd": performance.cost_known_current_value_usd,
         "cost_known_cost_basis_usd": performance.cost_known_cost_basis_usd,
         "total_unrealized_pnl_known_usd": performance.total_unrealized_pnl_known_usd,
@@ -451,6 +479,7 @@ def classify_symbol(symbol: str, policy: Policy | None = None) -> str:
 
 __all__ = [
     "ASSET_TYPES",
+    "EXTERNAL_CASH_FLOW_TYPES",
     "Position",
     "PortfolioSnapshot",
     "classify_symbol",

@@ -11,6 +11,7 @@ from .base import (
     ProviderAuthenticationError,
     ProviderCapabilities,
     ProviderDataError,
+    ProviderDiagnostic,
     ProviderError,
     ProviderRateLimited,
     ProviderRequest,
@@ -24,6 +25,7 @@ from .base import (
 from .cache import ProviderCache
 from .config import provider_runtime_status, provider_status
 from .router import ProviderRouter
+from .probe import probe_provider, probe_providers
 from .alternative_me import AlternativeMeProvider
 from .binance import BinanceProvider
 from .bybit import BybitProvider
@@ -44,6 +46,7 @@ __all__ = [
     "ProviderCapabilities",
     "ProviderCache",
     "ProviderDataError",
+    "ProviderDiagnostic",
     "ProviderError",
     "ProviderRateLimited",
     "ProviderRequest",
@@ -51,6 +54,8 @@ __all__ = [
     "ProviderResponseError",
     "ProviderRuntimeStatus",
     "ProviderRouter",
+    "probe_provider",
+    "probe_providers",
     "provider_runtime_status",
     "provider_status",
     "ProviderUnavailable",

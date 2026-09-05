@@ -222,7 +222,8 @@ def normalize_collection_event(
         raise ValueError("collection event must be an object")
     allowed = {
         "event_id", "timestamp", "asset", "metric_key", "status", "reason", "source",
-        "observed_at", "decision_id", "fetched_at",
+        "observed_at", "decision_id", "fetched_at", "last_observation_id", "last_observation_at",
+        "refresh_provider", "refresh_endpoint", "refresh_error_code", "refresh_error_detail",
     }
     unknown = set(value) - allowed
     if unknown:
@@ -248,6 +249,12 @@ def normalize_collection_event(
         "observed_at": value.get("observed_at"),
         "fetched_at": value.get("fetched_at"),
         "decision_id": value.get("decision_id"),
+        "last_observation_id": value.get("last_observation_id"),
+        "last_observation_at": value.get("last_observation_at"),
+        "refresh_provider": value.get("refresh_provider"),
+        "refresh_endpoint": value.get("refresh_endpoint"),
+        "refresh_error_code": value.get("refresh_error_code"),
+        "refresh_error_detail": value.get("refresh_error_detail"),
     }
     return CollectionEvent(
         event_id=value.get("event_id") or _event_id(event_payload),
@@ -260,6 +267,12 @@ def normalize_collection_event(
         observed_at=value.get("observed_at"),
         decision_id=value.get("decision_id"),
         fetched_at=value.get("fetched_at"),
+        last_observation_id=value.get("last_observation_id"),
+        last_observation_at=value.get("last_observation_at"),
+        refresh_provider=value.get("refresh_provider"),
+        refresh_endpoint=value.get("refresh_endpoint"),
+        refresh_error_code=value.get("refresh_error_code"),
+        refresh_error_detail=value.get("refresh_error_detail"),
     )
 
 

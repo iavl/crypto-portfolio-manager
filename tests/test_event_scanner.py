@@ -33,9 +33,13 @@ class EventScannerTests(unittest.TestCase):
     def test_catalog_has_fixed_btc_eth_and_shared_regulatory_sources(self):
         btc = source_catalog("security", "BTC")
         eth = source_catalog("security", "ETH")
+        aave_security = source_catalog("security", "AAVE")
+        aave_governance = source_catalog("governance", "AAVE")
         regulatory = source_catalog("regulatory", "AAVE")
         self.assertEqual(len(btc), 3)
         self.assertEqual(len(eth), 3)
+        self.assertGreaterEqual(len(aave_security), 1)
+        self.assertGreaterEqual(len(aave_governance), 1)
         self.assertEqual(len(regulatory), 3)
         self.assertTrue(all(source.required_for_full_coverage for source in btc + eth + regulatory))
         self.assertTrue(all(source.tier == 1 for source in regulatory))
@@ -188,6 +192,65 @@ class EventScannerTests(unittest.TestCase):
         self.assertEqual(result.event_scan_requests, ())
         self.assertEqual(len(result.event_scans), 4)
         self.assertTrue(all(item.status == "SUCCESS" for item in result.results))
+
+    def test_acquisition_exposes_hard_critical_two_pass_gate(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("ETH", "risk.security_event_status"),
+        ))
+        manager = AcquisitionManager(persist=False)
+        first = manager.run(plan, mode="AUTO", as_of=AS_OF, now=AS_OF)
+        self.assertTrue(first.requires_external_resolution)
+        self.assertEqual(first.pending_event_scans, first.event_scan_requests)
+        self.assertEqual(first.hard_critical_unresolved, (("ETH", "risk.security_event_status"),))
+        self.assertFalse(first.ready_for_scoring)
+        with self.assertRaisesRegex(RuntimeError, "hard-critical event scan"):
+            first.require_scoring_ready()
+
+        responses = tuple(
+            EventSourceScanResponse(request.source_id, True, AS_OF, (), None)
+            for request in first.pending_event_scans
+        )
+        second = manager.run(
+            plan,
+            mode="AUTO",
+            as_of=AS_OF,
+            now=AS_OF,
+            event_source_scan_responses=responses,
+        )
+        self.assertEqual(second.event_scan_requests, ())
+        self.assertEqual(len(second.event_scans), 1)
+        self.assertTrue(second.ready_for_scoring)
+        self.assertTrue(second.results[0].status == "SUCCESS")
+
+    def test_incomplete_event_scan_remains_a_critical_failure(self):
+        plan = MetricCollectionPlan("EVENT_REVIEW", (
+            MetricRequest("ETH", "risk.security_event_status"),
+        ))
+        manager = AcquisitionManager(persist=False)
+        first = manager.run(plan, as_of=AS_OF, now=AS_OF)
+        responses = tuple(
+            EventSourceScanResponse(
+                request.source_id,
+                request.source_id == first.pending_event_scans[0].source_id,
+                AS_OF,
+                (),
+                None if request.source_id == first.pending_event_scans[0].source_id else "unreachable",
+            )
+            for request in first.pending_event_scans
+        )
+        result = manager.run(plan, as_of=AS_OF, now=AS_OF, event_source_scan_responses=responses)
+        self.assertEqual(result.event_scan_requests, ())
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertEqual(result.summary["critical_failures"], 1)
+        self.assertIn("INSUFFICIENT_SOURCE_COVERAGE", result.results[0].event.reason)
+
+    def test_cache_only_missing_hard_critical_scan_is_not_scoring_ready(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("ETH", "risk.security_event_status"),
+        ))
+        result = AcquisitionManager(persist=False).run(plan, mode="CACHE_ONLY", as_of=AS_OF, now=AS_OF)
+        self.assertFalse(result.ready_for_scoring)
+        self.assertEqual(result.hard_critical_unresolved, (("ETH", "risk.security_event_status"),))
 
     def test_acquisition_maps_shared_market_regulatory_result(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (

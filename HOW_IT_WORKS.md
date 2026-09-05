@@ -39,8 +39,10 @@ flowchart TD
     I --> J[Web fallback requests only]
     J --> K[Python normalization, MetricObservation, CollectionEvent]
     G --> E1[EventScanner source plan]
-    E1 --> E2[Runtime checks allowlisted event sources]
-    E2 --> K
+    E1 --> E2[Pass 1: serialized source requests]
+    E2 --> E3[Runtime checks allowlisted event sources]
+    E3 --> E4[Pass 2: typed source responses]
+    E4 --> K
     K --> L[Python metric history and deterministic Facts]
     L --> M[Python deterministic factors]
     L --> N[LUNA_MAX bounded semantic factor judgment]
@@ -294,6 +296,12 @@ Regulatory work is one shared market scan over the configured SEC, CFTC, and
 ESMA/MiCA primary-source scope, then mapped to BTC/ETH/other affected assets.
 This is not a global regulator crawler.
 
+Acquisition does not enter scoring while a hard-critical event source plan is
+pending. The first pass exposes `pending_event_scans` and
+`ready_for_scoring=False`; the runtime can return serializable responses and a
+second acquisition pass synthesizes the scan. Explicit incomplete coverage is
+retained as a failure, not converted into a no-event success.
+
 `observed_at` for an event observation is always `scan_as_of`. An old incident
 publication therefore does not make a successfully completed current scan
 stale. Full primary coverage with no material result is
@@ -323,6 +331,10 @@ summarizes counts, critical failures, weighted coverage, and confidence.
 or conflict lowers coverage/confidence. Critical failures such as current
 price or unresolved material security status block high-conviction trades.
 Missing data is never converted into a favorable score.
+
+The summary keeps per-request coverage for diagnostics and computes decision
+coverage by factor using the canonical policy weights. Confidence thresholds
+come from `policy.scoring`; hard-critical failures override coverage.
 
 Event criticality is review-aware. Security and chain liveness are hard
 critical for `SNAPSHOT_REVIEW`, `FULL_REVIEW`, and `EVENT_REVIEW`. Governance
@@ -707,7 +719,9 @@ fallback work into model stages before portfolio logic. Event metrics use the
 dedicated allowlisted EventScanner boundary and return typed source requests;
 they are not generic one-line web fallbacks. `scripts/` contains read-only
 provider and cache diagnostics. Provider status distinguishes configuration,
-adapter availability, credential presence, and runtime readiness offline.
+adapter availability, credential presence, and runtime readiness offline;
+`scripts/providers.py --probe ...` is the separate opt-in network check. HTTPS
+uses a verified context and retains safe transport error codes.
 
 ## Persistence and Replay
 

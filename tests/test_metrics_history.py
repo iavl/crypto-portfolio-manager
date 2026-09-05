@@ -45,6 +45,19 @@ def observation(value, observed_at, *, freshness="CURRENT", source="test", super
 
 
 class MetricHistoryTests(unittest.TestCase):
+    def test_collection_summary_reports_factor_weighted_coverage(self):
+        events = [
+            CollectionEvent(f"trend-{index}", "2026-09-01", "ETH", "market.return_30d", "SUCCESS", source="test", observed_at="2026-09-01", fetched_at="2026-09-01")
+            for index in range(10)
+        ] + [
+            CollectionEvent(f"valuation-{index}", "2026-09-01", "ETH", "valuation.market_cap", "SUCCESS" if index == 0 else "FAILED", reason=None if index == 0 else "missing", source="test")
+            for index in range(10)
+        ]
+        summary = collection_summary(events)
+        self.assertAlmostEqual(summary["per_request_coverage"], 0.55)
+        self.assertAlmostEqual(summary["policy_weighted_coverage"], (0.25 + 0.2 * 0.1) / 0.45)
+        self.assertNotEqual(summary["per_request_coverage"], summary["policy_weighted_coverage"])
+
     def test_model_validation_and_stable_identity(self):
         first_id = stable_observation_id("eth", "fundamentals.tvl", "2026-09-01", "test", 100)
         self.assertEqual(first_id, stable_observation_id("ETH", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100.0))

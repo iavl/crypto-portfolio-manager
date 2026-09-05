@@ -8,6 +8,7 @@ from typing import Any
 
 from ..engine.ledger import PortfolioSnapshot as LedgerSnapshot
 from ..engine.ledger import build_nav_history
+from ..engine.cash_flow import detect_external_cash_flow
 from ..engine.position_pnl import calculate_portfolio_position_performance
 from ..models.performance import PositionPerformance
 from ..models.decision import Decision
@@ -44,6 +45,11 @@ def portfolio_nav_history(path: str | Path | None = None):
     snapshots.sort(
         key=lambda item: (parse_timestamp(item[1].timestamp), item[0])
     )
+    if any(
+        detect_external_cash_flow(previous[1], current[1])["requires_confirmation"]
+        for previous, current in zip(snapshots, snapshots[1:])
+    ):
+        return []
     return build_nav_history(
         [
             LedgerSnapshot(
@@ -54,6 +60,25 @@ def portfolio_nav_history(path: str | Path | None = None):
             for _, snapshot in snapshots
         ]
     ) if snapshots else []
+
+
+def external_cash_flow_review(path: str | Path | None = None) -> dict[str, Any]:
+    records = []
+    for index, record in enumerate(read_snapshots(path)):
+        snapshot, _, _ = snapshot_from_mapping(record)
+        records.append((parse_timestamp(snapshot.timestamp), index, snapshot))
+    records.sort(key=lambda item: (item[0], item[1]))
+    transitions = [
+        detect_external_cash_flow(previous[2], current[2])
+        for previous, current in zip(records, records[1:])
+    ]
+    unresolved = next((item for item in transitions if item["requires_confirmation"]), None)
+    return {
+        "status": "PROVISIONAL" if unresolved else "AVAILABLE",
+        "requires_confirmation": unresolved is not None,
+        "transitions": transitions,
+        "reason": unresolved.get("reason") if unresolved else None,
+    }
 
 
 def previous_asset_assessment(
@@ -170,6 +195,7 @@ def build_history_context(
         parsed_decision = Decision.from_mapping(decision)
         previous_assessments = dict(parsed_decision.factor_scores)
     position_pnl = build_position_pnl_context(snapshot_path)
+    cash_flow_review = external_cash_flow_review(snapshot_path)
     invalid_observations: list[str] = []
     observations = read_metric_observations(metrics_path, invalid=invalid_observations)
     assets = {
@@ -208,6 +234,8 @@ def build_history_context(
         "latest_snapshot": snapshot,
         "latest_decision": decision,
         "nav_history": nav,
+        "external_cash_flow_review": cash_flow_review,
+        "performance_status": cash_flow_review["status"],
         "current_drawdown": nav[-1].current_drawdown if nav else None,
         "max_drawdown": nav[-1].max_drawdown if nav else None,
         "previous_target_weights": (decision or {}).get("target_weights"),
@@ -225,6 +253,7 @@ def build_history_context(
 __all__ = [
     "build_history_context",
     "build_position_pnl_context",
+    "external_cash_flow_review",
     "last_full_review",
     "latest_decision",
     "latest_position_performance",

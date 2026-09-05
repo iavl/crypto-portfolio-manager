@@ -279,6 +279,12 @@ class CollectionEvent:
     observed_at: str | None = None
     decision_id: str | None = None
     fetched_at: str | None = None
+    last_observation_id: str | None = None
+    last_observation_at: str | None = None
+    refresh_provider: str | None = None
+    refresh_endpoint: str | None = None
+    refresh_error_code: str | None = None
+    refresh_error_detail: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_id", _text(self.event_id, "event_id"))
@@ -300,6 +306,15 @@ class CollectionEvent:
         object.__setattr__(self, "decision_id", _optional_text(self.decision_id, "decision_id"))
         if self.fetched_at is not None:
             object.__setattr__(self, "fetched_at", normalize_timestamp(self.fetched_at, "fetched_at"))
+        for field in (
+            "last_observation_id", "refresh_provider", "refresh_endpoint", "refresh_error_code", "refresh_error_detail",
+        ):
+            value = _optional_text(getattr(self, field), field)
+            if field == "refresh_error_code" and value is not None:
+                value = value.upper()
+            object.__setattr__(self, field, value)
+        if self.last_observation_at is not None:
+            object.__setattr__(self, "last_observation_at", normalize_timestamp(self.last_observation_at, "last_observation_at"))
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "CollectionEvent":
@@ -307,7 +322,8 @@ class CollectionEvent:
             raise ValueError("collection event must be an object")
         allowed = {
             "event_id", "timestamp", "asset", "metric_key", "status", "reason", "source",
-            "observed_at", "decision_id", "fetched_at",
+            "observed_at", "decision_id", "fetched_at", "last_observation_id", "last_observation_at",
+            "refresh_provider", "refresh_endpoint", "refresh_error_code", "refresh_error_detail",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -330,6 +346,12 @@ class CollectionEvent:
             "observed_at": self.observed_at,
             "decision_id": self.decision_id,
             "fetched_at": self.fetched_at,
+            "last_observation_id": self.last_observation_id,
+            "last_observation_at": self.last_observation_at,
+            "refresh_provider": self.refresh_provider,
+            "refresh_endpoint": self.refresh_endpoint,
+            "refresh_error_code": self.refresh_error_code,
+            "refresh_error_detail": self.refresh_error_detail,
         }
         return result
 

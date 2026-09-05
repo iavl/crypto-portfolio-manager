@@ -124,6 +124,22 @@ EVENT_SOURCE_CATALOG = (
         "https://blog.ethereum.org/", True, name="Ethereum protocol announcements",
     ),
     EventSource(
+        "aave-security", "security", ("AAVE",), "Aave", "official",
+        "https://aave.com/security", True, name="Aave security",
+    ),
+    EventSource(
+        "aave-v3-security-advisories", "security", ("AAVE",), "Aave", "official",
+        "https://github.com/aave/aave-v3-core/security/advisories", True, name="Aave V3 security advisories",
+    ),
+    EventSource(
+        "aave-governance-forum", "governance", ("AAVE",), "Aave governance", "official",
+        "https://governance.aave.com/", True, name="Aave governance forum",
+    ),
+    EventSource(
+        "aave-governance-proposals", "governance", ("AAVE",), "Aave governance", "official",
+        "https://governance.aave.com/c/governance/4", True, name="Aave governance proposals",
+    ),
+    EventSource(
         "sec-digital-assets", "regulatory", ("MARKET",), "U.S. SEC", "official",
         "https://www.sec.gov/news/pressreleases", True, name="SEC press releases",
     ),

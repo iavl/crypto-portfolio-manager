@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect configured provider capabilities without making network calls."""
+"""Inspect providers offline, or run an explicit read-only network probe."""
 
 from __future__ import annotations
 
@@ -21,13 +21,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="list provider capabilities")
     parser.add_argument("--status", action="store_true", help="show offline config, adapter, credential, and runtime readiness")
+    parser.add_argument("--probe", metavar="PROVIDER", help="opt-in network probe for a provider or all")
     parser.add_argument("--metric", help="show the deterministic provider chain for a metric")
     parser.add_argument("--asset", help="asset used with --plan")
     parser.add_argument("--plan", action="store_true", help="show a local metric collection plan")
     args = parser.parse_args()
     config = load_provider_config()
     router = ProviderRouter(config=config)
-    if args.status or not any((args.list, args.metric, args.plan)):
+    if args.status or not any((args.list, args.metric, args.plan, args.probe)):
         print("provider               config    adapter   credential   runtime")
         for row in router.provider_status():
             config_state = "ENABLED" if row["config_enabled"] else "DISABLED"
@@ -45,6 +46,13 @@ def main() -> int:
         asset = args.asset or "BTC"
         plan = build_metric_collection_plan({"positions": [{"symbol": asset, "value_usd": 1}]})
         print(json.dumps(plan.as_dict(), ensure_ascii=False, sort_keys=True))
+    if args.probe:
+        requested = args.probe.strip().lower()
+        configured_names = set(config.get("providers", {}))
+        if requested != "all" and requested not in router.providers and requested not in configured_names:
+            parser.error(f"unknown or unregistered provider: {args.probe}")
+        for result in router.probe(requested):
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
 
 

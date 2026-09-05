@@ -9,8 +9,8 @@ from urllib.parse import quote
 
 from ..metrics_registry import metric_definition
 from ..models.time import normalize_timestamp, parse_timestamp
-from .base import ProviderCapabilities, ProviderDataError, ProviderRequest, ProviderResponseError, ProviderUnsupportedMetric
-from .http import HttpClient
+from .base import ProviderCapabilities, ProviderDataError, ProviderRequest, ProviderResponse, ProviderResponseError, ProviderUnsupportedMetric
+from .http import HttpClient, classify_transport_error, redact_secrets
 
 
 BASE_URL = "https://api.llama.fi"
@@ -210,26 +210,49 @@ class DeFiLlamaProvider:
             requires_api_key=False,
         )
 
-    def collect(self, request: ProviderRequest) -> list[Mapping[str, Any]]:
+    def collect(self, request: ProviderRequest) -> ProviderResponse:
         identifier = identifier_for_asset(request.asset)
         url = BASE_URL + "/protocol/" + quote(identifier, safe="")
         fetched = _now(self.clock)
         payload = self.client.get_json(url)
         fees_payload = None
+        fees_error: Exception | None = None
         if any(key in request.metric_keys for key in ("fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple")):
             try:
                 fees_payload = self.client.get_json(BASE_URL + "/summary/fees/" + quote(identifier, safe=""))
-            except Exception:
+            except Exception as exc:
                 # The protocol response is still useful for TVL/valuation.
-                fees_payload = None
-        return [dict(item) for item in parse_protocol_payload(
-            payload,
-            request.asset,
-            request.metric_keys,
-            fetched_at=fetched,
-            as_of=request.parameters.get("as_of"),
-            fees_payload=fees_payload,
-        )]
+                fees_payload, fees_error = None, exc
+
+        values: list[Mapping[str, Any]] = []
+        diagnostics: dict[str, Mapping[str, Any]] = {}
+        for key in request.metric_keys:
+            try:
+                values.extend(parse_protocol_payload(
+                    payload,
+                    request.asset,
+                    (key,),
+                    fetched_at=fetched,
+                    as_of=request.parameters.get("as_of"),
+                    fees_payload=fees_payload,
+                ))
+            except (ProviderDataError, ProviderResponseError, ProviderUnsupportedMetric) as exc:
+                source_error = fees_error if fees_error is not None and key in {
+                    "fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple",
+                } else exc
+                diagnostic = getattr(source_error, "diagnostic", None)
+                if hasattr(diagnostic, "as_dict"):
+                    details = dict(diagnostic.as_dict())
+                elif isinstance(diagnostic, Mapping):
+                    details = dict(diagnostic)
+                else:
+                    details = {
+                        "error_code": classify_transport_error(source_error),
+                        "exception_class": source_error.__class__.__name__,
+                        "detail": redact_secrets(str(source_error)),
+                    }
+                diagnostics[key] = details
+        return ProviderResponse(tuple(values), diagnostics=diagnostics)
 
 
 DefiLlamaProvider = DeFiLlamaProvider
