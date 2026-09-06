@@ -22,6 +22,7 @@ judgment and user-facing decisions:
 - `references/decision-rules.md`
 - `references/data-sources.md`
 - `references/data-providers.md`
+- `references/data-source-inventory.md`
 - `references/output-template.md`
 - `references/model-routing.md`
 

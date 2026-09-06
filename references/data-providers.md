@@ -1,5 +1,9 @@
 # Data Provider and Cache Policy
 
+For the complete source-to-field-to-metric inventory, see
+[`data-source-inventory.md`](data-source-inventory.md). This document remains
+the policy for routing, freshness, cache behavior, and availability semantics.
+
 Acquisition is on demand. A review first checks fresh normalized
 `MetricObservation` history, then the local provider cache, then free public
 structured APIs. Only unresolved work is handed to the Web/LLM fallback. The

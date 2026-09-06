@@ -25,6 +25,7 @@ class DocumentationTests(unittest.TestCase):
             "references/risk-model.md",
             "references/decision-rules.md",
             "references/data-sources.md",
+            "references/data-source-inventory.md",
             "references/output-template.md",
             "crypto_portfolio",
             "crypto_portfolio/events",
@@ -60,6 +61,34 @@ class DocumentationTests(unittest.TestCase):
             project = tomllib.load(stream)
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
         self.assertIn("Python 3.11 or newer", (ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_data_source_inventory_matches_current_provider_boundaries(self):
+        inventory = (ROOT / "references/data-source-inventory.md").read_text(encoding="utf-8")
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        provider_policy = (ROOT / "references/data-providers.md").read_text(encoding="utf-8")
+        self.assertIn("references/data-source-inventory.md", skill)
+        self.assertIn("data-source-inventory.md", provider_policy)
+        for provider in (
+            "Binance", "Bybit", "DeFiLlama", "Alternative.me", "Chain liveness",
+            "Coin Metrics", "GitHub", "SoSoValue", "EventScanner",
+        ):
+            with self.subTest(provider=provider):
+                self.assertIn(provider, inventory)
+        for metric in (
+            "market.spot_price", "derivatives.funding_rate", "fundamentals.tvl",
+            "sentiment.market_fear_greed", "risk.chain_liveness_status",
+            "fundamentals.developer_activity", "flows.etf_net_1d",
+            "flows.etf_net_7d", "flows.etf_net_30d",
+        ):
+            with self.subTest(metric=metric):
+                self.assertIn(metric, inventory)
+        for status in ("SUCCESS", "STALE", "FAILED", "SKIPPED", "NOT_APPLICABLE"):
+            with self.subTest(status=status):
+                self.assertIn(f"`{status}`", inventory)
+        self.assertIn("MATERIAL_EVENT_FOUND", inventory)
+        self.assertIn("NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES", inventory)
+        self.assertIn("INSUFFICIENT_SOURCE_COVERAGE", inventory)
+        self.assertIn("does not provide liquidation history", inventory)
 
     def test_reports_document_decision_basis_and_ambiguous_terms(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
