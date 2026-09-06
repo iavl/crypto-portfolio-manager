@@ -154,7 +154,21 @@ display data, so the engine uses value ÷ quantity and records a note.
     `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
     return. `FULL_REVIEW` also compares the prior/current return by asset in
     percentage points; `SNAPSHOT_REVIEW` shows the current table without
-    treating cost basis as a buy signal.
+    treating cost basis as a buy signal. Every portfolio conclusion and
+    risk-asset Action must show the auditable chain:
+    `证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action`.
+    Cite the matching Evidence ID, source, observed time, and collection
+    status; explain the effect on score, confidence, regime, eligibility, or
+    trade size; state current-versus-target deviation and the threshold that
+    produced the Action; and give the concrete condition that would change it.
+    Keep this as concise decision rationale, never private reasoning or a
+    hidden scratchpad.
+    When the report uses a potentially ambiguous term, add a short
+    `术语解释与决策影响` entry. Explain only terms used or material to the
+    decision. `MATERIAL_EVENT_FOUND` means a relevant proposal or announcement
+    was found in the scanned source; it does not mean an exploit, approval, or
+    execution. Call Ethereum items `协议提案/升级活动` and Aave items
+    `治理提案/风险参数活动` when that is what the evidence supports.
 23. Persist only validated snapshots, decisions, execution plans, metric
     observations, collection events, and complete
     evidence. Never

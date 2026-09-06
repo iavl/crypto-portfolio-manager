@@ -594,6 +594,34 @@ class DataAcquisitionTests(unittest.TestCase):
         ))
         self.assertNotIn("liquidations", str(provider.capabilities.as_dict()).lower())
 
+    def test_sosovalue_provider_keeps_short_windows_when_30d_history_is_insufficient(self):
+        class ShortHistoryClient:
+            def get_json(self, url, *, params=None, headers=None):
+                return {
+                    "code": 0,
+                    "data": [
+                        {
+                            "date": (datetime(2026, 8, 15) + timedelta(days=index)).strftime("%Y-%m-%d"),
+                            "total_net_inflow": index + 1,
+                        }
+                        for index in range(21)
+                    ],
+                }
+
+        response = SoSoValueProvider(client=ShortHistoryClient(), api_key="fake-secret").collect(
+            ProviderRequest(
+                "sosovalue",
+                "etf",
+                "BTC",
+                {},
+                ("flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d"),
+            )
+        )
+        self.assertEqual({item["metric_key"] for item in response.observations}, {
+            "flows.etf_net_1d", "flows.etf_net_7d",
+        })
+        self.assertEqual(response.diagnostics["flows.etf_net_30d"]["error_code"], "PROVIDER_UNSUPPORTED")
+
     def test_sosovalue_provider_redacts_key_from_provider_error(self):
         class LeakingClient:
             def get_json(self, url, *, params=None, headers=None):

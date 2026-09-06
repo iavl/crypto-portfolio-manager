@@ -16,6 +16,20 @@ Start with the actual decision in 2–5 concise bullets, for example:
 - 最优先动作
 - Stablecoin target after actions
 
+### 结论依据
+
+After the bullets, give a compact portfolio-level bridge:
+
+```text
+证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action
+```
+
+Name the matching Evidence IDs, sources, observed times, collection status,
+and the effect on confidence or trade eligibility. State the current-versus-
+target deviation, active threshold, stablecoin floor, concentration and
+turnover constraints. If evidence is missing, say `无法确认` and state the
+decision effect; never replace missing evidence with a neutral assumption.
+
 ## 2. 组合诊断
 
 Include:
@@ -57,6 +71,31 @@ Explain the regime using only the most decision-relevant evidence:
 - major current events.
 
 Separate fact from judgment.
+
+Use explicit labels such as `事实` and `判断`. For a phrase such as
+“整体是混合状态”, explain that market breadth and core-asset trend disagree,
+identify the measured breadth/trend evidence, and state that this lowers
+confidence for broad satellite additions rather than automatically creating a
+sell signal.
+
+### 术语解释与决策影响
+
+Add this subsection only for terms used in the report that could be
+misunderstood. Keep entries short and use this format:
+
+| 术语 | 含义 | 本轮决策影响 |
+|---|---|---|
+| `MATERIAL_EVENT_FOUND` | Scanned sources contain a material proposal or announcement. It is not proof of an exploit, approval, or execution. | State whether it lowers confidence, blocks an increase, supports HOLD, or creates a concrete REDUCE/EXIT trigger. |
+| `协议提案/升级活动` | An Ethereum protocol roadmap, upgrade, or developer-economics proposal. | State the affected risk assumption and what confirmation would change the Action. |
+| `治理提案/风险参数活动` | An Aave governance proposal or risk-parameter change under discussion. | State why it does or does not justify new exposure, reduction, or continued HOLD. |
+| `STALE` / `FAILED` / `SKIPPED` | Old evidence / attempted collection without usable evidence / intentionally omitted optional or premium evidence. | State the affected factor, confidence, and trade eligibility. |
+| `Position P&L` | Remaining-position unrealized P&L based on usable cost basis. | Do not call it Portfolio NAV Return or use it as a buy signal. |
+| `NAV Return` | Cash-flow-adjusted portfolio performance. | Mark it `PROVISIONAL` when external cash flows are unresolved. |
+| `成本数据覆盖率` | Current-value share of positions with usable cost data. | Explain how much of the Position P&L is known. |
+
+Use the actual source term when it is more precise. Do not call a proposal a
+“治理案件” or a security incident unless the Evidence explicitly supports
+that classification.
 
 ## 4. 单币评估
 
@@ -116,6 +155,11 @@ Below the factor table, include this compact decision bridge:
   turnover concern.
 - **什么会改变建议**：link to the concrete invalidation/catalyst in section
   8.
+
+Make each bridge distinguish four layers: the observed fact, its bounded
+meaning, the portfolio-level constraint, and the resulting Action. A high score
+does not override missing critical evidence, a regime envelope, a stablecoin
+floor, concentration, or the active rebalance threshold.
 
 For material assets, also show the most important historical metric change:
 current value, previous value, absolute/percentage change, recent trend, and
@@ -233,7 +277,10 @@ State:
 
 The detailed `Data Collection Log` is shown during evidence acquisition. The
 final report must still list every `FAILED`, `STALE`, or `CONFLICT` metric and
-its scoring/decision effect; do not silently omit collection failures.
+its scoring/decision effect; do not silently omit collection failures. Explain
+which missing evidence lowered confidence, blocked an increase, forced
+`HOLD_ONLY`, or left the decision `NO_TRADE`. Optional and premium `SKIPPED`
+items must state that they were excluded from applicable coverage.
 
 For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
 show the change in percentage points when both cost bases are usable. For

@@ -229,6 +229,46 @@ def _parse_points(
     return tuple(result)
 
 
+def _partial_parse_error(error: ProviderError) -> Mapping[str, Any]:
+    diagnostic = getattr(error, "diagnostic", None)
+    if hasattr(diagnostic, "as_dict"):
+        return dict(diagnostic.as_dict())
+    return {
+        "error_code": (
+            "PROVIDER_UNSUPPORTED"
+            if isinstance(error, ProviderUnsupportedMetric)
+            else "PROVIDER_SCHEMA_ERROR"
+        ),
+        "detail": redact_secrets(str(error)) or error.__class__.__name__,
+    }
+
+
+def _parse_requested_points(
+    payload: Any,
+    metric_keys: Iterable[str],
+    *,
+    asset: str,
+    fetched_at: str,
+    as_of: str | datetime | None,
+    endpoint: str,
+) -> tuple[tuple[Mapping[str, Any], ...], dict[str, Mapping[str, Any]]]:
+    values: list[Mapping[str, Any]] = []
+    diagnostics: dict[str, Mapping[str, Any]] = {}
+    for key in tuple(dict.fromkeys(str(item).strip().lower() for item in metric_keys)):
+        try:
+            values.extend(parse_etf_flow_history(
+                payload,
+                (key,),
+                asset=asset,
+                fetched_at=fetched_at,
+                as_of=as_of,
+                endpoint=endpoint,
+            ))
+        except ProviderError as exc:
+            diagnostics[key] = _partial_parse_error(exc)
+    return tuple(values), diagnostics
+
+
 def parse_etf_flow_history(
     payload: Any,
     metric_keys: Iterable[str],
@@ -362,7 +402,7 @@ class SoSoValueProvider:
         fetched_at = _now(self.clock)
         endpoint = BASE_URL + ETF_SUMMARY_HISTORY_PATH
         if scope in _ETF_TYPES:
-            values = parse_etf_flow_history(
+            values, diagnostics = _parse_requested_points(
                 self._get(symbol=_ETF_TYPES[scope], as_of=as_of),
                 request.metric_keys,
                 asset=scope,
@@ -370,17 +410,25 @@ class SoSoValueProvider:
                 as_of=as_of,
                 endpoint=endpoint,
             )
-            return ProviderResponse(observations=tuple(values), network_requests=1)
+            return ProviderResponse(observations=values, diagnostics=diagnostics, network_requests=1)
         if scope == "MARKET":
-            values = _parse_market_history(
-                self._get(symbol="BTC", as_of=as_of),
-                self._get(symbol="ETH", as_of=as_of),
-                request.metric_keys,
-                fetched_at=fetched_at,
-                as_of=as_of,
-                endpoint=endpoint,
-            )
-            return ProviderResponse(observations=tuple(values), network_requests=2)
+            btc_payload = self._get(symbol="BTC", as_of=as_of)
+            eth_payload = self._get(symbol="ETH", as_of=as_of)
+            values: list[Mapping[str, Any]] = []
+            diagnostics: dict[str, Mapping[str, Any]] = {}
+            for key in tuple(dict.fromkeys(str(item).strip().lower() for item in request.metric_keys)):
+                try:
+                    values.extend(_parse_market_history(
+                        btc_payload,
+                        eth_payload,
+                        (key,),
+                        fetched_at=fetched_at,
+                        as_of=as_of,
+                        endpoint=endpoint,
+                    ))
+                except ProviderError as exc:
+                    diagnostics[key] = _partial_parse_error(exc)
+            return ProviderResponse(observations=tuple(values), diagnostics=diagnostics, network_requests=2)
         raise ProviderUnsupportedMetric(f"SoSoValue ETF history is not supported for {scope}")
 
 

@@ -61,6 +61,35 @@ class DocumentationTests(unittest.TestCase):
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
         self.assertIn("Python 3.11 or newer", (ROOT / "README.md").read_text(encoding="utf-8"))
 
+    def test_reports_document_decision_basis_and_ambiguous_terms(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
+        for text in (
+            "证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action",
+            "Evidence ID",
+            "MATERIAL_EVENT_FOUND",
+            "协议提案/升级活动",
+            "治理提案/风险参数活动",
+            "无法确认",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(text in skill or text in template)
+        for text in (
+            "### 结论依据",
+            "### 术语解释与决策影响",
+            "事实",
+            "判断",
+            "STALE",
+            "Position P&L",
+            "NAV Return",
+            "成本数据覆盖率",
+            "scoring/decision effect",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, template)
+        self.assertIn("MATERIAL_EVENT_FOUND` means a relevant proposal or announcement", skill)
+        self.assertIn("not proof of an exploit, approval, or execution", template)
+
     def test_install_script_copies_payload_and_refuses_existing_destination(self):
         script = ROOT / "install.sh"
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
