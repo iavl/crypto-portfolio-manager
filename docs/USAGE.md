@@ -240,6 +240,7 @@ python3 scripts/providers.py --status
 python3 scripts/providers.py --list
 python3 scripts/provider_cache.py --stats
 python3 scripts/providers.py --probe binance
+python3 scripts/providers.py --probe coingecko
 python3 scripts/providers.py --probe defillama
 python3 scripts/providers.py --probe alternative_me
 python3 scripts/providers.py --probe sosovalue
@@ -265,6 +266,7 @@ API key 只通过环境变量提供，绝不写入配置、cache、JSONL、日�
 ```bash
 export SOSOVALUE_API_KEY='...'
 export COINMETRICS_API_KEY='...'
+export COINGECKO_API_KEY='...'
 export GITHUB_TOKEN='...'
 ```
 

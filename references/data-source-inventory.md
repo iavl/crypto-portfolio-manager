@@ -31,7 +31,8 @@ observation 即使原 provider 已停用，也必须保持可读取。
 |---|---|---|---|
 | Binance | 已配置并注册 | 无 | 现价、OHLCV、funding、OI、ratios、delivery basis |
 | Bybit | 已配置并注册 | 无 | OHLCV、funding、OI、account ratio |
-| DeFiLlama | 已配置并注册 | 无 | TVL、fees、revenue、部分估值字段 |
+| CoinGecko | 凭证门控 | `COINGECKO_API_KEY` | BTC/ETH/SOL/BNB/LINK/AAVE market cap、FDV |
+| DeFiLlama | 已配置并注册 | 无 | TVL、fees、revenue、fee/revenue multiple |
 | Alternative.me | 已配置并注册 | 无 | Fear & Greed |
 | Chain liveness | 已配置并注册 | 无 | BTC/ETH/BNB/SOL 进度和 finality |
 | Coin Metrics Community | 已配置并注册 | 无 | BTC/ETH 链上、供应、周期、exchange attribution |
@@ -72,6 +73,22 @@ aggregates、generic exchange netflow 或 protocol market cap。
 Bybit 是支持的 market/derivatives fallback，不实现 Binance 的 delivery-basis
 methodology。
 
+## CoinGecko
+
+公共 HTTPS 请求使用共享的 verified-TLS `HttpClient`。Demo API key 只通过
+`COINGECKO_API_KEY` 环境变量传入，并发送为 `x-cg-demo-api-key` header；不会
+进入 query string、cache identity、history 或 probe output。
+
+| Endpoint | 获取的信息 | Metric keys |
+|---|---|---|
+| `GET https://api.coingecko.com/api/v3/coins/markets` | 当前 USD market cap、FDV、source `last_updated` | `valuation.market_cap`, `valuation.fdv` |
+| `GET https://api.coingecko.com/api/v3/coins/{id}/history` | 按日期的历史 market cap；FDV 仅在官方响应明确提供时使用 | `valuation.market_cap`, `valuation.fdv` |
+
+当前估值一次请求绑定一个精确 allowlisted CoinGecko ID，并允许 market cap 成功
+而 FDV 缺失。历史请求只使用 `as_of` 日期的历史 endpoint；不能用今天的
+`/coins/markets` 填补历史 FDV。`valuation.fdv_market_cap_ratio` 由 Python
+在同资产、非未来、仍新鲜的输入上计算。
+
 ## DeFiLlama
 
 公共 HTTPS 请求不需要 API key。当前显式 identifier 为
@@ -83,12 +100,11 @@ methodology。
 | `GET https://api.llama.fi/v2/chains` | chain TVL | `fundamentals.tvl` for ETH/SOL/BNB |
 | `GET https://api.llama.fi/tvl/{identifier}` | lightweight protocol TVL | `fundamentals.tvl` for AAVE |
 | `GET https://api.llama.fi/summary/fees/{identifier}` | fees/revenue summaries | `fundamentals.fees_30d`, `fundamentals.revenue_30d`, `valuation.fee_revenue_multiple` |
-| `GET https://api.llama.fi/protocol/{identifier}` | protocol payload when usable | selected TVL/valuation fields |
+| `GET https://api.llama.fi/protocol/{identifier}` | protocol payload when usable | selected TVL/fundamental fields |
 | stablecoin/fee overview routes | stablecoin liquidity and fee context | `fundamentals.stablecoin_liquidity`, fees/revenue where supported |
 
-估值字段依赖 provider capability 和响应字段。当前 adapter 没有 BTC
-protocol identifier；缺少 market cap/FDV 时报告为 unsupported/stale，不从
-TVL 或价格伪造估值。
+DeFiLlama 不再是 broad market-cap/FDV provider。缺少协议 fundamentals 时仍
+按 provider failure/stale 处理；不从 TVL 或价格伪造 market cap、FDV 或其比率。
 
 ## Alternative.me
 
@@ -116,11 +132,14 @@ context，不是单币情绪，也不是单独的买卖信号。
 
 Community endpoint 为 `https://community-api.coinmetrics.io`；authenticated
 tier 为 `https://api.coinmetrics.io`，使用 `COINMETRICS_API_KEY`。当前适用
-assets 为 BTC/ETH，且先检查 catalog 和 1D availability。
+assets 为 BTC/ETH/AAVE，且先检查 catalog 和 1D availability。`CapMrktEstUSD`
+只作为 CoinGecko 不可用时的 market-cap fallback；不使用
+`CapMrktCurUSD` 代替，也不把 `CapFutExp10yrUSD` 当作 FDV。
 
 | 数据组 | 信息 | Metric keys |
 |---|---|---|
-| Network | active addresses、transactions | `onchain.active_addresses`, `onchain.transaction_count` |
+| Market-cap fallback | estimated circulating-supply market cap | `valuation.market_cap` via catalog-supported `CapMrktEstUSD` |
+| Network | active addresses、transfer volume、blockspace fees、transactions | `onchain.active_addresses`, `onchain.transfer_volume`, `onchain.blockspace_fees`, `onchain.transaction_count` when the 1D catalog supports the metric/asset |
 | BTC cycle | MVRV、realized price、SOPR、LTH/STH、NUPL | `onchain.btc.mvrv`, `onchain.btc.mvrv_zscore`, `onchain.btc.realized_price`, `onchain.btc.market_to_realized_price`, `onchain.btc.sopr`, `onchain.btc.lth_supply_pct`, `onchain.btc.lth_net_position_change`, `onchain.btc.sth_realized_price`, `onchain.btc.lth_realized_price`, `onchain.btc.nupl` |
 | Tokenomics inputs | issuance/current supply | `tokenomics.annualized_emissions`, `tokenomics.supply_growth` |
 | Exchange attribution | exchange inflow/outflow | `flows.exchange_netflow` when catalog/tier supports it |

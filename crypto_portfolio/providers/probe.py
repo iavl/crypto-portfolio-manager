@@ -10,6 +10,7 @@ from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
 from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, catalog_metrics
+from .coingecko import BASE_URL as COINGECKO_BASE_URL, CoinGeckoProvider
 from .chain_liveness import CHAIN_NATIVE_ASSETS, ChainLivenessProvider
 from .defillama import BASE_URL as DEFILLAMA_BASE_URL
 from .http import classify_transport_error, redact_secrets, redact_url
@@ -214,6 +215,35 @@ def probe_provider(
         return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
         return (_with_config(_sosovalue_probe(provider), client),)
+    if name == "coingecko" and isinstance(provider, CoinGeckoProvider):
+        endpoint = COINGECKO_BASE_URL + "/coins/markets"
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "coingecko", "valuation", "BTC", {"as_of": None},
+                ("valuation.market_cap", "valuation.fdv"),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call(
+            "coingecko",
+            endpoint,
+            call,
+            authenticated=True,
+            validate=_require_observations,
+        )
+        if "error_code" not in result:
+            observations = tuple(getattr(captured["value"], "observations", ()))
+            result.update({
+                "asset": "BTC",
+                "market_cap": "present" if any(item.get("metric_key") == "valuation.market_cap" for item in observations) else "missing",
+                "fdv": "present" if any(item.get("metric_key") == "valuation.fdv" for item in observations) else "missing",
+                "last_updated": next((item.get("observed_at") for item in observations if item.get("observed_at")), None),
+            })
+        result["endpoint_name"] = "coins/markets"
+        return (_with_config(result, client),)
     if name == "binance":
         endpoint = SPOT_BASE_URL + "/api/v3/ticker/price"
         return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"symbol": "BTCUSDT"}), validate=lambda value: _require_mapping(value)), client),)

@@ -38,6 +38,7 @@ from .chain_liveness import (
 from .binance import BinanceProvider
 from .bybit import BybitProvider
 from .coinmetrics import CoinMetricsAuthenticatedProvider, CoinMetricsProvider
+from .coingecko import CoinGeckoProvider
 from .defillama import DeFiLlamaProvider, DefiLlamaProvider
 from .github_activity import GitHubActivityProvider
 from .sosovalue import SoSoValueProvider
@@ -81,6 +82,7 @@ __all__ = [
     "BybitProvider",
     "CoinMetricsAuthenticatedProvider",
     "CoinMetricsProvider",
+    "CoinGeckoProvider",
     "DeFiLlamaProvider",
     "DefiLlamaProvider",
     "GitHubActivityProvider",

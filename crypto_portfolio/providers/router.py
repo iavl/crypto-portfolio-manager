@@ -170,6 +170,7 @@ class ProviderRouter:
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
+        from .coingecko import CoinGeckoProvider
         from .chain_liveness import ChainLivenessProvider
         from .defillama import DeFiLlamaProvider
         from .github_activity import GitHubActivityProvider
@@ -186,6 +187,11 @@ class ProviderRouter:
             "chain_liveness": ChainLivenessProvider(client=client),
             "github": GitHubActivityProvider(client=client),
         }
+        if provider_enabled("coingecko", self.config):
+            providers["coingecko"] = CoinGeckoProvider(
+                client=client,
+                api_key=provider_api_key("coingecko", self.config),
+            )
         if provider_enabled("coinmetrics_pro", self.config):
             from .coinmetrics import CoinMetricsAuthenticatedProvider
 

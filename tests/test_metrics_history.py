@@ -172,6 +172,36 @@ class MetricHistoryTests(unittest.TestCase):
             self.assertEqual(comparison["previous_value"], 20)
             self.assertEqual(comparison["trend"], "IMPROVING")
 
+    def test_market_cap_methodology_transition_does_not_create_false_trend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+
+            def market_cap(value, observed_at, source, methodology):
+                return MetricObservation(
+                    stable_observation_id("BTC", "valuation.market_cap", observed_at, source, value, "1d"),
+                    "BTC", "valuation.market_cap", "valuation", value, "USD", "1d",
+                    observed_at, observed_at, source, "CURRENT", "MEDIUM",
+                    metadata={"methodology": methodology},
+                )
+
+            append_metric_observation(market_cap(
+                100, "2026-09-04T00:00:00Z", "defillama", "defillama_reported_market_cap",
+            ), path)
+            append_metric_observation(market_cap(
+                120, "2026-09-05T00:00:00Z", "coingecko", "coingecko_reported_circulating_supply_market_cap",
+            ), path)
+            comparison = compare_latest_metric("BTC", "valuation.market_cap", path=path)
+            self.assertIsNone(comparison["previous_value"])
+            self.assertEqual(comparison["trend"], "INSUFFICIENT_HISTORY")
+
+            append_metric_observation(market_cap(
+                130, "2026-09-06T00:00:00Z", "coinmetrics_community",
+                "coinmetrics_estimated_circulating_supply_market_cap",
+            ), path)
+            comparison = compare_latest_metric("BTC", "valuation.market_cap", path=path)
+            self.assertIsNone(comparison["previous_value"])
+            self.assertEqual(comparison["trend"], "INSUFFICIENT_HISTORY")
+
     def test_collection_events_and_reporter(self):
         with tempfile.TemporaryDirectory() as directory:
             observation_path = Path(directory) / "observations.jsonl"

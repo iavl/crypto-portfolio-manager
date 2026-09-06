@@ -72,6 +72,14 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("binance", "bybit")
     if key == "derivatives.open_interest_to_market_cap":
         return ()
+    if key == "valuation.market_cap":
+        return ("coingecko", "coinmetrics_community", "coinmetrics_pro")
+    if key == "valuation.fdv":
+        return ("coingecko",)
+    if key == "valuation.fdv_market_cap_ratio":
+        return ()
+    if key == "valuation.fee_revenue_multiple":
+        return ("defillama",)
     if key.startswith("flows.etf_"):
         return ("sosovalue",)
     if "liquidations" in key:
@@ -92,7 +100,10 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ()
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"}:
         return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH"} else ()
-    if key in {"onchain.active_addresses", "onchain.transaction_count"}:
+    if key in {
+        "onchain.active_addresses", "onchain.transfer_volume",
+        "onchain.blockspace_fees", "onchain.transaction_count",
+    }:
         return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)
@@ -120,6 +131,12 @@ def dataset_for_metric(metric_key: str) -> str:
         return "funding"
     if key == "derivatives.open_interest_to_market_cap":
         return "derived"
+    if key in {"valuation.market_cap", "valuation.fdv"}:
+        return "valuation"
+    if key == "valuation.fdv_market_cap_ratio":
+        return "derived"
+    if key == "valuation.fee_revenue_multiple":
+        return "protocol"
     if key.startswith("derivatives.open_interest"):
         return "open_interest"
     if key.startswith(("derivatives.long_short", "derivatives.top_trader")):
@@ -192,13 +209,19 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
     start = end - timedelta(days=start_days)
     result: dict[str, Any] = {
         "symbol": asset,
-        "market": "chain" if dataset == "chain_liveness" else "spot" if dataset == "ohlcv" or dataset == "spot" else "perpetual",
-        "quote_currency": "USDT",
-        "as_of": None if dataset in {"basis", "chain_liveness"} and as_of is None else normalize_timestamp(end.isoformat(), "as_of"),
+        "market": "chain" if dataset == "chain_liveness" else "spot" if dataset in {"ohlcv", "spot", "valuation"} else "perpetual",
+        "quote_currency": "USD" if dataset == "valuation" else "USDT",
+        "as_of": (
+            None
+            if dataset in {"basis", "chain_liveness", "valuation"} and as_of is None
+            else normalize_timestamp(end.isoformat(), "as_of")
+        ),
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
-    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain", "github"}:
+    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain", "github"} or (
+        dataset == "valuation" and as_of is not None
+    ):
         result.update({
             "start": normalize_timestamp(start.isoformat(), "start"),
             "end": normalize_timestamp(end.isoformat(), "end"),
@@ -240,7 +263,11 @@ def build_provider_requests(
                 "methodology": BASIS_METHODOLOGY,
             })
         keys = tuple(item.metric_key for item in items)
-        mutable = any(metric_is_mutable(key) for key in keys) and dataset != "ohlcv"
+        mutable = (
+            any(metric_is_mutable(key) for key in keys)
+            and dataset != "ohlcv"
+            and not (dataset == "valuation" and as_of is not None)
+        )
         result.append(
             ProviderRequest(
                 provider=provider,

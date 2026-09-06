@@ -17,10 +17,16 @@ AUTHENTICATED_BASE_URL = "https://api.coinmetrics.io"
 COINMETRICS_ASSETS = {
     "BTC": "btc",
     "ETH": "eth",
+    "AAVE": "aave",
 }
 COINMETRICS_GENERIC_NETWORK_METRICS = {
     "onchain.active_addresses": "AdrActCnt",
+    "onchain.transfer_volume": "TxTfrValAdjUSD",
+    "onchain.blockspace_fees": "FeeTotUSD",
     "onchain.transaction_count": "TxCnt",
+}
+COINMETRICS_MARKET_VALUATION_METRICS = {
+    "valuation.market_cap": "CapMrktEstUSD",
 }
 COINMETRICS_BTC_CYCLE_METRICS = {
     "onchain.btc.mvrv": "CapMVRVCur",
@@ -41,6 +47,7 @@ COINMETRICS_TOKENOMICS_INPUTS = {
 COINMETRICS_EXCHANGE_FLOW_INPUTS = ("FlowInExUSD", "FlowOutExUSD")
 COINMETRICS_METRIC_MAP = {
     **COINMETRICS_GENERIC_NETWORK_METRICS,
+    **COINMETRICS_MARKET_VALUATION_METRICS,
     **COINMETRICS_BTC_CYCLE_METRICS,
 }
 COINMETRICS_SUPPORTED_METRICS = tuple(dict.fromkeys((
@@ -129,6 +136,9 @@ def catalog_metrics_by_asset(payload: Mapping[str, Any]) -> dict[str, frozenset[
                         found_asset = True
             if found_asset:
                 continue
+            # A catalog entry with only non-daily frequencies is not a valid
+            # source for this provider's 1D acquisition contract.
+            continue
         assets = item.get("assets", item.get("asset"))
         if isinstance(assets, str):
             assets = (assets,)
@@ -205,6 +215,10 @@ def parse_timeseries(
             "metadata": {
                 "source_dataset": "timeseries/asset-metrics",
                 "coinmetrics_metric": mapping[key],
+                **(
+                    {"methodology": "coinmetrics_estimated_circulating_supply_market_cap"}
+                    if key == "valuation.market_cap" else {}
+                ),
             },
         })
     return tuple(result)
@@ -478,6 +492,7 @@ __all__ = [
     "COINMETRICS_ASSETS",
     "COINMETRICS_BTC_CYCLE_METRICS",
     "COINMETRICS_GENERIC_NETWORK_METRICS",
+    "COINMETRICS_MARKET_VALUATION_METRICS",
     "COINMETRICS_METRIC_MAP",
     "COINMETRICS_SUPPORTED_METRICS",
     "COMMUNITY_BASE_URL",

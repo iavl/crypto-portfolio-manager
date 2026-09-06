@@ -15,8 +15,9 @@ Current portfolio recommendations require current data. Prefer authoritative pri
 ## Provider hierarchy
 
 For acquisition, use structured public exchange APIs for market and
-derivatives data, structured analytics APIs for protocol fundamentals, a
-catalog-checked on-chain API for BTC cycle context, and current official/Web
+derivatives data, CoinGecko for broad market valuation, DeFiLlama for protocol
+fundamentals, a catalog-checked Coin Metrics API for on-chain context and a
+market-cap fallback, and current official/Web
 scans for security, governance, and regulatory events. Optional API-key
 providers may fill advanced ETF, liquidation, social, or exchange-attribution
 gaps; they are never required for a normal review. See
@@ -39,8 +40,8 @@ Use whenever available:
 
 Useful examples, subject to availability and coverage:
 
-- CoinGecko / CoinMarketCap for broad market reference;
-- DefiLlama for DeFi TVL, stablecoins, fees/revenue where applicable;
+- CoinGecko for broad market-cap and FDV reference;
+- DeFiLlama for DeFi TVL, stablecoins, fees/revenue where applicable;
 - Token Terminal or similar analytics when methodology is understood;
 - reputable ETF flow aggregators when issuer-level primary data is impractical;
 - reputable on-chain analytics platforms.
@@ -160,6 +161,12 @@ Examples:
 - developer/ecosystem activity;
 - supply/emissions/unlocks;
 - token value capture.
+
+Broad market valuation is a separate data category: `valuation.market_cap` and
+`valuation.fdv` come from CoinGecko when configured, with catalog-aware Coin
+Metrics `CapMrktEstUSD` as market-cap-only fallback. Python derives
+`valuation.fdv_market_cap_ratio`; DeFiLlama failure must not make BTC/ETH/AAVE
+market cap unavailable when these routes are available.
 
 ### Events
 

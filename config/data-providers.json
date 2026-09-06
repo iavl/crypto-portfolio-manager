@@ -3,6 +3,10 @@
   "providers": {
     "binance": {"enabled": true},
     "bybit": {"enabled": true},
+    "coingecko": {
+      "enabled": "AUTO",
+      "api_key_env": "COINGECKO_API_KEY"
+    },
     "coinmetrics_community": {"enabled": true},
     "defillama": {"enabled": true},
     "alternative_me": {"enabled": true},
@@ -31,6 +35,7 @@
     "etf": 86400,
     "sentiment": 43200,
     "protocol": 21600,
+    "valuation": 3600,
     "onchain": 86400,
     "default": 3600
   },

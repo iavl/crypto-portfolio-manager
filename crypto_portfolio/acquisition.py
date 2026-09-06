@@ -43,6 +43,10 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "CACHE_EXPIRED",
     "CACHE_CORRUPT",
 }
+_DERIVED_DEPENDENCIES = {
+    "valuation.fdv_market_cap_ratio": ("valuation.fdv", "valuation.market_cap"),
+    "derivatives.open_interest_to_market_cap": ("derivatives.open_interest_usd", "valuation.market_cap"),
+}
 
 
 class AcquisitionResolutionRequired(RuntimeError):
@@ -224,6 +228,10 @@ def _active_observation_source(observation: MetricObservation, as_of: str | date
     source = observation.source.strip().lower()
     if source == "coinglass":
         return False
+    if source == "defillama" and observation.metric_key in {
+        "valuation.market_cap", "valuation.fdv", "valuation.fdv_market_cap_ratio",
+    }:
+        return False
     if source == "binance" and observation.metric_key == "derivatives.futures_basis_annualized":
         return current_delivery_basis(observation.metadata, as_of)
     return True
@@ -245,6 +253,33 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
         f"Provider failures: {summary.get('provider_failures_by_error_code', {})}",
         f"Failed after all fallbacks: {summary.get('failed_after_fallbacks', 0)}",
     ))
+
+
+def _expand_derived_dependencies(plan: MetricCollectionPlan) -> MetricCollectionPlan:
+    """Fetch dependencies for a direct derived-metric request without exposing them as results."""
+    identities = {(request.asset, request.metric_key) for request in plan.requests}
+    additions: list[MetricRequest] = []
+    for request in plan.requests:
+        for dependency in _DERIVED_DEPENDENCIES.get(request.metric_key, ()):
+            identity = (request.asset, dependency)
+            if identity in identities or not metric_definition(dependency).applies_to(request.asset):
+                continue
+            identities.add(identity)
+            additions.append(MetricRequest(
+                request.asset,
+                dependency,
+                review_type=plan.review_type,
+                reason=f"derived dependency for {request.metric_key}",
+            ))
+    if not additions:
+        return plan
+    return MetricCollectionPlan(
+        review_type=plan.review_type,
+        requests=(*plan.requests, *additions),
+        assets=plan.assets,
+        discovery_required_assets=plan.discovery_required_assets,
+        collector_model=plan.collector_model,
+    )
 
 
 class AcquisitionManager:
@@ -283,7 +318,8 @@ class AcquisitionManager:
         event_source_scan_responses: Mapping[Any, EventSourceScanResponse | Mapping[str, Any]] | Iterable[EventSourceScanResponse | Mapping[str, Any]] | None = None,
         event_source_fetcher: Callable[[EventSourceScanRequest], Any] | None = None,
     ) -> AcquisitionResult:
-        model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
+        requested_model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
+        model = _expand_derived_dependencies(requested_model)
         selected_mode = resolve_fetch_mode(fetch_mode if fetch_mode is not None else (mode if mode is not None else self.fetch_mode))
         current = _now(now)
         cutoff = as_of if as_of is not None else current
@@ -314,7 +350,14 @@ class AcquisitionManager:
                         request.metric_key,
                         self.router.config.get("cache_ttl_seconds"),
                     )
-                    if metric_is_mutable(request.metric_key) and provider_chain(request.metric_key, request.asset)
+                    if (
+                        metric_is_mutable(request.metric_key)
+                        and provider_chain(request.metric_key, request.asset)
+                        and not (
+                            as_of is not None
+                            and request.metric_key in {"valuation.market_cap", "valuation.fdv"}
+                        )
+                    )
                     else None
                 ),
             )
@@ -540,7 +583,7 @@ class AcquisitionManager:
                 (*chain, "official/current sources") if chain else ("official/current sources",),
             ))
 
-        for request in model.requests:
+        for request in requested_model.requests:
             identity = (request.asset, request.metric_key)
             raw = reusable.get(identity)
             if raw is not None:
@@ -682,7 +725,7 @@ class AcquisitionManager:
             if scan is not None:
                 event_sources_reachable += round(scan.coverage * len(requests))
         summary.update({
-            "metrics_requested": len(model.requests),
+            "metrics_requested": len(requested_model.requests),
             "fresh_observation_hits": fresh_hits,
             "provider_cache_hits": routed.provider_cache_hits,
             "api_requests": routed.api_requests,
@@ -698,7 +741,7 @@ class AcquisitionManager:
             "event_sources_required": event_sources_required,
         })
         return AcquisitionResult(
-            model,
+            requested_model,
             tuple(results),
             tuple(web_fallbacks),
             summary,

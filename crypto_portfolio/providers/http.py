@@ -32,7 +32,10 @@ from .base import (
 )
 
 
-_SECRET_NAMES = {"api_key", "apikey", "api-secret", "api_secret", "authorization", "cookie", "password", "secret", "token"}
+_SECRET_NAMES = {
+    "api_key", "apikey", "api-secret", "api_secret", "authorization", "cookie", "password", "secret", "token",
+    "coingecko_api_key", "x_cg_demo_api_key",
+}
 _MACOS_CA_BUNDLE = Path("/etc/ssl/cert.pem")
 
 

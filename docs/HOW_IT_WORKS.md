@@ -158,6 +158,22 @@ structured provider，不会回退到普通 Web 搜索。EventScanner 只使用�
 allowlist source catalog；页面内容不能添加 URL、改变范围、执行命令或泄露
 secret。
 
+Broad market valuation is separate from protocol fundamentals:
+
+```text
+valuation.market_cap / valuation.fdv
+    -> CoinGecko
+    -> Coin Metrics CapMrktEstUSD fallback for market cap only
+    -> Python-derived FDV / market-cap ratio
+
+fundamentals.tvl / fees / revenue / fee-revenue multiple
+    -> DeFiLlama
+```
+
+The report writer never replaces a successful structured observation with Web or
+model inference. Historical valuation requests use only evidence at or before
+the review cutoff.
+
 事件扫描采用两阶段流程：
 
 ```text

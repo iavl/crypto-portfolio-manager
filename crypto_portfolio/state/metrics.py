@@ -51,6 +51,22 @@ def _same_identity(left: MetricObservation, right: MetricObservation) -> bool:
     )
 
 
+_SOURCE_SENSITIVE_METRICS = {
+    "flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d",
+    "valuation.market_cap", "valuation.fdv", "valuation.fdv_market_cap_ratio",
+}
+
+
+def _methodology(observation: MetricObservation) -> str:
+    return str((observation.metadata or {}).get("methodology") or observation.source).strip().lower()
+
+
+def _trend_compatible(metric_key: str, current: MetricObservation, previous: MetricObservation) -> bool:
+    if metric_key not in _SOURCE_SENSITIVE_METRICS:
+        return True
+    return _methodology(current) == _methodology(previous)
+
+
 def append_metric_observation(
     observation: MetricObservation | Mapping[str, Any],
     path: str | Path | None = None,
@@ -295,9 +311,12 @@ def previous_metric(
         return None
     latest_time = values[-1].observed_at
     latest_source = values[-1].source
-    source_transition_guard = metric_definition(metric_key).key.startswith("flows.etf_")
+    canonical_key = metric_definition(metric_key).key
     for item in reversed(values[:-1]):
-        if item.observed_at != latest_time and (not source_transition_guard or item.source == latest_source):
+        if item.observed_at != latest_time and (
+            _trend_compatible(canonical_key, values[-1], item)
+            and (not canonical_key.startswith("flows.etf_") or item.source == latest_source)
+        ):
             return item
     return None
 
@@ -339,11 +358,14 @@ def trend_summary(
     invalid: list[str] | None = None,
 ) -> dict[str, Any]:
     values = metric_series(asset, metric_key, path=path, invalid=invalid)
-    if values and metric_definition(metric_key).key.startswith("flows.etf_"):
-        source = values[-1].source
+    canonical_key = metric_definition(metric_key).key
+    if values and canonical_key in _SOURCE_SENSITIVE_METRICS:
+        latest = values[-1]
         compatible: list[MetricObservation] = []
         for item in reversed(values):
-            if item.source != source:
+            if not _trend_compatible(canonical_key, latest, item):
+                break
+            if canonical_key.startswith("flows.etf_") and item.source != latest.source:
                 break
             compatible.append(item)
         values = list(reversed(compatible))
@@ -353,7 +375,7 @@ def trend_summary(
         values = values[-limit:]
     result: dict[str, Any] = {
         "asset": asset.strip().upper(),
-        "metric_key": metric_definition(metric_key).key,
+        "metric_key": canonical_key,
         "observation_count": len(values),
         "values": [item.value for item in values],
         "observation_ids": [item.observation_id for item in values],

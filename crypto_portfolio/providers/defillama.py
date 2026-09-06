@@ -147,8 +147,6 @@ def parse_protocol_payload(
         "fundamentals.fees_30d": ("fees30d", "fees_30d", "total30d", "fees"),
         "fundamentals.revenue_30d": ("revenue30d", "revenue_30d", "revenue"),
         "fundamentals.stablecoin_liquidity": ("stablecoinLiquidity", "stablecoin_liquidity"),
-        "valuation.market_cap": ("mcap", "marketCap", "market_cap"),
-        "valuation.fdv": ("fdv", "fullyDilutedValuation"),
     }
     for metric, names in scalar_names.items():
         if metric == "fundamentals.revenue_30d" and revenue_payload is not None:
@@ -173,8 +171,6 @@ def parse_protocol_payload(
                     break
             if metric in values:
                 break
-    if "valuation.fdv_market_cap_ratio" in keys and "valuation.fdv" in values and "valuation.market_cap" in values and values["valuation.market_cap"][0] > 0:
-        values["valuation.fdv_market_cap_ratio"] = (values["valuation.fdv"][0] / values["valuation.market_cap"][0], fetched_at)
     if "valuation.fee_revenue_multiple" in keys and "fundamentals.fees_30d" in values and "fundamentals.revenue_30d" in values and values["fundamentals.revenue_30d"][0] > 0:
         values["valuation.fee_revenue_multiple"] = (values["fundamentals.fees_30d"][0] / values["fundamentals.revenue_30d"][0], fetched_at)
     result = []
@@ -210,8 +206,7 @@ class DeFiLlamaProvider:
             provider=self.name,
             metric_keys=(
                 "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
-                "fundamentals.stablecoin_liquidity", "valuation.market_cap", "valuation.fdv",
-                "valuation.fdv_market_cap_ratio", "valuation.fee_revenue_multiple",
+                "fundamentals.stablecoin_liquidity", "valuation.fee_revenue_multiple",
             ),
             historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d"),
             supports_batching=True,
@@ -247,7 +242,7 @@ class DeFiLlamaProvider:
             try:
                 fees_payload = self.client.get_json(BASE_URL + "/summary/fees/" + quote(identifier, safe=""))
             except Exception as exc:
-                # The protocol response is still useful for TVL/valuation.
+                # The protocol response is still useful for TVL/fundamentals.
                 fees_payload, fees_error = None, exc
         revenue_payload = None
         revenue_error: Exception | None = None

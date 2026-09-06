@@ -30,10 +30,11 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Spot/OHLCV | Binance, Bybit | None | Only approved public USDT mappings are used. |
 | Funding/OI/ratios | Binance, Bybit | None | Venue and methodology stay in provenance. |
 | Annualized futures basis | Binance | None | Nearest trading USDT delivery contract; exact-symbol mark/index basis, ACT/365. Bybit has no implemented basis adapter. |
+| Market cap / FDV | CoinGecko, then catalog-aware Coin Metrics market-cap fallback | `COINGECKO_API_KEY` for CoinGecko; optional `COINMETRICS_API_KEY` for Pro | CoinGecko owns structured broad valuation; Python derives FDV/market-cap ratio. |
 | Protocol TVL/fees/revenue | DeFiLlama | None | Asset-to-protocol identifiers are explicit. |
 | Market Fear & Greed | Alternative.me | None | Market-wide context, not per-asset sentiment. |
 | Chain liveness | Structured Bitcoin block APIs, EVM JSON-RPC, and Solana JSON-RPC | None | Current canonical progress only; transport failure is not a halt. |
-| BTC/ETH network, supply, cycle, and exchange attribution | Coin Metrics Community, optional authenticated tier | Optional environment key | Asset-specific catalog availability is checked; unsupported USD transfer/fee or asset combinations remain required failures or premium skips. |
+| BTC/ETH network, supply, cycle, and exchange attribution | Coin Metrics Community, optional authenticated tier | Optional environment key | Asset-specific catalog availability is checked; unsupported USD transfer/fee or asset combinations remain required failures or premium skips. `CapMrktEstUSD` is only a catalog-aware market-cap fallback. |
 | Developer activity | Fixed canonical ETH/AAVE GitHub repository allowlist | Optional `GITHUB_TOKEN` | Public REST commits only; bounded trailing 30-day default-branch counts, no repository discovery or HTML scraping. |
 | ETF flows | SoSoValue API v1 when configured; Web only for unresolved non-provider work | `SOSOVALUE_API_KEY` | U.S. BTC/ETH ETF summary history is bundled into 1D/7D/30D values; current access and limits are controlled by SoSoValue. |
 | Historical liquidations | No configured structured provider; optional and skipped when unavailable | None | SoSoValue's current official API documents ETF data, not liquidation history. Historical CoinGlass points remain audit-only; realtime snapshots are not substituted. |
@@ -126,6 +127,7 @@ history diagnostics:
 
 ```bash
 python3 scripts/providers.py --probe binance
+python3 scripts/providers.py --probe coingecko
 python3 scripts/providers.py --probe defillama
 python3 scripts/providers.py --probe alternative_me
 python3 scripts/providers.py --probe sosovalue
