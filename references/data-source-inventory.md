@@ -132,7 +132,9 @@ context，不是单币情绪，也不是单独的买卖信号。
 
 Community endpoint 为 `https://community-api.coinmetrics.io`；authenticated
 tier 为 `https://api.coinmetrics.io`，使用 `COINMETRICS_API_KEY`。当前适用
-assets 为 BTC/ETH/AAVE，且先检查 catalog 和 1D availability。`CapMrktEstUSD`
+assets 为 BTC/ETH/BNB/AAVE，且先检查 catalog 和 1D availability。当前
+Community catalog 已确认 BNB 的 canonical asset ID 为 `bnb`，并支持
+`CapMrktEstUSD` 的 `1d` 数据。`CapMrktEstUSD`
 只作为 CoinGecko 不可用时的 market-cap fallback；不使用
 `CapMrktCurUSD` 代替，也不把 `CapFutExp10yrUSD` 当作 FDV。
 
@@ -162,9 +164,11 @@ metadata。不做 repository discovery、HTML scraping；GitHub rate-limit 不�
 
 ## SoSoValue ETF flows
 
-Endpoint 为 `GET https://openapi.sosovalue.com/openapi/v1/etfs/summary-history`，
-使用 `x-soso-api-key` / `SOSOVALUE_API_KEY`。Python 将美国交易日按
-`America/New_York` 16:00 转为 observation timestamp。
+Endpoint 为 `POST https://api.sosovalue.xyz/openapi/v2/etf/historicalInflowChart`，
+使用 `x-soso-api-key` / `SOSOVALUE_API_KEY`，body 仅为
+`{"type":"us-btc-spot"}` 或 `{"type":"us-eth-spot"}`。Python 将美国
+交易日按 `America/New_York` 16:00 转为 observation timestamp，并在本地
+按 `as_of` 过滤最多 300 天的返回历史。
 
 - `BTC`: `flows.etf_net_1d`, `flows.etf_net_7d`, `flows.etf_net_30d`;
 - `ETH`: 同上；
@@ -172,7 +176,7 @@ Endpoint 为 `GET https://openapi.sosovalue.com/openapi/v1/etfs/summary-history`
 
 metadata 保留 source date、scope、window、rows used、source assets、aggregation
 和 excluded incomplete dates。负流量有效。如果源历史不足 30D，1D/7D
-仍可成功，只有 30D 标记为 `PROVIDER_UNSUPPORTED`/`STALE`。
+仍可成功，只有 30D 标记为 `PROVIDER_INSUFFICIENT_HISTORY`。
 
 SoSoValue does not provide liquidation history in the active contract；liquidation metrics 继续
 optional/skipped，绝不路由到 SoSoValue。
@@ -189,12 +193,19 @@ time、lookback、reachability、materiality、affected assets 和 summary。
 | ETH protocol/governance | EIPs、AllCoreDevs、Ethereum Foundation protocol notices | `risk.governance_event_status` |
 | AAVE security | Official Aave security page、Aave V3 repository advisories | `risk.security_event_status` |
 | AAVE governance | Official Aave governance forum、proposal scope | `risk.governance_event_status` |
+| BNB security | BNB Smart Chain security advisories、official release notes | `risk.security_event_status` |
+| BNB governance | BNB Evolution Proposals、official BNB Chain governance | `risk.governance_event_status` |
 | Regulatory | SEC、CFTC、ESMA/MiCA primary-source scope | `risk.regulatory_event_status` mapped to affected assets |
 
 `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES` 只表示 configured sources 在
 scan_as_of 时没有发现 material item；partial reachability 为
 `INSUFFICIENT_SOURCE_COVERAGE`。`MATERIAL_EVENT_FOUND` 表示找到 proposal 或
 announcement，不等于 exploit、approval 或 execution。
+
+EventSourceScanRequest 必须在外部阶段逐项得到一个
+EventSourceScanResponse；不可达来源使用 `reachable=false` 和有界错误。
+Acquisition pass 1 只生成请求，pass 2 消费完整响应并在
+`require_scoring_ready()` 通过后才允许评分。
 
 ## Local data layers
 

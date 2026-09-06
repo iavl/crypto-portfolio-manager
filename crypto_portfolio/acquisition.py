@@ -15,6 +15,7 @@ from .metric_availability import metric_availability, skip_reason
 from .engine.derived_metrics import derive_metric_observations
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
 from .engine.metric_plan import MetricCollectionPlan, MetricRequest
+from .engine.technical import derive_aligned_relative_return
 from .events import EventScanner, EventSourceScanRequest, EventSourceScanResponse, event_metric_category
 from .metrics_registry import metric_definition
 from .models.events import EventScanResult
@@ -42,6 +43,7 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "CACHE_MISS",
     "CACHE_EXPIRED",
     "CACHE_CORRUPT",
+    "PROVIDER_INSUFFICIENT_HISTORY",
 }
 _DERIVED_DEPENDENCIES = {
     "valuation.fdv_market_cap_ratio": ("valuation.fdv", "valuation.market_cap"),
@@ -124,6 +126,7 @@ class AcquisitionResult:
         completed_groups = {
             ("MARKET" if scan.category == "regulatory" else scan.asset, scan.category)
             for scan in self.event_scans
+            if scan.status != "INSUFFICIENT_SOURCE_COVERAGE"
         }
         result_by_identity = {
             (item.event.asset, item.event.metric_key): item
@@ -260,13 +263,21 @@ def _expand_derived_dependencies(plan: MetricCollectionPlan) -> MetricCollection
     identities = {(request.asset, request.metric_key) for request in plan.requests}
     additions: list[MetricRequest] = []
     for request in plan.requests:
-        for dependency in _DERIVED_DEPENDENCIES.get(request.metric_key, ()):
-            identity = (request.asset, dependency)
+        if request.metric_key.startswith("relative.return_vs_btc_") and request.asset != "BTC":
+            horizon = request.metric_key.rsplit("_", 1)[-1]
+            dependency_identities = ((request.asset, f"market.return_{horizon}"), ("BTC", f"market.return_{horizon}"))
+        else:
+            dependency_identities = tuple(
+                (request.asset, dependency)
+                for dependency in _DERIVED_DEPENDENCIES.get(request.metric_key, ())
+            )
+        for identity in dependency_identities:
+            dependency = identity[1]
             if identity in identities or not metric_definition(dependency).applies_to(request.asset):
                 continue
             identities.add(identity)
             additions.append(MetricRequest(
-                request.asset,
+                identity[0],
                 dependency,
                 review_type=plan.review_type,
                 reason=f"derived dependency for {request.metric_key}",
@@ -397,18 +408,22 @@ class AcquisitionManager:
                 continue
             pending.append(request)
 
+        self._synchronize_relative_dependencies(model, reusable, pending)
         provider_requests = self.router.build_requests(pending, as_of=as_of, now=current)
         routed = self.router.collect(provider_requests, mode=selected_mode, as_of=as_of, now=current)
         routed_values = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
             for item in routed.observations
         }
-        routed_values.update(self._derive_relative_observations(
+        relative_values, relative_reasons = self._derive_relative_observations(
             model.requests,
             reusable,
             routed_values,
             fetched_at=current,
-        ))
+            series_by_identity=self._relative_series_inputs(model.requests, reusable, routed_values),
+            as_of=as_of,
+        )
+        routed_values.update(relative_values)
         routed_values.update(self._derive_flow_state_observation(
             model.requests,
             reusable,
@@ -427,6 +442,7 @@ class AcquisitionManager:
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): str(item.get("reason", ""))
             for item in routed.unresolved_details
         }
+        routed_reasons.update(relative_reasons)
         routed_reasons.update(derived_reasons)
         routed_diagnostics = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
@@ -802,6 +818,102 @@ class AcquisitionManager:
         }, now=timestamp)
 
     @staticmethod
+    def _relative_scalar_compatible(
+        asset: MetricObservation | None,
+        btc: MetricObservation | None,
+    ) -> bool:
+        if asset is None or btc is None or asset.source != btc.source:
+            return False
+        try:
+            if parse_timestamp(asset.observed_at).date() != parse_timestamp(btc.observed_at).date():
+                return False
+        except ValueError:
+            return False
+        if asset.period != btc.period:
+            return False
+        for field in ("venue", "market", "quote_currency"):
+            left = (asset.metadata or {}).get(field)
+            right = (btc.metadata or {}).get(field)
+            if left is None or right is None or str(left).strip().lower() != str(right).strip().lower():
+                return False
+        return True
+
+    @classmethod
+    def _synchronize_relative_dependencies(
+        cls,
+        plan: MetricCollectionPlan,
+        reusable: dict[tuple[str, str], MetricObservation],
+        pending: list[MetricRequest],
+    ) -> None:
+        """Invalidate both scalar inputs when a relative cohort is not aligned."""
+        pending_identities = {(request.asset, request.metric_key) for request in pending}
+        requests_by_identity = {(request.asset, request.metric_key): request for request in plan.requests}
+        for request in plan.requests:
+            if not request.metric_key.startswith("relative.return_vs_btc_") or request.asset == "BTC":
+                continue
+            horizon = request.metric_key.rsplit("_", 1)[-1]
+            dependencies = (
+                (request.asset, f"market.return_{horizon}"),
+                ("BTC", f"market.return_{horizon}"),
+            )
+            asset_value = reusable.get(dependencies[0])
+            btc_value = reusable.get(dependencies[1])
+            if cls._relative_scalar_compatible(asset_value, btc_value):
+                continue
+            for identity in dependencies:
+                reusable.pop(identity, None)
+                dependency = requests_by_identity.get(identity)
+                if dependency is not None and identity not in pending_identities:
+                    pending.append(dependency)
+                    pending_identities.add(identity)
+
+    def _relative_series_inputs(
+        self,
+        requests: Iterable[MetricRequest],
+        reusable: Mapping[tuple[str, str], MetricObservation],
+        routed: Mapping[tuple[str, str], Mapping[str, Any]],
+    ) -> dict[tuple[str, str], Any]:
+        """Load cached normalized OHLCV for routed relative-return inputs."""
+        identities = {
+            (request.asset, f"market.return_{request.metric_key.rsplit('_', 1)[-1]}")
+            for request in requests
+            if request.metric_key.startswith("relative.return_vs_btc_") and request.asset != "BTC"
+        }
+        identities.update(("BTC", identity[1]) for identity in tuple(identities))
+        result: dict[tuple[str, str], Any] = {}
+        cache = getattr(self.router, "cache", None)
+        if cache is None:
+            return result
+        for identity in identities:
+            observation = reusable.get(identity) or routed.get(identity)
+            if observation is None:
+                continue
+            if isinstance(observation, MetricObservation):
+                asset = observation.asset
+                metadata = dict(observation.metadata or {})
+                source = observation.source
+            else:
+                asset = str(observation.get("asset", identity[0])).strip().upper()
+                metadata = dict(observation.get("metadata") or {})
+                source = str(observation.get("source", "")).strip().lower()
+            if not metadata.get("ohlcv_hash"):
+                continue
+            market = str(metadata.get("market", "spot")).strip().lower()
+            quote = str(metadata.get("quote_currency", "USDT")).strip().upper()
+            providers = tuple(dict.fromkeys((source, "binance", "bybit")))
+            for provider in providers:
+                if provider not in {"binance", "bybit"}:
+                    continue
+                try:
+                    series = cache.load_series(provider, asset, "1D", market=market, quote_currency=quote)
+                except ValueError:
+                    continue
+                if series is not None:
+                    result[identity] = series
+                    break
+        return result
+
+    @staticmethod
     def _coerce_event_scans(
         value: Mapping[Any, EventScanResult | Mapping[str, Any]] | Iterable[EventScanResult | Mapping[str, Any]] | None,
     ) -> dict[tuple[str, str], EventScanResult]:
@@ -874,8 +986,21 @@ class AcquisitionManager:
         requests: Iterable[EventSourceScanRequest],
         responses: Iterable[EventSourceScanResponse],
     ) -> tuple[EventSourceScanResponse, ...]:
-        source_ids = {request.source_id for request in requests}
-        return tuple(response for response in responses if response.source_id in source_ids)
+        requests = tuple(requests)
+        by_source = {response.source_id: response for response in responses}
+        return tuple(
+            by_source.get(
+                request.source_id,
+                EventSourceScanResponse(
+                    source_id=request.source_id,
+                    reachable=False,
+                    checked_at=request.as_of,
+                    items=(),
+                    error="external event source stage returned no response",
+                ),
+            )
+            for request in requests
+        )
 
     @staticmethod
     def _map_shared_regulatory(scan: EventScanResult, asset: str) -> EventScanResult:
@@ -966,9 +1091,13 @@ class AcquisitionManager:
         routed: Mapping[tuple[str, str], Mapping[str, Any]],
         *,
         fetched_at: str,
-    ) -> dict[tuple[str, str], Mapping[str, Any]]:
-        """Derive BTC-relative returns from the same Python-owned OHLCV outputs."""
+        series_by_identity: Mapping[tuple[str, str], Any] | None = None,
+        as_of: str | datetime | None = None,
+    ) -> tuple[dict[tuple[str, str], Mapping[str, Any]], dict[tuple[str, str], str]]:
+        """Derive BTC-relative returns from one aligned completed-candle cohort."""
         result: dict[tuple[str, str], Mapping[str, Any]] = {}
+        reasons: dict[tuple[str, str], str] = {}
+        series_by_identity = series_by_identity or {}
 
         def value_for(identity: tuple[str, str]) -> tuple[Any, str | None, str | None, str | None, Mapping[str, Any]]:
             observation = reusable.get(identity)
@@ -988,6 +1117,50 @@ class AcquisitionManager:
             btc_identity = ("BTC", f"market.return_{horizon}")
             asset_value, asset_observed, asset_id, asset_source, asset_metadata = value_for(asset_identity)
             btc_value, btc_observed, btc_id, btc_source, btc_metadata = value_for(btc_identity)
+            output_identity = (request.asset, key)
+            asset_series = series_by_identity.get(asset_identity)
+            btc_series = series_by_identity.get(btc_identity)
+            if asset_series is not None or btc_series is not None:
+                if asset_series is None or btc_series is None:
+                    reasons[output_identity] = "DERIVED_INPUT_UNAVAILABLE: both asset and BTC OHLCV series are required"
+                    continue
+                try:
+                    aligned = derive_aligned_relative_return(
+                        asset_series,
+                        btc_series,
+                        horizon_days=int(horizon[:-1]),
+                        as_of=as_of,
+                    )
+                except ValueError as exc:
+                    reasons[output_identity] = f"DERIVED_INPUT_UNAVAILABLE: {exc}"
+                    continue
+                if aligned is None:
+                    reasons[output_identity] = "INSUFFICIENT_ALIGNED_HISTORY: no common completed candle supports the requested calendar horizon"
+                    continue
+                result[output_identity] = {
+                    "asset": request.asset,
+                    "metric_key": key,
+                    "value": aligned["value"],
+                    "unit": "fraction",
+                    "period": horizon,
+                    "observed_at": aligned["observed_at"],
+                    "fetched_at": fetched_at,
+                    "source": "python-derived",
+                    "confidence": "HIGH",
+                    "metadata": {
+                        "source_mode": "DERIVED",
+                        "calculation": "aligned asset return minus aligned BTC return",
+                        "venue": aligned["venue"],
+                        "market": aligned["market"],
+                        "quote_currency": aligned["quote_currency"],
+                        "horizon": horizon,
+                        "common_anchor": aligned["common_anchor"],
+                        "asset_ohlcv_hash": aligned["asset_ohlcv_hash"],
+                        "btc_ohlcv_hash": aligned["btc_ohlcv_hash"],
+                        "source_observation_ids": [item for item in (asset_id, btc_id) if item],
+                    },
+                }
+                continue
             if (
                 isinstance(asset_value, bool) or not isinstance(asset_value, (int, float))
                 or isinstance(btc_value, bool) or not isinstance(btc_value, (int, float))
@@ -995,27 +1168,41 @@ class AcquisitionManager:
                 or float(asset_value) - float(btc_value) < -1
                 or asset_observed is None or btc_observed is None
                 or asset_source is None or btc_source is None or asset_source != btc_source
-                or parse_timestamp(asset_observed).date() != parse_timestamp(btc_observed).date()
             ):
+                reasons[output_identity] = "DERIVED_INPUT_UNAVAILABLE: asset and BTC returns are missing or incompatible"
                 continue
-            result[(request.asset, key)] = {
+            try:
+                if parse_timestamp(asset_observed).date() != parse_timestamp(btc_observed).date():
+                    reasons[output_identity] = "DERIVED_INPUT_UNAVAILABLE: asset and BTC returns do not share a completed daily anchor"
+                    continue
+            except ValueError:
+                reasons[output_identity] = "DERIVED_INPUT_UNAVAILABLE: asset or BTC return timestamp is invalid"
+                continue
+            result[output_identity] = {
                 "asset": request.asset,
                 "metric_key": key,
                 "value": float(asset_value) - float(btc_value),
                 "unit": "fraction",
                 "period": horizon,
-                "observed_at": max(asset_observed, btc_observed),
+                "observed_at": asset_observed,
                 "fetched_at": fetched_at,
                 "source": "python-derived",
                 "confidence": "HIGH",
                 "metadata": {
                     "source_mode": "DERIVED",
-                    "calculation": "asset return minus BTC return",
+                    "calculation": "aligned asset return minus aligned BTC return",
+                    "horizon": horizon,
+                    "common_anchor": parse_timestamp(asset_observed).date().isoformat(),
+                    "venue": asset_metadata.get("venue"),
+                    "market": asset_metadata.get("market"),
+                    "quote_currency": asset_metadata.get("quote_currency"),
+                    "asset_ohlcv_hash": asset_metadata.get("ohlcv_hash"),
+                    "btc_ohlcv_hash": btc_metadata.get("ohlcv_hash"),
                     "source_observation_ids": [item for item in (asset_id, btc_id) if item],
                     "source_metadata": {"asset": asset_metadata, "btc": btc_metadata},
                 },
             }
-        return result
+        return result, reasons
 
 
 MetricAcquisitionManager = AcquisitionManager

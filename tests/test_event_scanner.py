@@ -7,6 +7,7 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator, FormatChecker
 
 from crypto_portfolio.acquisition import AcquisitionManager
+from crypto_portfolio.engine.scoring import score_factors
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.events import EventScanner, EventSourceScanResponse, source_catalog
@@ -41,11 +42,15 @@ class EventScannerTests(unittest.TestCase):
         eth = source_catalog("security", "ETH")
         aave_security = source_catalog("security", "AAVE")
         aave_governance = source_catalog("governance", "AAVE")
+        bnb_security = source_catalog("security", "BNB")
+        bnb_governance = source_catalog("governance", "BNB")
         regulatory = source_catalog("regulatory", "AAVE")
         self.assertEqual(len(btc), 3)
         self.assertEqual(len(eth), 3)
         self.assertGreaterEqual(len(aave_security), 1)
         self.assertGreaterEqual(len(aave_governance), 1)
+        self.assertGreaterEqual(len(bnb_security), 2)
+        self.assertGreaterEqual(len(bnb_governance), 2)
         self.assertEqual(len(regulatory), 3)
         self.assertTrue(all(source.required_for_full_coverage for source in btc + eth + regulatory))
         self.assertTrue(all(source.tier == 1 for source in regulatory))
@@ -211,6 +216,8 @@ class EventScannerTests(unittest.TestCase):
         self.assertFalse(first.ready_for_scoring)
         with self.assertRaisesRegex(RuntimeError, "hard-critical event scan"):
             first.require_scoring_ready()
+        with self.assertRaisesRegex(RuntimeError, "hard-critical event scan"):
+            score_factors({"trend": 50}, acquisition=first)
 
         responses = tuple(
             EventSourceScanResponse(request.source_id, True, AS_OF, (), None)
@@ -249,6 +256,32 @@ class EventScannerTests(unittest.TestCase):
         self.assertEqual(result.results[0].status, "FAILED")
         self.assertEqual(result.summary["critical_failures"], 1)
         self.assertIn("INSUFFICIENT_SOURCE_COVERAGE", result.results[0].event.reason)
+        self.assertFalse(result.ready_for_scoring)
+        with self.assertRaisesRegex(RuntimeError, "hard-critical event scan"):
+            result.require_scoring_ready()
+
+    def test_missing_external_response_is_materialized_as_unreachable(self):
+        plan = MetricCollectionPlan("EVENT_REVIEW", (
+            MetricRequest("BNB", "risk.security_event_status"),
+        ))
+        manager = AcquisitionManager(persist=False)
+        first = manager.run(plan, as_of=AS_OF, now=AS_OF)
+        response = EventSourceScanResponse(
+            first.pending_event_scans[0].source_id,
+            True,
+            AS_OF,
+            (),
+        )
+        second = manager.run(
+            plan,
+            as_of=AS_OF,
+            now=AS_OF,
+            event_source_scan_responses=(response,),
+        )
+        self.assertEqual(second.event_scan_requests, ())
+        self.assertFalse(second.ready_for_scoring)
+        self.assertEqual(second.results[0].status, "FAILED")
+        self.assertIn("INSUFFICIENT_SOURCE_COVERAGE", second.results[0].event.reason)
 
     def test_cache_only_missing_hard_critical_scan_is_not_scoring_ready(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
@@ -262,6 +295,7 @@ class EventScannerTests(unittest.TestCase):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
             MetricRequest("BTC", "risk.regulatory_event_status"),
             MetricRequest("ETH", "risk.regulatory_event_status"),
+            MetricRequest("BNB", "risk.regulatory_event_status"),
         ))
         scanner = EventScanner()
         shared = scanner.scan("MARKET", "regulatory", AS_OF, responses=responses(scanner, "MARKET", "regulatory"))

@@ -7,7 +7,7 @@ from crypto_portfolio.engine.derived_metrics import derive_fdv_market_cap_ratio
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
 from crypto_portfolio.providers.base import ProviderCapabilities, ProviderRequest
 from crypto_portfolio.providers.cache import ProviderCache, request_hash
-from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider
+from crypto_portfolio.providers.coinmetrics import COINMETRICS_ASSETS, CoinMetricsProvider
 from crypto_portfolio.providers.coingecko import (
     BASE_URL,
     COINGECKO_API_KEY_HEADER,
@@ -39,6 +39,22 @@ class FakeClient:
 
 
 class ValuationProviderTests(unittest.TestCase):
+    def test_bnb_coingecko_market_cap_and_fdv_use_binancecoin(self):
+        client = FakeClient([{
+            "id": "binancecoin",
+            "market_cap": 100,
+            "fully_diluted_valuation": 110,
+            "last_updated": "2026-09-05T23:59:00Z",
+        }])
+        response = CoinGeckoProvider(client=client, api_key="fake-key").collect(ProviderRequest(
+            "coingecko", "valuation", "BNB", {"as_of": None},
+            ("valuation.market_cap", "valuation.fdv"),
+        ))
+        self.assertEqual(client.calls[0][1]["ids"], "binancecoin")
+        self.assertEqual({item["metric_key"] for item in response.observations}, {
+            "valuation.market_cap", "valuation.fdv",
+        })
+
     def test_current_coingecko_bundle_and_source_timestamp(self):
         client = FakeClient([{
             "id": "bitcoin",
@@ -155,6 +171,30 @@ class ValuationProviderTests(unittest.TestCase):
         self.assertEqual(values[0]["metadata"]["coinmetrics_metric"], "CapMrktEstUSD")
         self.assertEqual(values[0]["metadata"]["methodology"], "coinmetrics_estimated_circulating_supply_market_cap")
         self.assertEqual(client.calls[1][1]["params"]["metrics"], "CapMrktEstUSD")
+
+    def test_coinmetrics_bnb_market_cap_uses_verified_community_mapping(self):
+        self.assertEqual(COINMETRICS_ASSETS["BNB"], "bnb")
+
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def get_json(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                if "catalog" in url:
+                    return {"data": [{
+                        "metric": "CapMrktEstUSD",
+                        "frequencies": [{"frequency": "1d", "assets": ["bnb"]}],
+                    }]}
+                return {"data": [{"time": "2026-09-05T00:00:00Z", "CapMrktEstUSD": "88"}]}
+
+        client = Client()
+        values = CoinMetricsProvider(client=client).collect(ProviderRequest(
+            "coinmetrics_community", "valuation", "BNB", {"as_of": NOW},
+            ("valuation.market_cap",),
+        ))
+        self.assertEqual(values[0]["value"], 88)
+        self.assertEqual(client.calls[1][1]["params"]["assets"], "bnb")
 
     def test_market_cap_falls_back_when_coingecko_is_disabled(self):
         class FallbackProvider:

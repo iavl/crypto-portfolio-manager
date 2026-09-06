@@ -1,4 +1,4 @@
-"""Optional SoSoValue ETF-flow provider using the documented v1 API."""
+"""Optional SoSoValue ETF-flow provider using the documented v2 API."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .base import (
     ProviderCapabilities,
     ProviderDataError,
     ProviderDiagnostic,
+    ProviderInsufficientHistory,
     ProviderError,
     ProviderRequest,
     ProviderResponse,
@@ -26,13 +27,13 @@ from .base import (
 from .http import HttpClient, redact_secrets
 
 
-BASE_URL = "https://openapi.sosovalue.com"
+BASE_URL = "https://api.sosovalue.xyz"
 API_KEY_HEADER = "x-soso-api-key"
-ETF_SUMMARY_HISTORY_PATH = "/openapi/v1/etfs/summary-history"
-ETF_FLOW_PATH = ETF_SUMMARY_HISTORY_PATH
-ETF_FLOW_PATHS = {"BTC": ETF_SUMMARY_HISTORY_PATH, "ETH": ETF_SUMMARY_HISTORY_PATH, "MARKET": ETF_SUMMARY_HISTORY_PATH}
+ETF_HISTORICAL_INFLOW_PATH = "/openapi/v2/etf/historicalInflowChart"
+ETF_FLOW_PATH = ETF_HISTORICAL_INFLOW_PATH
+ETF_FLOW_PATHS = {"BTC": ETF_HISTORICAL_INFLOW_PATH, "ETH": ETF_HISTORICAL_INFLOW_PATH, "MARKET": ETF_HISTORICAL_INFLOW_PATH}
 _ETF_KEYS = ("flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d")
-_ETF_TYPES = {"BTC": "BTC", "ETH": "ETH"}
+_ETF_TYPES = {"BTC": "us-btc-spot", "ETH": "us-eth-spot"}
 _DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _MARKET_TIMEZONE = ZoneInfo("America/New_York")
 
@@ -144,10 +145,10 @@ def _window(points: list[_ETFPoint], days: int) -> tuple[list[_ETFPoint], _ETFPo
     latest = points[-1]
     start = latest.source_date - timedelta(days=days - 1)
     if days > 1 and points[0].source_date > start:
-        raise ProviderUnsupportedMetric(f"SoSoValue ETF history is insufficient for {days}d aggregation")
+        raise ProviderInsufficientHistory(f"SoSoValue ETF history is insufficient for {days}d aggregation")
     selected = [item for item in points if start <= item.source_date <= latest.source_date]
     if not selected:
-        raise ProviderUnsupportedMetric(f"SoSoValue ETF history is insufficient for {days}d aggregation")
+        raise ProviderInsufficientHistory(f"SoSoValue ETF history is insufficient for {days}d aggregation")
     return selected, latest
 
 
@@ -176,13 +177,14 @@ def _observation(
         "source": "sosovalue",
         "confidence": "MEDIUM",
         "metadata": {
-            "source_dataset": "spot_etf_summary_history",
-            "api_version": "v1",
+            "source_dataset": "spot_etf_historical_inflow_chart",
+            "api_version": "v2",
             "endpoint": endpoint,
             "etf_scope": asset,
             "window": period,
             "source_start_date": points[0].source_date.isoformat(),
             "source_end_date": points[-1].source_date.isoformat(),
+            "history_rows": len(points),
             "window_start_date": selected[0].source_date.isoformat(),
             "window_end_date": selected[-1].source_date.isoformat(),
             "rows_used": len(selected),
@@ -235,7 +237,9 @@ def _partial_parse_error(error: ProviderError) -> Mapping[str, Any]:
         return dict(diagnostic.as_dict())
     return {
         "error_code": (
-            "PROVIDER_UNSUPPORTED"
+            "PROVIDER_INSUFFICIENT_HISTORY"
+            if isinstance(error, ProviderInsufficientHistory)
+            else "PROVIDER_UNSUPPORTED"
             if isinstance(error, ProviderUnsupportedMetric)
             else "PROVIDER_SCHEMA_ERROR"
         ),
@@ -276,9 +280,9 @@ def parse_etf_flow_history(
     asset: str = "BTC",
     fetched_at: str,
     as_of: str | datetime | None = None,
-    endpoint: str = ETF_SUMMARY_HISTORY_PATH,
+    endpoint: str = ETF_HISTORICAL_INFLOW_PATH,
 ) -> tuple[Mapping[str, Any], ...]:
-    """Derive 1d/7d/30d ETF flows from one documented history response."""
+    """Derive 1d/7d/30d ETF flows from one documented v2 history response."""
     scope = asset.strip().upper()
     if scope not in _ETF_TYPES:
         raise ProviderUnsupportedMetric("SoSoValue history parser requires BTC or ETH scope")
@@ -343,7 +347,7 @@ def _parse_market_history(
 
 
 class SoSoValueProvider:
-    """Authenticated, read-only SoSoValue ETF summary-history provider."""
+    """Authenticated, read-only SoSoValue ETF historical-inflow provider."""
 
     name = "sosovalue"
 
@@ -359,22 +363,15 @@ class SoSoValueProvider:
             requires_api_key=True,
         )
 
-    def _get(self, *, symbol: str, as_of: str | datetime | None) -> Any:
+    def _post(self, *, etf_type: str) -> Any:
         if not self.api_key:
             raise ProviderAuthenticationError("SoSoValue API key is not configured")
-        params: dict[str, Any] = {"symbol": symbol, "country_code": "US", "limit": 300}
-        if as_of is not None:
-            cutoff = parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of)
-            end_date = cutoff.astimezone(_MARKET_TIMEZONE).date()
-            params.update({
-                "start_date": (end_date - timedelta(days=30)).isoformat(),
-                "end_date": end_date.isoformat(),
-            })
         try:
-            return self.client.get_json(
-                BASE_URL + ETF_SUMMARY_HISTORY_PATH,
-                params=params,
+            return self.client.post_json(
+                BASE_URL + ETF_HISTORICAL_INFLOW_PATH,
+                json_body={"type": etf_type},
                 headers={API_KEY_HEADER: self.api_key},
+                idempotent=True,
             )
         except ProviderError as exc:
             message = redact_secrets(str(exc), (self.api_key,)) or exc.__class__.__name__
@@ -400,10 +397,10 @@ class SoSoValueProvider:
         scope = request.asset.strip().upper()
         as_of = request.parameters.get("as_of")
         fetched_at = _now(self.clock)
-        endpoint = BASE_URL + ETF_SUMMARY_HISTORY_PATH
+        endpoint = BASE_URL + ETF_HISTORICAL_INFLOW_PATH
         if scope in _ETF_TYPES:
             values, diagnostics = _parse_requested_points(
-                self._get(symbol=_ETF_TYPES[scope], as_of=as_of),
+                self._post(etf_type=_ETF_TYPES[scope]),
                 request.metric_keys,
                 asset=scope,
                 fetched_at=fetched_at,
@@ -412,8 +409,8 @@ class SoSoValueProvider:
             )
             return ProviderResponse(observations=values, diagnostics=diagnostics, network_requests=1)
         if scope == "MARKET":
-            btc_payload = self._get(symbol="BTC", as_of=as_of)
-            eth_payload = self._get(symbol="ETH", as_of=as_of)
+            btc_payload = self._post(etf_type=_ETF_TYPES["BTC"])
+            eth_payload = self._post(etf_type=_ETF_TYPES["ETH"])
             values: list[Mapping[str, Any]] = []
             diagnostics: dict[str, Mapping[str, Any]] = {}
             for key in tuple(dict.fromkeys(str(item).strip().lower() for item in request.metric_keys)):
@@ -435,9 +432,9 @@ class SoSoValueProvider:
 __all__ = [
     "API_KEY_HEADER",
     "BASE_URL",
+    "ETF_HISTORICAL_INFLOW_PATH",
     "ETF_FLOW_PATH",
     "ETF_FLOW_PATHS",
-    "ETF_SUMMARY_HISTORY_PATH",
     "SoSoValueProvider",
     "parse_etf_flow_history",
 ]

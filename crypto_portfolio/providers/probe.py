@@ -10,18 +10,20 @@ from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
 from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, catalog_metrics
-from .coingecko import BASE_URL as COINGECKO_BASE_URL, CoinGeckoProvider
+from .coingecko import BASE_URL as COINGECKO_BASE_URL, COINGECKO_IDS, CoinGeckoProvider
 from .chain_liveness import CHAIN_NATIVE_ASSETS, ChainLivenessProvider
 from .defillama import BASE_URL as DEFILLAMA_BASE_URL
+from .github_activity import BASE_URL as GITHUB_BASE_URL, GitHubActivityProvider, REPOSITORY_ALLOWLIST
 from .http import classify_transport_error, redact_secrets, redact_url
 from .router import ProviderRouter
-from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_SUMMARY_HISTORY_PATH, SoSoValueProvider
+from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_HISTORICAL_INFLOW_PATH, SoSoValueProvider
 
 
 _NETWORK_FAILURES = {
     "TLS_CERTIFICATE_VERIFY_FAILED", "TLS_HANDSHAKE_FAILED", "DNS_RESOLUTION_FAILED",
     "CONNECT_TIMEOUT", "READ_TIMEOUT", "CONNECTION_REFUSED", "CONNECTION_RESET",
     "PROXY_ERROR", "HTTP_5XX", "UNKNOWN_NETWORK_ERROR",
+    "HTTP_403_RATE_LIMIT", "HTTP_429",
 }
 _SCHEMA_FAILURES = {"INVALID_JSON", "RESPONSE_TOO_LARGE", "PROVIDER_SCHEMA_ERROR"}
 
@@ -115,15 +117,18 @@ def _require_observations(value: Any) -> None:
         raise ProviderResponseError("probe response schema has no normalized observations")
 
 
-def _sosovalue_probe(provider: SoSoValueProvider) -> dict[str, Any]:
-    endpoint = SOSOVALUE_BASE_URL + ETF_SUMMARY_HISTORY_PATH
+def _sosovalue_probe(provider: SoSoValueProvider, asset: str = "BTC") -> dict[str, Any]:
+    asset = asset.strip().upper()
+    if asset not in {"BTC", "ETH"}:
+        raise ValueError("SoSoValue probe asset must be BTC or ETH")
+    endpoint = SOSOVALUE_BASE_URL + ETF_HISTORICAL_INFLOW_PATH
     captured: dict[str, Any] = {}
 
     def call() -> Any:
         value = provider.collect(ProviderRequest(
             "sosovalue",
             "etf",
-            "BTC",
+            asset,
             {"as_of": _now()},
             ("flows.etf_net_1d",),
         ))
@@ -134,14 +139,17 @@ def _sosovalue_probe(provider: SoSoValueProvider) -> dict[str, Any]:
         "sosovalue",
         endpoint,
         call,
+        method="POST",
         authenticated=True,
         validate=_require_observations,
     )
-    result["endpoint_name"] = "ETF summary history"
+    result["endpoint_name"] = "ETF historical inflow chart"
+    result["asset"] = asset
     if "error_code" not in result:
         observations = tuple(getattr(captured["value"], "observations", ()))
-        result["history_rows"] = len(observations)
-        result["latest_source_date"] = (observations[0].get("metadata", {}).get("source_end_date") if observations else None)
+        metadata = observations[0].get("metadata", {}) if observations else {}
+        result["history_rows"] = metadata.get("history_rows", len(observations))
+        result["latest_source_date"] = metadata.get("source_end_date")
     transport = getattr(provider.client, "transport_metadata", lambda: {})()
     result.update({
         "python_ssl": transport.get("python_ssl"),
@@ -214,14 +222,17 @@ def probe_provider(
     if client is None or not hasattr(client, "get_json"):
         return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
-        return (_with_config(_sosovalue_probe(provider), client),)
+        return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
     if name == "coingecko" and isinstance(provider, CoinGeckoProvider):
         endpoint = COINGECKO_BASE_URL + "/coins/markets"
+        target = (asset or "BTC").strip().upper()
+        if target not in COINGECKO_IDS:
+            raise ValueError(f"CoinGecko probe asset must be one of {tuple(COINGECKO_IDS)}")
         captured: dict[str, Any] = {}
 
         def call() -> Any:
             response = provider.collect(ProviderRequest(
-                "coingecko", "valuation", "BTC", {"as_of": None},
+                "coingecko", "valuation", target, {"as_of": None},
                 ("valuation.market_cap", "valuation.fdv"),
             ))
             captured["value"] = response
@@ -237,12 +248,43 @@ def probe_provider(
         if "error_code" not in result:
             observations = tuple(getattr(captured["value"], "observations", ()))
             result.update({
-                "asset": "BTC",
+                "asset": target,
                 "market_cap": "present" if any(item.get("metric_key") == "valuation.market_cap" for item in observations) else "missing",
                 "fdv": "present" if any(item.get("metric_key") == "valuation.fdv" for item in observations) else "missing",
                 "last_updated": next((item.get("observed_at") for item in observations if item.get("observed_at")), None),
             })
         result["endpoint_name"] = "coins/markets"
+        return (_with_config(result, client),)
+    if name == "github" and isinstance(provider, GitHubActivityProvider):
+        target = (asset or "ETH").strip().upper()
+        if target not in REPOSITORY_ALLOWLIST:
+            raise ValueError(f"GitHub probe asset must be one of {tuple(REPOSITORY_ALLOWLIST)}")
+        endpoint = f"{GITHUB_BASE_URL}/repos/{REPOSITORY_ALLOWLIST[target][0]}/commits"
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "github", "github", target, {}, ("fundamentals.developer_activity",),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call(
+            "github",
+            endpoint,
+            call,
+            authenticated=True,
+            validate=_require_observations,
+        )
+        if "error_code" not in result:
+            observations = tuple(getattr(captured["value"], "observations", ()))
+            result.update({
+                "asset": target,
+                "auth_method": "bearer_token",
+                "repositories": list(REPOSITORY_ALLOWLIST[target]),
+                "developer_activity": observations[0].get("value") if observations else None,
+            })
+        result["endpoint_name"] = "repository commits"
         return (_with_config(result, client),)
     if name == "binance":
         endpoint = SPOT_BASE_URL + "/api/v3/ticker/price"
@@ -284,7 +326,7 @@ def probe_providers(
     names = tuple(sorted(router.providers)) if providers == "all" else (providers,) if isinstance(providers, str) else tuple(providers)
     result: list[dict[str, Any]] = []
     for name in names:
-        result.extend(probe_provider(router, name, asset=asset if name.strip().lower() == "chain_liveness" else None))
+        result.extend(probe_provider(router, name, asset=asset))
     return tuple(result)
 
 

@@ -37,8 +37,9 @@ Trading:  advisory only; no automatic execution
   failures for compact current-vs-previous trend comparisons.
 - Acquires data on demand through free structured public APIs first, with
   freshness-aware local provider caching; no background service is required.
-- When configured, uses SoSoValue's documented U.S. BTC/ETH ETF summary history
-  for structured ETF-flow context; liquidation data is not attributed to it.
+- When configured, uses SoSoValue's documented v2 U.S. BTC/ETH historical
+  inflow chart for structured ETF-flow context; liquidation data is not
+  attributed to it.
   Annualized basis uses Binance's nearest trading USDT delivery contract and
   exact-symbol mark/index prices; unsupported assets remain unavailable.
 - Adds derivatives/social positioning and BTC cycle context as non-scoring

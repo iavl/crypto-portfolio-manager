@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument("--status", action="store_true", help="show offline config, adapter, credential, and runtime readiness")
     parser.add_argument("--probe", metavar="PROVIDER", help="opt-in network probe for a provider or all")
     parser.add_argument("--metric", help="show the deterministic provider chain for a metric")
-    parser.add_argument("--asset", help="asset used with --plan or --probe chain_liveness")
+    parser.add_argument("--asset", help="asset used with --plan or a targeted --probe")
     parser.add_argument("--plan", action="store_true", help="show a local metric collection plan")
     args = parser.parse_args()
     config = load_provider_config()

@@ -24,6 +24,7 @@ from .base import (
     ProviderAuthenticationError,
     ProviderDiagnostic,
     ProviderError,
+    ProviderInsufficientHistory,
     ProviderRateLimited,
     ProviderResponseError,
     ProviderUnavailable,
@@ -60,12 +61,14 @@ TRANSPORT_ERROR_CODES = (
     "HTTP_400",
     "HTTP_401",
     "HTTP_403",
+    "HTTP_403_RATE_LIMIT",
     "HTTP_404",
     "HTTP_429",
     "HTTP_5XX",
     "INVALID_JSON",
     "RESPONSE_TOO_LARGE",
     "PROVIDER_PLAN_RESTRICTED",
+    "PROVIDER_INSUFFICIENT_HISTORY",
     "PROVIDER_UNSUPPORTED",
     "PROVIDER_SCHEMA_ERROR",
     "UNKNOWN_NETWORK_ERROR",
@@ -176,6 +179,8 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
     if isinstance(error, HTTPError):
         if error.code == 429:
             return "HTTP_429"
+        if error.code == 403 and _rate_limit_signal(getattr(error, "headers", None)):
+            return "HTTP_403_RATE_LIMIT"
         if 400 <= error.code <= 499:
             return f"HTTP_{error.code}"
         if 500 <= error.code <= 599:
@@ -205,6 +210,8 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
         return "PROXY_ERROR"
     if isinstance(error, ProviderUnsupportedMetric):
         return "PROVIDER_PLAN_RESTRICTED" if any(value in text for value in ("plan", "tier", "permission", "subscription", "upgrade")) else "PROVIDER_UNSUPPORTED"
+    if isinstance(error, ProviderInsufficientHistory):
+        return "PROVIDER_INSUFFICIENT_HISTORY"
     if isinstance(error, ProviderNotApplicable):
         return "PROVIDER_NOT_APPLICABLE"
     if isinstance(error, ProviderAuthenticationError):
@@ -226,7 +233,7 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
 
 def _retryable(error_code: str) -> bool:
     return error_code in {
-        "HTTP_429", "HTTP_5XX", "DNS_RESOLUTION_FAILED", "CONNECT_TIMEOUT", "READ_TIMEOUT",
+        "HTTP_429", "HTTP_403_RATE_LIMIT", "HTTP_5XX", "DNS_RESOLUTION_FAILED", "CONNECT_TIMEOUT", "READ_TIMEOUT",
         "CONNECTION_REFUSED", "CONNECTION_RESET", "PROXY_ERROR", "UNKNOWN_NETWORK_ERROR",
     }
 
@@ -303,6 +310,22 @@ def _retry_after(headers: Any) -> float | None:
             return max(0.0, (target - datetime.now(timezone.utc)).total_seconds())
         except (TypeError, ValueError, OverflowError):
             return None
+
+
+def _rate_limit_signal(headers: Any) -> bool:
+    if headers is None:
+        return False
+    try:
+        remaining = headers.get("X-RateLimit-Remaining")
+    except AttributeError:
+        remaining = None
+    if remaining is not None:
+        try:
+            if int(str(remaining).strip()) == 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return _retry_after(headers) is not None
 
 
 classify_error = classify_transport_error
@@ -436,7 +459,13 @@ class HttpClient:
                     ) from exc
             except HTTPError as exc:
                 last_error = exc
-                retryable = retry_allowed and (exc.code == 429 or 500 <= exc.code <= 599)
+                rate_limited_403 = exc.code == 403 and _rate_limit_signal(getattr(exc, "headers", None))
+                retry_after = _retry_after(getattr(exc, "headers", None)) if rate_limited_403 else None
+                retryable = retry_allowed and (
+                    exc.code == 429
+                    or 500 <= exc.code <= 599
+                    or rate_limited_403 and retry_after is not None and 0 < retry_after <= 30
+                )
                 if not retryable or attempt + 1 >= self.max_attempts:
                     diagnostic = _diagnostic(
                         exc,
@@ -444,10 +473,11 @@ class HttpClient:
                         method=method,
                         attempt=attempt + 1,
                         status_code=exc.code,
+                        error_code="HTTP_403_RATE_LIMIT" if rate_limited_403 else None,
                         secrets=request_secrets,
-                        retryable=retry_allowed,
+                        retryable=retryable,
                     )
-                    if exc.code == 429:
+                    if exc.code == 429 or rate_limited_403:
                         raise ProviderRateLimited(f"provider rate limited request ({exc.code})", diagnostic=diagnostic) from exc
                     if 500 <= exc.code <= 599:
                         raise ProviderUnavailable(f"provider server error ({exc.code})", diagnostic=diagnostic) from exc

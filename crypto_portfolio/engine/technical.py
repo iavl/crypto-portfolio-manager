@@ -125,6 +125,70 @@ def calendar_lookback_return(candles: Sequence[Candle], days: int) -> float | No
     return None if window is None else simple_return(window[0], window[-1])
 
 
+def derive_aligned_relative_return(
+    asset_series: OHLCVSeries,
+    btc_series: OHLCVSeries,
+    *,
+    horizon_days: int,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    """Derive a BTC-relative return from one shared completed daily anchor."""
+    if not isinstance(asset_series, OHLCVSeries) or not isinstance(btc_series, OHLCVSeries):
+        raise ValueError("asset_series and btc_series must be OHLCVSeries objects")
+    if asset_series.timeframe != "1D" or btc_series.timeframe != "1D":
+        raise ValueError("aligned relative returns require 1D OHLCV series")
+    if asset_series.source.strip().lower() != btc_series.source.strip().lower():
+        raise ValueError("aligned relative returns require one source")
+    for field in ("venue", "market", "quote_currency"):
+        left = getattr(asset_series, field) or ("spot" if field == "market" else "USDT" if field == "quote_currency" else "")
+        right = getattr(btc_series, field) or ("spot" if field == "market" else "USDT" if field == "quote_currency" else "")
+        if str(left).strip().lower() != str(right).strip().lower():
+            raise ValueError(f"aligned relative returns require matching {field}")
+    horizon_days = _positive_int(horizon_days, "horizon_days")
+    asset_candles = completed_candles(asset_series, as_of=as_of)
+    btc_candles = completed_candles(btc_series, as_of=as_of)
+    if not asset_candles or not btc_candles:
+        return None
+    asset_by_date = {parse_timestamp(item.timestamp).date(): item for item in asset_candles}
+    btc_by_date = {parse_timestamp(item.timestamp).date(): item for item in btc_candles}
+    if len(asset_by_date) != len(asset_candles) or len(btc_by_date) != len(btc_candles):
+        raise ValueError("aligned relative returns require one daily candle per date")
+    common_end = max(set(asset_by_date) & set(btc_by_date), default=None)
+    if common_end is None:
+        return None
+
+    def truncate(series: OHLCVSeries, candles: Iterable[Candle]) -> OHLCVSeries:
+        selected = tuple(item for item in candles if parse_timestamp(item.timestamp).date() <= common_end)
+        return OHLCVSeries(
+            series.symbol,
+            series.timeframe,
+            selected,
+            series.source,
+            series.fetched_at,
+            series.venue,
+            series.market,
+            series.quote_currency,
+        )
+
+    aligned_asset = truncate(asset_series, asset_candles)
+    aligned_btc = truncate(btc_series, btc_candles)
+    asset_return = calendar_lookback_return(aligned_asset.candles, horizon_days)
+    btc_return = calendar_lookback_return(aligned_btc.candles, horizon_days)
+    if asset_return is None or btc_return is None:
+        return None
+    anchor = asset_by_date[common_end]
+    return {
+        "value": asset_return - btc_return,
+        "observed_at": anchor.timestamp,
+        "common_anchor": common_end.isoformat(),
+        "asset_ohlcv_hash": aligned_asset.ohlcv_hash,
+        "btc_ohlcv_hash": aligned_btc.ohlcv_hash,
+        "venue": asset_series.venue or asset_series.source.upper(),
+        "market": asset_series.market or "spot",
+        "quote_currency": asset_series.quote_currency or "USDT",
+    }
+
+
 def calendar_realized_volatility(
     candles: Sequence[Candle], window: int, *, annualization_days: int = 365
 ) -> float | None:
@@ -961,6 +1025,7 @@ __all__ = [
     "build_structural_zones",
     "build_technical_snapshot",
     "calendar_lookback_return",
+    "derive_aligned_relative_return",
     "calendar_realized_volatility",
     "completed_candles",
     "canonical_ohlcv_hash",

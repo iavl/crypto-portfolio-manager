@@ -36,7 +36,7 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Chain liveness | Structured Bitcoin block APIs, EVM JSON-RPC, and Solana JSON-RPC | None | Current canonical progress only; transport failure is not a halt. |
 | BTC/ETH network, supply, cycle, and exchange attribution | Coin Metrics Community, optional authenticated tier | Optional environment key | Asset-specific catalog availability is checked; unsupported USD transfer/fee or asset combinations remain required failures or premium skips. `CapMrktEstUSD` is only a catalog-aware market-cap fallback. |
 | Developer activity | Fixed canonical ETH/AAVE GitHub repository allowlist | Optional `GITHUB_TOKEN` | Public REST commits only; bounded trailing 30-day default-branch counts, no repository discovery or HTML scraping. |
-| ETF flows | SoSoValue API v1 when configured; Web only for unresolved non-provider work | `SOSOVALUE_API_KEY` | U.S. BTC/ETH ETF summary history is bundled into 1D/7D/30D values; current access and limits are controlled by SoSoValue. |
+| ETF flows | SoSoValue API v2 when configured; Web only for unresolved non-provider work | `SOSOVALUE_API_KEY` | U.S. BTC/ETH historical inflow chart is bundled into 1D/7D/30D values; current access and limits are controlled by SoSoValue. |
 | Historical liquidations | No configured structured provider; optional and skipped when unavailable | None | SoSoValue's current official API documents ETF data, not liquidation history. Historical CoinGlass points remain audit-only; realtime snapshots are not substituted. |
 | Social | No configured adapter; optional and skipped by default | Optional environment key | No scraping, search-count substitution, or invented sentiment. |
 | Exchange netflow | Coin Metrics Community when its exchange-attribution catalog supports the asset, then optional authenticated tier | Optional environment key | Uses official exchange-attributed inflow/outflow inputs; otherwise premium evidence is skipped. |
@@ -47,6 +47,9 @@ are read from `~/.config/crypto-portfolio-manager/data-providers.json` or the
 path in `CRYPTO_PORTFOLIO_PROVIDER_CONFIG`. API keys are referenced only by
 environment-variable name and are never written to config, cache, history, or
 logs.
+
+The current Coin Metrics Community catalog confirms BNB as asset `bnb` with
+`CapMrktEstUSD` at `1d`; it is an eligible market-cap fallback after CoinGecko.
 
 ### Delivery basis and unavailable metrics
 
@@ -143,12 +146,13 @@ URLs are redacted in diagnostics and credentials are never persisted.
 
 SoSoValue's current official documentation is at
 [`sosovalue-1.gitbook.io/sosovalue-api-doc`](https://sosovalue-1.gitbook.io/sosovalue-api-doc).
-The active ETF route is `GET /openapi/v1/etfs/summary-history` on
-`https://openapi.sosovalue.com`, authenticated with `x-soso-api-key`. The
-documented v1 history window is one month; settled flow rows are normalized by
-their U.S. trading date. The shared HTTP client also supports explicit
-idempotent JSON POST calls for read-only endpoints, but the current SoSoValue
-ETF contract is GET.
+The active ETF route is `POST /openapi/v2/etf/historicalInflowChart` on
+`https://api.sosovalue.xyz`, authenticated with `x-soso-api-key`. The
+request body is only `{"type":"us-btc-spot"}` or
+`{"type":"us-eth-spot"}`; the documented response contains up to 300 days
+of daily history. Settled flow rows are normalized by their U.S. trading date;
+`as_of` filtering is local, so undocumented date parameters are never sent.
+The read-only POST is explicitly idempotent for bounded retry handling.
 
 The Python client uses verified TLS. `CRYPTO_PORTFOLIO_CA_BUNDLE` overrides
 `SSL_CERT_FILE`/`SSL_CERT_DIR`, and no normal configuration disables

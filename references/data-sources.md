@@ -140,12 +140,14 @@ Primarily relevant to BTC and ETH where spot products exist.
 
 Use daily and multi-week context; avoid overreacting to one day of flow unless exceptional.
 
-The optional SoSoValue adapter uses the documented v1 ETF summary-history
-endpoint for U.S. BTC and ETH products. Python derives 1D, 7D, and 30D values
-from completed trading-date rows; `MARKET` is the complete-date BTC+ETH sum,
-not BTC-only flow. The current official SoSoValue API does not document
-liquidation history, so liquidation metrics remain context-only and are never
-sent to SoSoValue.
+The optional SoSoValue adapter uses the documented v2
+`POST /openapi/v2/etf/historicalInflowChart` endpoint on
+`https://api.sosovalue.xyz` for U.S. BTC and ETH products. Python derives 1D,
+7D, and 30D values from completed trading-date rows after local `as_of`
+filtering; `MARKET` is the complete-date BTC+ETH sum, not BTC-only flow. A
+short response is `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported capability.
+The current official SoSoValue API does not document liquidation history, so
+liquidation metrics remain context-only and are never sent to SoSoValue.
 
 ### Fundamentals
 
@@ -165,8 +167,8 @@ Examples:
 Broad market valuation is a separate data category: `valuation.market_cap` and
 `valuation.fdv` come from CoinGecko when configured, with catalog-aware Coin
 Metrics `CapMrktEstUSD` as market-cap-only fallback. Python derives
-`valuation.fdv_market_cap_ratio`; DeFiLlama failure must not make BTC/ETH/AAVE
-market cap unavailable when these routes are available.
+`valuation.fdv_market_cap_ratio`; DeFiLlama failure must not make
+BTC/ETH/BNB/AAVE market cap unavailable when these routes are available.
 
 ### Events
 
@@ -189,6 +191,10 @@ are EIPs, AllCoreDevs coordination, and Ethereum Foundation protocol notices.
 AAVE security uses the official Aave security page and the Aave V3
 repository advisories; AAVE governance uses the official governance forum and
 proposal scope.
+BNB security uses the BNB Smart Chain security-advisory repository and official
+release notes; BNB governance uses the BNB Evolution Proposals repository and
+the official BNB Chain governance page. Regulatory collection remains one
+shared MARKET scan mapped to affected assets.
 The compatible BTC metric key `risk.governance_event_status` means material
 protocol-development/governance-context changes, not DAO governance.
 

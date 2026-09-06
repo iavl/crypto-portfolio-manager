@@ -132,12 +132,28 @@ EVENT_SOURCE_CATALOG = (
         "https://github.com/aave/aave-v3-core/security/advisories", True, name="Aave V3 security advisories",
     ),
     EventSource(
+        "bnb-bsc-security-advisories", "security", ("BNB",), "BNB Chain", "official",
+        "https://github.com/bnb-chain/bsc/security/advisories", True, name="BNB Smart Chain security advisories",
+    ),
+    EventSource(
+        "bnb-bsc-releases", "security", ("BNB",), "BNB Chain", "official",
+        "https://www.bnbchain.org/en/releases", True, name="BNB Chain release notes",
+    ),
+    EventSource(
         "aave-governance-forum", "governance", ("AAVE",), "Aave governance", "official",
         "https://governance.aave.com/", True, name="Aave governance forum",
     ),
     EventSource(
         "aave-governance-proposals", "governance", ("AAVE",), "Aave governance", "official",
         "https://governance.aave.com/c/governance/4", True, name="Aave governance proposals",
+    ),
+    EventSource(
+        "bnb-beps", "governance", ("BNB",), "BNB Chain BEPs", "official",
+        "https://github.com/bnb-chain/BEPs", True, name="BNB Evolution Proposals",
+    ),
+    EventSource(
+        "bnb-governance", "governance", ("BNB",), "BNB Chain", "official",
+        "https://www.bnbchain.org/en/bnb-chain-governance", True, name="BNB Chain governance",
     ),
     EventSource(
         "sec-digital-assets", "regulatory", ("MARKET",), "U.S. SEC", "official",

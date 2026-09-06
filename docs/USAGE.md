@@ -273,6 +273,15 @@ export GITHUB_TOKEN='...'
 配置存在不代表 provider 一定可用；应同时检查 adapter、credential、runtime
 status 和实际 probe 结果。
 
+安全检查不会输出 key 值：
+
+python3 scripts/providers.py --status
+python3 scripts/providers.py --probe coingecko --asset BNB
+python3 scripts/providers.py --probe github --asset ETH
+python3 scripts/providers.py --probe github --asset AAVE
+python3 scripts/providers.py --probe sosovalue --asset BTC
+python3 scripts/providers.py --probe sosovalue --asset ETH
+
 ## 14. 开发检查
 
 ```bash

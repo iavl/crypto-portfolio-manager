@@ -28,7 +28,7 @@ from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider, catalog_
 from crypto_portfolio.providers.sosovalue import (
     API_KEY_HEADER as SOSOVALUE_API_KEY_HEADER,
     BASE_URL as SOSOVALUE_BASE_URL,
-    ETF_SUMMARY_HISTORY_PATH,
+    ETF_HISTORICAL_INFLOW_PATH,
     SoSoValueProvider,
     parse_etf_flow_history,
 )
@@ -128,6 +128,8 @@ class DataAcquisitionTests(unittest.TestCase):
             def get_json(self, *_args, **_kwargs):
                 raise ProviderAuthenticationError("rejected")
 
+            post_json = get_json
+
         provider = SoSoValueProvider(client=ProbeClient(), api_key="fake-secret")
         router = ProviderRouter({"sosovalue": provider}, config=config_for("sosovalue"))
         # This provider requires a credential even with an injected adapter.
@@ -171,12 +173,65 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result["auth"], "NOT_REQUIRED")
         self.assertEqual(client.calls, 1)
 
+    def test_targeted_authenticated_probes_honor_asset_and_redact_credentials(self):
+        from crypto_portfolio.providers.coingecko import CoinGeckoProvider
+        from crypto_portfolio.providers.github_activity import GitHubActivityProvider
+
+        class CoinGeckoClient:
+            def get_json(self, url, *, params=None, headers=None):
+                self.call = (url, params, headers)
+                return [{
+                    "id": "binancecoin",
+                    "market_cap": 100,
+                    "fully_diluted_valuation": 110,
+                    "last_updated": "2026-09-05T23:59:00Z",
+                }]
+
+        coingecko_client = CoinGeckoClient()
+        coingecko_config = config_for("coingecko")
+        coingecko_config["providers"]["coingecko"]["api_key_env"] = "COINGECKO_API_KEY"
+        with patch.dict("os.environ", {"COINGECKO_API_KEY": "fake-key"}, clear=True):
+            result = probe_provider(
+                ProviderRouter({"coingecko": CoinGeckoProvider(client=coingecko_client, api_key="fake-key")}, config=coingecko_config),
+                "coingecko",
+                asset="BNB",
+            )[0]
+        self.assertEqual(result["asset"], "BNB")
+        self.assertEqual(result["market_cap"], "present")
+        self.assertEqual(coingecko_client.call[1]["ids"], "binancecoin")
+        self.assertNotIn("fake-key", str(result))
+
+        class GitHubClient:
+            def __init__(self):
+                self.headers = []
+
+            def get_json(self, url, *, params=None, headers=None):
+                self.headers.append(headers)
+                return []
+
+        github_client = GitHubClient()
+        github_config = config_for("github")
+        github_config["providers"]["github"]["api_key_env"] = "GITHUB_TOKEN"
+        with patch.dict("os.environ", {"GITHUB_TOKEN": "fake-token"}, clear=True):
+            result = probe_provider(
+                ProviderRouter({"github": GitHubActivityProvider(client=github_client, token="fake-token")}, config=github_config),
+                "github",
+                asset="AAVE",
+            )[0]
+        self.assertEqual(result["asset"], "AAVE")
+        self.assertEqual(result["auth_method"], "bearer_token")
+        self.assertTrue(all(item["Authorization"] == "Bearer fake-token" for item in github_client.headers))
+        self.assertNotIn("fake-token", str(result))
+
     def test_sosovalue_probe_reports_current_endpoint_without_secret(self):
         class ProbeClient:
             def get_json(self, url, *, params=None, headers=None):
                 return {"code": 0, "message": "success", "data": [
                     {"date": "2026-09-04", "total_net_inflow": 12},
                 ]}
+
+            def post_json(self, url, *, json_body=None, params=None, headers=None, idempotent=False):
+                return self.get_json(url, params=params, headers=headers)
 
         config = config_for("sosovalue")
         config["providers"]["sosovalue"] = {"enabled": "AUTO", "api_key_env": "SOSOVALUE_API_KEY"}
@@ -185,8 +240,8 @@ class DataAcquisitionTests(unittest.TestCase):
             router = ProviderRouter({"sosovalue": provider}, config=config)
             result = probe_provider(router, "sosovalue")[0]
         self.assertEqual(result["network"], "OK")
-        self.assertEqual(result["method"], "GET")
-        self.assertEqual(result["endpoint"], SOSOVALUE_BASE_URL + ETF_SUMMARY_HISTORY_PATH)
+        self.assertEqual(result["method"], "POST")
+        self.assertEqual(result["endpoint"], SOSOVALUE_BASE_URL + ETF_HISTORICAL_INFLOW_PATH)
         self.assertEqual(result["history_rows"], 1)
         self.assertEqual(result["latest_source_date"], "2026-09-04")
         self.assertNotIn("fake-secret", str(result))
@@ -464,6 +519,15 @@ class DataAcquisitionTests(unittest.TestCase):
                 HttpClient(opener=Client([Response(status)])).post_json(
                     "https://example.test/etf", json_body={"type": "us-btc-spot"}
                 )
+        with self.assertRaises(ProviderRateLimited) as raised:
+            HttpClient(
+                opener=Client([Response(403, headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"})]),
+                max_attempts=3,
+            ).post_json(
+                "https://example.test/etf", json_body={"type": "us-btc-spot"},
+            )
+        self.assertEqual(raised.exception.diagnostic.error_code, "HTTP_403_RATE_LIMIT")
+        self.assertEqual(raised.exception.diagnostic.status_code, 403)
 
     def test_sosovalue_parser_derives_calendar_windows_and_session_time(self):
         rows = [
@@ -571,10 +635,10 @@ class DataAcquisitionTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def get_json(self, url, *, params=None, headers=None):
-                self.calls.append((url, params, headers))
-                symbol = params["symbol"]
-                return {"code": 0, "data": [{"date": "2026-09-04", "total_net_inflow": 10 if symbol == "BTC" else 3}]}
+            def post_json(self, url, *, json_body=None, params=None, headers=None, idempotent=False):
+                self.calls.append((url, json_body, headers, idempotent))
+                etf_type = json_body["type"]
+                return {"code": 0, "data": [{"date": "2026-09-04", "totalNetInflow": 10 if etf_type == "us-btc-spot" else 3}]}
 
         client = FakeSoSoValueClient()
         provider = SoSoValueProvider(client=client, api_key="fake-secret")
@@ -586,9 +650,10 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(response.observations[0]["value"], 13)
         self.assertEqual(response.observations[0]["metadata"]["etf_scope"], "BTC+ETH")
         self.assertEqual(response.observations[0]["metadata"]["source_assets"], ["BTC", "ETH"])
-        self.assertEqual([call[1]["symbol"] for call in client.calls], ["BTC", "ETH"])
-        self.assertTrue(all(call[0] == SOSOVALUE_BASE_URL + ETF_SUMMARY_HISTORY_PATH for call in client.calls))
+        self.assertEqual([call[1]["type"] for call in client.calls], ["us-btc-spot", "us-eth-spot"])
+        self.assertTrue(all(call[0] == SOSOVALUE_BASE_URL + ETF_HISTORICAL_INFLOW_PATH for call in client.calls))
         self.assertTrue(all(call[2] == {SOSOVALUE_API_KEY_HEADER: "fake-secret"} for call in client.calls))
+        self.assertTrue(all(call[3] is True for call in client.calls))
         self.assertEqual(provider.capabilities.metric_keys, (
             "flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d",
         ))
@@ -596,7 +661,7 @@ class DataAcquisitionTests(unittest.TestCase):
 
     def test_sosovalue_provider_keeps_short_windows_when_30d_history_is_insufficient(self):
         class ShortHistoryClient:
-            def get_json(self, url, *, params=None, headers=None):
+            def post_json(self, url, *, json_body=None, params=None, headers=None, idempotent=False):
                 return {
                     "code": 0,
                     "data": [
@@ -620,11 +685,11 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual({item["metric_key"] for item in response.observations}, {
             "flows.etf_net_1d", "flows.etf_net_7d",
         })
-        self.assertEqual(response.diagnostics["flows.etf_net_30d"]["error_code"], "PROVIDER_UNSUPPORTED")
+        self.assertEqual(response.diagnostics["flows.etf_net_30d"]["error_code"], "PROVIDER_INSUFFICIENT_HISTORY")
 
     def test_sosovalue_provider_redacts_key_from_provider_error(self):
         class LeakingClient:
-            def get_json(self, url, *, params=None, headers=None):
+            def post_json(self, url, *, json_body=None, headers=None, idempotent=False):
                 raise RuntimeError(f"request failed for {headers[SOSOVALUE_API_KEY_HEADER]}")
 
         with self.assertRaises(Exception) as raised:
@@ -634,7 +699,7 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertNotIn("fake-secret", str(raised.exception))
 
         class DiagnosticLeakingClient:
-            def get_json(self, url, *, params=None, headers=None):
+            def post_json(self, url, *, json_body=None, headers=None, idempotent=False):
                 raise ProviderUnavailable(
                     "request failed",
                     diagnostic=ProviderDiagnostic(
@@ -803,6 +868,55 @@ class DataAcquisitionTests(unittest.TestCase):
             self.assertEqual(relative.value, 0)
             self.assertEqual(relative.source, "python-derived")
             self.assertEqual(result.web_fallbacks, ())
+
+    def test_mismatched_relative_cache_is_synchronized_before_derivation(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("BTC", "market.return_30d"),
+            MetricRequest("BNB", "market.return_30d"),
+            MetricRequest("BNB", "relative.return_vs_btc_30d"),
+        ))
+        cached = tuple(
+            normalize_metric_result({
+                "asset": asset,
+                "metric_key": "market.return_30d",
+                "value": value,
+                "unit": "fraction",
+                "period": "30d",
+                "observed_at": observed,
+                "fetched_at": observed,
+                "source": "binance",
+                "confidence": "HIGH",
+                "metadata": {
+                    "venue": "BINANCE",
+                    "market": "spot",
+                    "quote_currency": "USDT",
+                    "ohlcv_hash": f"{asset.lower()}-hash",
+                },
+            }).observation
+            for asset, value, observed in (
+                ("BNB", 0.2, "2026-09-05T00:00:00Z"),
+                ("BTC", 0.1, "2026-09-04T00:00:00Z"),
+            )
+        )
+        provider = StructuredProvider(value=0.2, source="binance")
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"binance": provider},
+                    config=config_for("binance"),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(
+                plan,
+                cached_observations=cached,
+                as_of="2026-09-06T00:00:00Z",
+                now="2026-09-06T00:00:00Z",
+            )
+        relative = next(item for item in result.observations if item.metric_key == "relative.return_vs_btc_30d")
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(relative.value, 0)
+        self.assertEqual(relative.metadata["common_anchor"], "2026-09-04")
 
     def test_market_flow_state_is_python_derived_from_etf_flow(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (

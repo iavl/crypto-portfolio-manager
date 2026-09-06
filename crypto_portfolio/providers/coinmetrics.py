@@ -17,6 +17,7 @@ AUTHENTICATED_BASE_URL = "https://api.coinmetrics.io"
 COINMETRICS_ASSETS = {
     "BTC": "btc",
     "ETH": "eth",
+    "BNB": "bnb",
     "AAVE": "aave",
 }
 COINMETRICS_GENERIC_NETWORK_METRICS = {

@@ -7,6 +7,7 @@ from crypto_portfolio.engine.technical import (
     build_structural_zones,
     build_technical_snapshot,
     completed_candles,
+    derive_aligned_relative_return,
     detect_swings,
     history_position,
     lookback_return,
@@ -119,6 +120,72 @@ class MarketModelTests(unittest.TestCase):
             build_technical_snapshot(make_series(), 240, as_of="2025-11-28T12:00:00Z")
 
 class TechnicalMetricTests(unittest.TestCase):
+    def test_aligned_relative_return_uses_common_completed_anchor(self):
+        start = date(2026, 1, 1)
+
+        def series(symbol, count, multiplier):
+            candles = tuple(
+                Candle(
+                    (start + timedelta(days=index)).isoformat(),
+                    100 + index * multiplier,
+                    101 + index * multiplier,
+                    99 + index * multiplier,
+                    100 + index * multiplier,
+                    100,
+                )
+                for index in range(count)
+            )
+            return OHLCVSeries(
+                symbol,
+                "1D",
+                candles,
+                source="binance",
+                venue="BINANCE",
+                market="spot",
+                quote_currency="USDT",
+            )
+
+        aligned = derive_aligned_relative_return(
+            series("BNB", 42, 1.0),
+            series("BTC", 41, 0.5),
+            horizon_days=30,
+            as_of="2026-02-12T00:00:00Z",
+        )
+        self.assertIsNotNone(aligned)
+        self.assertEqual(aligned["common_anchor"], "2026-02-10")
+        self.assertEqual(aligned["observed_at"], "2026-02-10T00:00:00Z")
+        self.assertNotEqual(aligned["asset_ohlcv_hash"], aligned["btc_ohlcv_hash"])
+
+    def test_aligned_relative_return_excludes_future_candles(self):
+        start = date(2026, 1, 1)
+        def make(symbol, extra):
+            return OHLCVSeries(
+                symbol,
+                "1D",
+                tuple(
+                    Candle(
+                        (start + timedelta(days=index)).isoformat(),
+                        100 + index,
+                        101 + index,
+                        99 + index,
+                        100 + index,
+                        100,
+                    )
+                    for index in range(40 + extra)
+                ),
+                source="binance",
+                venue="BINANCE",
+                market="spot",
+                quote_currency="USDT",
+            )
+        aligned = derive_aligned_relative_return(
+            make("BNB", 2),
+            make("BTC", 1),
+            horizon_days=30,
+            as_of="2026-02-10T00:00:00Z",
+        )
+        self.assertEqual(aligned["common_anchor"], "2026-02-09")
+
     def test_hand_checkable_metrics(self):
         candles = (
             Candle("2026-01-01", 100, 110, 90, 100, 1),

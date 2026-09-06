@@ -134,6 +134,10 @@ class ProviderUnsupportedMetric(ProviderError):
     """The provider does not support a requested metric."""
 
 
+class ProviderInsufficientHistory(ProviderError):
+    """The provider supports a metric but returned too little history."""
+
+
 class ProviderNotApplicable(ProviderError):
     """The requested metric has no meaningful current instrument/scope."""
 
@@ -374,6 +378,7 @@ __all__ = [
     "ProviderDataError",
     "ProviderDiagnostic",
     "ProviderError",
+    "ProviderInsufficientHistory",
     "ProviderRateLimited",
     "ProviderRequest",
     "ProviderResponse",

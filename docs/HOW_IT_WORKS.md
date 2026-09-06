@@ -176,6 +176,17 @@ the review cutoff.
 
 事件扫描采用两阶段流程：
 
+事件请求的正常运行顺序是：pass 1 生成 EventSourceScanRequest，外部阶段
+为每个请求返回一个 EventSourceScanResponse（不可达时也必须返回
+reachable=false 和有界错误），pass 2 重新运行 acquisition，随后调用
+require_scoring_ready()，最后才进入 scoring。BNB 使用固定的官方
+security/governance source catalog，监管仍复用共享 MARKET source。
+
+BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d
+作为一个依赖 cohort 处理。缓存日期不一致时两侧一起刷新/重建；Python
+只在同一 venue、quote、completed daily candle 和共同 calendar anchor 上
+相减，不接受错位标量。
+
 ```text
 Python source catalog
     -> EventSourceScanRequest

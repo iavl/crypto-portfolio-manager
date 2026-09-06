@@ -116,10 +116,14 @@ display data, so the engine uses value ÷ quantity and records a note.
     `CollectionEvent`. Never silently omit a requested metric; retain its
     status and scoring effect.
    If a hard-critical event group is unresolved, stop before scoring and
-   return the structured resolution state. Resolve the serialized
-   `EventSourceScanRequest` values and rerun acquisition with matching
-   `EventSourceScanResponse` values, or explicitly record
-   `INSUFFICIENT_SOURCE_COVERAGE`/failure results before continuing.
+   return the structured resolution state. This is pass 1 only. The external
+   stage must fetch every serialized `EventSourceScanRequest` and return
+   exactly one matching `EventSourceScanResponse` per request, including
+   `reachable=false` with a bounded error when a source cannot be fetched.
+   Rerun acquisition as pass 2 with those responses, then call
+   `result.require_scoring_ready()` immediately before scoring. Never score
+   between the two passes, and do not treat an unreachable source as
+   `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`.
    If structured chain-liveness acquisition fails, retain the hard-critical
    missing evidence and do not invent `HEALTHY`, `DEGRADED`, or `HALTED`.
 9. Compare current observations with previous observations and build
@@ -203,13 +207,17 @@ and confirmed long crowding agree, or return `WAIT`. A deleveraged state only
 removes a crowding penalty; it never boosts exposure.
 
 Structured ETF flow data is optional and comes from the current documented
-SoSoValue v1 U.S. ETF summary-history endpoint when `SOSOVALUE_API_KEY` is
-configured. Python maps BTC and ETH flows separately and defines MARKET as the
-complete-date BTC+ETH aggregate, then derives 1D/7D/30D calendar windows. If
-SoSoValue is unavailable, preserve an explicit fallback or UNKNOWN result; do
-not request duplicate ETF web data after a successful structured result. The
-current official SoSoValue API does not establish liquidation history, so
-liquidation metrics remain optional context and must not be routed to it.
+SoSoValue v2 POST /openapi/v2/etf/historicalInflowChart endpoint on
+https://api.sosovalue.xyz when `SOSOVALUE_API_KEY` is configured. Python sends
+only {"type":"us-btc-spot"} or {"type":"us-eth-spot"}, filters the returned
+300-day history locally to `as_of`, maps BTC and ETH separately, and defines
+MARKET as the complete-date BTC+ETH aggregate before deriving 1D/7D/30D
+calendar windows. A short returned range is
+`PROVIDER_INSUFFICIENT_HISTORY`, not unsupported capability. If SoSoValue is
+unavailable, preserve an explicit fallback or UNKNOWN result; do not request
+duplicate ETF web data after a successful structured result. The current
+official SoSoValue API does not establish liquidation history, so liquidation
+metrics remain optional context and must not be routed to it.
 
 ## Visible evidence collection
 
