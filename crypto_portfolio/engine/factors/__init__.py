@@ -2,6 +2,7 @@
 
 from .flows import FlowFactorResult, classify_flow_state, calculate_flow_factor
 from .relative_strength import RelativeStrengthFactorResult, calculate_relative_strength
+from .event_risk import EventRiskAssessment, assess_event_risk, build_event_risk_assessment
 from .trend import TrendFactorResult, calculate_trend_factor
 from .fundamentals import build_fundamental_facts
 from .onchain import build_onchain_facts
@@ -13,6 +14,9 @@ __all__ = [
     "TrendFactorResult",
     "calculate_flow_factor",
     "calculate_relative_strength",
+    "EventRiskAssessment",
+    "assess_event_risk",
+    "build_event_risk_assessment",
     "calculate_trend_factor",
     "classify_flow_state",
     "build_fundamental_facts",

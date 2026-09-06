@@ -1,5 +1,5 @@
 {
-  "policy_version": 1,
+  "policy_version": 2,
   "investment_horizon_months": {
     "min": 6,
     "max": 12
@@ -52,14 +52,26 @@
     "watch_below_pp": 5,
     "high_priority_above_pp": 10
   },
-  "scoring_weights": {
-    "trend": 0.25,
-    "valuation": 0.2,
-    "fundamentals": 0.2,
-    "onchain": 0.1,
-    "capital_flows": 0.1,
-    "relative_strength_btc": 0.1,
-    "event_risk": 0.05
+  "scoring_profiles": {
+    "default": {
+      "trend": 0.2,
+      "valuation": 0.2,
+      "fundamentals": 0.25,
+      "onchain": 0.15,
+      "capital_flows": 0.1,
+      "relative_strength_btc": 0.1
+    },
+    "btc": {
+      "trend": 0.2222222222222222,
+      "valuation": 0.2222222222222222,
+      "fundamentals": 0.2777777777777778,
+      "onchain": 0.16666666666666666,
+      "capital_flows": 0.11111111111111112,
+      "relative_strength_btc": 0.0
+    }
+  },
+  "asset_scoring_profiles": {
+    "BTC": "btc"
   },
   "scoring": {
     "high_confidence_min_coverage": 0.9,
@@ -80,18 +92,25 @@
       "extension_penalty": 10
     },
     "relative_strength": {
-      "positive_threshold": 0.05,
-      "negative_threshold": -0.05,
       "horizon_weights": {
         "30d": 0.2,
         "90d": 0.4,
         "180d": 0.4
-      }
+      },
+      "risk_adjusted_neutral_band": 0.1,
+      "risk_adjusted_saturation": 1.0
     },
     "flows": {
-      "positive_threshold": 0,
-      "negative_threshold": 0
+      "neutral_abs_max": 0.001,
+      "strong_abs": 0.01
     }
+  },
+  "event_risk_multipliers": {
+    "NORMAL": 1.0,
+    "ELEVATED": 0.75,
+    "HIGH": 0.5,
+    "SEVERE": 0.0,
+    "CRITICAL": 0.0
   },
   "regimes": {
     "NORMAL": {
@@ -114,7 +133,8 @@
     }
   },
   "allocation": {
-    "satellite_min_score": 65,
+    "satellite_entry_score": 67,
+    "satellite_exit_score": 60,
     "satellite_full_score": 85,
     "core_min_score": 50,
     "low_confidence_satellite_weight": 0.0,

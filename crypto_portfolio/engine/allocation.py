@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..models.evidence import AssetAssessment, FactorScore
+from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
 
@@ -34,7 +34,7 @@ def _score(value: Any, symbol: str) -> float:
         values = [
             score.score if isinstance(score, FactorScore) else float(score)
             for score in value.factor_scores.values()
-            if score is not None
+            if score is not None and (not isinstance(score, FactorScore) or score.score is not None)
         ]
         raw = sum(values) / len(values) if values else 50.0
     else:
@@ -96,9 +96,33 @@ def _relative_multiplier(value: Any) -> float:
     return 1.0 if str(value).strip().upper() in {"STRONG", "OUTPERFORM", "POSITIVE", "HEALTHY"} else 0.75
 
 
+def _event_risk_state(value: Any) -> str:
+    raw = _field(value, "event_risk", None)
+    if isinstance(raw, EventRiskAssessment):
+        return raw.state
+    if isinstance(raw, Mapping):
+        raw = raw.get("state")
+    if raw is not None:
+        state = str(raw).strip().upper()
+        if state not in {"NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"}:
+            raise ValueError("event_risk.state is unsupported")
+        return state
+    return "SEVERE" if _flag(_field(value, "severe_event", False), "severe_event") else "NORMAL"
+
+
+def _event_risk_multiplier(state: str, policy: Policy) -> float:
+    multipliers = policy.event_risk_multipliers
+    try:
+        return float(multipliers[state])
+    except KeyError as exc:
+        raise ValueError(f"unknown event risk state {state}") from exc
+
+
 def satellite_eligibility(
     assessment: AssetAssessment | Mapping[str, Any] | None,
     policy: Policy | None = None,
+    *,
+    current_weight: float = 0.0,
 ) -> str:
     """Return ELIGIBLE, HOLD_ONLY, or INELIGIBLE for a satellite assessment."""
     resolved = policy or resolve_policy()
@@ -112,13 +136,31 @@ def satellite_eligibility(
         if assessment is not None
         else None
     )
-    if score < resolved.allocation["satellite_min_score"]:
-        return "INELIGIBLE"
-    if _flag(_field(assessment, "severe_event", False), "severe_event") or _flag(
+    if isinstance(current_weight, bool) or not isinstance(current_weight, (int, float)):
+        raise ValueError("current_weight must be numeric")
+    if not math.isfinite(float(current_weight)) or current_weight < 0:
+        raise ValueError("current_weight must be finite and >= 0")
+    entry_score = resolved.allocation.get(
+        "satellite_entry_score", resolved.allocation.get("satellite_min_score")
+    )
+    exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
+    if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
         _field(assessment, "thesis_broken", False), "thesis_broken"
     ):
         return "INELIGIBLE"
+    if score < entry_score:
+        return "HOLD_ONLY" if current_weight > 0 and score >= exit_score else "INELIGIBLE"
     if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
+        return "HOLD_ONLY"
+    event_risk = _field(assessment, "event_risk", None)
+    unresolved = (
+        event_risk.unresolved
+        if isinstance(event_risk, EventRiskAssessment)
+        else _flag(event_risk.get("unresolved", False), "event_risk.unresolved")
+        if isinstance(event_risk, Mapping)
+        else False
+    )
+    if unresolved:
         return "HOLD_ONLY"
     return _relative_eligibility(relative)
 
@@ -237,8 +279,9 @@ def build_target_allocation(
             )
         score = _score(assessment, symbol) if assessment is not None else 50.0
         confidence = _confidence(_field(assessment, "confidence", "MEDIUM")) if assessment is not None else "MEDIUM"
-        severe_event = _flag(_field(assessment, "severe_event", False), "severe_event") if assessment is not None else False
         thesis_broken = _flag(_field(assessment, "thesis_broken", False), "thesis_broken") if assessment is not None else False
+        event_risk = _event_risk_state(assessment) if assessment is not None else "NORMAL"
+        event_multiplier = _event_risk_multiplier(event_risk, resolved)
         risk_tier = str(_field(assessment, "risk_tier", "normal")).lower() if assessment is not None else "normal"
         relative = (
             _field(
@@ -250,17 +293,31 @@ def build_target_allocation(
             else None
         )
         if asset_type == "satellite":
-            relative_status = satellite_eligibility(assessment, resolved)
+            relative_status = satellite_eligibility(
+                assessment,
+                resolved,
+                current_weight=normalized_current_weights.get(symbol, 0.0),
+            )
             if relative_status == "HOLD_ONLY":
                 if current_weights.get(symbol, 0.0) > 0:
                     satellite_hold[symbol] = current_weights[symbol]
-                reasons.append(f"{symbol} is HOLD_ONLY because BTC-relative evidence is incomplete")
+                reason = (
+                    "score is inside the entry/exit hysteresis band"
+                    if score < resolved.allocation.get(
+                        "satellite_entry_score", resolved.allocation.get("satellite_min_score")
+                    )
+                    else "BTC-relative or critical evidence is incomplete"
+                )
+                reasons.append(f"{symbol} is HOLD_ONLY because {reason}")
             elif relative_status == "ELIGIBLE":
+                entry_score = resolved.allocation.get(
+                    "satellite_entry_score", resolved.allocation.get("satellite_min_score")
+                )
                 score_strength = min(
                     1.0,
-                    max(0.0, (score - resolved.allocation["satellite_min_score"]) / (
+                    max(0.0, (score - entry_score) / (
                         resolved.allocation["satellite_full_score"]
-                        - resolved.allocation["satellite_min_score"]
+                        - entry_score
                     )),
                 )
                 confidence_multiplier = resolved.allocation["confidence_multipliers"][confidence]
@@ -273,14 +330,19 @@ def build_target_allocation(
                     * score_strength
                     * confidence_multiplier
                     * risk_multiplier
+                    * event_multiplier
                     * _relative_multiplier(relative)
                 )
+                if event_multiplier < 1.0:
+                    reasons.append(
+                        f"{symbol} event-risk state {event_risk} limits new deployment to {event_multiplier:.0%}"
+                    )
                 if confidence_multiplier == 0:
                     reasons.append(f"{symbol} receives 0% satellite target because confidence is LOW")
             else:
                 reasons.append(f"{symbol} receives 0% satellite target because eligibility failed")
-        elif asset_type == "core" and not severe_event and not thesis_broken:
-            core_raw[symbol] = max(score, resolved.allocation["core_min_score"])
+        elif asset_type == "core" and event_risk not in {"SEVERE", "CRITICAL"} and not thesis_broken:
+            core_raw[symbol] = max(score, resolved.allocation["core_min_score"]) * event_multiplier
 
     held_satellite_weights, _ = _bounded_allocate(
         satellite_hold, satellite_cap, limits.single_asset_max

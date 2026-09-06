@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from .evidence import EventRiskAssessment
 from .factor_packet import freeze_packet_value, thaw_packet_value
 
 
@@ -101,6 +102,7 @@ class AssetDecisionSummary:
     thesis_broken: bool = False
     severe_event: bool = False
     portfolio_constraint: str = ""
+    event_risk: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "asset summary symbol").upper())
@@ -151,6 +153,13 @@ class AssetDecisionSummary:
         for field_name in ("thesis_broken", "severe_event"):
             if not isinstance(getattr(self, field_name), bool):
                 raise ValueError(f"{field_name} must be boolean")
+        if self.event_risk is not None:
+            event_risk = (
+                self.event_risk.as_dict()
+                if isinstance(self.event_risk, EventRiskAssessment)
+                else EventRiskAssessment.from_mapping(self.event_risk).as_dict()
+            )
+            object.__setattr__(self, "event_risk", freeze_packet_value(event_risk, path="event_risk"))
         if not isinstance(self.portfolio_constraint, str):
             raise ValueError("portfolio_constraint must be a string")
         object.__setattr__(self, "portfolio_constraint", self.portfolio_constraint.strip())
@@ -182,6 +191,7 @@ class AssetDecisionSummary:
             "thesis_broken": self.thesis_broken,
             "severe_event": self.severe_event,
             "portfolio_constraint": self.portfolio_constraint,
+            "event_risk": thaw_packet_value(self.event_risk) if self.event_risk is not None else None,
         }
         return result
 

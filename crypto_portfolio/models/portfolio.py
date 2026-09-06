@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
+from .policy import Policy, legacy_policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
 
@@ -288,6 +288,8 @@ def snapshot_from_mapping(
         resolved_policy = policy
     elif data.get("resolved_policy") is not None:
         resolved_policy = policy_from_mapping(data["resolved_policy"])
+    elif data.get("policy_version") == 1:
+        resolved_policy = legacy_policy().with_overrides(data.get("config"))
     else:
         resolved_policy = resolve_policy(data.get("config"))
     raw_positions = data.get("positions")

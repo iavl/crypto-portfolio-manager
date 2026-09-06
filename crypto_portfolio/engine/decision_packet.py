@@ -6,7 +6,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from ..models.decision_packet import AssetDecisionSummary, DecisionReviewPacket
-from ..models.evidence import AssetAssessment, FactorScore
+from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
@@ -142,6 +142,21 @@ def _asset_summary(
     amount = float(action_dict.get("amount_usd", action_dict.get("approved_amount_usd", 0.0)))
     if action_name in {"HOLD", "WAIT", "NO_TRADE"}:
         amount = 0.0
+    raw_event_risk = (
+        assessment.event_risk
+        if isinstance(assessment, AssetAssessment)
+        else assessment_dict.get("event_risk")
+    )
+    event_risk = (
+        raw_event_risk.as_dict()
+        if isinstance(raw_event_risk, EventRiskAssessment)
+        else EventRiskAssessment.from_mapping(raw_event_risk).as_dict()
+        if raw_event_risk is not None
+        else None
+    )
+    severe_event = _bool_flag(assessment_dict.get("severe_event", False), "severe_event")
+    if event_risk is not None and event_risk["state"] in {"SEVERE", "CRITICAL"}:
+        severe_event = True
     return AssetDecisionSummary(
         symbol=symbol,
         factor_scores=factor_scores,
@@ -161,8 +176,9 @@ def _asset_summary(
         action=action_name,
         approved_amount_usd=amount,
         thesis_broken=_bool_flag(assessment_dict.get("thesis_broken", False), "thesis_broken"),
-        severe_event=_bool_flag(assessment_dict.get("severe_event", False), "severe_event"),
+        severe_event=severe_event,
         portfolio_constraint=str(action_dict.get("rationale", "")),
+        event_risk=event_risk,
     )
 
 

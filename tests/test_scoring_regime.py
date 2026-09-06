@@ -4,8 +4,8 @@ from crypto_portfolio.engine.regime import RegimeInputs, determine_regime
 from crypto_portfolio.engine.risk import run_risk_gate
 from crypto_portfolio.engine.scoring import score_factors
 from crypto_portfolio.engine.scoring import score_assessment
-from crypto_portfolio.models.evidence import AssetAssessment
-from crypto_portfolio.models.policy import resolve_policy
+from crypto_portfolio.models.evidence import AssetAssessment, FactorScore
+from crypto_portfolio.models.policy import legacy_policy, resolve_policy
 
 
 class ScoringAndRegimeTests(unittest.TestCase):
@@ -18,23 +18,75 @@ class ScoringAndRegimeTests(unittest.TestCase):
                 "onchain": 50,
                 "capital_flows": 40,
                 "relative_strength_btc": 30,
-                "event_risk": 20,
             }
         )
-        self.assertAlmostEqual(result.score, 59.0)
+        self.assertAlmostEqual(result.score, 59.5)
         self.assertEqual(result.missing_factors, ())
         self.assertAlmostEqual(sum(result.effective_weights.values()), 1.0)
+        self.assertEqual(set(result.effective_weights), {
+            "trend", "valuation", "fundamentals", "onchain", "capital_flows", "relative_strength_btc"
+        })
 
-    def test_missing_factor_renormalizes_and_lowers_confidence(self):
+    def test_missing_factor_keeps_weight_and_shrinks_to_neutral(self):
         result = score_factors(
             {"trend": 80, "valuation": 60},
-            {"trend": 0.25, "valuation": 0.2, "onchain": 0.1},
+            {"trend": 0.5, "valuation": 0.4, "onchain": 0.1},
             confidence="HIGH",
         )
-        self.assertAlmostEqual(result.score, (80 * 0.25 + 60 * 0.2) / 0.45)
+        self.assertAlmostEqual(result.score, 80 * 0.5 + 60 * 0.4 + 50 * 0.1)
         self.assertEqual(result.missing_factors, ("onchain",))
-        self.assertEqual(result.confidence, "MEDIUM")
+        self.assertEqual(result.confidence, "HIGH")
         self.assertAlmostEqual(sum(result.effective_weights.values()), 1.0)
+        self.assertAlmostEqual(result.coverage, 0.9)
+        self.assertEqual(result.effective_factor_scores["onchain"], 50.0)
+
+    def test_reliability_shrinks_toward_neutral(self):
+        for raw, reliability, expected in ((80, 1.0, 80), (80, 0.5, 65), (80, 0.0, 50), (20, 0.5, 35)):
+            with self.subTest(raw=raw, reliability=reliability):
+                result = score_factors(
+                    {"trend": FactorScore("trend", raw, reliability=reliability)},
+                    {"trend": 1.0},
+                )
+                self.assertAlmostEqual(result.score, expected)
+                self.assertAlmostEqual(result.coverage, reliability)
+
+    def test_missing_all_factors_is_neutral_but_not_investable(self):
+        result = score_factors({}, {"trend": 1.0}, confidence="HIGH")
+        self.assertEqual(result.score, 50.0)
+        self.assertEqual(result.coverage, 0.0)
+        self.assertEqual(result.confidence, "LOW")
+
+    def test_not_applicable_requires_zero_weight(self):
+        valid = score_factors(
+            {"relative_strength_btc": FactorScore("relative_strength_btc", None, availability="NOT_APPLICABLE")},
+            {"trend": 1.0, "relative_strength_btc": 0.0},
+            symbol="BTC",
+        )
+        self.assertEqual(valid.not_applicable_factors, ("relative_strength_btc",))
+        with self.assertRaises(ValueError):
+            score_factors(
+                {"trend": FactorScore("trend", None, availability="NOT_APPLICABLE")},
+                {"trend": 1.0},
+            )
+
+    def test_v1_replay_keeps_legacy_event_factor_and_renormalization(self):
+        result = score_factors(
+            {
+                "trend": 80,
+                "valuation": 70,
+                "fundamentals": 60,
+                "onchain": 50,
+                "capital_flows": 40,
+                "relative_strength_btc": 30,
+                "event_risk": 20,
+            },
+            policy=legacy_policy(),
+        )
+        self.assertAlmostEqual(result.score, 59.0)
+        self.assertEqual(result.scoring_model_version, 1)
+        missing = score_factors({"trend": 80}, policy=legacy_policy())
+        self.assertAlmostEqual(missing.score, 80.0)
+        self.assertEqual(missing.effective_weights, {"trend": 1.0})
 
     def test_confidence_tracks_coverage_and_critical_completeness(self):
         low_coverage = score_factors(
@@ -58,9 +110,8 @@ class ScoringAndRegimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown scoring factor"):
             score_factors({"fundamental": 80}, {"fundamentals": 1.0})
 
-    def test_all_factors_missing_and_invalid_score_fail(self):
-        with self.assertRaises(ValueError):
-            score_factors({}, {"trend": 1.0})
+    def test_all_factors_missing_is_neutral_and_invalid_score_fails(self):
+        self.assertEqual(score_factors({}, {"trend": 1.0}).score, 50.0)
         with self.assertRaises(ValueError):
             score_factors({"trend": 101}, {"trend": 1.0})
 

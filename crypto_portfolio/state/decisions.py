@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from ..models.decision import Decision, DecisionStatusEvent
 from ..models.evidence import Evidence
-from ..models.policy import Policy, policy_from_mapping, policy_hash, resolve_policy
+from ..models.policy import Policy, legacy_policy, policy_from_mapping, policy_hash, resolve_policy
 from ..models.time import parse_timestamp
 from ._jsonl import append_record, read_records
 from .snapshots import runtime_data_dir
@@ -28,6 +28,8 @@ def _validated_decision(
             resolved = policy
         elif decision.get("resolved_policy") is not None:
             resolved = policy_from_mapping(decision["resolved_policy"])
+        elif decision.get("policy_version") == 1:
+            resolved = legacy_policy().with_overrides(decision.get("config"))
         else:
             resolved = resolve_policy(decision.get("config"))
         model = Decision.from_mapping(decision)
@@ -37,6 +39,8 @@ def _validated_decision(
             resolved = policy
         elif decision.resolved_policy is not None:
             resolved = policy_from_mapping(decision.resolved_policy)
+        elif decision.policy_version == 1:
+            resolved = legacy_policy().with_overrides(decision.config)
         else:
             resolved = resolve_policy()
     else:

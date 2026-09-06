@@ -15,6 +15,22 @@ class PolicyError(ValueError):
 
 
 _REGIMES = ("NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION")
+SCORING_FACTORS = (
+    "trend",
+    "valuation",
+    "fundamentals",
+    "onchain",
+    "capital_flows",
+    "relative_strength_btc",
+)
+_EVENT_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL")
+_DEFAULT_EVENT_RISK_MULTIPLIERS = {
+    "NORMAL": 1.0,
+    "ELEVATED": 0.75,
+    "HIGH": 0.5,
+    "SEVERE": 0.0,
+    "CRITICAL": 0.0,
+}
 _REGIME_FIELDS = (
     "stablecoin_target",
     "satellite_max",
@@ -30,6 +46,8 @@ _TOP_LEVEL_FIELDS = {
     "benchmarks",
     "rebalance",
     "scoring_weights",
+    "scoring_profiles",
+    "asset_scoring_profiles",
     "scoring",
     "factor_rules",
     "regimes",
@@ -40,6 +58,7 @@ _TOP_LEVEL_FIELDS = {
     "btc_cycle",
     "execution_overlay",
     "events",
+    "event_risk_multipliers",
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -59,6 +78,8 @@ _HORIZON_FIELDS = {"min", "max"}
 _REBALANCE_FIELDS = {"hold_below_pp", "watch_below_pp", "high_priority_above_pp"}
 _ALLOCATION_FIELDS = {
     "satellite_min_score",
+    "satellite_entry_score",
+    "satellite_exit_score",
     "satellite_full_score",
     "core_min_score",
     "low_confidence_satellite_weight",
@@ -83,8 +104,14 @@ _TREND_RULE_FIELDS = {
     "extension_threshold_atr",
     "extension_penalty",
 }
-_RELATIVE_RULE_FIELDS = {"positive_threshold", "negative_threshold", "horizon_weights"}
-_FLOW_RULE_FIELDS = {"positive_threshold", "negative_threshold"}
+_RELATIVE_RULE_FIELDS_V1 = {"positive_threshold", "negative_threshold", "horizon_weights"}
+_RELATIVE_RULE_FIELDS_V2 = {
+    "horizon_weights",
+    "risk_adjusted_neutral_band",
+    "risk_adjusted_saturation",
+}
+_FLOW_RULE_FIELDS_V1 = {"positive_threshold", "negative_threshold"}
+_FLOW_RULE_FIELDS_V2 = {"neutral_abs_max", "strong_abs"}
 _EXECUTION_FIELDS = {
     "timeframe",
     "preferred_history_days",
@@ -280,6 +307,102 @@ def _weighted_map(value: Any, name: str) -> dict[str, float]:
     return result
 
 
+def _parse_scoring_weights(value: Any, name: str) -> dict[str, float]:
+    if not isinstance(value, dict) or not value:
+        raise PolicyError(f"{name} must be a non-empty object")
+    result: dict[str, float] = {}
+    for raw_factor, raw_weight in value.items():
+        if not isinstance(raw_factor, str) or not raw_factor.strip():
+            raise PolicyError(f"{name} keys must be non-empty strings")
+        factor = raw_factor.strip().lower()
+        if factor in result:
+            raise PolicyError(f"{name} contains duplicate key {factor}")
+        result[factor] = _fraction(raw_weight, f"{name}.{raw_factor}")
+    if not math.isclose(sum(result.values()), 1.0, abs_tol=1e-9):
+        raise PolicyError(f"{name} must sum to 1")
+    return result
+
+
+def _parse_scoring_profiles(value: Any) -> dict[str, dict[str, float]]:
+    if not isinstance(value, dict) or not value:
+        raise PolicyError("scoring_profiles must be a non-empty object")
+    result: dict[str, dict[str, float]] = {}
+    for raw_name, raw_weights in value.items():
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise PolicyError("scoring profile names must be non-empty strings")
+        name = raw_name.strip().lower()
+        if name in result:
+            raise PolicyError(f"scoring_profiles contains duplicate profile {name}")
+        if not isinstance(raw_weights, dict):
+            raise PolicyError(f"scoring_profiles.{name} must be an object")
+        keys = {key.strip().lower() for key in raw_weights if isinstance(key, str)}
+        if keys != set(SCORING_FACTORS) or len(raw_weights) != len(SCORING_FACTORS):
+            raise PolicyError(
+                f"scoring_profiles.{name} must contain exactly {', '.join(SCORING_FACTORS)}"
+            )
+        weights: dict[str, float] = {}
+        for raw_factor, raw_weight in raw_weights.items():
+            if not isinstance(raw_factor, str) or not raw_factor.strip():
+                raise PolicyError(f"scoring_profiles.{name} keys must be non-empty strings")
+            factor = raw_factor.strip().lower()
+            if factor in weights:
+                raise PolicyError(f"scoring_profiles.{name} contains duplicate key {factor}")
+            weights[factor] = _number(
+                raw_weight,
+                f"scoring_profiles.{name}.{factor}",
+                minimum=0.0,
+                maximum=1.0,
+            )
+        if not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+            raise PolicyError(f"scoring_profiles.{name} weights must sum to 1")
+        result[name] = weights
+    if "default" not in result:
+        raise PolicyError("scoring_profiles must contain default")
+    return result
+
+
+def _parse_asset_scoring_profiles(value: Any, profiles: Mapping[str, Mapping[str, float]]) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise PolicyError("asset_scoring_profiles must be an object")
+    result: dict[str, str] = {}
+    for raw_symbol, raw_name in value.items():
+        if not isinstance(raw_symbol, str) or not raw_symbol.strip():
+            raise PolicyError("asset_scoring_profiles keys must be non-empty strings")
+        symbol = raw_symbol.strip().upper()
+        if symbol in result:
+            raise PolicyError(f"asset_scoring_profiles contains duplicate asset {symbol}")
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise PolicyError(f"asset_scoring_profiles.{symbol} must be a profile name")
+        name = raw_name.strip().lower()
+        if name not in profiles:
+            raise PolicyError(f"asset_scoring_profiles.{symbol} references unknown profile {name}")
+        result[symbol] = name
+    btc_profile = result.get("BTC")
+    if btc_profile is None:
+        raise PolicyError("asset_scoring_profiles must explicitly map BTC")
+    if profiles[btc_profile]["relative_strength_btc"] != 0.0:
+        raise PolicyError("BTC scoring profile must assign zero relative_strength_btc weight")
+    return result
+
+
+def _parse_event_risk_multipliers(value: Any, *, allow_missing: bool = False) -> dict[str, float]:
+    if value is None and allow_missing:
+        return dict(_DEFAULT_EVENT_RISK_MULTIPLIERS)
+    if not isinstance(value, dict):
+        raise PolicyError("event_risk_multipliers must be an object")
+    if set(value) != set(_EVENT_RISK_STATES):
+        raise PolicyError(
+            "event_risk_multipliers must contain NORMAL, ELEVATED, HIGH, SEVERE, and CRITICAL"
+        )
+    result = {
+        state: _fraction(value[state], f"event_risk_multipliers.{state}")
+        for state in _EVENT_RISK_STATES
+    }
+    if any(result[left] < result[right] for left, right in zip(_EVENT_RISK_STATES, _EVENT_RISK_STATES[1:])):
+        raise PolicyError("event_risk_multipliers must be monotonically non-increasing")
+    return result
+
+
 @dataclass(frozen=True)
 class RegimeLimits:
     stablecoin_target: float
@@ -299,10 +422,12 @@ class Policy:
     max_portfolio_drawdown: float
     benchmarks: Mapping[str, Mapping[str, float]]
     rebalance: Mapping[str, float]
-    scoring_weights: Mapping[str, float]
+    scoring_profiles: Mapping[str, Mapping[str, float]]
+    asset_scoring_profiles: Mapping[str, str]
     scoring: Mapping[str, float]
     regimes: Mapping[str, RegimeLimits]
     allocation: Mapping[str, Any]
+    event_risk_multipliers: Mapping[str, float]
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
     _execution_omitted_fields: frozenset[str] = dataclass_field(
         default_factory=frozenset, repr=False, compare=False
@@ -314,6 +439,30 @@ class Policy:
     execution_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     events: Mapping[str, Any] = dataclass_field(default_factory=dict)
     chain_liveness: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    legacy_scoring_weights: Mapping[str, float] | None = dataclass_field(
+        default=None, repr=False, compare=False
+    )
+
+    @property
+    def scoring_weights(self) -> Mapping[str, float]:
+        """Compatibility view; v2 storage is owned by scoring_profiles."""
+        if self.policy_version == 1:
+            return self.legacy_scoring_weights or self.scoring_profiles.get("legacy", {})
+        return self.scoring_profiles["default"]
+
+    def scoring_profile_name(self, symbol: str) -> str:
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise PolicyError("symbol must be a non-empty string")
+        if self.policy_version == 1:
+            return "legacy"
+        return self.asset_scoring_profiles.get(symbol.strip().upper(), "default")
+
+    def scoring_profile(self, symbol: str) -> Mapping[str, float]:
+        name = self.scoring_profile_name(symbol)
+        try:
+            return self.scoring_profiles[name]
+        except KeyError as exc:
+            raise PolicyError(f"unknown scoring profile: {name}") from exc
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -368,7 +517,6 @@ class Policy:
             },
             "benchmarks": {name: dict(weights) for name, weights in self.benchmarks.items()},
             "rebalance": dict(self.rebalance),
-            "scoring_weights": dict(self.scoring_weights),
             "scoring": dict(self.scoring),
             "regimes": {
                 name: {
@@ -381,6 +529,14 @@ class Policy:
             },
             "allocation": dict(self.allocation),
         }
+        if self.policy_version == 1:
+            result["scoring_weights"] = dict(self.scoring_weights)
+        else:
+            result["scoring_profiles"] = {
+                name: dict(weights) for name, weights in self.scoring_profiles.items()
+            }
+            result["asset_scoring_profiles"] = dict(self.asset_scoring_profiles)
+            result["event_risk_multipliers"] = dict(self.event_risk_multipliers)
         if self.volume_profile:
             result["volume_profile"] = dict(self.volume_profile)
         if self.factor_rules:
@@ -732,7 +888,9 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
     }
 
 
-def _parse_factor_rules(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+def _parse_factor_rules(
+    value: Any, *, policy_version: int, allow_missing: bool = False
+) -> dict[str, Any]:
     if value is None and allow_missing:
         return {}
     if not isinstance(value, dict):
@@ -766,38 +924,72 @@ def _parse_factor_rules(value: Any, *, allow_missing: bool = False) -> dict[str,
     relative = value["relative_strength"]
     if not isinstance(relative, dict):
         raise PolicyError("factor_rules.relative_strength must be an object")
-    _unknown_fields(relative, _RELATIVE_RULE_FIELDS, "factor_rules.relative_strength")
-    if set(relative) != _RELATIVE_RULE_FIELDS:
+    relative_fields = _RELATIVE_RULE_FIELDS_V1 if policy_version == 1 else _RELATIVE_RULE_FIELDS_V2
+    _unknown_fields(relative, relative_fields, "factor_rules.relative_strength")
+    if set(relative) != relative_fields:
         raise PolicyError("factor_rules.relative_strength fields are incomplete")
-    positive = _number(relative["positive_threshold"], "factor_rules.relative_strength.positive_threshold")
-    negative = _number(relative["negative_threshold"], "factor_rules.relative_strength.negative_threshold")
-    if negative > positive or negative > 0 or positive < 0:
-        raise PolicyError("relative-strength thresholds must satisfy negative <= 0 <= positive")
     horizon_weights = _weighted_map(relative["horizon_weights"], "factor_rules.relative_strength.horizon_weights")
     if set(horizon_weights) != {"30d", "90d", "180d"}:
         raise PolicyError("factor_rules.relative_strength.horizon_weights must contain 30d, 90d, and 180d")
+    if policy_version == 1:
+        positive = _number(relative["positive_threshold"], "factor_rules.relative_strength.positive_threshold")
+        negative = _number(relative["negative_threshold"], "factor_rules.relative_strength.negative_threshold")
+        if negative > positive or negative > 0 or positive < 0:
+            raise PolicyError("relative-strength thresholds must satisfy negative <= 0 <= positive")
+        parsed_relative = {
+            "positive_threshold": positive,
+            "negative_threshold": negative,
+            "horizon_weights": horizon_weights,
+        }
+    else:
+        neutral_band = _number(
+            relative["risk_adjusted_neutral_band"],
+            "factor_rules.relative_strength.risk_adjusted_neutral_band",
+            minimum=0.0,
+        )
+        saturation = _number(
+            relative["risk_adjusted_saturation"],
+            "factor_rules.relative_strength.risk_adjusted_saturation",
+            minimum=neutral_band,
+        )
+        if saturation <= neutral_band:
+            raise PolicyError(
+                "factor_rules.relative_strength.risk_adjusted_saturation must exceed neutral_band"
+            )
+        parsed_relative = {
+            "horizon_weights": horizon_weights,
+            "risk_adjusted_neutral_band": neutral_band,
+            "risk_adjusted_saturation": saturation,
+        }
 
     flows = value["flows"]
     if not isinstance(flows, dict):
         raise PolicyError("factor_rules.flows must be an object")
-    _unknown_fields(flows, _FLOW_RULE_FIELDS, "factor_rules.flows")
-    if set(flows) != _FLOW_RULE_FIELDS:
+    flow_fields = _FLOW_RULE_FIELDS_V1 if policy_version == 1 else _FLOW_RULE_FIELDS_V2
+    _unknown_fields(flows, flow_fields, "factor_rules.flows")
+    if set(flows) != flow_fields:
         raise PolicyError("factor_rules.flows fields are incomplete")
-    flow_positive = _number(flows["positive_threshold"], "factor_rules.flows.positive_threshold")
-    flow_negative = _number(flows["negative_threshold"], "factor_rules.flows.negative_threshold")
-    if flow_negative > flow_positive or flow_negative > 0 or flow_positive < 0:
-        raise PolicyError("flow thresholds must satisfy negative <= 0 <= positive")
-    return {
-        "trend": parsed_trend,
-        "relative_strength": {
-            "positive_threshold": positive,
-            "negative_threshold": negative,
-            "horizon_weights": horizon_weights,
-        },
-        "flows": {
+    if policy_version == 1:
+        flow_positive = _number(flows["positive_threshold"], "factor_rules.flows.positive_threshold")
+        flow_negative = _number(flows["negative_threshold"], "factor_rules.flows.negative_threshold")
+        if flow_negative > flow_positive or flow_negative > 0 or flow_positive < 0:
+            raise PolicyError("flow thresholds must satisfy negative <= 0 <= positive")
+        parsed_flows = {
             "positive_threshold": flow_positive,
             "negative_threshold": flow_negative,
-        },
+        }
+    else:
+        neutral_abs_max = _number(
+            flows["neutral_abs_max"], "factor_rules.flows.neutral_abs_max", minimum=0.0
+        )
+        strong_abs = _number(flows["strong_abs"], "factor_rules.flows.strong_abs", minimum=neutral_abs_max)
+        if strong_abs <= neutral_abs_max:
+            raise PolicyError("factor_rules.flows.strong_abs must exceed neutral_abs_max")
+        parsed_flows = {"neutral_abs_max": neutral_abs_max, "strong_abs": strong_abs}
+    return {
+        "trend": parsed_trend,
+        "relative_strength": parsed_relative,
+        "flows": parsed_flows,
     }
 
 
@@ -1207,7 +1399,13 @@ def _parse_policy(
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
     _unknown_fields(data, _TOP_LEVEL_FIELDS, "policy")
+    version = data.get("policy_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise PolicyError("policy_version must be a positive integer")
     missing = set(_TOP_LEVEL_FIELDS - set(data))
+    missing.difference_update({"scoring_weights", "scoring_profiles", "asset_scoring_profiles"})
+    if version == 1:
+        missing.discard("event_risk_multipliers")
     if allow_missing_execution:
         missing.discard("execution")
     if allow_missing_volume_profile:
@@ -1222,10 +1420,6 @@ def _parse_policy(
         missing.discard("chain_liveness")
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
-
-    version = data["policy_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-        raise PolicyError("policy_version must be a positive integer")
 
     horizon = data["investment_horizon_months"]
     if not isinstance(horizon, dict):
@@ -1281,19 +1475,20 @@ def _parse_policy(
     ):
         raise PolicyError("rebalance thresholds must be strictly ordered")
 
-    scoring_weights = data["scoring_weights"]
-    if not isinstance(scoring_weights, dict) or not scoring_weights:
-        raise PolicyError("scoring_weights must be a non-empty object")
-    parsed_scores: dict[str, float] = {}
-    for key, value in scoring_weights.items():
-        if not isinstance(key, str) or not key.strip():
-            raise PolicyError("scoring_weights keys must be non-empty strings")
-        key = key.strip()
-        if key in parsed_scores:
-            raise PolicyError(f"scoring_weights contains duplicate key {key}")
-        parsed_scores[key] = _fraction(value, f"scoring_weights.{key}")
-    if not math.isclose(sum(parsed_scores.values()), 1.0, abs_tol=1e-9):
-        raise PolicyError("scoring_weights must sum to 1")
+    if version == 1:
+        if "scoring_profiles" in data or "asset_scoring_profiles" in data:
+            raise PolicyError("v1 policies must use scoring_weights")
+        parsed_legacy_scores = _parse_scoring_weights(data.get("scoring_weights"), "scoring_weights")
+        parsed_profiles = {"legacy": parsed_legacy_scores}
+        parsed_asset_profiles: dict[str, str] = {}
+    else:
+        if "scoring_weights" in data:
+            raise PolicyError("v2 policies must use scoring_profiles")
+        parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
+        parsed_asset_profiles = _parse_asset_scoring_profiles(
+            data.get("asset_scoring_profiles"), parsed_profiles
+        )
+        parsed_legacy_scores = None
 
     scoring = data["scoring"]
     if not isinstance(scoring, dict):
@@ -1312,7 +1507,9 @@ def _parse_policy(
         raise PolicyError("scoring coverage thresholds must be ordered")
 
     parsed_factor_rules = _parse_factor_rules(
-        data.get("factor_rules"), allow_missing=allow_missing_factor_rules
+        data.get("factor_rules"),
+        policy_version=version,
+        allow_missing=allow_missing_factor_rules,
     )
     parsed_positioning = _parse_positioning(data.get("positioning"), allow_missing=allow_missing_overlays)
     parsed_btc_cycle = _parse_btc_cycle(data.get("btc_cycle"), allow_missing=allow_missing_overlays)
@@ -1348,7 +1545,18 @@ def _parse_policy(
     if not isinstance(allocation, dict):
         raise PolicyError("allocation must be an object")
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
-    if set(allocation) != _ALLOCATION_FIELDS:
+    common_allocation_fields = {
+        "satellite_full_score",
+        "core_min_score",
+        "low_confidence_satellite_weight",
+        "confidence_multipliers",
+        "risk_multipliers",
+    }
+    score_fields = {"satellite_min_score"} if version == 1 else {
+        "satellite_entry_score", "satellite_exit_score"
+    }
+    expected_allocation_fields = common_allocation_fields | score_fields
+    if set(allocation) != expected_allocation_fields:
         raise PolicyError("allocation fields are incomplete")
     confidence_multipliers = allocation["confidence_multipliers"]
     if not isinstance(confidence_multipliers, dict):
@@ -1369,9 +1577,6 @@ def _parse_policy(
         for key, value in risk_multipliers.items()
     }
     parsed_allocation = {
-        "satellite_min_score": _number(
-            allocation["satellite_min_score"], "allocation.satellite_min_score", minimum=0, maximum=100
-        ),
         "satellite_full_score": _number(
             allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100
         ),
@@ -1385,8 +1590,40 @@ def _parse_policy(
         "confidence_multipliers": parsed_confidence_multipliers,
         "risk_multipliers": parsed_risk_multipliers,
     }
-    if parsed_allocation["satellite_full_score"] <= parsed_allocation["satellite_min_score"]:
-        raise PolicyError("allocation.satellite_full_score must exceed satellite_min_score")
+    if version == 1:
+        parsed_allocation["satellite_min_score"] = _number(
+            allocation["satellite_min_score"],
+            "allocation.satellite_min_score",
+            minimum=0,
+            maximum=100,
+        )
+        if parsed_allocation["satellite_full_score"] <= parsed_allocation["satellite_min_score"]:
+            raise PolicyError("allocation.satellite_full_score must exceed satellite_min_score")
+    else:
+        parsed_allocation["satellite_entry_score"] = _number(
+            allocation["satellite_entry_score"],
+            "allocation.satellite_entry_score",
+            minimum=0,
+            maximum=100,
+        )
+        parsed_allocation["satellite_exit_score"] = _number(
+            allocation["satellite_exit_score"],
+            "allocation.satellite_exit_score",
+            minimum=0,
+            maximum=100,
+        )
+        if not (
+            parsed_allocation["satellite_exit_score"]
+            < parsed_allocation["satellite_entry_score"]
+            < parsed_allocation["satellite_full_score"]
+        ):
+            raise PolicyError(
+                "allocation satellite scores must satisfy exit < entry < full"
+            )
+
+    parsed_event_risk_multipliers = _parse_event_risk_multipliers(
+        data.get("event_risk_multipliers"), allow_missing=version == 1
+    )
 
     parsed_execution = _parse_execution(data.get("execution"), allow_missing=allow_missing_execution)
     parsed_volume_profile = _parse_volume_profile(
@@ -1408,10 +1645,12 @@ def _parse_policy(
         ),
         benchmarks=parsed_benchmarks,
         rebalance=parsed_rebalance,
-        scoring_weights=parsed_scores,
+        scoring_profiles=parsed_profiles,
+        asset_scoring_profiles=parsed_asset_profiles,
         scoring=parsed_scoring,
         regimes=parsed_regimes,
         allocation=parsed_allocation,
+        event_risk_multipliers=parsed_event_risk_multipliers,
         volume_profile=parsed_volume_profile,
         execution=parsed_execution,
         factor_rules=parsed_factor_rules,
@@ -1420,6 +1659,7 @@ def _parse_policy(
         execution_overlay=parsed_execution_overlay,
         events=parsed_events,
         chain_liveness=parsed_chain_liveness,
+        legacy_scoring_weights=parsed_legacy_scores,
     )
     raw_execution = data.get("execution")
     omitted = (
@@ -1476,6 +1716,35 @@ def resolve_policy(
     return load_policy(path, overrides)
 
 
+def legacy_policy() -> Policy:
+    """Return the built-in v1 policy shape for records without a snapshot policy."""
+    data = load_policy().as_dict()
+    data["policy_version"] = 1
+    data["scoring_weights"] = {
+        "trend": 0.25,
+        "valuation": 0.20,
+        "fundamentals": 0.20,
+        "onchain": 0.10,
+        "capital_flows": 0.10,
+        "relative_strength_btc": 0.10,
+        "event_risk": 0.05,
+    }
+    data.pop("scoring_profiles", None)
+    data.pop("asset_scoring_profiles", None)
+    data.pop("event_risk_multipliers", None)
+    data["factor_rules"]["relative_strength"] = {
+        "positive_threshold": 0.05,
+        "negative_threshold": -0.05,
+        "horizon_weights": {"30d": 0.2, "90d": 0.4, "180d": 0.4},
+    }
+    data["factor_rules"]["flows"] = {"positive_threshold": 0.0, "negative_threshold": 0.0}
+    allocation = data["allocation"]
+    allocation["satellite_min_score"] = 65
+    allocation.pop("satellite_entry_score", None)
+    allocation.pop("satellite_exit_score", None)
+    return _parse_policy(data)
+
+
 def policy_hash(policy: Policy | Mapping[str, Any]) -> str:
     """Return the SHA-256 digest of a policy's canonical JSON representation."""
     value = policy.as_dict() if isinstance(policy, Policy) else dict(policy)
@@ -1487,7 +1756,9 @@ __all__ = [
     "Policy",
     "PolicyError",
     "RegimeLimits",
+    "SCORING_FACTORS",
     "load_policy",
+    "legacy_policy",
     "policy_hash",
     "policy_from_mapping",
     "resolve_policy",

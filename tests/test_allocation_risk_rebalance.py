@@ -1,6 +1,6 @@
 import unittest
 
-from crypto_portfolio.engine.allocation import build_target_allocation
+from crypto_portfolio.engine.allocation import build_target_allocation, satellite_eligibility
 from crypto_portfolio.engine.rebalance import RebalanceAction, recommend_rebalance, validate_execution_plan
 from crypto_portfolio.engine.risk import run_risk_gate
 from crypto_portfolio.models.evidence import AssetAssessment
@@ -143,11 +143,21 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
                 }
             ).target_weights.get("SOL", 0)
 
-        self.assertEqual(weight(score=65), 0)
+        self.assertEqual(weight(score=66), 0)
+        self.assertEqual(satellite_eligibility({"score": 67, "confidence": "HIGH", "relative_strength_vs_btc": "STRONG"}), "ELIGIBLE")
         self.assertLess(weight(score=70), weight(score=80))
         self.assertLess(weight(confidence="MEDIUM"), weight(confidence="HIGH"))
         self.assertLess(weight(risk_tier="high_beta"), weight(risk_tier="normal"))
         self.assertLessEqual(weight(), 0.25)
+
+    def test_satellite_score_hysteresis(self):
+        assessment = {"score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "STRONG"}
+        self.assertEqual(satellite_eligibility(assessment), "INELIGIBLE")
+        self.assertEqual(satellite_eligibility(assessment, current_weight=0.05), "HOLD_ONLY")
+        below_exit = {**assessment, "score": 59}
+        self.assertEqual(satellite_eligibility(below_exit, current_weight=0.05), "INELIGIBLE")
+        result = build_target_allocation(assessments={"SOL": assessment}, current_weights={"SOL": 0.05, "USDT": 0.1, "BTC": 0.85})
+        self.assertAlmostEqual(result.target_weights.get("SOL", 0), 0.05)
 
     def test_missing_relative_strength_is_hold_only(self):
         new_risk = build_target_allocation(
@@ -159,6 +169,16 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         )
         self.assertEqual(new_risk.target_weights.get("SOL", 0), 0)
         self.assertAlmostEqual(existing.target_weights.get("SOL", 0), 0.05)
+
+    def test_event_risk_is_independent_from_base_score(self):
+        normal = build_target_allocation(
+            assessments={"SOL": {"score": 100, "confidence": "HIGH", "relative_strength_vs_btc": "STRONG"}}
+        )
+        critical = build_target_allocation(
+            assessments={"SOL": {"score": 100, "confidence": "HIGH", "relative_strength_vs_btc": "STRONG", "event_risk": {"state": "CRITICAL"}}}
+        )
+        self.assertGreater(normal.target_weights.get("SOL", 0), 0)
+        self.assertEqual(critical.target_weights.get("SOL", 0), 0)
 
     def test_stablecoins_are_one_sleeve(self):
         current = {"BTC": 0.9, "USDT": 0.05, "USDC": 0.05}

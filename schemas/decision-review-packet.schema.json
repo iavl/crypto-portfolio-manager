@@ -47,6 +47,7 @@
         "contrary_evidence_ids": {"type": "array"},
         "thesis_broken": {"type": "boolean"},
         "severe_event": {"type": "boolean"},
+        "event_risk": {"type": ["object", "null"]},
         "portfolio_constraint": {"type": "string"}
       },
       "additionalProperties": false

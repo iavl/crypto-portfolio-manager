@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
-from typing import Any
+from typing import Any, Mapping
 
 
 _EXPECTED_TYPES = {"number", "string"}
 _DIRECTIONS = {"HIGHER_IS_BETTER", "LOWER_IS_BETTER", "CONTEXTUAL"}
 _DECISION_ROLES = {
     "SCORING_FACTOR",
+    "EVENT_RISK",
     "POSITIONING_OVERLAY",
     "CYCLE_CONTEXT",
     "EXECUTION_CONTEXT",
@@ -163,7 +164,11 @@ class MetricDefinition:
 
     @property
     def is_overlay(self) -> bool:
-        return not self.is_scoring_factor
+        return self.decision_role in {"POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT"}
+
+    @property
+    def is_event_risk(self) -> bool:
+        return self.decision_role == "EVENT_RISK"
 
     @property
     def freshness_days(self) -> int | float | None:
@@ -272,18 +277,20 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "relative.return_vs_btc_30d": _definition("relative.return_vs_btc_30d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_90d": _definition("relative.return_vs_btc_90d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_180d": _definition("relative.return_vs_btc_180d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="14d", asset_scope=_APPLICATION_ASSETS),
-    "tokenomics.next_unlock_pct": _definition("tokenomics.next_unlock_pct", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_UNLOCK_ASSETS),
-    "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
-    "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
-    "risk.security_event_status": _definition("risk.security_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),
-    "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    "tokenomics.next_unlock_pct": _definition("tokenomics.next_unlock_pct", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_UNLOCK_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
+    "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
+    "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
+    "risk.security_event_status": _definition("risk.security_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
+    "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_CHAIN_NATIVE_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
     "risk.regulatory_event_status": _definition(
         "risk.regulatory_event_status", "event_risk", "string", None, "CONTEXTUAL",
         critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,
+        decision_role="EVENT_RISK", context_group="event_risk",
     ),
     "risk.governance_event_status": _definition(
         "risk.governance_event_status", "event_risk", "string", None, "CONTEXTUAL",
         critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,
+        decision_role="EVENT_RISK", context_group="event_risk",
     ),
 
     # Positioning and social context are deliberately separate from scoring.
@@ -569,6 +576,25 @@ def metrics_for_role(
     )
 
 
+def validate_metric_ownership(
+    registry: Mapping[str, MetricDefinition] | None = None,
+) -> bool:
+    """Validate that scoring and overlay metrics have one explicit owner."""
+    values = METRIC_REGISTRY if registry is None else registry
+    if not isinstance(values, Mapping) or not values:
+        raise ValueError("metric registry must be a non-empty mapping")
+    for key, definition in values.items():
+        if not isinstance(definition, MetricDefinition) or definition.key != normalize_metric_key(key):
+            raise ValueError("metric registry keys must match MetricDefinition.key")
+        if definition.is_scoring_factor and definition.factor not in {
+            "trend", "valuation", "fundamentals", "onchain", "capital_flows", "relative_strength_btc"
+        }:
+            raise ValueError(f"scoring metric {definition.key} has no canonical factor owner")
+        if definition.is_event_risk and definition.factor != "event_risk":
+            raise ValueError(f"event-risk metric {definition.key} has an incompatible factor")
+    return True
+
+
 validate_metric_key = metric_definition
 
 
@@ -587,5 +613,6 @@ __all__ = [
     "metric_definition",
     "normalize_metric_key",
     "validate_metric_key",
+    "validate_metric_ownership",
     "validate_metric_value",
 ]

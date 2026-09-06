@@ -117,8 +117,18 @@ def build_factor_facts(
         previous_values = tuple(item for item in previous_values if item.factor.lower() == factor_name)
         if factor_name not in FACT_TYPES:
             raise ValueError(f"overlay factor {factor_name} must use its dedicated overlay engine")
-    values = tuple(item for item in values if metric_definition(item.metric_key).decision_role == "SCORING_FACTOR")
-    previous_values = tuple(item for item in previous_values if metric_definition(item.metric_key).decision_role == "SCORING_FACTOR")
+    values = tuple(
+        item
+        for item in values
+        if metric_definition(item.metric_key).decision_role == "SCORING_FACTOR"
+        or (factor_name == "event_risk" and metric_definition(item.metric_key).decision_role == "EVENT_RISK")
+    )
+    previous_values = tuple(
+        item
+        for item in previous_values
+        if metric_definition(item.metric_key).decision_role == "SCORING_FACTOR"
+        or (factor_name == "event_risk" and metric_definition(item.metric_key).decision_role == "EVENT_RISK")
+    )
     if values and normalized_symbol is None:
         symbols = {item.asset for item in values}
         if len(symbols) != 1:
@@ -213,7 +223,7 @@ def build_facts_for_asset(
         item.factor
         for item in values
         if item.asset == symbol.strip().upper()
-        and metric_definition(item.metric_key).decision_role == "SCORING_FACTOR"
+        and metric_definition(item.metric_key).decision_role in {"SCORING_FACTOR", "EVENT_RISK"}
     })
     return {
         factor: build_factor_facts(

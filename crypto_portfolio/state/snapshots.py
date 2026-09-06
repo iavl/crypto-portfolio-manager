@@ -10,7 +10,7 @@ from ..engine.position_pnl import (
     calculate_portfolio_position_performance,
     position_performance_record,
 )
-from ..models.policy import Policy, policy_from_mapping, policy_hash, resolve_policy
+from ..models.policy import Policy, legacy_policy, policy_from_mapping, policy_hash, resolve_policy
 from ..models.portfolio import PortfolioSnapshot, snapshot_from_mapping
 from ..models.time import parse_timestamp
 from ._jsonl import append_record, read_records
@@ -33,6 +33,8 @@ def _validated_snapshot(
             supplied_policy = policy
         elif snapshot.get("resolved_policy") is not None:
             supplied_policy = policy_from_mapping(snapshot["resolved_policy"])
+        elif snapshot.get("policy_version") == 1:
+            supplied_policy = legacy_policy().with_overrides(snapshot.get("config"))
         else:
             supplied_policy = resolve_policy(snapshot.get("config"))
         model, resolved, _ = snapshot_from_mapping(snapshot, policy=supplied_policy)
@@ -42,6 +44,8 @@ def _validated_snapshot(
             resolved = policy
         elif snapshot.resolved_policy is not None:
             resolved = policy_from_mapping(snapshot.resolved_policy)
+        elif snapshot.policy_version == 1:
+            resolved = legacy_policy()
         else:
             resolved = resolve_policy()
     else:

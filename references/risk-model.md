@@ -158,6 +158,15 @@ When reducing risk, generally prefer:
 
 This is a default hierarchy, not an absolute rule. A severe asset-specific event can make a core asset reduce faster than a satellite.
 
+## Event-risk gate
+
+Event risk is independent from the attractiveness score. The typed states are
+`NORMAL`, `ELEVATED`, `HIGH`, `SEVERE`, and `CRITICAL`; the default new-risk
+deployment multipliers are 1.00, 0.75, 0.50, 0.00, and 0.00 respectively.
+`SEVERE` and `CRITICAL` block new risk even when the base score is 100. Existing
+exposure remains subject to thesis, rebalance, and portfolio-risk rules rather
+than an unconditional liquidation instruction.
+
 ## Positioning and cycle warnings
 
 Derivatives positioning and BTC Cycle Context are execution overlays, not

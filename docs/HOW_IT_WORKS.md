@@ -208,7 +208,7 @@ Python 从 MetricObservation 构建 compact Facts 和 metric history。趋势、
 解释、BTC-relative strength 等已有确定性实现；其他需要上下文的 fundamentals、
 valuation、event risk 可由模型在 bounded packet 中判断。
 
-七个 base scoring factors 来自 canonical policy：
+v2 的六个 base scoring factors 来自 canonical policy：
 
 ```text
 trend
@@ -217,10 +217,11 @@ fundamentals
 onchain
 capital_flows
 relative_strength_btc
-event_risk
 ```
 
-缺失的非关键 factor 会被移除并重新归一化，但 coverage 和 confidence 会下降。
+event/security risk 使用独立的 typed gate；positioning 和 BTC cycle 是不计分的
+overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩，不能靠
+消失的数据抬高分数；v1 历史 replay 才保留旧的重新归一化。
 关键 current price、trend、portfolio value 或材料安全事件缺失时，高置信新增
 仓位被阻止。
 

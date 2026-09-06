@@ -9,6 +9,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import metric_definition
+from .evidence import EventRiskAssessment
 from .time import normalize_timestamp, parse_timestamp
 
 
@@ -197,4 +198,10 @@ def event_scan_observation(
 normalize_event_scan = EventScanResult.from_mapping
 
 
-__all__ = ["EventScanResult", "build_event_scan_result", "event_scan_observation", "normalize_event_scan"]
+__all__ = [
+    "EventRiskAssessment",
+    "EventScanResult",
+    "build_event_scan_result",
+    "event_scan_observation",
+    "normalize_event_scan",
+]

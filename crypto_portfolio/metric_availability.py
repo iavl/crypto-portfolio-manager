@@ -58,6 +58,8 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"} and asset not in {"BTC", "ETH"}:
         return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
+    if definition.is_event_risk:
+        return MetricAvailabilityPolicy(key)
     if definition.decision_role != "SCORING_FACTOR":
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
     return MetricAvailabilityPolicy(key)

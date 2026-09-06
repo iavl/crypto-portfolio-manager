@@ -126,19 +126,22 @@ Confidence: HIGH
 
 | Factor | Policy weight / effective weight | Score | Key evidence | Effect |
 |---|---:|---:|---|---|
-| trend | 25% / 27.8% | 82 | evidence ID, source, observed time, concise fact | ++ |
-| valuation | 20% / 22.2% | 61 | ... | + |
-| fundamentals | 20% / 22.2% | 78 | ... | ++ |
-| onchain | 10% / 11.1% | 70 | ... | + |
-| capital_flows | 10% / 11.1% | 66 | ... | + |
-| relative_strength_btc | 10% / 11.1% | 54 | ... | - |
-| event_risk | 5% / 5.6% | 85 | ... | + |
+| trend | 20% / 20% | 82 | evidence ID, source, observed time, concise fact | ++ |
+| valuation | 20% / 20% | 61 | ... | + |
+| fundamentals | 25% / 25% | 78 | ... | ++ |
+| onchain | 15% / 15% | 70 | ... | + |
+| capital_flows | 10% / 10% | 66 | ... | + |
+| relative_strength_btc | 10% / 10% | 54 | ... | - |
 
-Use the canonical factor names from `config/policy.json`. Show the policy
-weight and the renormalized effective weight when factors are missing. Every
+Use the canonical factor names from `config/policy.json`. Show the fixed
+profile weight, effective factor score after reliability shrinkage, availability,
+and reliability; v2 weights are not renormalized when factors are missing. Every
 key evidence statement must come from a matching persisted `Evidence` record
 and identify its evidence ID, source, and observed time; never fill a failed,
 stale, or conflicting metric with an invented value.
+
+Show event risk separately as a typed gate state and evidence-backed reasons;
+never add it as a seventh base-score row.
 
 Below the factor table, include this compact decision bridge:
 

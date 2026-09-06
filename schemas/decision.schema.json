@@ -46,7 +46,16 @@
         "required": ["symbol", "factor_scores", "weighted_score", "confidence", "asset_type", "relative_strength_vs_btc", "severe_event", "thesis_broken", "critical_data_complete", "risk_tier"],
         "properties": {
           "symbol": {"type": "string", "minLength": 1},
-          "factor_scores": {"type": "object"},
+          "factor_scores": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {"type": "null"},
+                {"type": "number", "minimum": 0, "maximum": 100},
+                {"$ref": "#/$defs/factorScore"}
+              ]
+            }
+          },
           "weighted_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
           "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
@@ -54,7 +63,11 @@
           "severe_event": {"type": "boolean"},
           "thesis_broken": {"type": "boolean"},
           "critical_data_complete": {"type": "boolean"},
-          "risk_tier": {"type": "string", "minLength": 1}
+        "risk_tier": {"type": "string", "minLength": 1},
+        "event_risk": {"oneOf": [{"$ref": "#/$defs/eventRisk"}, {"type": "null"}]},
+        "scoring_profile_name": {"type": ["string", "null"]},
+        "scoring_model_version": {"type": ["integer", "null"], "minimum": 1},
+        "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
         },
         "additionalProperties": false
       }
@@ -68,6 +81,29 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "eventRisk": {
+      "type": "object",
+      "required": ["state", "reasons", "evidence_ids", "unresolved"],
+      "properties": {
+        "state": {"enum": ["NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"]},
+        "reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "unresolved": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "factorScore": {
+      "type": "object",
+      "required": ["factor", "score"],
+      "properties": {
+        "factor": {"type": "string", "minLength": 1},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "availability": {"enum": ["AVAILABLE", "MISSING", "NOT_APPLICABLE"]},
+        "reliability": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": true
+    },
     "rebalanceAction": {
       "type": "object",
       "required": ["symbol", "action", "current_weight", "target_weight", "amount_usd", "priority", "rationale"],

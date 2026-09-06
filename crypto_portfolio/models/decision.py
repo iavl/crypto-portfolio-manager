@@ -208,6 +208,13 @@ class Decision:
                         raise ValueError(f"factor {factor} references evidence for wrong asset {evidence_id}")
                     if evidence.factor != factor:
                         raise ValueError(f"factor {factor} references evidence for wrong factor {evidence_id}")
+            if assessment.event_risk is not None:
+                for evidence_id in assessment.event_risk.evidence_ids:
+                    evidence = evidence_by_id.get(evidence_id)
+                    if evidence is None:
+                        raise ValueError(f"event_risk references missing evidence {evidence_id}")
+                    if evidence.asset != symbol or evidence.factor != "event_risk":
+                        raise ValueError(f"event_risk references incompatible evidence {evidence_id}")
         for plan in (self.execution_plans or {}).values():
             if plan.technical_summary is None:
                 continue

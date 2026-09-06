@@ -9,12 +9,16 @@ from crypto_portfolio.models.policy import PolicyError, load_policy, policy_from
 class PolicyTests(unittest.TestCase):
     def test_canonical_policy_loads_and_normalizes(self):
         policy = load_policy()
-        self.assertEqual(policy.policy_version, 1)
+        self.assertEqual(policy.policy_version, 2)
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
         self.assertEqual(policy.classify(" usdc "), "stablecoin")
         self.assertEqual(policy.classify("USD"), "cash")
         self.assertEqual(policy.events["lookback_days"]["FULL_REVIEW"]["security"], 90)
         self.assertEqual(policy.events["coverage"]["high_minimum"], 1.0)
+        self.assertEqual(policy.scoring_profile_name("BTC"), "btc")
+        self.assertEqual(policy.scoring_profile("BTC")["relative_strength_btc"], 0.0)
+        self.assertEqual(policy.allocation["satellite_entry_score"], 67.0)
+        self.assertEqual(policy.allocation["satellite_exit_score"], 60.0)
 
     def test_policy_hash_is_canonical_and_changes_with_policy(self):
         policy = load_policy()
@@ -132,7 +136,7 @@ class PolicyTests(unittest.TestCase):
         invalid_benchmark["benchmarks"]["primary"]["BTC"] = 0.9
         cases.append(invalid_benchmark)
         invalid_scoring = json.loads(json.dumps(original))
-        invalid_scoring["scoring_weights"]["trend"] = 0.9
+        invalid_scoring["scoring_profiles"]["default"]["trend"] = 0.9
         cases.append(invalid_scoring)
         invalid_unknown = json.loads(json.dumps(original))
         invalid_unknown["unexpected"] = True
@@ -158,6 +162,23 @@ class PolicyTests(unittest.TestCase):
         legacy = json.loads(json.dumps(original))
         legacy.pop("events")
         self.assertEqual(policy_from_mapping(legacy).events, {})
+
+    def test_v2_scoring_profiles_and_event_multipliers_are_strict(self):
+        original = load_policy().as_dict()
+        for mutate in (
+            lambda data: data["scoring_profiles"]["default"].pop("trend"),
+            lambda data: data["asset_scoring_profiles"].update({"ETH": "missing"}),
+            lambda data: data["event_risk_multipliers"].update({"HIGH": 0.8}),
+            lambda data: data["allocation"].update({"satellite_exit_score": 70}),
+        ):
+            invalid = json.loads(json.dumps(original))
+            mutate(invalid)
+            with self.subTest(invalid=invalid):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "policy.json"
+                    path.write_text(json.dumps(invalid), encoding="utf-8")
+                    with self.assertRaises(PolicyError):
+                        load_policy(path)
 
 
 if __name__ == "__main__":

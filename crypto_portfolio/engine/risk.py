@@ -6,13 +6,14 @@ import math
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any, Iterable, Mapping
 
-from ..models.evidence import AssetAssessment
+from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 
 
 _SEVERITIES = {"ERROR", "WARNING", "INFO"}
 _CHAIN_LIVENESS_STATUSES = {"HEALTHY", "DEGRADED", "HALTED", "UNKNOWN", "FAILED", "CONFLICT"}
+_EVENT_RISK_STATES = {"NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"}
 
 
 @dataclass(frozen=True)
@@ -75,22 +76,64 @@ def _weights(value: Mapping[str, Any]) -> dict[str, float]:
     return result
 
 
-def _assessment(value: Any) -> tuple[str, bool, str]:
+def _event_risk_state(value: Any) -> str:
+    raw = value.event_risk if isinstance(value, AssetAssessment) else (
+        value.get("event_risk") if isinstance(value, Mapping) else None
+    )
+    if isinstance(raw, EventRiskAssessment):
+        state = raw.state
+    else:
+        if isinstance(raw, Mapping):
+            raw = raw.get("state")
+        state = None
+    if state is None and raw is not None:
+        state = str(raw).strip().upper()
+        if state not in _EVENT_RISK_STATES:
+            raise ValueError("assessment event_risk must be a recognized state")
+    if state is not None:
+        thesis = value.thesis_broken if isinstance(value, AssetAssessment) else (
+            value.get("thesis_broken", False) if isinstance(value, Mapping) else False
+        )
+        if not isinstance(thesis, bool):
+            raise ValueError("assessment thesis_broken must be boolean")
+        return "SEVERE" if thesis else state
+    legacy = value.severe_event if isinstance(value, AssetAssessment) else (
+        value.get("severe_event", False) if isinstance(value, Mapping) else False
+    )
+    if not isinstance(legacy, bool):
+        raise ValueError("assessment severe_event must be boolean")
+    thesis = value.thesis_broken if isinstance(value, AssetAssessment) else (
+        value.get("thesis_broken", False) if isinstance(value, Mapping) else False
+    )
+    if not isinstance(thesis, bool):
+        raise ValueError("assessment thesis_broken must be boolean")
+    return "SEVERE" if legacy or thesis else "NORMAL"
+
+
+def event_risk_deployment_factor(state: str, *, policy: Policy | None = None) -> float:
+    normalized = str(state).strip().upper()
+    if normalized not in _EVENT_RISK_STATES:
+        raise ValueError("event risk state is unsupported")
+    resolved = policy or resolve_policy()
+    value = float(resolved.event_risk_multipliers[normalized])
+    if not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError("event risk multiplier must be finite and in [0, 1]")
+    return value
+
+
+def _assessment(value: Any) -> tuple[str, str, str]:
     if isinstance(value, AssetAssessment):
-        return value.confidence, value.severe_event or value.thesis_broken, value.risk_tier
+        return value.confidence, _event_risk_state(value), value.risk_tier
     if isinstance(value, Mapping):
         confidence = str(value.get("confidence", "LOW")).upper()
         if confidence not in {"HIGH", "MEDIUM", "LOW"}:
             raise ValueError("assessment confidence must be HIGH, MEDIUM, or LOW")
-        severe_value = value.get("severe_event", False) or value.get("thesis_broken", False)
-        if not isinstance(severe_value, bool):
-            raise ValueError("assessment severe_event and thesis_broken must be boolean")
         return (
             confidence,
-            severe_value,
+            _event_risk_state(value),
             str(value.get("risk_tier", "normal")).lower(),
         )
-    return "LOW", False, "normal"
+    return "LOW", "NORMAL", "normal"
 
 
 def _liveness_status(value: Any, field: str) -> str:
@@ -290,11 +333,23 @@ def run_risk_gate(
     assessments = assessments or {}
     severe_symbols: list[str] = []
     high_beta_symbols: list[str] = []
+    event_caps: dict[str, float] = {}
     for raw_symbol, assessment in assessments.items():
         symbol = str(raw_symbol).strip().upper()
-        confidence, severe_event, risk_tier = _assessment(assessment)
-        if severe_event and weights.get(symbol, 0.0) > 0:
+        confidence, event_risk, risk_tier = _assessment(assessment)
+        if event_risk != "NORMAL" and weights.get(symbol, 0.0) > 0:
+            event_caps[symbol] = event_risk_deployment_factor(event_risk, policy=resolved)
+        if event_risk in {"SEVERE", "CRITICAL"} and weights.get(symbol, 0.0) > 0:
             severe_symbols.append(symbol)
+        elif event_risk in {"ELEVATED", "HIGH"} and weights.get(symbol, 0.0) > 0:
+            multiplier = event_risk_deployment_factor(event_risk, policy=resolved)
+            violations.append(
+                RiskViolation(
+                    "WARNING",
+                    "EVENT_RISK_DEPLOYMENT_CAP",
+                    f"{symbol} event risk is {event_risk}; new deployment is capped at {multiplier:.0%}",
+                )
+            )
         if symbol in resolved.satellite_symbols and weights.get(symbol, 0.0) > 0:
             if confidence == "LOW":
                 violations.append(
@@ -304,7 +359,7 @@ def run_risk_gate(
                         f"low-confidence satellite {symbol} has non-zero exposure",
                     )
                 )
-            if severe_event:
+            if event_risk in {"SEVERE", "CRITICAL"}:
                 violations.append(
                     RiskViolation(
                         "ERROR",
@@ -391,13 +446,13 @@ def run_risk_gate(
     action_values = tuple(actions or ())
     increase_symbols = _increase_symbols(action_values)
     current = _weights(current_weights) if current_weights is not None else None
-    deployment_caps: dict[str, float] = {}
+    deployment_caps: dict[str, float] = dict(event_caps)
     blocked_symbols: list[str] = []
     for symbol, status in liveness_values.items():
         factor = chain_liveness_deployment_factor(status, policy=resolved)
         if status == "HEALTHY":
             continue
-        deployment_caps[symbol] = factor
+        deployment_caps[symbol] = min(deployment_caps.get(symbol, 1.0), factor)
         has_exposure = (
             symbol in increase_symbols
             or (
@@ -459,6 +514,7 @@ __all__ = [
     "RiskViolation",
     "apply_chain_liveness_deployment_cap",
     "chain_liveness_deployment_factor",
+    "event_risk_deployment_factor",
     "risk_gate",
     "run_risk_gate",
 ]

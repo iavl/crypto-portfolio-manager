@@ -269,7 +269,9 @@ Critical missing data:
 
 If critical data is missing, do not provide a strong actionable entry.
 
-Non-critical missing data may be removed from the scoring model with renormalized weights and reduced confidence.
+In v2, non-critical missing data keeps its configured factor weight, contributes
+neutral 50 through reliability shrinkage, and reduces weighted coverage and
+confidence. Historical v1 replay may use its persisted renormalized arithmetic.
 
 ## Conflict handling
 

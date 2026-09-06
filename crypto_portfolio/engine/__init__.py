@@ -16,7 +16,7 @@ from .metric_normalization import (
     persist_collection_results,
 )
 from .report_packet import build_final_review_output, build_report_packet, validate_final_review_output, validate_report_packet
-from .scoring import ensure_acquisition_ready
+from .scoring import calculate_factor_reliability, derive_factor_reliability, ensure_acquisition_ready
 from .regime_inputs import build_regime_inputs
 from .positioning import build_positioning_facts, build_positioning_overlay, classify_positioning
 from .cycle import build_btc_cycle_context, build_cycle_context, classify_btc_cycle, halving_context_for_days
@@ -29,7 +29,7 @@ from .overlays import (
     overlay_wait_required,
     positioning_deployment_factor,
 )
-from .risk import apply_chain_liveness_deployment_cap, chain_liveness_deployment_factor
+from .risk import apply_chain_liveness_deployment_cap, chain_liveness_deployment_factor, event_risk_deployment_factor
 
 __all__ = [
     "calculate_portfolio_position_performance",
@@ -61,10 +61,13 @@ __all__ = [
     "positioning_deployment_factor",
     "apply_chain_liveness_deployment_cap",
     "chain_liveness_deployment_factor",
+    "event_risk_deployment_factor",
     "build_report_packet",
     "build_final_review_output",
     "validate_final_review_output",
     "ensure_acquisition_ready",
+    "calculate_factor_reliability",
+    "derive_factor_reliability",
     "validate_report_packet",
     "normalize_metric_observation",
     "normalize_metric_result",

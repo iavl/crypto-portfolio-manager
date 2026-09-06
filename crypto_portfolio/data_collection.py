@@ -56,7 +56,10 @@ def collection_summary(
     ]
     resolved_policy = policy or resolve_policy()
     if isinstance(resolved_policy, Mapping):
-        policy_weights = dict(resolved_policy.get("scoring_weights", {}))
+        if "scoring_profiles" in resolved_policy:
+            policy_weights = dict(resolved_policy["scoring_profiles"].get("default", {}))
+        else:
+            policy_weights = dict(resolved_policy.get("scoring_weights", {}))
         scoring_policy = resolved_policy.get("scoring", {})
     else:
         policy_weights = dict(resolved_policy.scoring_weights)
@@ -111,7 +114,6 @@ def collection_summary(
             if review_type is not None
             else metric_definition(event.metric_key).critical
         )
-        and metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
         for event in values
     )
     minimum = float(scoring_policy["minimum_investable_coverage"])
@@ -198,7 +200,15 @@ def format_collection_event(
     if event.reason:
         lines.append(f"       reason: {event.reason}")
     definition = metric_definition(event.metric_key)
-    if definition.decision_role != "SCORING_FACTOR":
+    if definition.decision_role == "EVENT_RISK":
+        effect = "event-risk gate input; excluded from base scoring coverage"
+        if event.status != "SUCCESS":
+            hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
+            if hard_critical:
+                effect += "; CRITICAL DATA FAILURE; high-conviction trade blocked"
+            elif review_type is not None and definition.critical:
+                effect += "; not hard-critical for this review"
+    elif definition.decision_role != "SCORING_FACTOR":
         effect = "context only; excluded from base scoring coverage"
     elif event.status == "SUCCESS":
         effect = "available for scoring/history"

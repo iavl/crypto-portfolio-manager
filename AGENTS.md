@@ -75,8 +75,8 @@ execution authority held by Python.
 LLM/Agent work may research evidence, interpret market structure, assess
 fundamentals/governance/security, assign bounded factor judgments, explain
 decisions, and identify uncertainty. Code must perform valuation, weights,
-cash-flow-adjusted NAV/returns/drawdown, benchmark math, weighted scoring and
-renormalization, risk/target/rebalance constraints, stable floors, tranche
+cash-flow-adjusted NAV/returns/drawdown, benchmark math, reliability-aware
+weighted scoring, risk/target/rebalance constraints, stable floors, tranche
 sums, schema validation, freshness checks, and history calculations.
 
 ## Canonical policy and classification
@@ -130,15 +130,19 @@ values. Do not mix percentage points and fractions without conversion.
 
 ## Scoring, regimes, and allocation
 
-The score covers trend, valuation, fundamentals, on-chain activity, capital
-flows, BTC-relative strength, and event/risk adjustment. It is an input to
-portfolio construction, never a direct `score > X -> buy` signal. Apply
-confidence, regime, valuation/entry conditions, risk tier, concentration,
-BTC opportunity cost, drawdown capacity, stable constraints, and rebalance
-thresholds.
+The v2 base score covers exactly trend, valuation, fundamentals, on-chain
+activity, capital flows, and BTC-relative strength. Event/security risk is a
+separate evidence-backed gate; positioning and BTC-cycle context are overlays.
+The score is an input to portfolio construction, never a direct
+`score > X -> buy` signal. Apply confidence, regime, valuation/entry
+conditions, risk tier, concentration, BTC opportunity cost, drawdown capacity,
+stable constraints, and rebalance thresholds.
 
-For non-critical missing factors, remove the factor, renormalize configured
-weights, and reduce confidence. Never fabricate data. Critical missing price,
+For v2, `MISSING` factors remain at their configured weight and shrink their
+raw score toward neutral 50 according to deterministic reliability; do not
+renormalize missing factors. `NOT_APPLICABLE` is defined by a zero-weight
+profile factor. Historical v1 replay may retain the old renormalization.
+Never fabricate data. Critical missing price,
 trend history, portfolio valuation, or unresolved material security status
 blocks high-conviction entries. Unknown factor keys are errors. Confidence
 must reflect weighted data coverage; poor coverage cannot be raised by a

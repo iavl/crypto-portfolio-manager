@@ -30,7 +30,7 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(METRIC_REGISTRY["derivatives.funding_rate"].decision_role, "POSITIONING_OVERLAY")
         self.assertEqual(METRIC_REGISTRY["derivatives.funding_rate"].context_group, "positioning")
         self.assertEqual(METRIC_REGISTRY["onchain.btc.mvrv"].decision_role, "CYCLE_CONTEXT")
-        self.assertEqual(load_policy().scoring_weights["trend"], 0.25)
+        self.assertEqual(load_policy().scoring_profile("ETH")["trend"], 0.2)
 
     def test_positioning_scenarios(self):
         building = build_positioning_facts(
