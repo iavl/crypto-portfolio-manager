@@ -91,7 +91,7 @@ class GitHubActivityProvider:
             metric_keys=("fundamentals.developer_activity",),
             historical_series=("fundamentals.developer_activity",),
             supports_batching=False,
-            requires_api_key=False,
+            requires_api_key=True,
         )
 
     def _headers(self) -> Mapping[str, str]:

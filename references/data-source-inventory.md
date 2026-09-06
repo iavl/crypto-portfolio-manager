@@ -37,7 +37,7 @@ observation 即使原 provider 已停用，也必须保持可读取。
 | Chain liveness | 已配置并注册 | 无 | BTC/ETH/BNB/SOL 进度和 finality |
 | Coin Metrics Community | 已配置并注册 | 无 | BTC/ETH 链上、供应、周期、exchange attribution |
 | Coin Metrics Pro | 可选、凭证门控 | `COINMETRICS_API_KEY` | authenticated Coin Metrics 数据 |
-| GitHub | 已配置并注册 | 可选 `GITHUB_TOKEN` | ETH/AAVE 固定仓库的 30D commits |
+| GitHub | `AUTO`，有 `GITHUB_TOKEN` 才注册 | `GITHUB_TOKEN` | ETH/AAVE 固定仓库的 30D commits |
 | SoSoValue | 凭证门控 | `SOSOVALUE_API_KEY` | BTC/ETH ETF flow history |
 | EventScanner | 已配置 source catalog | 无 | security/governance/regulatory scans |
 | LunarCrush | 默认停用/无 adapter | `LUNARCRUSH_API_KEY` | social metrics，默认 skipped |

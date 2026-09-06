@@ -14,10 +14,11 @@ class DocumentationTests(unittest.TestCase):
         skill = ROOT / "SKILL.md"
         self.assertTrue(skill.is_file())
         self.assertIn("name: crypto-portfolio-manager", skill.read_text(encoding="utf-8"))
-        self.assertIn("[Usage Guide](USAGE.md)", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("[Usage Guide](docs/USAGE.md)", (ROOT / "README.md").read_text(encoding="utf-8"))
 
         required_paths = (
-            "USAGE.md",
+            "docs/USAGE.md",
+            "docs/HOW_IT_WORKS.md",
             "README.zh-CN.md",
             "config/policy.json",
             "references/investment-policy.md",
@@ -150,8 +151,8 @@ class DocumentationTests(unittest.TestCase):
                 "SKILL.md",
                 "README.md",
                 "README.zh-CN.md",
-                "USAGE.md",
-                "HOW_IT_WORKS.md",
+                "docs/USAGE.md",
+                "docs/HOW_IT_WORKS.md",
                 "config/policy.json",
                 "references/risk-model.md",
                 "schemas/decision.schema.json",
@@ -165,6 +166,8 @@ class DocumentationTests(unittest.TestCase):
                 ".git",
                 "tests",
                 "data",
+                "USAGE.md",
+                "HOW_IT_WORKS.md",
                 "install.sh",
                 "pyproject.toml",
                 "AGENTS.md",

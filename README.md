@@ -8,9 +8,9 @@ It combines current market evidence with deterministic accounting, risk,
 allocation, benchmark, and rebalance calculations.
 
 Detailed review workflows, input examples, history behavior, and
-troubleshooting are in the [Usage Guide](USAGE.md).
+troubleshooting are in the [Usage Guide](docs/USAGE.md).
 
-For architecture and implementation details, see [How It Works](HOW_IT_WORKS.md).
+For architecture and implementation details, see [How It Works](docs/HOW_IT_WORKS.md).
 
 Model/reasoning profiles use safe defaults and runtime-aware fallback; see the
 [routing reference](references/model-routing.md).
@@ -147,7 +147,7 @@ description. Use the explicit invocation when discovery must be guaranteed.
 
 ## Usage
 
-Start with the [Usage Guide](USAGE.md) for screenshot/JSON input, review types,
+Start with the [Usage Guide](docs/USAGE.md) for screenshot/JSON input, review types,
 copyable prompts, dry runs, external data, and local history.
 
 For the standard Binance workflow, set the wallet overview display currency to

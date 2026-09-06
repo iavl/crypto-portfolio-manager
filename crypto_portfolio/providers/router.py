@@ -185,8 +185,12 @@ class ProviderRouter:
             "defillama": DeFiLlamaProvider(client=client),
             "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
             "chain_liveness": ChainLivenessProvider(client=client),
-            "github": GitHubActivityProvider(client=client),
         }
+        if provider_enabled("github", self.config):
+            providers["github"] = GitHubActivityProvider(
+                client=client,
+                token=provider_api_key("github", self.config),
+            )
         if provider_enabled("coingecko", self.config):
             providers["coingecko"] = CoinGeckoProvider(
                 client=client,

@@ -11,7 +11,10 @@
     "defillama": {"enabled": true},
     "alternative_me": {"enabled": true},
     "chain_liveness": {"enabled": true},
-    "github": {"enabled": true},
+    "github": {
+      "enabled": "AUTO",
+      "api_key_env": "GITHUB_TOKEN"
+    },
     "sosovalue": {
       "enabled": "AUTO",
       "api_key_env": "SOSOVALUE_API_KEY"

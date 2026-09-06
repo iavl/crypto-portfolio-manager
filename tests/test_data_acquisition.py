@@ -1016,6 +1016,14 @@ class DataAcquisitionTests(unittest.TestCase):
         config = load_provider_config()
         self.assertFalse(provider_enabled("coinmetrics_pro", config, {}))
         self.assertTrue(provider_enabled("coinmetrics_pro", config, {"COINMETRICS_API_KEY": "configured"}))
+        self.assertFalse(provider_enabled("github", config, {}))
+        self.assertTrue(provider_enabled("github", config, {"GITHUB_TOKEN": "configured"}))
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertNotIn("github", ProviderRouter().providers)
+        with patch.dict("os.environ", {"GITHUB_TOKEN": "configured"}, clear=True):
+            github = ProviderRouter().providers["github"]
+            self.assertEqual(github.token, "configured")
+            self.assertEqual(github._headers(), {"Authorization": "Bearer configured"})
 
         class CoinMetricsClient:
             def __init__(self):
