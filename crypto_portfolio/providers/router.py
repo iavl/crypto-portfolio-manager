@@ -169,6 +169,7 @@ class ProviderRouter:
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
+        from .chain_liveness import ChainLivenessProvider
         from .defillama import DeFiLlamaProvider
         from .sosovalue import SoSoValueProvider
 
@@ -180,6 +181,7 @@ class ProviderRouter:
             "alternative_me": AlternativeMeProvider(client=client),
             "defillama": DeFiLlamaProvider(client=client),
             "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
+            "chain_liveness": ChainLivenessProvider(client=client),
         }
         if provider_enabled("coinmetrics_pro", self.config):
             from .coinmetrics import CoinMetricsAuthenticatedProvider
@@ -211,11 +213,11 @@ class ProviderRouter:
 
     runtime_status = provider_runtime_status
 
-    def probe(self, provider: str = "all") -> tuple[dict[str, Any], ...]:
+    def probe(self, provider: str = "all", *, asset: str | None = None) -> tuple[dict[str, Any], ...]:
         """Run an explicit network probe; normal collection remains unchanged."""
         from .probe import probe_providers
 
-        return probe_providers(self, provider)
+        return probe_providers(self, provider, asset=asset)
 
     def capabilities(self, provider: str) -> ProviderCapabilities | None:
         value = self.providers.get(provider.strip().lower())

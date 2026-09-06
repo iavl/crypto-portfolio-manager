@@ -29,6 +29,7 @@ from .overlays import (
     overlay_wait_required,
     positioning_deployment_factor,
 )
+from .risk import apply_chain_liveness_deployment_cap, chain_liveness_deployment_factor
 
 __all__ = [
     "calculate_portfolio_position_performance",
@@ -58,6 +59,8 @@ __all__ = [
     "effective_deployment_factor",
     "overlay_wait_required",
     "positioning_deployment_factor",
+    "apply_chain_liveness_deployment_cap",
+    "chain_liveness_deployment_factor",
     "build_report_packet",
     "build_final_review_output",
     "validate_final_review_output",

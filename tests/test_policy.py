@@ -82,6 +82,19 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(PolicyError):
                 load_policy(path)
 
+    def test_chain_liveness_policy_is_canonical_and_strict(self):
+        policy = load_policy()
+        self.assertEqual(policy.chain_liveness["BTC"]["halted_minimum_independent_sources"], 2)
+        self.assertEqual(policy.chain_liveness["ETH"]["healthy_head_age_seconds"], 120.0)
+        self.assertEqual(policy.chain_liveness["degraded_deployment_factor"], 0.25)
+        invalid = json.loads(json.dumps(policy.as_dict()))
+        invalid["chain_liveness"]["BTC"]["halted_minimum_independent_sources"] = 1
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+
     def test_old_resolved_execution_policy_remains_hash_stable(self):
         policy = load_policy()
         legacy = json.loads(json.dumps(policy.as_dict()))

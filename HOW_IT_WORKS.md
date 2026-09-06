@@ -278,6 +278,16 @@ does not let a model invent a new metric key. `normalize_collection_results()`
 requires exactly one result for each planned `(asset, metric_key)` pair;
 omissions, extras, and duplicates fail closed.
 
+### Chain liveness
+
+`risk.chain_liveness_status` is collected only for `BTC`, `ETH`, `SOL`, and
+`BNB` through the structured `chain_liveness` provider. Python reads recent
+canonical block or finalized-slot progress from the allowlisted RPC/REST
+sources, computes age and source quorum, and emits `HEALTHY`, `DEGRADED`, or
+corroborated `HALTED`. Transport failures remain `UNKNOWN`/failed collection;
+they are not converted into a halt. Routine Web search is not a liveness
+source, and AAVE/LINK do not receive independent chain checks.
+
 ### Event scanning
 
 `events/sources.py` is the deterministic allowlist for event evidence.
@@ -729,6 +739,12 @@ adapter availability, credential presence, and runtime readiness offline;
 `scripts/providers.py --probe ...` is the separate opt-in network check. HTTPS
 uses a verified context and retains safe transport error codes.
 
+The chain-liveness provider is a structured exception to the general fallback
+order: it uses no API key by default, queries only its chain-specific RPC/REST
+sources, and never falls through to Web search. Its 300-second mutable-data TTL
+is the shorter reuse window even though the registry's event freshness window
+is one day.
+
 ## Persistence and Replay
 
 The persistence design answers:
@@ -762,6 +778,8 @@ The system fails toward less actionability:
 
 - `FAILED`, `STALE`, and `CONFLICT` collection events remain visible and lower
   coverage/confidence; they are not successful evidence.
+- Chain-liveness transport/provider failures remain unavailable critical
+  evidence; only corroborated stale canonical progress can produce `HALTED`.
 - `NOT_APPLICABLE` excludes a metric from applicable coverage rather than
   pretending it is missing or positive.
 - Critical data failure, partial screenshot coverage, stale/insufficient data,

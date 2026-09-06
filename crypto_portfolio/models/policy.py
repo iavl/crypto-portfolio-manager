@@ -26,6 +26,7 @@ _TOP_LEVEL_FIELDS = {
     "investment_horizon_months",
     "universe",
     "risk",
+    "chain_liveness",
     "benchmarks",
     "rebalance",
     "scoring_weights",
@@ -42,6 +43,18 @@ _TOP_LEVEL_FIELDS = {
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
+_CHAIN_LIVENESS_FIELDS = {"degraded_deployment_factor", "BTC", "ETH", "BNB", "SOL"}
+_CHAIN_HEAD_FIELDS = {
+    "healthy_head_age_seconds",
+    "degraded_head_age_seconds",
+    "halted_head_age_seconds",
+    "halted_minimum_independent_sources",
+}
+_CHAIN_FINALIZED_FIELDS = {
+    "healthy_finalized_age_seconds",
+    "degraded_finalized_age_seconds",
+    "halted_finalized_age_seconds",
+}
 _HORIZON_FIELDS = {"min", "max"}
 _REBALANCE_FIELDS = {"hold_below_pp", "watch_below_pp", "high_priority_above_pp"}
 _ALLOCATION_FIELDS = {
@@ -300,6 +313,7 @@ class Policy:
     btc_cycle: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     events: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    chain_liveness: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def core(self) -> tuple[str, ...]:
@@ -387,6 +401,8 @@ class Policy:
             result["execution_overlay"] = _copy_mapping(self.execution_overlay)
         if self.events:
             result["events"] = _copy_mapping(self.events)
+        if self.chain_liveness:
+            result["chain_liveness"] = _copy_mapping(self.chain_liveness)
         return result
 
     def legacy_config(self) -> dict[str, Any]:
@@ -1115,6 +1131,69 @@ def _parse_events(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
     }
 
 
+def _parse_chain_liveness(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
+    if value is None and allow_missing:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("chain_liveness must be an object")
+    _unknown_fields(value, _CHAIN_LIVENESS_FIELDS, "chain_liveness")
+    if set(value) != _CHAIN_LIVENESS_FIELDS:
+        raise PolicyError("chain_liveness must contain its deployment factor and all native assets")
+    deployment_factor = _fraction(
+        value["degraded_deployment_factor"],
+        "chain_liveness.degraded_deployment_factor",
+        exclusive_minimum=True,
+    )
+    parsed: dict[str, Any] = {"degraded_deployment_factor": deployment_factor}
+    for asset in ("BTC", "ETH", "BNB", "SOL"):
+        raw = value[asset]
+        if not isinstance(raw, dict):
+            raise PolicyError(f"chain_liveness.{asset} must be an object")
+        allowed = _CHAIN_HEAD_FIELDS | _CHAIN_FINALIZED_FIELDS
+        _unknown_fields(raw, allowed, f"chain_liveness.{asset}")
+        required = (
+            _CHAIN_FINALIZED_FIELDS | {"halted_minimum_independent_sources"}
+            if asset == "SOL" else _CHAIN_HEAD_FIELDS
+        )
+        if asset == "ETH":
+            required = _CHAIN_HEAD_FIELDS | _CHAIN_FINALIZED_FIELDS
+        if set(raw) != required:
+            raise PolicyError(f"chain_liveness.{asset} fields are incomplete")
+        parsed_asset: dict[str, Any] = {}
+        for field_name in required:
+            if field_name == "halted_minimum_independent_sources":
+                parsed_asset[field_name] = _positive_integer(
+                    raw[field_name], f"chain_liveness.{asset}.{field_name}"
+                )
+                if parsed_asset[field_name] < 2:
+                    raise PolicyError(
+                        f"chain_liveness.{asset}.{field_name} must be at least 2"
+                    )
+            else:
+                parsed_asset[field_name] = _number(
+                    raw[field_name], f"chain_liveness.{asset}.{field_name}", minimum=0.0
+                )
+                if parsed_asset[field_name] <= 0:
+                    raise PolicyError(f"chain_liveness.{asset}.{field_name} must be > 0")
+        for prefix in ("head", "finalized"):
+            fields = (
+                f"healthy_{prefix}_age_seconds",
+                f"degraded_{prefix}_age_seconds",
+                f"halted_{prefix}_age_seconds",
+            )
+            if all(field_name in parsed_asset for field_name in fields):
+                if not (
+                    parsed_asset[fields[0]]
+                    <= parsed_asset[fields[1]]
+                    <= parsed_asset[fields[2]]
+                ):
+                    raise PolicyError(
+                        f"chain_liveness.{asset} {prefix} age thresholds must be ordered"
+                    )
+        parsed[asset] = parsed_asset
+    return parsed
+
+
 def _parse_policy(
     data: Any,
     *,
@@ -1123,6 +1202,7 @@ def _parse_policy(
     allow_missing_factor_rules: bool = False,
     allow_missing_overlays: bool = False,
     allow_missing_events: bool = False,
+    allow_missing_chain_liveness: bool = False,
 ) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
@@ -1138,6 +1218,8 @@ def _parse_policy(
         missing.difference_update({"positioning", "btc_cycle", "execution_overlay"})
     if allow_missing_events:
         missing.discard("events")
+    if allow_missing_chain_liveness:
+        missing.discard("chain_liveness")
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -1238,6 +1320,9 @@ def _parse_policy(
         data.get("execution_overlay"), allow_missing=allow_missing_overlays
     )
     parsed_events = _parse_events(data.get("events"), allow_missing=allow_missing_events)
+    parsed_chain_liveness = _parse_chain_liveness(
+        data.get("chain_liveness"), allow_missing=allow_missing_chain_liveness
+    )
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -1334,6 +1419,7 @@ def _parse_policy(
         btc_cycle=parsed_btc_cycle,
         execution_overlay=parsed_execution_overlay,
         events=parsed_events,
+        chain_liveness=parsed_chain_liveness,
     )
     raw_execution = data.get("execution")
     omitted = (
@@ -1354,6 +1440,8 @@ def _parse_policy(
         object.__setattr__(policy, "execution_overlay", {})
     if "events" not in data:
         object.__setattr__(policy, "events", {})
+    if "chain_liveness" not in data:
+        object.__setattr__(policy, "chain_liveness", {})
     return policy
 
 
@@ -1378,6 +1466,7 @@ def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
         allow_missing_factor_rules=True,
         allow_missing_overlays=True,
         allow_missing_events=True,
+        allow_missing_chain_liveness=True,
     )
 
 

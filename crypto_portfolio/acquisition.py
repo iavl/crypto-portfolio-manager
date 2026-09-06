@@ -115,11 +115,19 @@ class AcquisitionResult:
         }
         unresolved = []
         for request in self.plan.requests:
+            if not request.definition.applies_to(request.asset):
+                continue
             category = event_metric_category(request.metric_key)
-            if not request.critical or category is None:
+            if not request.critical:
+                continue
+            result = result_by_identity.get((request.asset, request.metric_key))
+            if request.metric_key == "risk.chain_liveness_status":
+                if result is None or result.status != "SUCCESS":
+                    unresolved.append((request.asset, request.metric_key))
+                continue
+            if category is None:
                 continue
             group = ("MARKET", category) if category == "regulatory" else (request.asset, category)
-            result = result_by_identity.get((request.asset, request.metric_key))
             missing_resolution = group in pending_groups or (
                 group not in completed_groups and result is not None and result.status != "SUCCESS"
             )
@@ -273,9 +281,12 @@ class AcquisitionManager:
         reusable: dict[tuple[str, str], MetricObservation] = {}
         stale: dict[tuple[str, str], MetricObservation] = {}
         pending: list[MetricRequest] = []
+        historical_liveness: set[tuple[str, str]] = set()
         fresh_hits = 0
         for request in model.requests:
             identity = (request.asset, request.metric_key)
+            if not request.definition.applies_to(request.asset):
+                continue
             candidate = latest_usable_observation(
                 request.asset,
                 request.metric_key,
@@ -301,10 +312,29 @@ class AcquisitionManager:
             if local:
                 candidates = [
                     item for item in local
-                    if item.asset == request.asset and item.metric_key == request.metric_key
+                    if item.asset == request.asset
+                    and item.metric_key == request.metric_key
+                    and not (
+                        request.metric_key == "risk.chain_liveness_status"
+                        and as_of is not None
+                        and parse_timestamp(item.observed_at) > parse_timestamp(normalize_timestamp(
+                            as_of.isoformat() if isinstance(as_of, datetime) else as_of,
+                            "as_of",
+                        ))
+                    )
                 ]
                 if candidates:
                     stale[identity] = max(candidates, key=lambda item: (item.observed_at, item.observation_id))
+            if (
+                request.metric_key == "risk.chain_liveness_status"
+                and as_of is not None
+                and parse_timestamp(normalize_timestamp(
+                    as_of.isoformat() if isinstance(as_of, datetime) else as_of,
+                    "as_of",
+                )) < parse_timestamp(current)
+            ):
+                historical_liveness.add(identity)
+                continue
             pending.append(request)
 
         provider_requests = self.router.build_requests(pending, as_of=as_of, now=current)
@@ -514,17 +544,18 @@ class AcquisitionManager:
                 old = stale.get(identity)
                 diagnostic = routed_diagnostics.get(identity)
                 category = event_metric_category(request.metric_key)
-                if category is not None:
+                if identity in historical_liveness:
+                    reason = f"historical chain liveness evidence unavailable at {cutoff}"
+                    diagnostic = {
+                        "provider": "chain_liveness",
+                        "error_code": "HISTORICAL_LIVENESS_UNAVAILABLE",
+                        "detail": "current chain state is not valid historical evidence",
+                    }
+                elif category is not None:
                     reason = event_errors.get(
                         (request.asset, category),
                         f"{category} event scan requires the returned authoritative source plan",
                     )
-                elif request.metric_key == "risk.chain_liveness_status":
-                    reason = "chain liveness requires a separate structured status check"
-                    diagnostic = {
-                        "error_code": "NO_CHAIN_LIVENESS_SOURCE",
-                        "detail": reason,
-                    }
                 elif not provider_chain(request.metric_key):
                     reason = "no configured structured provider route for this metric"
                     diagnostic = {"error_code": "NO_PROVIDER_ROUTE", "detail": reason}

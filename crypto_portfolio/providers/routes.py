@@ -36,6 +36,7 @@ DEFAULT_TTL_SECONDS = {
     "sentiment": 43200,
     "protocol": 21600,
     "onchain": 86400,
+    "chain_liveness": 300,
     "default": 3600,
 }
 PROVIDER_ROUTES = {
@@ -48,6 +49,7 @@ PROVIDER_ROUTES = {
     "sentiment.market": ("alternative_me",),
     "sentiment.social": ("lunarcrush",),
     "btc_cycle": ("coinmetrics_community", "coinmetrics_pro"),
+    "chain_liveness": ("chain_liveness",),
 }
 
 
@@ -62,6 +64,8 @@ def provider_chain(metric_key: str) -> tuple[str, ...]:
         "market.flow_state",
     }:
         return ()
+    if key == "risk.chain_liveness_status":
+        return PROVIDER_ROUTES["chain_liveness"]
     if key == "market.spot_price" or key.startswith("market."):
         return ("binance", "bybit")
     if key.startswith("flows.etf_"):
@@ -94,6 +98,8 @@ def dataset_for_metric(metric_key: str) -> str:
     key = normalize_metric_key(metric_key)
     if key == "market.spot_price":
         return "spot"
+    if key == "risk.chain_liveness_status":
+        return "chain_liveness"
     if key.startswith("market."):
         return "ohlcv"
     if key.startswith("derivatives.funding_rate"):
@@ -164,9 +170,9 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
     start = end - timedelta(days=start_days)
     result: dict[str, Any] = {
         "symbol": asset,
-        "market": "spot" if dataset == "ohlcv" or dataset == "spot" else "perpetual",
+        "market": "chain" if dataset == "chain_liveness" else "spot" if dataset == "ohlcv" or dataset == "spot" else "perpetual",
         "quote_currency": "USDT",
-        "as_of": None if dataset == "basis" and as_of is None else normalize_timestamp(end.isoformat(), "as_of"),
+        "as_of": None if dataset in {"basis", "chain_liveness"} and as_of is None else normalize_timestamp(end.isoformat(), "as_of"),
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
@@ -191,6 +197,9 @@ def build_provider_requests(
     groups: dict[tuple[str, str, str, str], list[Any]] = {}
     for item in requests:
         key = normalize_metric_key(item.metric_key)
+        definition = getattr(item, "definition", None)
+        if definition is not None and not definition.applies_to(item.asset):
+            continue
         chain = provider_chain(key)
         if not chain:
             continue

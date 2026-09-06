@@ -28,6 +28,7 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Annualized futures basis | Binance | None | Nearest trading USDT delivery contract; exact-symbol mark/index basis, ACT/365. Bybit has no implemented basis adapter. |
 | Protocol TVL/fees/revenue | DeFiLlama | None | Asset-to-protocol identifiers are explicit. |
 | Market Fear & Greed | Alternative.me | None | Market-wide context, not per-asset sentiment. |
+| Chain liveness | Structured Bitcoin block APIs, EVM JSON-RPC, and Solana JSON-RPC | None | Current canonical progress only; transport failure is not a halt. |
 | BTC cycle/on-chain | Coin Metrics Community, optional authenticated tier | Optional environment key | Catalog availability is checked; unsupported metrics stay unknown. |
 | ETF flows | SoSoValue API v1 when configured; Web only for unresolved non-provider work | `SOSOVALUE_API_KEY` | U.S. BTC/ETH ETF summary history is bundled into 1D/7D/30D values; current access and limits are controlled by SoSoValue. |
 | Historical liquidations | No configured structured provider; Web only when explicitly allowed | None | SoSoValue's current official API documents ETF data, not liquidation history. Historical CoinGlass points remain audit-only; realtime snapshots are not substituted. |
@@ -93,8 +94,8 @@ Completed normalized OHLCV remains content-addressed in
 `market-data/sha256/<ohlcv-hash>.json`; the series manifest only points to the
 existing immutable object and records its available range. Current incomplete
 candles are not persisted as completed decision evidence. Mutable responses
-use bounded TTLs; historical series are reusable and revisions are not
-silently overwritten.
+use bounded TTLs; chain-liveness responses use the 300-second TTL. Historical
+series are reusable and revisions are not silently overwritten.
 
 Inspect the local state without network access:
 
@@ -118,7 +119,15 @@ python3 scripts/providers.py --probe binance
 python3 scripts/providers.py --probe defillama
 python3 scripts/providers.py --probe alternative_me
 python3 scripts/providers.py --probe sosovalue
+python3 scripts/providers.py --probe chain_liveness --asset BTC
 ```
+
+Chain-liveness probes can target `BTC`, `ETH`, `SOL`, or `BNB`. The default
+structured sources are Blockstream Esplora plus mempool.space for BTC,
+zero-key EVM RPC endpoints for ETH, official BNB Chain dataseeds for BNB, and
+the official Solana mainnet RPC plus one independent public fallback for SOL.
+Optional `CRYPTO_PORTFOLIO_*_LIVENESS_URL`/`*_RPC_URL` overrides are local-only;
+URLs are redacted in diagnostics and credentials are never persisted.
 
 SoSoValue's current official documentation is at
 [`sosovalue-1.gitbook.io/sosovalue-api-doc`](https://sosovalue-1.gitbook.io/sosovalue-api-doc).

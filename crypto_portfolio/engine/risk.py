@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Any, Mapping
+from dataclasses import dataclass, field as dataclass_field
+from typing import Any, Iterable, Mapping
 
 from ..models.evidence import AssetAssessment
 from ..models.market_overlays import MarketOverlays
@@ -12,6 +12,7 @@ from ..models.policy import Policy, resolve_policy
 
 
 _SEVERITIES = {"ERROR", "WARNING", "INFO"}
+_CHAIN_LIVENESS_STATUSES = {"HEALTHY", "DEGRADED", "HALTED", "UNKNOWN", "FAILED", "CONFLICT"}
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class RiskViolation:
 @dataclass(frozen=True)
 class RiskCheckResult:
     violations: tuple[RiskViolation, ...]
+    deployment_caps: Mapping[str, float] = dataclass_field(default_factory=dict)
+    blocked_symbols: tuple[str, ...] = ()
 
     @property
     def errors(self) -> tuple[RiskViolation, ...]:
@@ -48,6 +51,8 @@ class RiskCheckResult:
         return {
             "ok": self.ok,
             "violations": [item.as_dict() for item in self.violations],
+            "deployment_caps": dict(self.deployment_caps),
+            "blocked_symbols": list(self.blocked_symbols),
         }
 
 
@@ -88,6 +93,105 @@ def _assessment(value: Any) -> tuple[str, bool, str]:
     return "LOW", False, "normal"
 
 
+def _liveness_status(value: Any, field: str) -> str:
+    if isinstance(value, Mapping):
+        value = value.get("status", value.get("value", value.get("chain_liveness_status")))
+    elif hasattr(value, "status"):
+        value = value.status
+    elif hasattr(value, "value") and not isinstance(value, (str, bytes)):
+        value = value.value
+    if not isinstance(value, str) or value.strip().upper() not in _CHAIN_LIVENESS_STATUSES:
+        raise ValueError(f"{field} must be a recognized chain liveness status")
+    return value.strip().upper()
+
+
+def _liveness_values(
+    value: Any | None,
+    assessments: Mapping[str, Any],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if value is not None:
+        if hasattr(value, "asset") and hasattr(value, "status"):
+            items = ((value.asset, value),)
+        elif hasattr(value, "asset") and hasattr(value, "value"):
+            items = ((value.asset, value),)
+        elif not isinstance(value, Mapping):
+            raise ValueError("chain_liveness must be an object mapping assets to statuses")
+        elif "asset" in value and "value" in value:
+            items = ((value.get("asset"), value),)
+        else:
+            items = value.items()
+        for raw_symbol, raw_status in items:
+            symbol = str(raw_symbol).strip().upper()
+            if not symbol:
+                raise ValueError("chain_liveness contains an empty asset")
+            if symbol not in {"BTC", "ETH", "SOL", "BNB"}:
+                raise ValueError(f"chain liveness is not applicable to {symbol}")
+            result[symbol] = _liveness_status(raw_status, f"chain_liveness.{symbol}")
+    for raw_symbol, assessment in assessments.items():
+        symbol = str(raw_symbol).strip().upper()
+        if not isinstance(assessment, Mapping):
+            continue
+        for key in ("chain_liveness_status", "chain_liveness", "liveness"):
+            if key in assessment:
+                if symbol not in {"BTC", "ETH", "SOL", "BNB"}:
+                    raise ValueError(f"chain liveness is not applicable to {symbol}")
+                result.setdefault(symbol, _liveness_status(assessment[key], f"assessments.{symbol}.{key}"))
+                break
+    return result
+
+
+def _increase_symbols(actions: Iterable[Any] | None) -> set[str]:
+    result: set[str] = set()
+    for action in actions or ():
+        if isinstance(action, Mapping):
+            symbol = action.get("symbol")
+            name = action.get("action")
+            amount = action.get("amount_usd", 0)
+        else:
+            symbol = getattr(action, "symbol", None)
+            name = getattr(action, "action", None)
+            amount = getattr(action, "amount_usd", 0)
+        if str(name).strip().upper() == "INCREASE" and float(amount) > 0:
+            result.add(str(symbol).strip().upper())
+    return result
+
+
+def chain_liveness_deployment_factor(
+    status: str,
+    *,
+    policy: Policy | None = None,
+) -> float:
+    """Return the maximum immediate deployment factor for one liveness state."""
+    normalized = _liveness_status(status, "status")
+    if normalized == "HEALTHY":
+        return 1.0
+    if normalized == "DEGRADED":
+        resolved = policy or resolve_policy()
+        configured = resolved.chain_liveness.get("degraded_deployment_factor", 0.25)
+        if isinstance(configured, bool) or not isinstance(configured, (int, float)):
+            raise ValueError("chain_liveness.degraded_deployment_factor must be numeric")
+        configured = float(configured)
+        if not math.isfinite(configured) or not 0 < configured <= 1:
+            raise ValueError("chain_liveness.degraded_deployment_factor must be in (0, 1]")
+        return configured
+    return 0.0
+
+
+def apply_chain_liveness_deployment_cap(
+    amount_usd: float,
+    status: str,
+    *,
+    policy: Policy | None = None,
+) -> float:
+    if isinstance(amount_usd, bool) or not isinstance(amount_usd, (int, float)):
+        raise ValueError("amount_usd must be numeric")
+    amount = float(amount_usd)
+    if not math.isfinite(amount) or amount < 0:
+        raise ValueError("amount_usd must be finite and >= 0")
+    return amount * chain_liveness_deployment_factor(status, policy=policy)
+
+
 def run_risk_gate(
     target_weights: Mapping[str, float] | Any,
     *,
@@ -96,6 +200,10 @@ def run_risk_gate(
     assessments: Mapping[str, AssetAssessment | Mapping[str, Any]] | None = None,
     current_drawdown: float | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    chain_liveness: Mapping[str, Any] | None = None,
+    liveness: Mapping[str, Any] | None = None,
+    actions: Iterable[Any] | None = None,
+    current_weights: Mapping[str, float] | None = None,
 ) -> RiskCheckResult:
     resolved = policy or resolve_policy()
     if hasattr(target_weights, "target_weights"):
@@ -275,9 +383,48 @@ def run_risk_gate(
                         "WARNING",
                         "BTC_CYCLE_RISK_ELEVATED",
                         "BTC cycle context has elevated non-clock risk confirmation; deployment may be reduced",
+                        )
+                    )
+    if chain_liveness is not None and liveness is not None:
+        raise ValueError("provide only one of chain_liveness or liveness")
+    liveness_values = _liveness_values(chain_liveness if chain_liveness is not None else liveness, assessments)
+    action_values = tuple(actions or ())
+    increase_symbols = _increase_symbols(action_values)
+    current = _weights(current_weights) if current_weights is not None else None
+    deployment_caps: dict[str, float] = {}
+    blocked_symbols: list[str] = []
+    for symbol, status in liveness_values.items():
+        factor = chain_liveness_deployment_factor(status, policy=resolved)
+        if status == "HEALTHY":
+            continue
+        deployment_caps[symbol] = factor
+        has_exposure = (
+            symbol in increase_symbols
+            or (
+                current is not None
+                and weights.get(symbol, 0.0) > current.get(symbol, 0.0) + 1e-12
+            )
+            or (current is None and not action_values and weights.get(symbol, 0.0) > 0)
+        )
+        if status == "DEGRADED":
+            if has_exposure:
+                violations.append(
+                    RiskViolation(
+                        "WARNING",
+                        "CHAIN_LIVENESS_DEGRADED",
+                        f"{symbol} chain liveness is DEGRADED; immediate new deployment is capped at {factor:.0%}",
                     )
                 )
-    return RiskCheckResult(tuple(violations))
+        elif has_exposure:
+            blocked_symbols.append(symbol)
+            code = "CHAIN_LIVENESS_HALTED" if status == "HALTED" else "CHAIN_LIVENESS_UNAVAILABLE"
+            message = (
+                f"{symbol} chain liveness is HALTED; INCREASE/new exposure is blocked"
+                if status == "HALTED"
+                else f"{symbol} chain liveness is {status}; hard-critical evidence blocks INCREASE/new exposure"
+            )
+            violations.append(RiskViolation("ERROR", code, message))
+    return RiskCheckResult(tuple(violations), deployment_caps, tuple(dict.fromkeys(blocked_symbols)))
 
 
 def risk_gate(
@@ -288,6 +435,10 @@ def risk_gate(
     assessments: Mapping[str, AssetAssessment | Mapping[str, Any]] | None = None,
     current_drawdown: float | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    chain_liveness: Mapping[str, Any] | None = None,
+    liveness: Mapping[str, Any] | None = None,
+    actions: Iterable[Any] | None = None,
+    current_weights: Mapping[str, float] | None = None,
 ) -> RiskCheckResult:
     return run_risk_gate(
         target_weights,
@@ -296,7 +447,18 @@ def risk_gate(
         assessments=assessments,
         current_drawdown=current_drawdown,
         overlays=overlays,
+        chain_liveness=chain_liveness,
+        liveness=liveness,
+        actions=actions,
+        current_weights=current_weights,
     )
 
 
-__all__ = ["RiskCheckResult", "RiskViolation", "risk_gate", "run_risk_gate"]
+__all__ = [
+    "RiskCheckResult",
+    "RiskViolation",
+    "apply_chain_liveness_deployment_cap",
+    "chain_liveness_deployment_factor",
+    "risk_gate",
+    "run_risk_gate",
+]

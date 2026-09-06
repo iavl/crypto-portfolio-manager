@@ -10,6 +10,7 @@ from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
 from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, catalog_metrics
+from .chain_liveness import CHAIN_NATIVE_ASSETS, ChainLivenessProvider
 from .defillama import BASE_URL as DEFILLAMA_BASE_URL
 from .http import classify_transport_error, redact_secrets, redact_url
 from .router import ProviderRouter
@@ -150,7 +151,49 @@ def _sosovalue_probe(provider: SoSoValueProvider) -> dict[str, Any]:
     return result
 
 
-def probe_provider(router: ProviderRouter, provider_name: str) -> tuple[dict[str, Any], ...]:
+def _chain_liveness_probe(
+    provider: ChainLivenessProvider,
+    asset: str,
+) -> dict[str, Any]:
+    normalized_asset = asset.strip().upper()
+    if normalized_asset not in CHAIN_NATIVE_ASSETS:
+        raise ValueError(f"chain liveness asset must be one of {CHAIN_NATIVE_ASSETS}")
+    assessment = provider.assess(normalized_asset)
+    result: dict[str, Any] = {
+        "provider": "chain_liveness",
+        "asset": normalized_asset,
+        "network": "OK" if assessment.sources_healthy else "FAILED",
+        "checked_at": assessment.checked_at,
+        "assessment": assessment.status,
+        "confidence": assessment.confidence,
+        "head_height_or_slot": assessment.head_height_or_slot,
+        "head_hash": assessment.head_hash,
+        "head_observed_at": assessment.head_observed_at,
+        "head_age_seconds": assessment.head_age_seconds,
+        "finalized_height_or_slot": assessment.finalized_height_or_slot,
+        "finalized_observed_at": assessment.finalized_observed_at,
+        "finalized_age_seconds": assessment.finalized_age_seconds,
+        "head_finalized_distance": (
+            assessment.head_height_or_slot - assessment.finalized_height_or_slot
+            if assessment.head_height_or_slot is not None
+            and assessment.finalized_height_or_slot is not None
+            else None
+        ),
+        "sources_checked": list(assessment.sources_checked),
+        "sources_healthy": list(assessment.sources_healthy),
+    }
+    if assessment.source_failures:
+        result["source_failures"] = [dict(item) for item in assessment.source_failures]
+        result["error_code"] = str(assessment.source_failures[-1].get("error_code", "UNKNOWN_NETWORK_ERROR"))
+    return result
+
+
+def probe_provider(
+    router: ProviderRouter,
+    provider_name: str,
+    *,
+    asset: str | None = None,
+) -> tuple[dict[str, Any], ...]:
     """Probe one registered provider; callers must opt in explicitly."""
     name = provider_name.strip().lower()
     statuses = {item.provider: item for item in router.provider_runtime_status()}
@@ -164,6 +207,9 @@ def probe_provider(router: ProviderRouter, provider_name: str) -> tuple[dict[str
         },)
     provider = router.providers.get(name)
     client = getattr(provider, "client", None)
+    if name == "chain_liveness" and isinstance(provider, ChainLivenessProvider):
+        assets = (asset.strip().upper(),) if asset is not None else CHAIN_NATIVE_ASSETS
+        return tuple(_with_config(_chain_liveness_probe(provider, item), client) for item in assets)
     if client is None or not hasattr(client, "get_json"):
         return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
@@ -199,11 +245,16 @@ def _with_config(result: Mapping[str, Any], client: Any | None = None) -> dict[s
     return output
 
 
-def probe_providers(router: ProviderRouter, providers: Iterable[str] | str = "all") -> tuple[dict[str, Any], ...]:
+def probe_providers(
+    router: ProviderRouter,
+    providers: Iterable[str] | str = "all",
+    *,
+    asset: str | None = None,
+) -> tuple[dict[str, Any], ...]:
     names = tuple(sorted(router.providers)) if providers == "all" else (providers,) if isinstance(providers, str) else tuple(providers)
     result: list[dict[str, Any]] = []
     for name in names:
-        result.extend(probe_provider(router, name))
+        result.extend(probe_provider(router, name, asset=asset if name.strip().lower() == "chain_liveness" else None))
     return tuple(result)
 
 

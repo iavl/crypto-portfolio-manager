@@ -6,6 +6,7 @@
     "coinmetrics_community": {"enabled": true},
     "defillama": {"enabled": true},
     "alternative_me": {"enabled": true},
+    "chain_liveness": {"enabled": true},
     "sosovalue": {
       "enabled": "AUTO",
       "api_key_env": "SOSOVALUE_API_KEY"

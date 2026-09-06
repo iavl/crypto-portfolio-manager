@@ -96,6 +96,9 @@ display data, so the engine uses value ÷ quantity and records a note.
    `AcquisitionManager` in `AUTO` (or the explicit `CACHE_ONLY`/
    `REFRESH`) mode. It checks fresh normalized observations, provider cache,
    and free structured APIs before producing unresolved work for `LUNA_MAX`.
+   `risk.chain_liveness_status` uses the structured `chain_liveness` provider
+   for chain-native assets only; routine liveness is never collected with a
+   generic Web search.
    Security, governance, and regulatory gaps produce the dedicated
    `EventScanner` source plan; they are not generic one-line web fallbacks.
    Emit a visible `Data Collection Log` for every requested metric, including
@@ -113,6 +116,8 @@ display data, so the engine uses value ÷ quantity and records a note.
    `EventSourceScanRequest` values and rerun acquisition with matching
    `EventSourceScanResponse` values, or explicitly record
    `INSUFFICIENT_SOURCE_COVERAGE`/failure results before continuing.
+   If structured chain-liveness acquisition fails, retain the hard-critical
+   missing evidence and do not invent `HEALTHY`, `DEGRADED`, or `HALTED`.
 9. Compare current observations with previous observations and build
    `Evidence`, `FactorScore`, and `AssetAssessment` records. Keep complete
    Evidence embedded in the Decision.
@@ -255,6 +260,13 @@ factor links into the canonical records.
 latest/previous values, changes, and compact trends; current values are still
 refetched for freshness. `CollectionEvent` records failed or stale attempts so
 missing data remains visible.
+
+Chain liveness is a current operational check of canonical block/slot progress
+and, where available, finality. It is collected from structured RPC or block
+APIs by Python. RPC/DNS/TLS/rate-limit/provider failures produce unavailable
+critical evidence; they are never evidence that a chain halted. AAVE and LINK
+are protocol/token assets here, not independent chains. Routine Web search is
+not a liveness source.
 
 Event scans are current at `scan_as_of`, not at the timestamp of the latest
 article. A full scan with no material result uses

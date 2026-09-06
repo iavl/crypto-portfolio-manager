@@ -806,13 +806,32 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result.results[0].event.refresh_error_code, "PROVIDER_DISABLED")
         self.assertEqual(result.attempts[0]["error_code"], "PROVIDER_DISABLED")
 
-    def test_chain_liveness_gap_keeps_a_stable_diagnostic_code(self):
+    def test_chain_liveness_failure_keeps_a_stable_diagnostic_code(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
             MetricRequest("BTC", "risk.chain_liveness_status"),
         ))
-        result = AcquisitionManager(persist=False).run(plan, mode="AUTO", cached_observations=())
+        class FailingProvider:
+            def collect(self, _request):
+                raise ProviderUnavailable(
+                    "chain liveness unavailable",
+                    diagnostic=ProviderDiagnostic(
+                        error_code="CHAIN_LIVENESS_UNAVAILABLE",
+                        detail="all structured sources failed",
+                    ),
+                )
+
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"chain_liveness": FailingProvider()},
+                    config=config_for("chain_liveness"),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(plan, mode="AUTO", cached_observations=())
         self.assertEqual(result.results[0].status, "FAILED")
-        self.assertEqual(result.results[0].event.refresh_error_code, "NO_CHAIN_LIVENESS_SOURCE")
+        self.assertEqual(result.results[0].event.refresh_error_code, "CHAIN_LIVENESS_UNAVAILABLE")
+        self.assertTrue(result.hard_critical_unresolved)
 
     def test_cache_identity_expiry_and_secret_exclusion(self):
         request_a = ProviderRequest("test", "spot", "BTC", {"symbol": "BTCUSDT", "api_key": "one"}, ("market.spot_price",), True, 60)

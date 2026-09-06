@@ -175,6 +175,25 @@ technical extension plus long crowding can produce `WAIT`. Deleveraging only
 removes a crowding penalty and never boosts exposure. The halving clock alone
 has no risk or trade authority.
 
+## Chain liveness consequences
+
+`risk.chain_liveness_status` is hard-critical for chain-native assets. Python
+classifies structured progress as:
+
+- `HEALTHY`: recent canonical head/finalized progress; no liveness restriction.
+- `DEGRADED`: the chain is progressing but age or finality is abnormal; no
+  high-conviction increase is allowed and immediate new deployment is capped
+  by the policy factor (25% by default).
+- `HALTED`: severe stale canonical progress corroborated by at least two
+  independent source groups; new exposure/`INCREASE` is blocked while
+  `HOLD`/`REDUCE`/`EXIT` analysis remains possible.
+- `UNKNOWN`: structured evidence is insufficient. It fails closed for a new
+  high-conviction increase.
+
+RPC/DNS/TLS/timeouts, rate limits, and provider outages are collection
+failures, not `HALTED`. They remain hard-critical missing evidence. AAVE and
+LINK do not get separate chain-liveness assessments.
+
 ## Review-specific event criticality
 
 Event metrics remain requested and visible even when they are not hard

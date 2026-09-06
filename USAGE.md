@@ -421,6 +421,49 @@ If critical information is unavailable, the Skill lowers confidence or
 declines to make a strong actionable recommendation. Missing data is not
 positive evidence.
 
+### Chain liveness
+
+For `BTC`, `ETH`, `SOL`, and `BNB`, the Skill checks
+`risk.chain_liveness_status` with the structured `chain_liveness` provider.
+The provider uses recent Bitcoin block APIs, EVM JSON-RPC, or Solana JSON-RPC
+and evaluates block/slot age in Python. It does not use a generic Web search,
+requires no API key by default, and does not run in the background.
+
+`HEALTHY` means recent canonical progress, `DEGRADED` means progress is
+abnormally old or finality is delayed, and `HALTED` requires corroborated
+severe staleness from independent source groups. DNS, TLS, timeout, 403/429,
+rate-limit, and provider-outage failures remain unavailable hard-critical
+evidence; they never prove a halt. AAVE and LINK are not checked as separate
+chains.
+
+The default AUTO reuse window is 300 seconds. `CACHE_ONLY` never performs a
+chain request, and `REFRESH` forces a current structured check. Historical
+replay uses only stored observations at or before the requested `as_of`.
+
+Optional local endpoint overrides are read from the environment and are never
+persisted:
+
+```text
+CRYPTO_PORTFOLIO_BTC_LIVENESS_URL
+CRYPTO_PORTFOLIO_ETH_RPC_URL
+CRYPTO_PORTFOLIO_BNB_RPC_URL
+CRYPTO_PORTFOLIO_SOL_RPC_URL
+```
+
+Use the explicit read-only probe when endpoint health needs checking:
+
+```bash
+python3 scripts/providers.py --probe chain_liveness --asset BTC
+python3 scripts/providers.py --probe chain_liveness --asset ETH
+python3 scripts/providers.py --probe chain_liveness --asset SOL
+python3 scripts/providers.py --probe chain_liveness --asset BNB
+```
+
+The deterministic risk gate leaves healthy exposure unchanged, caps immediate
+new deployment to the policy-configured degraded factor (25% by default),
+blocks new exposure for a corroborated halt, and fails closed for unavailable
+or conflicting critical evidence.
+
 ## Data Fetching and Cache
 
 The default mode is `AUTO`:

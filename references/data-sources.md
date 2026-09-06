@@ -115,6 +115,24 @@ Useful:
 - breadth/alt relative strength;
 - BTC volatility and drawdown.
 
+### Chain liveness
+
+`risk.chain_liveness_status` is a structured operational metric for chain-native
+assets only: `BTC`, `ETH`, `SOL`, and `BNB`. Bitcoin uses recent canonical
+block JSON from Blockstream Esplora or mempool.space. Ethereum uses
+read-only `eth_getBlockByNumber("latest", false)` and, when supported,
+`"finalized"`; BNB uses the latest-block call from official dataseeds.
+Solana uses `getHealth`, finalized `getSlot`, and
+`getBlockTime`. Python computes timestamp age, finality delay, and independent
+source quorum.
+
+`HEALTHY` requires recent canonical progress, `DEGRADED` represents progressing
+but abnormal age/finality, and `HALTED` requires severe stale chain state from
+the configured independent source groups. Provider reachability, DNS/TLS,
+timeouts, HTTP errors, or rate limits are unavailable evidence, not proof of a
+halt. RPC endpoints are observation transports, not authorities on security,
+governance, or regulation. AAVE and LINK are not independent chains.
+
 ### ETF / institutional flows
 
 Primarily relevant to BTC and ETH where spot products exist.
