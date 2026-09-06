@@ -22,9 +22,12 @@ judgment and user-facing decisions:
 - `references/decision-rules.md`
 - `references/data-sources.md`
 - `references/data-providers.md`
-- `references/data-source-inventory.md`
 - `references/output-template.md`
 - `references/model-routing.md`
+
+Use `data-sources.md` for source quality, methodology, and evidence meaning;
+use `data-providers.md` for provider routing, authentication, endpoints,
+fallback, cache behavior, and operational limitations.
 
 The canonical policy controls asset groups, risk limits, benchmarks, scoring
 weights, regime envelopes, rebalance thresholds, and technical execution

@@ -140,14 +140,14 @@ Primarily relevant to BTC and ETH where spot products exist.
 
 Use daily and multi-week context; avoid overreacting to one day of flow unless exceptional.
 
-The optional SoSoValue adapter uses the documented v2
-`POST /openapi/v2/etf/historicalInflowChart` endpoint on
-`https://api.sosovalue.xyz` for U.S. BTC and ETH products. Python derives 1D,
-7D, and 30D values from completed trading-date rows after local `as_of`
-filtering; `MARKET` is the complete-date BTC+ETH sum, not BTC-only flow. A
-short response is `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported capability.
-The current official SoSoValue API does not document liquidation history, so
-liquidation metrics remain context-only and are never sent to SoSoValue.
+The optional SoSoValue adapter provides U.S. BTC and ETH ETF products. Python
+derives 1D, 7D, and 30D values from completed trading-date rows after local
+`as_of` filtering; `MARKET` is the complete-date BTC+ETH sum, not BTC-only
+flow. A short response is `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported
+capability. The current official SoSoValue API does not document liquidation
+history, so liquidation metrics remain context-only and are never sent to
+SoSoValue. See `references/data-providers.md` for the active endpoint and
+authentication contract.
 
 ### Fundamentals
 

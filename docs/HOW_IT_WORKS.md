@@ -151,7 +151,8 @@ Python 派生。派生输入缺失时不会制造中性值。
 ## 7. Provider 与事件边界
 
 具体 source、字段、metric key 和限制见
-[`../references/data-source-inventory.md`](../references/data-source-inventory.md)。
+[`../references/data-providers.md`](../references/data-providers.md)；来源质量和
+方法论见 [`../references/data-sources.md`](../references/data-sources.md)。
 
 Provider 只返回规范化结构化数据。Chain liveness 是特殊的 chain-specific
 structured provider，不会回退到普通 Web 搜索。EventScanner 只使用固定

@@ -163,8 +163,8 @@ export CRYPTO_PORTFOLIO_FETCH_MODE=CACHE_ONLY
 export CRYPTO_PORTFOLIO_FETCH_MODE=REFRESH
 ```
 
-运行级选择优先于环境变量。详细来源、字段和限制见
-[数据源清单](../references/data-source-inventory.md)与
+运行级选择优先于环境变量。来源含义、字段边界和限制见
+[数据源策略](../references/data-sources.md)与
 [数据 Provider 策略](../references/data-providers.md)。
 
 ## 8. 链运行状态

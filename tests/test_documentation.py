@@ -26,7 +26,6 @@ class DocumentationTests(unittest.TestCase):
             "references/risk-model.md",
             "references/decision-rules.md",
             "references/data-sources.md",
-            "references/data-source-inventory.md",
             "references/output-template.md",
             "crypto_portfolio",
             "crypto_portfolio/events",
@@ -63,33 +62,48 @@ class DocumentationTests(unittest.TestCase):
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
         self.assertIn("Python 3.11 or newer", (ROOT / "README.md").read_text(encoding="utf-8"))
 
-    def test_data_source_inventory_matches_current_provider_boundaries(self):
-        inventory = (ROOT / "references/data-source-inventory.md").read_text(encoding="utf-8")
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    def test_data_sources_document_source_policy(self):
+        source_policy = (ROOT / "references/data-sources.md").read_text(encoding="utf-8")
+        for text in (
+            "Tier 1", "Tier 2", "Tier 3", "Chain liveness",
+            "ETF / institutional flows", "Fundamentals", "Events",
+            "Missing data", "Conflict handling",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, source_policy)
+
+    def test_data_providers_document_current_provider_boundaries(self):
         provider_policy = (ROOT / "references/data-providers.md").read_text(encoding="utf-8")
-        self.assertIn("references/data-source-inventory.md", skill)
-        self.assertIn("data-source-inventory.md", provider_policy)
         for provider in (
-            "Binance", "Bybit", "DeFiLlama", "Alternative.me", "Chain liveness",
-            "Coin Metrics", "GitHub", "SoSoValue", "EventScanner",
+            "Binance", "Bybit", "CoinGecko", "DeFiLlama", "Alternative.me",
+            "Chain liveness", "Coin Metrics", "GitHub", "SoSoValue", "EventScanner",
         ):
             with self.subTest(provider=provider):
-                self.assertIn(provider, inventory)
-        for metric in (
-            "market.spot_price", "derivatives.funding_rate", "fundamentals.tvl",
-            "sentiment.market_fear_greed", "risk.chain_liveness_status",
-            "fundamentals.developer_activity", "flows.etf_net_1d",
-            "flows.etf_net_7d", "flows.etf_net_30d",
+                self.assertIn(provider, provider_policy)
+        for text in (
+            "COINGECKO_API_KEY", "GITHUB_TOKEN", "SOSOVALUE_API_KEY",
+            "CapMrktEstUSD", "historicalInflowChart", "PROVIDER_INSUFFICIENT_HISTORY",
+            "`SKIPPED`", "`NOT_APPLICABLE`",
         ):
-            with self.subTest(metric=metric):
-                self.assertIn(metric, inventory)
-        for status in ("SUCCESS", "STALE", "FAILED", "SKIPPED", "NOT_APPLICABLE"):
-            with self.subTest(status=status):
-                self.assertIn(f"`{status}`", inventory)
-        self.assertIn("MATERIAL_EVENT_FOUND", inventory)
-        self.assertIn("NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES", inventory)
-        self.assertIn("INSUFFICIENT_SOURCE_COVERAGE", inventory)
-        self.assertIn("does not provide liquidation history", inventory)
+            with self.subTest(text=text):
+                self.assertIn(text, provider_policy)
+
+    def test_no_obsolete_data_source_layer_references(self):
+        obsolete = "data-source-" + "inventory.md"
+        paths = (
+            ROOT / "SKILL.md",
+            ROOT / "README.md",
+            ROOT / "README.zh-CN.md",
+            ROOT / "docs" / "USAGE.md",
+            ROOT / "docs" / "HOW_IT_WORKS.md",
+            ROOT / "references" / "data-sources.md",
+            ROOT / "references" / "data-providers.md",
+            ROOT / "tests" / "test_documentation.py",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertNotIn(obsolete, path.read_text(encoding="utf-8"))
+        self.assertFalse((ROOT / "references" / obsolete).exists())
 
     def test_reports_document_decision_basis_and_ambiguous_terms(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -155,6 +169,8 @@ class DocumentationTests(unittest.TestCase):
                 "docs/HOW_IT_WORKS.md",
                 "config/policy.json",
                 "references/risk-model.md",
+                "references/data-sources.md",
+                "references/data-providers.md",
                 "schemas/decision.schema.json",
                 "crypto_portfolio/__init__.py",
                 "scripts/portfolio_snapshot.py",
@@ -176,6 +192,8 @@ class DocumentationTests(unittest.TestCase):
                 with self.subTest(excluded_path=excluded_path):
                     self.assertFalse((installed / excluded_path).exists())
             self.assertFalse(any(installed.rglob("__pycache__")))
+            obsolete = "data-source-" + "inventory.md"
+            self.assertFalse((installed / "references" / obsolete).exists())
 
             marker = installed / "install-smoke-marker"
             marker.write_text("preserve", encoding="utf-8")
