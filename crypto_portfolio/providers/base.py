@@ -134,6 +134,10 @@ class ProviderUnsupportedMetric(ProviderError):
     """The provider does not support a requested metric."""
 
 
+class ProviderNotApplicable(ProviderError):
+    """The requested metric has no meaningful current instrument/scope."""
+
+
 def _text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
@@ -377,5 +381,6 @@ __all__ = [
     "ProviderRuntimeStatus",
     "ProviderUnavailable",
     "ProviderUnsupportedMetric",
+    "ProviderNotApplicable",
     "SocialDataProvider",
 ]

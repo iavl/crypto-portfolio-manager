@@ -644,8 +644,8 @@ class DataAcquisitionTests(unittest.TestCase):
             now="2026-09-05T00:00:00Z",
         )
         self.assertEqual(provider.calls, 0)
-        self.assertEqual(result.results[0].status, "FAILED")
-        self.assertEqual(result.web_fallbacks[0].preferred_sources, ("official/current sources",))
+        self.assertEqual(result.results[0].status, "SKIPPED")
+        self.assertEqual(result.web_fallbacks, ())
 
     def test_sosovalue_registration_is_key_gated_and_ignores_old_key(self):
         config = config_for("sosovalue")
@@ -802,7 +802,7 @@ class DataAcquisitionTests(unittest.TestCase):
             ProviderRouter({"lunarcrush": StructuredProvider()}, config=config),
             persist=False,
         ).run(plan, mode="AUTO", cached_observations=())
-        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertEqual(result.results[0].status, "SKIPPED")
         self.assertEqual(result.results[0].event.refresh_error_code, "PROVIDER_DISABLED")
         self.assertEqual(result.attempts[0]["error_code"], "PROVIDER_DISABLED")
 

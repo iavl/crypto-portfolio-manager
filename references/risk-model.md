@@ -217,3 +217,10 @@ Before scoring, a pending hard-critical event-source request is a resolution
 state, not a failed scan result. After an explicit source response is
 processed, incomplete coverage remains a critical failure and keeps the
 recommendation fail-closed.
+
+Coverage status semantics are part of the risk gate: `NOT_APPLICABLE` excludes
+an asset/metric pair that has no meaningful interpretation, while optional or
+premium `SKIPPED` evidence is excluded when no eligible provider exists.
+Required `FAILED`, `STALE`, and `CONFLICT` evidence stays in the denominator
+and lowers coverage; a hard-critical required failure remains a
+`CRITICAL DATA FAILURE`.

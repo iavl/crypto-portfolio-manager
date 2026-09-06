@@ -11,6 +11,8 @@ from typing import Any, Callable, Iterable, Mapping
 
 from .data_collection import collection_summary
 from .engine.factors.flows import classify_flow_state
+from .metric_availability import metric_availability, skip_reason
+from .engine.derived_metrics import derive_metric_observations
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
 from .engine.metric_plan import MetricCollectionPlan, MetricRequest
 from .events import EventScanner, EventSourceScanRequest, EventSourceScanResponse, event_metric_category
@@ -30,6 +32,16 @@ _EVENT_METRIC_KEYS = {
     "security": "risk.security_event_status",
     "governance": "risk.governance_event_status",
     "regulatory": "risk.regulatory_event_status",
+}
+_PROVIDER_SKIP_ERROR_CODES = {
+    "NO_PROVIDER_ROUTE",
+    "PROVIDER_DISABLED",
+    "PROVIDER_UNSUPPORTED",
+    "PROVIDER_PLAN_RESTRICTED",
+    "PROVIDER_NOT_APPLICABLE",
+    "CACHE_MISS",
+    "CACHE_EXPIRED",
+    "CACHE_CORRUPT",
 }
 
 
@@ -280,12 +292,17 @@ class AcquisitionManager:
             local = read_metric_observations(self.observation_path, invalid=[])
         reusable: dict[tuple[str, str], MetricObservation] = {}
         stale: dict[tuple[str, str], MetricObservation] = {}
+        preflight_skips: dict[tuple[str, str], str] = {}
         pending: list[MetricRequest] = []
         historical_liveness: set[tuple[str, str]] = set()
         fresh_hits = 0
         for request in model.requests:
             identity = (request.asset, request.metric_key)
             if not request.definition.applies_to(request.asset):
+                continue
+            availability = metric_availability(request.asset, request.metric_key)
+            if availability.reason_code == "METHODOLOGY_NOT_DEFINED":
+                preflight_skips[identity] = skip_reason(availability)
                 continue
             candidate = latest_usable_observation(
                 request.asset,
@@ -297,7 +314,7 @@ class AcquisitionManager:
                         request.metric_key,
                         self.router.config.get("cache_ttl_seconds"),
                     )
-                    if metric_is_mutable(request.metric_key) and provider_chain(request.metric_key)
+                    if metric_is_mutable(request.metric_key) and provider_chain(request.metric_key, request.asset)
                     else None
                 ),
             )
@@ -355,14 +372,29 @@ class AcquisitionManager:
             routed_values,
             fetched_at=current,
         ))
+        derived_values, derived_reasons = derive_metric_observations(
+            model.requests,
+            reusable,
+            routed_values,
+            fetched_at=current,
+            as_of=as_of,
+        )
+        routed_values.update(derived_values)
         routed_reasons = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): str(item.get("reason", ""))
             for item in routed.unresolved_details
         }
+        routed_reasons.update(derived_reasons)
         routed_diagnostics = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
             for item in routed.unresolved_details
             if isinstance(item, Mapping)
+        }
+        provider_failure_identities = {
+            (attempt.asset, metric_key)
+            for attempt in routed.attempts
+            if attempt.error_code not in (None, *_PROVIDER_SKIP_ERROR_CODES)
+            for metric_key in attempt.metric_keys
         }
         scanner = self.event_scanner
         if event_scan_results is not None and event_source_scan_responses is not None:
@@ -500,7 +532,7 @@ class AcquisitionManager:
                 or request.metric_key == "risk.chain_liveness_status"
             ):
                 return
-            chain = provider_chain(request.metric_key)
+            chain = provider_chain(request.metric_key, request.asset)
             web_fallbacks.append(WebFallbackRequest(
                 request.asset,
                 request.metric_key,
@@ -525,6 +557,8 @@ class AcquisitionManager:
                     "reason": "metric is outside its registry asset scope",
                     "source": "python-applicability",
                 }, now=current)
+            elif identity in preflight_skips:
+                normalized = self._skipped(request, current, preflight_skips[identity])
             elif identity in routed_values:
                 try:
                     normalized = normalize_metric_result(
@@ -556,7 +590,7 @@ class AcquisitionManager:
                         (request.asset, category),
                         f"{category} event scan requires the returned authoritative source plan",
                     )
-                elif not provider_chain(request.metric_key):
+                elif not provider_chain(request.metric_key, request.asset):
                     reason = "no configured structured provider route for this metric"
                     diagnostic = {"error_code": "NO_PROVIDER_ROUTE", "detail": reason}
                 else:
@@ -568,16 +602,51 @@ class AcquisitionManager:
                     reason = f"last observation is stale as of {cutoff}"
                     if refresh_reason:
                         reason += f"; refresh failed: {refresh_reason}"
-                if category is None and request.metric_key != "risk.chain_liveness_status":
-                    add_web_fallback(request, reason)
-                normalized = self._failure(
-                    request,
-                    current,
-                    reason,
-                    stale=old is not None,
-                    diagnostic=diagnostic,
-                    previous=old,
-                )
+                if diagnostic and diagnostic.get("error_code") == "PROVIDER_NOT_APPLICABLE":
+                    normalized = normalize_metric_result({
+                        "timestamp": current,
+                        "asset": request.asset,
+                        "metric_key": request.metric_key,
+                        "status": "NOT_APPLICABLE",
+                        "reason": reason,
+                        "source": "provider-router",
+                    }, now=current)
+                else:
+                    availability = metric_availability(request.asset, request.metric_key)
+                    provider_failed = (
+                        identity in provider_failure_identities
+                        or (
+                            diagnostic is not None
+                            and diagnostic.get("error_code") not in _PROVIDER_SKIP_ERROR_CODES
+                        )
+                    )
+                    if availability.is_skippable and provider_failed:
+                        normalized = self._failure(
+                            request,
+                            current,
+                            reason,
+                            stale=old is not None,
+                            diagnostic=diagnostic,
+                            previous=old,
+                        )
+                    elif availability.is_skippable:
+                        normalized = self._skipped(
+                            request,
+                            current,
+                            skip_reason(availability, reason),
+                            diagnostic=diagnostic,
+                        )
+                    else:
+                        if category is None and request.metric_key != "risk.chain_liveness_status":
+                            add_web_fallback(request, reason)
+                        normalized = self._failure(
+                            request,
+                            current,
+                            reason,
+                            stale=old is not None,
+                            diagnostic=diagnostic,
+                            previous=old,
+                        )
             if should_persist:
                 persist_metric_result(
                     normalized,
@@ -661,6 +730,28 @@ class AcquisitionManager:
             "source": "provider-router",
             "last_observation_id": previous.observation_id if previous else None,
             "last_observation_at": previous.observed_at if previous else None,
+            "refresh_provider": diagnostic.get("provider"),
+            "refresh_endpoint": diagnostic.get("endpoint"),
+            "refresh_error_code": diagnostic.get("error_code"),
+            "refresh_error_detail": diagnostic.get("detail"),
+        }, now=timestamp)
+
+    @staticmethod
+    def _skipped(
+        request: MetricRequest,
+        timestamp: str,
+        reason: str,
+        *,
+        diagnostic: Mapping[str, Any] | None = None,
+    ) -> NormalizedMetricResult:
+        diagnostic = diagnostic or {}
+        return normalize_metric_result({
+            "timestamp": timestamp,
+            "asset": request.asset,
+            "metric_key": request.metric_key,
+            "status": "SKIPPED",
+            "reason": reason,
+            "source": "python-availability",
             "refresh_provider": diagnostic.get("provider"),
             "refresh_endpoint": diagnostic.get("endpoint"),
             "refresh_error_code": diagnostic.get("error_code"),

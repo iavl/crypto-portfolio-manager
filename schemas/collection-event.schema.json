@@ -9,7 +9,7 @@
     "timestamp": {"type": "string", "format": "date-time"},
     "asset": {"type": "string", "minLength": 1},
     "metric_key": {"type": "string", "minLength": 1},
-    "status": {"type": "string", "enum": ["SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"]},
+    "status": {"type": "string", "enum": ["SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED"]},
     "reason": {"type": ["string", "null"], "minLength": 1},
     "source": {"type": ["string", "null"], "minLength": 1},
     "observed_at": {"type": ["string", "null"], "format": "date-time"},
@@ -24,7 +24,7 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"status": {"enum": ["FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"]}}, "required": ["status"]},
+      "if": {"properties": {"status": {"enum": ["FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED"]}}, "required": ["status"]},
       "then": {"required": ["reason"], "properties": {"reason": {"type": "string", "minLength": 1}}}
     }
   ],

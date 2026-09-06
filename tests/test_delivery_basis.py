@@ -9,7 +9,7 @@ from crypto_portfolio.acquisition import AcquisitionManager
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
 from crypto_portfolio.engine.metrics import annualized_futures_basis
-from crypto_portfolio.providers.base import ProviderCapabilities, ProviderDataError, ProviderRequest, ProviderUnsupportedMetric
+from crypto_portfolio.providers.base import ProviderCapabilities, ProviderDataError, ProviderNotApplicable, ProviderRequest, ProviderUnsupportedMetric
 from crypto_portfolio.providers.binance import BinanceProvider
 from crypto_portfolio.providers.cache import ProviderCache, request_hash
 from crypto_portfolio.providers.router import ProviderRouter
@@ -98,10 +98,10 @@ class DeliveryBasisTests(unittest.TestCase):
         ):
             with self.subTest(contract=item):
                 self.client.contracts = [item]
-                with self.assertRaises(ProviderUnsupportedMetric):
+                with self.assertRaises(ProviderNotApplicable):
                     self.provider.collect(self.request)
         self.client.contracts = []
-        with self.assertRaises(ProviderUnsupportedMetric):
+        with self.assertRaises(ProviderNotApplicable):
             self.provider.collect(self.request)
         self.assertTrue(all(call[0].endswith("/exchangeInfo") for call in self.client.calls))
 
@@ -195,7 +195,7 @@ class DeliveryBasisTests(unittest.TestCase):
                 self.cache.save_response(self.request, [value], fetched_at=NOW)
                 self.client.calls.clear()
                 result = self.manager.run(self.plan, mode="CACHE_ONLY", now=NOW, cached_observations=())
-                self.assertEqual(result.results[0].status, "FAILED")
+                self.assertEqual(result.results[0].status, "SKIPPED")
                 self.assertEqual(result.observations, ())
                 self.assertEqual(self.client.calls, [])
                 observation = normalize_metric_result(value, now=NOW).observation
@@ -205,16 +205,16 @@ class DeliveryBasisTests(unittest.TestCase):
 
     def test_liquidation_no_route_keeps_null_and_existing_web_policy(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("BTC", "derivatives.total_liquidations_24h_usd"),))
-        for mode, allow_web, expected_web in (("AUTO", True, 1), ("AUTO", False, 0), ("CACHE_ONLY", True, 0)):
+        for mode, allow_web in (("AUTO", True), ("AUTO", False), ("CACHE_ONLY", True)):
             with self.subTest(mode=mode, allow_web=allow_web):
                 self.router.config["fallback"]["allow_web"] = allow_web
                 result = self.manager.run(plan, mode=mode, now=NOW, cached_observations=())
-                self.assertEqual(result.results[0].status, "FAILED")
+                self.assertEqual(result.results[0].status, "SKIPPED")
                 self.assertEqual(result.events[0].refresh_error_code, "NO_PROVIDER_ROUTE")
                 self.assertIn("no configured structured provider route", result.events[0].reason)
                 self.assertEqual(result.observations, ())
                 self.assertEqual(result.attempts, ())
-                self.assertEqual(len(result.web_fallbacks), expected_web)
+                self.assertEqual(len(result.web_fallbacks), 0)
         self.assertEqual(self.client.calls, [])
 
     def test_unsupported_capability_and_bad_payload_have_distinct_diagnostics(self):

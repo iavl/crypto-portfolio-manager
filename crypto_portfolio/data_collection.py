@@ -8,6 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, TextIO
 
+from .metric_availability import metric_availability
 from .metrics_registry import REVIEW_TYPES, metric_definition
 from .models.metrics_history import CollectionEvent, MetricObservation
 from .models.policy import Policy, resolve_policy
@@ -18,7 +19,7 @@ from .state.metrics import (
 )
 
 
-_STATUS_ORDER = ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE")
+_STATUS_ORDER = ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED")
 
 
 def _display(value: Any) -> str:
@@ -48,7 +49,11 @@ def collection_summary(
         event for event in values
         if metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
     ]
-    applicable = [event for event in scoring_events if event.status != "NOT_APPLICABLE"]
+    applicable = [
+        event for event in scoring_events
+        if event.status != "NOT_APPLICABLE"
+        and not (event.status == "SKIPPED" and metric_availability(event.asset, event.metric_key).is_skippable)
+    ]
     resolved_policy = policy or resolve_policy()
     if isinstance(resolved_policy, Mapping):
         policy_weights = dict(resolved_policy.get("scoring_weights", {}))
@@ -118,7 +123,17 @@ def collection_summary(
         confidence = "MEDIUM"
     else:
         confidence = "HIGH"
-    return {
+    skipped_optional = sum(
+        event.status == "SKIPPED"
+        and metric_availability(event.asset, event.metric_key).requirement == "OPTIONAL"
+        for event in values
+    )
+    skipped_premium = sum(
+        event.status == "SKIPPED"
+        and metric_availability(event.asset, event.metric_key).requirement == "PREMIUM_ONLY"
+        for event in values
+    )
+    result = {
         "requested": len(values),
         "counts": {status: counts.get(status, 0) for status in _STATUS_ORDER},
         "critical_failures": critical_failures,
@@ -132,7 +147,14 @@ def collection_summary(
         "confidence": confidence,
         "overlay_requested": len(values) - len(scoring_events),
         "review_type": review_type,
+        "skipped_optional": skipped_optional,
+        "skipped_premium": skipped_premium,
     }
+    result["counts"].update({
+        "SKIPPED_OPTIONAL": skipped_optional,
+        "SKIPPED_PREMIUM": skipped_premium,
+    })
+    return result
 
 
 def format_collection_event(
@@ -182,6 +204,9 @@ def format_collection_event(
         effect = "available for scoring/history"
     elif event.status == "NOT_APPLICABLE":
         effect = "excluded from applicable coverage"
+    elif event.status == "SKIPPED":
+        requirement = metric_availability(event.asset, event.metric_key).requirement
+        effect = f"excluded from applicable coverage ({requirement.lower()} metric)"
     else:
         effect = "coverage/confidence reduced"
         definition = metric_definition(event.metric_key)
@@ -202,6 +227,7 @@ def format_collection_summary(summary: Mapping[str, Any]) -> str:
             f"Requested metrics: {summary['requested']}",
             f"SUCCESS: {counts['SUCCESS']}  STALE: {counts['STALE']}  FAILED: {counts['FAILED']}",
             f"CONFLICT: {counts['CONFLICT']}  NOT_APPLICABLE: {counts['NOT_APPLICABLE']}",
+            f"SKIPPED_OPTIONAL: {counts.get('SKIPPED_OPTIONAL', 0)}  SKIPPED_PREMIUM: {counts.get('SKIPPED_PREMIUM', 0)}",
             f"Critical failures: {summary['critical_failures']}",
             f"Per-request coverage: {summary.get('per_request_coverage', summary['coverage']):.0%}",
             f"Policy-weighted coverage: {summary.get('policy_weighted_coverage', summary['coverage']):.0%}",

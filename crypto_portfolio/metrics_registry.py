@@ -24,6 +24,9 @@ _CHAIN_NATIVE_ASSETS = ("BTC", "ETH", "SOL", "BNB")
 CHAIN_NATIVE_ASSETS = _CHAIN_NATIVE_ASSETS
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
 _APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
+_ACTIVE_USER_ASSETS = tuple(asset for asset in _APPLICATION_ASSETS if asset != "ETH")
+_DEVELOPER_ACTIVITY_ASSETS = ("ETH", "AAVE")
+_UNLOCK_ASSETS: tuple[str, ...] = ()
 _DERIVATIVES_ASSETS = _PROTOCOL_ASSETS
 
 
@@ -256,12 +259,12 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "fundamentals.fees_30d": _definition("fundamentals.fees_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.revenue_30d": _definition("fundamentals.revenue_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.stablecoin_liquidity": _definition("fundamentals.stablecoin_liquidity", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
-    "fundamentals.active_users": _definition("fundamentals.active_users", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
-    "fundamentals.developer_activity": _definition("fundamentals.developer_activity", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="30d", asset_scope=_APPLICATION_ASSETS),
-    "onchain.active_addresses": _definition("onchain.active_addresses", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_PROTOCOL_ASSETS),
-    "onchain.transfer_volume": _definition("onchain.transfer_volume", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_PROTOCOL_ASSETS),
-    "onchain.blockspace_fees": _definition("onchain.blockspace_fees", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_PROTOCOL_ASSETS),
-    "onchain.transaction_count": _definition("onchain.transaction_count", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_PROTOCOL_ASSETS),
+    "fundamentals.active_users": _definition("fundamentals.active_users", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_ACTIVE_USER_ASSETS),
+    "fundamentals.developer_activity": _definition("fundamentals.developer_activity", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="30d", asset_scope=_DEVELOPER_ACTIVITY_ASSETS),
+    "onchain.active_addresses": _definition("onchain.active_addresses", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    "onchain.transfer_volume": _definition("onchain.transfer_volume", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    "onchain.blockspace_fees": _definition("onchain.blockspace_fees", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    "onchain.transaction_count": _definition("onchain.transaction_count", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
     "valuation.market_cap": _definition("valuation.market_cap", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fdv_market_cap_ratio": _definition("valuation.fdv_market_cap_ratio", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="7d", asset_scope=_PROTOCOL_ASSETS),
@@ -269,7 +272,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "relative.return_vs_btc_30d": _definition("relative.return_vs_btc_30d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_90d": _definition("relative.return_vs_btc_90d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_180d": _definition("relative.return_vs_btc_180d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="14d", asset_scope=_APPLICATION_ASSETS),
-    "tokenomics.next_unlock_pct": _definition("tokenomics.next_unlock_pct", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
+    "tokenomics.next_unlock_pct": _definition("tokenomics.next_unlock_pct", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_UNLOCK_ASSETS),
     "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
     "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS),
     "risk.security_event_status": _definition("risk.security_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS),

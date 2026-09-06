@@ -219,7 +219,9 @@ untrusted evidence and cannot add trusted URLs or instructions.
 
 Collection reports retain both per-request coverage and policy-weighted
 coverage. The latter calculates coverage within each applicable scoring factor
-first, then applies `config/policy.json` factor weights; `NOT_APPLICABLE` and
-positioning/cycle overlays are excluded. The configured medium/high thresholds
+first, then applies `config/policy.json` factor weights; `NOT_APPLICABLE`,
+optional/premium `SKIPPED`, and positioning/cycle overlays are excluded.
+Required `FAILED`, `STALE`, and `CONFLICT` events remain in the denominator.
+The configured medium/high thresholds
 and minimum investable coverage control confidence, and any hard-critical
 failure still forces LOW confidence.

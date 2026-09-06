@@ -278,6 +278,17 @@ does not let a model invent a new metric key. `normalize_collection_results()`
 requires exactly one result for each planned `(asset, metric_key)` pair;
 omissions, extras, and duplicates fail closed.
 
+Each request is classified before routing:
+
+```text
+metric request -> semantic applicability -> Python-derived graph
+               -> provider capability/readiness -> fetch, skip, or fail
+```
+
+`NOT_APPLICABLE` is semantic scope, optional/premium `SKIPPED` is an honest
+provider-availability decision, and `FAILED` is reserved for expected
+applicable evidence that did not resolve.
+
 ### Chain liveness
 
 `risk.chain_liveness_status` is collected only for `BTC`, `ETH`, `SOL`, and
@@ -328,7 +339,7 @@ seven base scoring weights.
 The collection boundary accepts exactly these statuses:
 
 ```text
-SUCCESS | FAILED | STALE | CONFLICT | NOT_APPLICABLE
+SUCCESS | FAILED | STALE | CONFLICT | NOT_APPLICABLE | SKIPPED
 ```
 
 `SUCCESS` becomes a validated `MetricObservation`. Other outcomes remain
@@ -337,9 +348,11 @@ visible as `CollectionEvent` records but never become positive evidence.
 summarizes counts, critical failures, weighted coverage, and confidence.
 
 `CollectionEvent` is acquisition telemetry, not an investment signal.
-`NOT_APPLICABLE` is excluded from coverage; an applicable failure, stale value,
-or conflict lowers coverage/confidence. Critical failures such as current
-price or unresolved material security status block high-conviction trades.
+`NOT_APPLICABLE` is excluded from coverage. Optional or premium `SKIPPED`
+metrics are also excluded when their provider is unavailable. An applicable
+failure, stale value, or conflict lowers coverage/confidence. Critical
+failures such as current price or unresolved material security status block
+high-conviction trades.
 Missing data is never converted into a favorable score.
 
 The summary keeps per-request coverage for diagnostics and computes decision
@@ -718,8 +731,8 @@ documents, including [decision rules](references/decision-rules.md) and
 capabilities, fetch modes, and handled provider errors. The concrete public
 adapters use the stdlib HTTP client and normalize into registry/model
 contracts. Binance and Bybit are public market/derivatives sources;
-DeFiLlama, Alternative.me, and catalog-aware Coin Metrics cover selected
-structured context. The optional SoSoValue adapter uses an environment-only
+DeFiLlama, Alternative.me, catalog-aware Coin Metrics, and the fixed-allowlist
+GitHub commit adapter cover selected structured context. The optional SoSoValue adapter uses an environment-only
 API key for documented U.S. BTC/ETH ETF summary history. The current official
 SoSoValue API does not document liquidation history, so those metrics remain
 context-only. The adapters never expose private account or trading endpoints.
@@ -782,6 +795,9 @@ The system fails toward less actionability:
   evidence; only corroborated stale canonical progress can produce `HALTED`.
 - `NOT_APPLICABLE` excludes a metric from applicable coverage rather than
   pretending it is missing or positive.
+- Optional or premium `SKIPPED` evidence is meaningful but unavailable and is
+  excluded from its policy denominator; required missing evidence remains a
+  failure.
 - Critical data failure, partial screenshot coverage, stale/insufficient data,
   unresolved conflict, or low confidence can block a strong entry.
 - A risk-gate `ERROR` prevents the Skill from proceeding with the unsafe

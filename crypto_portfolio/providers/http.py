@@ -28,6 +28,7 @@ from .base import (
     ProviderResponseError,
     ProviderUnavailable,
     ProviderUnsupportedMetric,
+    ProviderNotApplicable,
 )
 
 
@@ -201,6 +202,8 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
         return "PROXY_ERROR"
     if isinstance(error, ProviderUnsupportedMetric):
         return "PROVIDER_PLAN_RESTRICTED" if any(value in text for value in ("plan", "tier", "permission", "subscription", "upgrade")) else "PROVIDER_UNSUPPORTED"
+    if isinstance(error, ProviderNotApplicable):
+        return "PROVIDER_NOT_APPLICABLE"
     if isinstance(error, ProviderAuthenticationError):
         return "HTTP_401"
     if isinstance(error, ProviderResponseError):

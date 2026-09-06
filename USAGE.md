@@ -412,8 +412,9 @@ Depending on the review, the Skill may need:
 
 The repository does not directly connect to Binance, OKX, CoinGecko,
 or private exchange endpoints. It has public Binance/Bybit market adapters,
-DeFiLlama protocol data, Alternative.me Fear & Greed, and catalog-aware Coin
-Metrics Community support. See [Data Providers](references/data-providers.md)
+DeFiLlama protocol data, Alternative.me Fear & Greed, catalog-aware Coin
+Metrics Community support, and bounded GitHub commit counts for its fixed
+developer-activity allowlist. See [Data Providers](references/data-providers.md)
 and `references/data-sources.md` for source hierarchy, freshness, and
 missing-data rules.
 
@@ -535,6 +536,9 @@ is enabled only when its environment variable is present:
 ```text
 COINMETRICS_API_KEY
 ```
+
+GitHub public API access is optional; `GITHUB_TOKEN` may improve rate limits but
+is never persisted. The adapter uses only its fixed repository allowlist.
 
 SoSoValue is an optional read-only provider for U.S. BTC/ETH spot ETF summary
 flows. Configure its key only in the environment:

@@ -154,7 +154,7 @@ class DocumentationTests(unittest.TestCase):
         template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
         self.assertIn("Data Collection Log", skill)
         self.assertIn("Never silently omit", skill)
-        for status in ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"):
+        for status in ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED"):
             with self.subTest(status=status):
                 self.assertIn(status, skill)
         self.assertIn("CRITICAL DATA FAILURE", skill)

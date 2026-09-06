@@ -18,6 +18,7 @@ from .base import (
     ProviderRuntimeStatus,
     ProviderUnavailable,
     ProviderUnsupportedMetric,
+    ProviderNotApplicable,
 )
 from .cache import CacheCorruption, CacheExpired, ProviderCache, merge_ohlcv_series, missing_series_range, request_hash
 from .config import load_provider_config, provider_api_key, provider_enabled
@@ -171,6 +172,7 @@ class ProviderRouter:
         from .coinmetrics import CoinMetricsProvider
         from .chain_liveness import ChainLivenessProvider
         from .defillama import DeFiLlamaProvider
+        from .github_activity import GitHubActivityProvider
         from .sosovalue import SoSoValueProvider
 
         client = self.http_client or HttpClient()
@@ -182,6 +184,7 @@ class ProviderRouter:
             "defillama": DeFiLlamaProvider(client=client),
             "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
             "chain_liveness": ChainLivenessProvider(client=client),
+            "github": GitHubActivityProvider(client=client),
         }
         if provider_enabled("coinmetrics_pro", self.config):
             from .coinmetrics import CoinMetricsAuthenticatedProvider
@@ -273,7 +276,7 @@ class ProviderRouter:
             for key in request.metric_keys:
                 if (request.asset, key) in pending:
                     raise ValueError("router requests contain duplicate asset/metric keys")
-                chain = tuple(dict.fromkeys((request.provider, *provider_chain(key))))
+                chain = tuple(dict.fromkeys((request.provider, *provider_chain(key, request.asset))))
                 pending[(request.asset, key)] = {"request": request, "chain": chain, "index": 0}
 
         observations: dict[tuple[str, str], Mapping[str, Any]] = {}
@@ -483,6 +486,8 @@ class ProviderRouter:
             return "CACHE_CORRUPT"
         if isinstance(error, ProviderUnsupportedMetric):
             return "UNSUPPORTED"
+        if isinstance(error, ProviderNotApplicable):
+            return "NOT_APPLICABLE"
         if isinstance(error, ProviderError):
             return error.__class__.__name__.replace("Provider", "").upper()
         return "FAILED"

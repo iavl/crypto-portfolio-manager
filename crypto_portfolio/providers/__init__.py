@@ -20,6 +20,7 @@ from .base import (
     ProviderRuntimeStatus,
     ProviderUnavailable,
     ProviderUnsupportedMetric,
+    ProviderNotApplicable,
     SocialDataProvider,
 )
 from .cache import ProviderCache
@@ -38,6 +39,7 @@ from .binance import BinanceProvider
 from .bybit import BybitProvider
 from .coinmetrics import CoinMetricsAuthenticatedProvider, CoinMetricsProvider
 from .defillama import DeFiLlamaProvider, DefiLlamaProvider
+from .github_activity import GitHubActivityProvider
 from .sosovalue import SoSoValueProvider
 
 __all__ = [
@@ -67,6 +69,7 @@ __all__ = [
     "provider_status",
     "ProviderUnavailable",
     "ProviderUnsupportedMetric",
+    "ProviderNotApplicable",
     "SocialDataProvider",
     "AlternativeMeProvider",
     "CHAIN_NATIVE_ASSETS",
@@ -80,5 +83,6 @@ __all__ = [
     "CoinMetricsProvider",
     "DeFiLlamaProvider",
     "DefiLlamaProvider",
+    "GitHubActivityProvider",
     "SoSoValueProvider",
 ]

@@ -27,6 +27,7 @@ from .base import (
     ProviderResponseError,
     ProviderRequest,
     ProviderUnsupportedMetric,
+    ProviderNotApplicable,
 )
 from .http import HttpClient
 from .routes import BASIS_METHODOLOGY
@@ -511,7 +512,7 @@ class BinanceProvider:
             if onboard <= started < expiry:
                 eligible.append((expiry, symbol, onboard, contract["contractType"]))
         if not eligible:
-            raise ProviderUnsupportedMetric(f"Binance has no trading USDT delivery contract for {request.asset}")
+            raise ProviderNotApplicable(f"Binance has no trading USDT delivery contract for {request.asset}")
         expiry, symbol, onboard, contract_type = min(eligible)
         # Request an exact symbol: a rotating CURRENT_QUARTER basis series does
         # not identify its delivery date across a rollover.

@@ -29,10 +29,12 @@ can be changed with `CRYPTO_PORTFOLIO_DATA_DIR`.
 | Protocol TVL/fees/revenue | DeFiLlama | None | Asset-to-protocol identifiers are explicit. |
 | Market Fear & Greed | Alternative.me | None | Market-wide context, not per-asset sentiment. |
 | Chain liveness | Structured Bitcoin block APIs, EVM JSON-RPC, and Solana JSON-RPC | None | Current canonical progress only; transport failure is not a halt. |
-| BTC cycle/on-chain | Coin Metrics Community, optional authenticated tier | Optional environment key | Catalog availability is checked; unsupported metrics stay unknown. |
+| BTC/ETH network, supply, cycle, and exchange attribution | Coin Metrics Community, optional authenticated tier | Optional environment key | Asset-specific catalog availability is checked; unsupported USD transfer/fee or asset combinations remain required failures or premium skips. |
+| Developer activity | Fixed canonical ETH/AAVE GitHub repository allowlist | Optional `GITHUB_TOKEN` | Public REST commits only; bounded trailing 30-day default-branch counts, no repository discovery or HTML scraping. |
 | ETF flows | SoSoValue API v1 when configured; Web only for unresolved non-provider work | `SOSOVALUE_API_KEY` | U.S. BTC/ETH ETF summary history is bundled into 1D/7D/30D values; current access and limits are controlled by SoSoValue. |
-| Historical liquidations | No configured structured provider; Web only when explicitly allowed | None | SoSoValue's current official API documents ETF data, not liquidation history. Historical CoinGlass points remain audit-only; realtime snapshots are not substituted. |
-| Social/netflow | Web; optional provider extension point | Optional environment key | Not fabricated from exchange trading data. |
+| Historical liquidations | No configured structured provider; optional and skipped when unavailable | None | SoSoValue's current official API documents ETF data, not liquidation history. Historical CoinGlass points remain audit-only; realtime snapshots are not substituted. |
+| Social | No configured adapter; optional and skipped by default | Optional environment key | No scraping, search-count substitution, or invented sentiment. |
+| Exchange netflow | Coin Metrics Community when its exchange-attribution catalog supports the asset, then optional authenticated tier | Optional environment key | Uses official exchange-attributed inflow/outflow inputs; otherwise premium evidence is skipped. |
 | Security/governance/regulatory events | Deterministic source catalog plus on-demand scan | None | A scan timestamp, lookback, primary-source coverage, and material results are retained. |
 
 The repository config is `config/data-providers.json`. User-local overrides
@@ -73,11 +75,15 @@ Binance perpetual-basis observations remain readable history, but cannot satisfy
 current acquisition; expired delivery observations cannot either.
 
 Liquidations still have no configured structured route. Their collection status
-remains `FAILED`, with no observation/value and `NO_PROVIDER_ROUTE` in the
-diagnostic. This differs from `PROVIDER_UNSUPPORTED` (adapter capability) and
-transport/schema failures. Existing allowed Web fallback behavior is unchanged;
-`CACHE_ONLY` performs no network work. Missing liquidation evidence remains
-missing coverage, not a zero-liquidation claim.
+is `SKIPPED`, with no observation/value and an explicit optional-provider
+reason. This differs from a required metric's `FAILED` status and from
+`PROVIDER_UNSUPPORTED` diagnostics. No Web fallback or zero-liquidation claim
+is created.
+
+Availability semantics are deliberate: `NOT_APPLICABLE` means the asset/metric
+pair has no meaningful interpretation; optional/premium `SKIPPED` means the
+evidence is meaningful but no eligible provider is configured; `FAILED` means
+the system expected applicable evidence and its route failed.
 
 ## Cache layers
 

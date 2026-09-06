@@ -7,6 +7,7 @@
     "defillama": {"enabled": true},
     "alternative_me": {"enabled": true},
     "chain_liveness": {"enabled": true},
+    "github": {"enabled": true},
     "sosovalue": {
       "enabled": "AUTO",
       "api_key_env": "SOSOVALUE_API_KEY"

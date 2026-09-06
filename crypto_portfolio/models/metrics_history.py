@@ -9,12 +9,13 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..metrics_registry import metric_definition, normalize_metric_key, validate_metric_value
+from ..metric_availability import metric_availability
 from .time import normalize_timestamp, parse_timestamp
 
 
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
-_STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"}
+_STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED"}
 _REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
 _PRIVATE_REASONING_FIELDS = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
 _SECRET_FIELDS = {"api_key", "apikey", "api_secret", "authorization", "cookie", "password", "secret", "token"}
@@ -295,6 +296,8 @@ class CollectionEvent:
         status = _text(self.status, "status").upper()
         if status not in _STATUSES:
             raise ValueError(f"status must be one of {sorted(_STATUSES)}")
+        if status == "SKIPPED" and not metric_availability(self.asset, self.metric_key).is_skippable:
+            raise ValueError("required metrics cannot use SKIPPED")
         object.__setattr__(self, "status", status)
         reason = _optional_text(self.reason, "reason")
         if status != "SUCCESS" and reason is None:

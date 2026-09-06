@@ -9,6 +9,7 @@ from .base import (
     ProviderResponseError,
     ProviderUnavailable,
     ProviderUnsupportedMetric,
+    ProviderNotApplicable,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "ProviderResponseError",
     "ProviderUnavailable",
     "ProviderUnsupportedMetric",
+    "ProviderNotApplicable",
 ]

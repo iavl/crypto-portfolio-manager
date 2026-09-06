@@ -17,7 +17,7 @@ from ..models.time import normalize_timestamp, parse_timestamp
 from ..state.metrics import append_collection_event, append_metric_observation
 
 
-_STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE"}
+_STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED"}
 _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _UNIT_ALIASES = {
