@@ -64,6 +64,60 @@ _ASSET_METRICS = (
     "risk.regulatory_event_status",
     "risk.governance_event_status",
 )
+_ETH_METRICS = (
+    "flows.etf_net_1d",
+    "flows.etf_net_7d",
+    "flows.etf_net_30d",
+    "flows.eth_etf_aum_usd",
+    "flows.eth_etf_net_to_aum_7d",
+    "flows.eth_etf_net_to_aum_30d",
+    "eth.monetary.current_supply_eth",
+    "eth.monetary.issuance_30d_eth",
+    "eth.monetary.issuance_365d_eth",
+    "eth.monetary.net_supply_growth_30d",
+    "eth.monetary.net_supply_growth_90d",
+    "eth.monetary.net_supply_growth_365d",
+    "eth.monetary.burn_30d_eth",
+    "eth.monetary.burn_365d_eth",
+    "eth.monetary.burn_to_issuance_30d",
+    "eth.monetary.burn_to_issuance_365d",
+    "eth.staking.staked_supply_eth",
+    "eth.staking.staked_supply_pct",
+    "eth.staking.active_staked_supply_eth",
+    "eth.staking.staked_supply_change_30d",
+    "eth.staking.staked_supply_change_90d",
+    "eth.staking.staking_apr_7d",
+    "eth.staking.staking_apr_30d",
+    "eth.staking.participation_rate",
+    "eth.staking.deposit_queue_eth",
+    "eth.staking.exit_queue_eth",
+    "eth.staking.withdrawal_backlog_eth",
+    "eth.l2.rent_paid_30d_usd",
+    "eth.l2.rent_paid_90d_usd",
+    "eth.l2.tvs_usd",
+    "eth.l2.activity_30d",
+    "eth.da.ethereum_blob_data_30d_mb",
+    "eth.da.ethereum_blob_fees_30d_usd",
+    "eth.da.ethereum_share_of_tracked_da_bytes_30d",
+    "eth.da.ethereum_share_of_tracked_da_fees_30d",
+    "eth.blobs.count_1d",
+    "eth.blobs.count_30d",
+    "eth.blobs.data_bytes_30d",
+    "eth.blobs.blob_transactions_30d",
+    "eth.blobs.utilization_30d",
+    "eth_valuation.mvrv",
+    "eth_valuation.realized_price",
+    "eth_valuation.realized_cap_usd",
+    "eth_valuation.price_to_realized_price",
+    "flows.eth_exchange_netflow_to_market_cap",
+    "flows.eth_staking_netflow_to_supply_30d",
+    "eth.structural.consensus_client_largest_share",
+    "eth.structural.execution_client_largest_share",
+    "eth.structural.staking_entity_largest_share",
+    "eth.structural.liquid_staking_largest_share",
+    "eth.structural.builder_largest_share",
+    "eth.structural.finality_participation_rate",
+)
 _BTC_SCORING_METRICS = (
     "market.spot_price",
     "market.return_30d",
@@ -118,6 +172,7 @@ _RELATIVE_METRICS = (
     "relative.return_vs_btc_90d",
     "relative.return_vs_btc_180d",
 )
+_RELATIVE_METRICS_V3 = (*_RELATIVE_METRICS, "relative.return_vs_btc_365d")
 _POSITIONING_METRICS = (
     "derivatives.funding_rate",
     "derivatives.funding_rate_24h_avg",
@@ -600,13 +655,17 @@ def build_metric_collection_plan(
         asset_metrics = _BTC_SCORING_METRICS if symbol == "BTC" else _ASSET_METRICS
         for key in asset_metrics:
             add(symbol, key, "asset market, risk, and decision factors")
+        if symbol == "ETH":
+            for key in _ETH_METRICS:
+                add(symbol, key, "Ethereum monetary, staking, settlement, DA, and structural context")
         for key in _POSITIONING_METRICS:
             add(symbol, key, "derivatives positioning and social context")
         if symbol == "BTC":
             for key in _BTC_CONTEXT_METRICS:
                 add(symbol, key, "BTC cycle and on-chain context")
         if symbol != "BTC":
-            for key in _RELATIVE_METRICS:
+            relative_metrics = _RELATIVE_METRICS_V3 if resolved.policy_version >= 3 else _RELATIVE_METRICS
+            for key in relative_metrics:
                 add(symbol, key, "BTC-relative performance")
 
     return MetricCollectionPlan(

@@ -220,14 +220,14 @@ class TechnicalMetricTests(unittest.TestCase):
         self.assertEqual(average_true_range(candles, 14), 10.0)
 
     def test_ma_coverage_and_missing_volume(self):
-        full = build_technical_snapshot(make_series(), 282)
+        full = build_technical_snapshot(make_series(430), 314.5)
         self.assertIsNotNone(full.ma20)
         self.assertIsNotNone(full.ma50)
         self.assertIsNotNone(full.ma100)
         self.assertIsNotNone(full.ma200)
         self.assertEqual(full.data_quality, "FULL")
         self.assertEqual(full.technical_confidence, "HIGH")
-        missing_volume = build_technical_snapshot(make_series(last_volume=100), 282, volume_reliable=False)
+        missing_volume = build_technical_snapshot(make_series(430, last_volume=100), 314.5, volume_reliable=False)
         self.assertIsNone(missing_volume.relative_volume)
         self.assertEqual(missing_volume.volume_state, "UNKNOWN")
         self.assertEqual(missing_volume.technical_confidence, "MEDIUM")

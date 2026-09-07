@@ -54,6 +54,7 @@ _TOP_LEVEL_FIELDS = {
     "factor_rules",
     "regimes",
     "allocation",
+    "core_allocation",
     "execution",
     "volume_profile",
     "positioning",
@@ -88,6 +89,17 @@ _ALLOCATION_FIELDS = {
     "confidence_multipliers",
     "risk_multipliers",
 }
+_CORE_ALLOCATION_FIELDS = {"anchor", "eth", "confidence_multipliers", "relative_multipliers"}
+_CORE_ANCHOR_FIELDS = {"BTC", "ETH"}
+_CORE_ETH_FIELDS = {
+    "increase_min_score",
+    "hold_min_score",
+    "relative_increase_min_score",
+    "relative_reduce_below_score",
+    "max_core_sleeve_share",
+}
+_CORE_CONFIDENCE_FIELDS = {"HIGH", "MEDIUM", "LOW"}
+_CORE_RELATIVE_FIELDS = {"strong", "neutral", "weak", "materially_weak"}
 _SCORING_FIELDS = {
     "high_confidence_min_coverage",
     "medium_confidence_min_coverage",
@@ -405,6 +417,79 @@ def _parse_event_risk_multipliers(value: Any, *, allow_missing: bool = False) ->
     return result
 
 
+def _parse_core_allocation(value: Any, *, policy_version: int) -> dict[str, Any]:
+    if value is None:
+        if policy_version < 3:
+            return {}
+        raise PolicyError("core_allocation is required for policy v3+")
+    if policy_version < 3:
+        raise PolicyError("core_allocation is only supported by policy v3+")
+    if not isinstance(value, dict):
+        raise PolicyError("core_allocation must be an object")
+    _unknown_fields(value, _CORE_ALLOCATION_FIELDS, "core_allocation")
+    if set(value) != _CORE_ALLOCATION_FIELDS:
+        raise PolicyError("core_allocation fields are incomplete")
+
+    anchor = value["anchor"]
+    if not isinstance(anchor, dict) or set(anchor) != _CORE_ANCHOR_FIELDS:
+        raise PolicyError("core_allocation.anchor must contain BTC and ETH")
+    parsed_anchor = {
+        symbol: _fraction(anchor[symbol], f"core_allocation.anchor.{symbol}")
+        for symbol in _CORE_ANCHOR_FIELDS
+    }
+    if not math.isclose(sum(parsed_anchor.values()), 1.0, abs_tol=1e-9):
+        raise PolicyError("core_allocation.anchor weights must sum to 1")
+
+    eth = value["eth"]
+    if not isinstance(eth, dict):
+        raise PolicyError("core_allocation.eth must be an object")
+    _unknown_fields(eth, _CORE_ETH_FIELDS, "core_allocation.eth")
+    if set(eth) != _CORE_ETH_FIELDS:
+        raise PolicyError("core_allocation.eth fields are incomplete")
+    parsed_eth = {
+        key: _number(eth[key], f"core_allocation.eth.{key}", minimum=0.0, maximum=100.0)
+        for key in _CORE_ETH_FIELDS
+    }
+    if not (
+        parsed_eth["relative_reduce_below_score"]
+        < parsed_eth["relative_increase_min_score"]
+        <= parsed_eth["hold_min_score"]
+        <= parsed_eth["increase_min_score"]
+    ):
+        raise PolicyError("core_allocation.eth score thresholds are not ordered")
+    parsed_eth["max_core_sleeve_share"] = _fraction(
+        eth["max_core_sleeve_share"], "core_allocation.eth.max_core_sleeve_share"
+    )
+
+    confidence = value["confidence_multipliers"]
+    if not isinstance(confidence, dict) or set(confidence) != _CORE_CONFIDENCE_FIELDS:
+        raise PolicyError("core_allocation.confidence_multipliers must contain HIGH, MEDIUM, and LOW")
+    parsed_confidence = {
+        key: _fraction(confidence[key], f"core_allocation.confidence_multipliers.{key}")
+        for key in _CORE_CONFIDENCE_FIELDS
+    }
+    if not (
+        parsed_confidence["HIGH"]
+        >= parsed_confidence["MEDIUM"]
+        >= parsed_confidence["LOW"]
+    ):
+        raise PolicyError("core_allocation confidence multipliers must be monotonic")
+
+    relative = value["relative_multipliers"]
+    if not isinstance(relative, dict) or set(relative) != _CORE_RELATIVE_FIELDS:
+        raise PolicyError("core_allocation.relative_multipliers fields are incomplete")
+    parsed_relative = {
+        key: _number(relative[key], f"core_allocation.relative_multipliers.{key}", minimum=0.0, maximum=2.0)
+        for key in _CORE_RELATIVE_FIELDS
+    }
+    return {
+        "anchor": parsed_anchor,
+        "eth": parsed_eth,
+        "confidence_multipliers": parsed_confidence,
+        "relative_multipliers": parsed_relative,
+    }
+
+
 @dataclass(frozen=True)
 class RegimeLimits:
     stablecoin_target: float
@@ -430,6 +515,7 @@ class Policy:
     regimes: Mapping[str, RegimeLimits]
     allocation: Mapping[str, Any]
     event_risk_multipliers: Mapping[str, float]
+    core_allocation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
     _execution_omitted_fields: frozenset[str] = dataclass_field(
         default_factory=frozenset, repr=False, compare=False
@@ -561,6 +647,8 @@ class Policy:
             result["events"] = _copy_mapping(self.events)
         if self.chain_liveness:
             result["chain_liveness"] = _copy_mapping(self.chain_liveness)
+        if self.core_allocation:
+            result["core_allocation"] = _copy_mapping(self.core_allocation)
         return result
 
     def legacy_config(self) -> dict[str, Any]:
@@ -931,8 +1019,12 @@ def _parse_factor_rules(
     if set(relative) != relative_fields:
         raise PolicyError("factor_rules.relative_strength fields are incomplete")
     horizon_weights = _weighted_map(relative["horizon_weights"], "factor_rules.relative_strength.horizon_weights")
-    if set(horizon_weights) != {"30d", "90d", "180d"}:
-        raise PolicyError("factor_rules.relative_strength.horizon_weights must contain 30d, 90d, and 180d")
+    expected_horizons = {"30d", "90d", "180d"}
+    if policy_version >= 3:
+        expected_horizons.add("365d")
+    if set(horizon_weights) != expected_horizons:
+        names = ", ".join(sorted(expected_horizons))
+        raise PolicyError(f"factor_rules.relative_strength.horizon_weights must contain {names}")
     if policy_version == 1:
         positive = _number(relative["positive_threshold"], "factor_rules.relative_strength.positive_threshold")
         negative = _number(relative["negative_threshold"], "factor_rules.relative_strength.negative_threshold")
@@ -1408,6 +1500,8 @@ def _parse_policy(
     missing.difference_update({"scoring_weights", "scoring_profiles", "asset_scoring_profiles"})
     if version == 1:
         missing.discard("event_risk_multipliers")
+    if version < 3:
+        missing.discard("core_allocation")
     if allow_missing_execution:
         missing.discard("execution")
     if allow_missing_volume_profile:
@@ -1626,6 +1720,9 @@ def _parse_policy(
     parsed_event_risk_multipliers = _parse_event_risk_multipliers(
         data.get("event_risk_multipliers"), allow_missing=version == 1
     )
+    parsed_core_allocation = _parse_core_allocation(
+        data.get("core_allocation"), policy_version=version
+    )
 
     parsed_execution = _parse_execution(data.get("execution"), allow_missing=allow_missing_execution)
     parsed_volume_profile = _parse_volume_profile(
@@ -1653,6 +1750,7 @@ def _parse_policy(
         regimes=parsed_regimes,
         allocation=parsed_allocation,
         event_risk_multipliers=parsed_event_risk_multipliers,
+        core_allocation=parsed_core_allocation,
         volume_profile=parsed_volume_profile,
         execution=parsed_execution,
         factor_rules=parsed_factor_rules,
@@ -1734,6 +1832,7 @@ def legacy_policy() -> Policy:
     data.pop("scoring_profiles", None)
     data.pop("asset_scoring_profiles", None)
     data.pop("event_risk_multipliers", None)
+    data.pop("core_allocation", None)
     data["factor_rules"]["relative_strength"] = {
         "positive_threshold": 0.05,
         "negative_threshold": -0.05,

@@ -138,6 +138,19 @@ The score is an input to portfolio construction, never a direct
 conditions, risk tier, concentration, BTC opportunity cost, drawdown capacity,
 stable constraints, and rebalance thresholds.
 
+Policy v3 adds ETH-specific monetary, staking, L2/DA, realized-valuation, and
+normalized ETF-flow evidence without changing the six top-level factor weights.
+ETH core classification is not an allocation entitlement and must not restore
+the old `core_min_score` score floor. The configurable 70/30 BTC/ETH core-sleeve
+anchor is a prior, not a floor. Missing ETH/BTC evidence blocks new ETH
+increases; low confidence cannot create a high-conviction ETH increase; ETH/BTC
+opportunity cost changes core sizing but not the base score.
+
+Ethereum L2 activity is bullish ETH evidence only when Ethereum settlement or
+DA value capture is demonstrated. Monetary, staking, burn, supply, ratio, and
+allocation arithmetic is Python-owned. Do not scrape unstable dashboards for
+deterministic structural-risk values; structural risk remains non-scoring.
+
 For v2, `MISSING` factors remain at their configured weight and shrink their
 raw score toward neutral 50 according to deterministic reliability; do not
 renormalize missing factors. `NOT_APPLICABLE` is defined by a zero-weight

@@ -121,7 +121,8 @@ DEPOSIT/WITHDRAWAL/NONE 分类，NAV 和 benchmark 表现必须标记为 `PROVIS
 - factor、expected type、unit 和 direction；
 - freshness window；
 - asset scope 与 criticality；
-- `SCORING_FACTOR`、`POSITIONING_OVERLAY` 或 `CYCLE_CONTEXT` role。
+- `SCORING_FACTOR`、`EVENT_RISK`、`POSITIONING_OVERLAY`、`CYCLE_CONTEXT`、
+  `EXECUTION_CONTEXT` 或 `STRUCTURAL_RISK` role。
 
 `engine.metric_plan.build_metric_collection_plan()` 在 Python 中选择 metric。
 它不会让模型发明 key，也不会给 stablecoin/cash 行请求不适用的资产指标。
@@ -145,7 +146,8 @@ fresh MetricObservation
 - `NOT_APPLICABLE`：语义上不适用；
 - `SKIPPED`：可选或 premium provider 没有配置。
 
-`market.flow_state`、BTC-relative returns 和 OI/market-cap 等明确依赖图由
+`market.flow_state`、BTC-relative returns、ETH/BTC opportunity ratios、ETH
+staking/flow normalization 和 OI/market-cap 等明确依赖图由
 Python 派生。派生输入缺失时不会制造中性值。
 
 ## 7. Provider 与事件边界
@@ -209,7 +211,7 @@ Python 从 MetricObservation 构建 compact Facts 和 metric history。趋势、
 解释、BTC-relative strength 等已有确定性实现；其他需要上下文的 fundamentals、
 valuation、event risk 可由模型在 bounded packet 中判断。
 
-v2 的六个 base scoring factors 来自 canonical policy：
+v2/v3 的六个 base scoring factors 来自 canonical policy：
 
 ```text
 trend
@@ -225,6 +227,11 @@ overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩
 消失的数据抬高分数；v1 历史 replay 才保留旧的重新归一化。
 关键 current price、trend、portfolio value 或材料安全事件缺失时，高置信新增
 仓位被阻止。
+
+Policy v3 对 ETH 额外分组展示 monetary economics、staking security、L2/DA
+settlement、DeFi/stablecoin 和 developer/ecosystem 证据；这些只是语义分组，
+数值仍由 Python 的 MetricObservation 和确定性派生函数拥有。ETH 核心门控与
+70/30 BTC/ETH 核心袖套锚点独立于 base score，不能把 core 分类当作目标保证。
 
 ### Regime
 
@@ -250,7 +257,7 @@ single-asset cap、chain liveness 和 overlays。Rebalance 使用 post-new-cash
 ## 9. Technical execution
 
 只有 rebalance 先批准 `INCREASE`，才进入技术层。技术层使用带 timestamp 的
-`SpotPrice` 和 completed `1D` OHLCV，优先至少 120 根日线、最好 365 天，
+`SpotPrice` 和 completed `1D` OHLCV，优先至少 120 根日线、最好 430 天，
 并检查 freshness、cadence、calendar coverage 和 provenance。
 
 技术 snapshot 计算 MA20/50/100/200、calendar 30D/90D/180D return、ATR14、

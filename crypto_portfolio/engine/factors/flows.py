@@ -201,9 +201,15 @@ def _normalized_ratios(value: Any) -> dict[str, float | None]:
         return {"30d": _ratio(current.get("flow", current.get("net_flow")), common_denominator)}
     ratios: dict[str, float | None] = {}
     for horizon in ("7d", "30d"):
-        normalized_key = f"flows.btc_etf_net_to_aum_{horizon}"
-        if normalized_key in current:
-            ratios[horizon] = _number(current[normalized_key])
+        normalized = [
+            current[key]
+            for key in current
+            if str(key).lower().endswith(f"etf_net_to_aum_{horizon}")
+        ]
+        if len(normalized) > 1:
+            raise ValueError(f"multiple normalized ETF flow observations for {horizon}")
+        if normalized:
+            ratios[horizon] = _number(normalized[0])
     for horizon in _HORIZON_WEIGHTS:
         if horizon in ratios:
             continue

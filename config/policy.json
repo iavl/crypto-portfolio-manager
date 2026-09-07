@@ -1,5 +1,5 @@
 {
-  "policy_version": 2,
+  "policy_version": 3,
   "investment_horizon_months": {
     "min": 6,
     "max": 12
@@ -97,9 +97,10 @@
     },
     "relative_strength": {
       "horizon_weights": {
-        "30d": 0.2,
-        "90d": 0.4,
-        "180d": 0.4
+        "30d": 0.1,
+        "90d": 0.25,
+        "180d": 0.35,
+        "365d": 0.3
       },
       "risk_adjusted_neutral_band": 0.1,
       "risk_adjusted_saturation": 1.0
@@ -151,6 +152,30 @@
       "normal": 1.0,
       "high_beta": 0.5,
       "high": 0.5
+    }
+  },
+  "core_allocation": {
+    "anchor": {
+      "BTC": 0.7,
+      "ETH": 0.3
+    },
+    "eth": {
+      "increase_min_score": 55,
+      "hold_min_score": 45,
+      "relative_increase_min_score": 45,
+      "relative_reduce_below_score": 30,
+      "max_core_sleeve_share": 0.4
+    },
+    "confidence_multipliers": {
+      "HIGH": 1.0,
+      "MEDIUM": 0.75,
+      "LOW": 0.25
+    },
+    "relative_multipliers": {
+      "strong": 1.15,
+      "neutral": 1.0,
+      "weak": 0.75,
+      "materially_weak": 0.5
     }
   },
   "volume_profile": {
@@ -265,7 +290,7 @@
   },
   "execution": {
     "timeframe": "1D",
-    "preferred_history_days": 365,
+    "preferred_history_days": 430,
     "minimum_history_days": 120,
     "max_fetched_age_days": 7,
     "maximum_daily_candle_lag_days": 1,

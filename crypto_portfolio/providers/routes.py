@@ -39,6 +39,11 @@ DEFAULT_TTL_SECONDS = {
     "macro": 86400,
     "github": 86400,
     "chain_liveness": 300,
+    "ethereum_protocol": 21600,
+    "ethereum_staking": 21600,
+    "ethereum_l2": 21600,
+    "ethereum_da": 21600,
+    "ethereum_valuation": 86400,
     "default": 3600,
 }
 PROVIDER_ROUTES = {
@@ -80,6 +85,22 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("coingecko",)
     if key == "valuation.fdv_market_cap_ratio":
         return ()
+    if key == "eth_valuation.price_to_realized_price":
+        return ()
+    if key.startswith("eth_valuation."):
+        return ("coinmetrics_community", "coinmetrics_pro")
+    if key.startswith("eth.l2.rent_paid") or key.startswith("eth.da."):
+        return ("growthepie",)
+    if key.startswith("eth.l2."):
+        return ("l2beat",)
+    if key.startswith("eth.blobs."):
+        return ("blobscan",)
+    if key.startswith("eth.monetary."):
+        return ("ethereum_protocol", "coinmetrics_community", "coinmetrics_pro")
+    if key.startswith("eth.staking."):
+        return ("coinmetrics_community", "coinmetrics_pro")
+    if key.startswith("eth.structural."):
+        return ()
     if key == "btc_valuation.price_to_realized_price":
         return ()
     if key.startswith("btc_valuation."):
@@ -88,6 +109,10 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("defillama",)
     if key.startswith(("flows.etf_", "flows.btc_etf_")):
         return ("sosovalue",)
+    if key.startswith("flows.eth_etf_"):
+        return ("sosovalue",)
+    if key.startswith(("flows.eth_exchange_", "flows.eth_staking_")):
+        return ()
     if "liquidations" in key:
         return ()
     if key == "derivatives.futures_basis_annualized":
@@ -145,6 +170,26 @@ def dataset_for_metric(metric_key: str) -> str:
         return "valuation"
     if key == "valuation.fdv_market_cap_ratio":
         return "derived"
+    if key in {
+        "eth_valuation.price_to_realized_price",
+        "flows.eth_exchange_netflow_to_market_cap",
+        "flows.eth_staking_netflow_to_supply_30d",
+    }:
+        return "derived"
+    if key.startswith("eth_valuation."):
+        return "ethereum_valuation"
+    if key.startswith("eth.l2.rent_paid"):
+        return "ethereum_l2"
+    if key.startswith("eth.da.") or key.startswith("eth.blobs."):
+        return "ethereum_da"
+    if key.startswith("eth.l2."):
+        return "ethereum_l2"
+    if key.startswith("eth.monetary."):
+        return "ethereum_protocol"
+    if key.startswith("eth.staking."):
+        return "ethereum_staking"
+    if key.startswith("eth.structural."):
+        return "web"
     if key == "valuation.fee_revenue_multiple":
         return "protocol"
     if key.startswith("derivatives.open_interest"):
@@ -219,7 +264,14 @@ def _as_of(value: str | datetime | None, now: datetime) -> datetime:
 
 def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: datetime, history_days: int) -> dict[str, Any]:
     end = _as_of(as_of, now)
-    start_days = 450 if dataset == "macro" else 365 if dataset in {"ohlcv", "onchain"} else max(7, min(history_days, 90))
+    start_days = (
+        450 if dataset == "macro"
+        else history_days if dataset in {
+            "ohlcv", "onchain", "ethereum_protocol", "ethereum_staking",
+            "ethereum_l2", "ethereum_da", "ethereum_valuation",
+        }
+        else max(7, min(history_days, 90))
+    )
     start = end - timedelta(days=start_days)
     result: dict[str, Any] = {
         "symbol": asset,
@@ -233,7 +285,11 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
-    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain", "github", "macro"} or (
+    if dataset in {
+        "ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain",
+        "github", "macro", "ethereum_protocol", "ethereum_staking", "ethereum_l2", "ethereum_da",
+        "ethereum_valuation",
+    } or (
         dataset == "valuation" and as_of is not None
     ):
         result.update({
@@ -248,7 +304,7 @@ def build_provider_requests(
     *,
     as_of: str | datetime | None = None,
     now: str | datetime | None = None,
-    history_days: int = 365,
+    history_days: int = 430,
     ttl_seconds: dict[str, Any] | None = None,
 ) -> tuple[ProviderRequest, ...]:
     """Group metric requests by primary provider and fetchable dataset."""

@@ -8,7 +8,7 @@ from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import metric_definition
 from ..models.time import normalize_timestamp, parse_timestamp
-from .base import ProviderAuthenticationError, ProviderCapabilities, ProviderDataError, ProviderRequest, ProviderResponseError, ProviderUnsupportedMetric
+from .base import ProviderAuthenticationError, ProviderCapabilities, ProviderDataError, ProviderInsufficientHistory, ProviderRequest, ProviderResponseError, ProviderUnsupportedMetric
 from .http import HttpClient
 
 
@@ -62,6 +62,24 @@ COINMETRICS_TOKENOMICS_INPUTS = {
     "tokenomics.supply_growth": ("SplyCur",),
 }
 COINMETRICS_EXCHANGE_FLOW_INPUTS = ("FlowInExUSD", "FlowOutExUSD")
+COINMETRICS_ETH_INPUTS = {
+    "eth.monetary.current_supply_eth": ("SplyCur",),
+    "eth.monetary.issuance_30d_eth": ("IssTotNtv",),
+    "eth.monetary.issuance_365d_eth": ("IssTotNtv",),
+    "eth.monetary.net_supply_growth_30d": ("SplyCur",),
+    "eth.monetary.net_supply_growth_90d": ("SplyCur",),
+    "eth.monetary.net_supply_growth_365d": ("SplyCur",),
+    "eth.staking.staked_supply_eth": ("SplyStkedNtv", "SplyTotStkedNtv"),
+    "eth.staking.active_staked_supply_eth": ("SplyActStkedNtv",),
+    "eth.staking.staked_supply_pct": ("SplyStkedNtv", "SplyCur"),
+    "eth.staking.staked_supply_change_30d": ("SplyStkedNtv", "SplyTotStkedNtv"),
+    "eth.staking.staked_supply_change_90d": ("SplyStkedNtv", "SplyTotStkedNtv"),
+    "eth.staking.participation_rate": ("SplyActStkedNtv", "SplyTotStkedNtv"),
+    "eth_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
+    "eth_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur"),
+    "eth_valuation.realized_cap_usd": ("CapRealUSD",),
+}
+COINMETRICS_ETH_SUPPORTED_METRICS = tuple(COINMETRICS_ETH_INPUTS)
 COINMETRICS_METRIC_MAP = {
     **COINMETRICS_GENERIC_NETWORK_METRICS,
     **COINMETRICS_MARKET_VALUATION_METRICS,
@@ -73,6 +91,7 @@ COINMETRICS_SUPPORTED_METRICS = tuple(dict.fromkeys((
     *COINMETRICS_METRIC_MAP,
     *COINMETRICS_TOKENOMICS_INPUTS,
     "flows.exchange_netflow",
+    *COINMETRICS_ETH_SUPPORTED_METRICS,
 )))
 SUPPLY_LOOKBACK_DAYS = 365
 SUPPLY_LOOKBACK_TOLERANCE_DAYS = 7
@@ -412,6 +431,114 @@ def parse_tokenomics(
     } for key, (value, observed, methodology) in values.items())
 
 
+def _eth_prior(rows: tuple[Mapping[str, Any], ...], field: str, cutoff: datetime) -> Mapping[str, Any] | None:
+    candidates = [
+        row for row in rows
+        if field in row["values"] and parse_timestamp(row["observed_at"]) <= cutoff
+    ]
+    return candidates[-1] if candidates else None
+
+
+def parse_eth_metrics(
+    payload: Mapping[str, Any],
+    asset: str,
+    metric_keys: Iterable[str],
+    input_plan: Mapping[str, tuple[str, ...]],
+    *,
+    fetched_at: str,
+    as_of: str | None = None,
+    source: str = "coinmetrics_community",
+) -> tuple[Mapping[str, Any], ...]:
+    """Parse catalog-supported ETH monetary, staking, and realized-value metrics."""
+    requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
+    fields = tuple(dict.fromkeys(field for key in requested for field in input_plan.get(key, ())))
+    rows = _series_rows(payload, fields=fields, as_of=as_of)
+    if not rows:
+        raise ProviderUnsupportedMetric("Coin Metrics returned no ETH history")
+    current = rows[-1]
+    current_time = parse_timestamp(current["observed_at"])
+    values: dict[str, tuple[float, str, str, tuple[str, ...]]] = {}
+
+    def add(key: str, value: float | None, methodology: str, *, observed: str | None = None) -> None:
+        if value is None or not math.isfinite(value):
+            raise ProviderUnsupportedMetric(f"Coin Metrics returned no usable value for {key}")
+        values[key] = (value, observed or current["observed_at"], methodology, input_plan.get(key, ()))
+
+    for key in requested:
+        inputs = input_plan.get(key, ())
+        if not inputs:
+            raise ProviderUnsupportedMetric(f"Coin Metrics catalog does not support {key}")
+        if key == "eth.monetary.current_supply_eth":
+            add(key, current["values"].get(inputs[0]), "latest SplyCur")
+        elif key in {"eth.staking.staked_supply_eth", "eth.staking.active_staked_supply_eth", "eth.staking.participation_rate"}:
+            if key == "eth.staking.participation_rate":
+                active = current["values"].get(inputs[0])
+                total = current["values"].get(inputs[1])
+                add(key, active / total if active is not None and total and total > 0 else None, "SplyActStkedNtv / SplyTotStkedNtv")
+            else:
+                add(key, current["values"].get(inputs[0]), inputs[0])
+        elif key == "eth.staking.staked_supply_pct":
+            staked = current["values"].get(inputs[0])
+            supply = current["values"].get(inputs[1])
+            add(key, staked / supply if staked is not None and supply and supply > 0 else None, "staked supply / SplyCur")
+        elif key.startswith("eth.monetary.issuance_"):
+            days = int(key.rsplit("_", 2)[-2].removesuffix("d"))
+            start = current_time - timedelta(days=days)
+            selected = [row for row in rows if inputs[0] in row["values"] and parse_timestamp(row["observed_at"]) >= start]
+            if not selected or parse_timestamp(selected[0]["observed_at"]) > start + timedelta(days=SUPPLY_LOOKBACK_TOLERANCE_DAYS):
+                raise ProviderInsufficientHistory(f"Coin Metrics issuance history is insufficient for {days}d")
+            add(key, sum(row["values"][inputs[0]] for row in selected), f"sum {inputs[0]} over trailing {days}d")
+        elif key.startswith("eth.monetary.net_supply_growth_"):
+            days = int(key.rsplit("_", 1)[-1].removesuffix("d"))
+            prior = _eth_prior(rows, inputs[0], current_time - timedelta(days=days))
+            current_supply = current["values"].get(inputs[0])
+            prior_supply = prior["values"].get(inputs[0]) if prior else None
+            add(
+                key,
+                current_supply / prior_supply - 1 if current_supply is not None and prior_supply and prior_supply > 0 else None,
+                f"SplyCur / SplyCur at trailing {days}d - 1",
+            )
+        elif key.startswith("eth.staking.staked_supply_change_"):
+            days = int(key.rsplit("_", 1)[-1].removesuffix("d"))
+            field = inputs[0]
+            prior = _eth_prior(rows, field, current_time - timedelta(days=days))
+            current_staked = current["values"].get(field)
+            prior_staked = prior["values"].get(field) if prior else None
+            add(key, current_staked - prior_staked if current_staked is not None and prior_staked is not None else None, f"{field} current - {field} at trailing {days}d")
+        elif key == "eth_valuation.mvrv":
+            direct = current["values"].get("CapMVRVCur")
+            market = current["values"].get("CapMrktCurUSD")
+            realized = current["values"].get("CapRealUSD")
+            add(key, direct if direct is not None else market / realized if market is not None and realized and realized > 0 else None, "CapMVRVCur or CapMrktCurUSD / CapRealUSD")
+        elif key == "eth_valuation.realized_price":
+            direct = current["values"].get("PriceRealizedUSD")
+            realized = current["values"].get("CapRealUSD")
+            supply = current["values"].get("SplyCur")
+            add(key, direct if direct is not None else realized / supply if realized is not None and supply and supply > 0 else None, "PriceRealizedUSD or CapRealUSD / SplyCur")
+        elif key == "eth_valuation.realized_cap_usd":
+            add(key, current["values"].get("CapRealUSD"), "CapRealUSD")
+        else:
+            raise ProviderUnsupportedMetric(f"Coin Metrics does not have an ETH parser for {key}")
+
+    return tuple({
+        "asset": asset.strip().upper(),
+        "metric_key": key,
+        "value": value,
+        "unit": metric_definition(key).unit,
+        "period": "1d" if key.startswith("eth_valuation.") or key.endswith("current_supply_eth") or key.startswith("eth.staking.") and "change" not in key else "365d" if "365d" in key else "30d",
+        "observed_at": observed,
+        "fetched_at": fetched_at,
+        "source": source,
+        "confidence": "MEDIUM",
+        "metadata": {
+            "source_dataset": "timeseries/asset-metrics",
+            "coinmetrics_metrics": list(metrics),
+            "methodology": methodology,
+            "asset_scope": "ETH",
+        },
+    } for key, (value, observed, methodology, metrics) in values.items())
+
+
 def parse_exchange_netflow(
     payload: Mapping[str, Any],
     asset: str,
@@ -469,6 +596,7 @@ class CoinMetricsProvider:
             historical_series=tuple(dict.fromkeys((
                 *COINMETRICS_METRIC_MAP,
                 *COINMETRICS_TOKENOMICS_INPUTS,
+                *COINMETRICS_ETH_INPUTS,
                 "flows.exchange_netflow",
             ))),
             supports_batching=True,
@@ -530,6 +658,47 @@ class CoinMetricsProvider:
                 required_inputs[key] = selected_inputs
             elif key in COINMETRICS_METRIC_MAP:
                 required_inputs[key] = (COINMETRICS_METRIC_MAP[key],)
+            elif key in COINMETRICS_ETH_INPUTS:
+                available_fields = {item.lower() for item in available}
+                candidates = COINMETRICS_ETH_INPUTS[key]
+                if key == "eth_valuation.mvrv":
+                    selected_inputs = (
+                        ("CapMVRVCur",)
+                        if "capmvrvcur" in available_fields
+                        else ("CapMrktCurUSD", "CapRealUSD")
+                        if {"capmrktcurusd", "caprealusd"} <= available_fields
+                        else ()
+                    )
+                elif key == "eth_valuation.realized_price":
+                    selected_inputs = (
+                        ("PriceRealizedUSD",)
+                        if "pricerealizedusd" in available_fields
+                        else ("CapRealUSD", "SplyCur")
+                        if {"caprealusd", "splycur"} <= available_fields
+                        else ()
+                    )
+                elif key == "eth.staking.participation_rate":
+                    denominator = "SplyTotStkedNtv" if "splytotstkedntv" in available_fields else "SplyStkedNtv"
+                    selected_inputs = (
+                        ("SplyActStkedNtv", denominator)
+                        if "splyactstkedntv" in available_fields and denominator.lower() in available_fields
+                        else ()
+                    )
+                elif key in {"eth.staking.staked_supply_pct"}:
+                    staked = "SplyStkedNtv" if "splystkedntv" in available_fields else "SplyTotStkedNtv"
+                    selected_inputs = (staked, "SplyCur") if staked.lower() in available_fields and "splycur" in available_fields else ()
+                elif key in {"eth.staking.staked_supply_eth", "eth.staking.staked_supply_change_30d", "eth.staking.staked_supply_change_90d"}:
+                    selected_inputs = (
+                        ("SplyStkedNtv",)
+                        if "splystkedntv" in available_fields
+                        else ("SplyTotStkedNtv",)
+                        if "splytotstkedntv" in available_fields
+                        else ()
+                    )
+                else:
+                    selected_inputs = candidates if all(item.lower() in available_fields for item in candidates) else ()
+                input_plans[key] = selected_inputs
+                required_inputs[key] = selected_inputs
             elif key in COINMETRICS_TOKENOMICS_INPUTS:
                 required_inputs[key] = COINMETRICS_TOKENOMICS_INPUTS[key]
             else:
@@ -596,6 +765,17 @@ class CoinMetricsProvider:
                 fetched_at=fetched_at,
                 as_of=request.parameters.get("as_of"),
             ))
+        eth_metrics = tuple(key for key in available_requested if key in COINMETRICS_ETH_INPUTS)
+        if eth_metrics:
+            result.extend(parse_eth_metrics(
+                payload,
+                asset,
+                eth_metrics,
+                input_plans,
+                source=self.name,
+                fetched_at=fetched_at,
+                as_of=request.parameters.get("as_of"),
+            ))
         if "flows.exchange_netflow" in available_requested:
             result.append(parse_exchange_netflow(
                 payload,
@@ -622,6 +802,8 @@ __all__ = [
     "COINMETRICS_BTC_VALUATION_INPUTS",
     "COINMETRICS_BTC_VALUATION_METRICS",
     "COINMETRICS_GENERIC_NETWORK_METRICS",
+    "COINMETRICS_ETH_INPUTS",
+    "COINMETRICS_ETH_SUPPORTED_METRICS",
     "COINMETRICS_MARKET_VALUATION_METRICS",
     "COINMETRICS_METRIC_MAP",
     "COINMETRICS_SUPPORTED_METRICS",
@@ -632,6 +814,7 @@ __all__ = [
     "catalog_metrics_by_asset",
     "available_metrics",
     "parse_exchange_netflow",
+    "parse_eth_metrics",
     "parse_tokenomics",
     "parse_timeseries",
 ]

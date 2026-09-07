@@ -34,7 +34,7 @@
           "endpoint": {"type": ["string", "null"], "minLength": 1},
           "last_observation_at": {"type": ["string", "null"], "format": "date-time"},
           "critical": {"type": "boolean"},
-          "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT"]},
+          "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT", "STRUCTURAL_RISK"]},
           "decision_effect": {"type": "string", "minLength": 1},
           "attempts": {
             "type": "array",

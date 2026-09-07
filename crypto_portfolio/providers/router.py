@@ -176,6 +176,10 @@ class ProviderRouter:
         from .fred import FREDProvider
         from .github_activity import GitHubActivityProvider
         from .sosovalue import SoSoValueProvider
+        from .blobscan import BlobscanProvider
+        from .growthepie import GrowthepieProvider
+        from .l2beat import L2BeatProvider
+        from .ethereum_protocol import EthereumProtocolProvider
 
         client = self.http_client or HttpClient()
         self.http_client = client
@@ -186,6 +190,10 @@ class ProviderRouter:
             "defillama": DeFiLlamaProvider(client=client),
             "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
             "chain_liveness": ChainLivenessProvider(client=client),
+            "blobscan": BlobscanProvider(client=client),
+            "growthepie": GrowthepieProvider(client=client),
+            "l2beat": L2BeatProvider(client=client),
+            "ethereum_protocol": EthereumProtocolProvider(client=client),
         }
         if provider_enabled("fred", self.config):
             providers["fred"] = FREDProvider(
@@ -251,7 +259,7 @@ class ProviderRouter:
         *,
         as_of: str | datetime | None = None,
         now: str | datetime | None = None,
-        history_days: int = 365,
+        history_days: int = 430,
     ) -> tuple[ProviderRequest, ...]:
         ttl = self.config.get("cache_ttl_seconds", {})
         return build_provider_requests(

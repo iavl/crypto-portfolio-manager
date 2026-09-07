@@ -30,6 +30,7 @@ from .overlays import (
     positioning_deployment_factor,
 )
 from .risk import apply_chain_liveness_deployment_cap, chain_liveness_deployment_factor, event_risk_deployment_factor
+from .core_eligibility import CORE_ELIGIBILITY_STATES, core_eligibility, eth_core_eligibility, relative_strength_score
 
 __all__ = [
     "calculate_portfolio_position_performance",
@@ -62,6 +63,10 @@ __all__ = [
     "apply_chain_liveness_deployment_cap",
     "chain_liveness_deployment_factor",
     "event_risk_deployment_factor",
+    "CORE_ELIGIBILITY_STATES",
+    "core_eligibility",
+    "eth_core_eligibility",
+    "relative_strength_score",
     "build_report_packet",
     "build_final_review_output",
     "validate_final_review_output",

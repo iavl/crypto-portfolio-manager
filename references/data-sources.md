@@ -142,13 +142,21 @@ Primarily relevant to BTC and ETH where spot products exist.
 Use daily and multi-week context; avoid overreacting to one day of flow unless exceptional.
 
 The optional SoSoValue adapter provides U.S. BTC and ETH ETF products. Python
-derives absolute 1D/7D/30D values and BTC 7D/30D net-flow-to-AUM ratios from completed trading-date rows after local
+derives absolute 1D/7D/30D values and BTC/ETH 7D/30D net-flow-to-AUM ratios from completed trading-date rows after local
 `as_of` filtering; `MARKET` is the complete-date BTC+ETH sum, not BTC-only
 flow. A short response is `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported
 capability. The current official SoSoValue API does not document liquidation
 history, so liquidation metrics remain context-only and are never sent to
 SoSoValue. See `references/data-providers.md` for the active endpoint and
 authentication contract.
+
+For ETH, normalized 7D/30D flow-to-AUM ratios are preferred over raw USD flow
+for scoring. Ethereum supply/issuance, staking, realized valuation, L2 rent,
+DA share, blob demand, and explicitly Ethereum-secured L2 activity are separate
+evidence groups; provider failure is unavailable evidence, never zero. ETH
+FDV/market-cap is not economically applicable, and structural client/entity/
+builder concentration remains non-scoring context unless a stable structured
+source is available.
 
 ### Fundamentals
 

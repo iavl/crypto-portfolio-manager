@@ -12,6 +12,73 @@ from ..models.time import parse_timestamp
 from .metric_plan import MetricRequest
 
 
+def _finite_number(value: Any, field: str, *, minimum: float | None = None) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be numeric")
+    result = float(value)
+    if not math.isfinite(result) or (minimum is not None and result < minimum):
+        suffix = f" >= {minimum}" if minimum is not None else " finite"
+        raise ValueError(f"{field} must be{suffix}")
+    return result
+
+
+def calculate_net_supply_growth(current_supply: float, prior_supply: float) -> float:
+    """Return signed supply growth without substituting a zero denominator."""
+    current = _finite_number(current_supply, "current_supply", minimum=0.0)
+    prior = _finite_number(prior_supply, "prior_supply", minimum=0.0)
+    if prior <= 0:
+        raise ValueError("prior_supply must be > 0")
+    return current / prior - 1.0
+
+
+def calculate_burn_to_issuance(burn: float, issuance: float) -> float | None:
+    """Return burn/issuance, or None when issuance is zero."""
+    burned = _finite_number(burn, "burn", minimum=0.0)
+    issued = _finite_number(issuance, "issuance", minimum=0.0)
+    return None if issued == 0 else burned / issued
+
+
+def calculate_staked_supply_pct(staked_supply: float, total_supply: float) -> float:
+    staked = _finite_number(staked_supply, "staked_supply", minimum=0.0)
+    total = _finite_number(total_supply, "total_supply", minimum=0.0)
+    if total <= 0:
+        raise ValueError("total_supply must be > 0")
+    result = staked / total
+    if result > 1:
+        raise ValueError("staked_supply must not exceed total_supply")
+    return result
+
+
+def calculate_staking_netflow_ratio(
+    staked_supply_now: float,
+    staked_supply_prior: float,
+    current_supply: float,
+) -> float:
+    change = _finite_number(staked_supply_now, "staked_supply_now", minimum=0.0) - _finite_number(
+        staked_supply_prior, "staked_supply_prior", minimum=0.0
+    )
+    supply = _finite_number(current_supply, "current_supply", minimum=0.0)
+    if supply <= 0:
+        raise ValueError("current_supply must be > 0")
+    return change / supply
+
+
+def calculate_exchange_flow_to_market_cap(netflow: float, market_cap: float) -> float:
+    flow = _finite_number(netflow, "netflow")
+    cap = _finite_number(market_cap, "market_cap", minimum=0.0)
+    if cap <= 0:
+        raise ValueError("market_cap must be > 0")
+    return flow / cap
+
+
+def calculate_eth_etf_flow_to_aum(netflow: float, aum: float) -> float:
+    flow = _finite_number(netflow, "netflow")
+    assets = _finite_number(aum, "aum", minimum=0.0)
+    if assets <= 0:
+        raise ValueError("aum must be > 0")
+    return flow / assets
+
+
 def _fresh_input(
     value: MetricObservation | Mapping[str, Any] | None,
     *,
@@ -182,6 +249,150 @@ def derive_btc_price_to_realized_price(
     }
 
 
+def _derived_ratio_observation(
+    asset: str,
+    metric_key: str,
+    value: float | None,
+    inputs: Iterable[tuple[float, str | None, str | None, Mapping[str, Any]]],
+    *,
+    fetched_at: str,
+    unit: str = "fraction",
+    period: str = "current",
+    calculation: str,
+) -> Mapping[str, Any] | None:
+    if value is None or not math.isfinite(float(value)):
+        return None
+    values = tuple(inputs)
+    observed_at = min((item[1] for item in values), key=parse_timestamp)
+    return {
+        "asset": asset,
+        "metric_key": metric_key,
+        "value": float(value),
+        "unit": unit,
+        "period": period,
+        "observed_at": observed_at,
+        "fetched_at": fetched_at,
+        "source": "python-derived",
+        "confidence": "MEDIUM",
+        "summary": f"Derived from {calculation}.",
+        "metadata": {
+            "source_mode": "DERIVED",
+            "calculation": calculation,
+            "input_observation_ids": [item[2] for item in values if item[2]],
+            "input_sources": [item[3] for item in values],
+        },
+    }
+
+
+def derive_eth_price_to_realized_price(
+    asset: str,
+    spot_price: MetricObservation | Mapping[str, Any],
+    realized_price: MetricObservation | Mapping[str, Any],
+    *,
+    fetched_at: str,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    asset = asset.strip().upper()
+    spot = _fresh_input(spot_price, asset=asset, metric_key="market.spot_price", as_of=as_of)
+    realized = _fresh_input(realized_price, asset=asset, metric_key="eth_valuation.realized_price", as_of=as_of)
+    if spot is None or realized is None or spot[0] <= 0 or realized[0] <= 0:
+        return None
+    return _derived_ratio_observation(
+        asset,
+        "eth_valuation.price_to_realized_price",
+        spot[0] / realized[0],
+        (spot, realized),
+        fetched_at=fetched_at,
+        unit="ratio",
+        calculation="market.spot_price / eth_valuation.realized_price",
+    )
+
+
+def derive_eth_staked_supply_pct(
+    asset: str,
+    staked_supply: MetricObservation | Mapping[str, Any],
+    total_supply: MetricObservation | Mapping[str, Any],
+    *,
+    fetched_at: str,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    asset = asset.strip().upper()
+    staked = _fresh_input(staked_supply, asset=asset, metric_key="eth.staking.staked_supply_eth", as_of=as_of)
+    supply = _fresh_input(total_supply, asset=asset, metric_key="eth.monetary.current_supply_eth", as_of=as_of)
+    if staked is None or supply is None:
+        return None
+    try:
+        value = calculate_staked_supply_pct(staked[0], supply[0])
+    except ValueError:
+        return None
+    return _derived_ratio_observation(
+        asset,
+        "eth.staking.staked_supply_pct",
+        value,
+        (staked, supply),
+        fetched_at=fetched_at,
+        calculation="eth.staking.staked_supply_eth / eth.monetary.current_supply_eth",
+    )
+
+
+def derive_eth_exchange_flow_to_market_cap(
+    asset: str,
+    netflow: MetricObservation | Mapping[str, Any],
+    market_cap: MetricObservation | Mapping[str, Any],
+    *,
+    fetched_at: str,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    asset = asset.strip().upper()
+    flow = _fresh_input(netflow, asset=asset, metric_key="flows.exchange_netflow", as_of=as_of)
+    cap = _fresh_input(market_cap, asset=asset, metric_key="valuation.market_cap", as_of=as_of)
+    if flow is None or cap is None:
+        return None
+    try:
+        value = calculate_exchange_flow_to_market_cap(flow[0], cap[0])
+    except ValueError:
+        return None
+    return _derived_ratio_observation(
+        asset,
+        "flows.eth_exchange_netflow_to_market_cap",
+        value,
+        (flow, cap),
+        fetched_at=fetched_at,
+        calculation="flows.exchange_netflow / valuation.market_cap",
+    )
+
+
+def derive_eth_staking_netflow_to_supply(
+    asset: str,
+    staked_change: MetricObservation | Mapping[str, Any],
+    current_supply: MetricObservation | Mapping[str, Any],
+    *,
+    fetched_at: str,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    asset = asset.strip().upper()
+    change = _fresh_input(staked_change, asset=asset, metric_key="eth.staking.staked_supply_change_30d", as_of=as_of)
+    supply = _fresh_input(current_supply, asset=asset, metric_key="eth.monetary.current_supply_eth", as_of=as_of)
+    if change is None or supply is None:
+        return None
+    try:
+        value = _finite_number(change[0], "staked_supply_change_30d") / _finite_number(
+            supply[0], "current_supply", minimum=0.0
+        )
+    except ValueError:
+        return None
+    if supply[0] <= 0:
+        return None
+    return _derived_ratio_observation(
+        asset,
+        "flows.eth_staking_netflow_to_supply_30d",
+        value,
+        (change, supply),
+        fetched_at=fetched_at,
+        calculation="eth.staking.staked_supply_change_30d / eth.monetary.current_supply_eth",
+    )
+
+
 def derive_metric_observations(
     requests: Iterable[MetricRequest],
     reusable: Mapping[tuple[str, str], MetricObservation],
@@ -198,6 +409,14 @@ def derive_metric_observations(
             "derivatives.open_interest_to_market_cap",
             "valuation.fdv_market_cap_ratio",
             "btc_valuation.price_to_realized_price",
+            "eth_valuation.price_to_realized_price",
+            "eth.staking.staked_supply_pct",
+            "flows.eth_exchange_netflow_to_market_cap",
+            "flows.eth_staking_netflow_to_supply_30d",
+            "flows.eth_etf_net_to_aum_7d",
+            "flows.eth_etf_net_to_aum_30d",
+            "eth.monetary.burn_to_issuance_30d",
+            "eth.monetary.burn_to_issuance_365d",
         }:
             continue
         identity = (request.asset, request.metric_key)
@@ -216,6 +435,91 @@ def derive_metric_observations(
                 as_of=as_of,
             ) if spot is not None and realized is not None else None
             dependencies = (("market.spot_price", spot), ("btc_valuation.realized_price", realized))
+        elif request.metric_key == "eth_valuation.price_to_realized_price":
+            spot = reusable.get((request.asset, "market.spot_price")) or routed.get((request.asset, "market.spot_price"))
+            realized = reusable.get((request.asset, "eth_valuation.realized_price")) or routed.get((request.asset, "eth_valuation.realized_price"))
+            derived = derive_eth_price_to_realized_price(
+                request.asset,
+                spot,
+                realized,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ) if spot is not None and realized is not None else None
+            dependencies = (("market.spot_price", spot), ("eth_valuation.realized_price", realized))
+        elif request.metric_key == "eth.staking.staked_supply_pct":
+            staked = reusable.get((request.asset, "eth.staking.staked_supply_eth")) or routed.get((request.asset, "eth.staking.staked_supply_eth"))
+            supply = reusable.get((request.asset, "eth.monetary.current_supply_eth")) or routed.get((request.asset, "eth.monetary.current_supply_eth"))
+            derived = derive_eth_staked_supply_pct(
+                request.asset,
+                staked,
+                supply,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ) if staked is not None and supply is not None else None
+            dependencies = (("eth.staking.staked_supply_eth", staked), ("eth.monetary.current_supply_eth", supply))
+        elif request.metric_key == "flows.eth_exchange_netflow_to_market_cap":
+            flow = reusable.get((request.asset, "flows.exchange_netflow")) or routed.get((request.asset, "flows.exchange_netflow"))
+            derived = derive_eth_exchange_flow_to_market_cap(
+                request.asset,
+                flow,
+                cap,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ) if flow is not None and cap is not None else None
+            dependencies = (("flows.exchange_netflow", flow), ("valuation.market_cap", cap))
+        elif request.metric_key == "flows.eth_staking_netflow_to_supply_30d":
+            change = reusable.get((request.asset, "eth.staking.staked_supply_change_30d")) or routed.get((request.asset, "eth.staking.staked_supply_change_30d"))
+            supply = reusable.get((request.asset, "eth.monetary.current_supply_eth")) or routed.get((request.asset, "eth.monetary.current_supply_eth"))
+            derived = derive_eth_staking_netflow_to_supply(
+                request.asset,
+                change,
+                supply,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ) if change is not None and supply is not None else None
+            dependencies = (("eth.staking.staked_supply_change_30d", change), ("eth.monetary.current_supply_eth", supply))
+        elif request.metric_key in {"flows.eth_etf_net_to_aum_7d", "flows.eth_etf_net_to_aum_30d"}:
+            days = request.metric_key.rsplit("_", 1)[-1]
+            raw = reusable.get((request.asset, f"flows.etf_net_{days}")) or routed.get((request.asset, f"flows.etf_net_{days}"))
+            aum = reusable.get((request.asset, "flows.eth_etf_aum_usd")) or routed.get((request.asset, "flows.eth_etf_aum_usd"))
+            raw_input = _fresh_input(raw, asset=request.asset, metric_key=f"flows.etf_net_{days}", as_of=as_of) if raw is not None else None
+            aum_input = _fresh_input(aum, asset=request.asset, metric_key="flows.eth_etf_aum_usd", as_of=as_of) if aum is not None else None
+            value = None
+            if raw_input is not None and aum_input is not None:
+                try:
+                    value = calculate_eth_etf_flow_to_aum(raw_input[0], aum_input[0])
+                except ValueError:
+                    value = None
+            derived = _derived_ratio_observation(
+                request.asset,
+                request.metric_key,
+                value,
+                (raw_input, aum_input) if raw_input is not None and aum_input is not None else (),
+                fetched_at=fetched_at,
+                calculation=f"flows.etf_net_{days} / flows.eth_etf_aum_usd",
+            ) if raw_input is not None and aum_input is not None else None
+            dependencies = ((f"flows.etf_net_{days}", raw), ("flows.eth_etf_aum_usd", aum))
+        elif request.metric_key in {"eth.monetary.burn_to_issuance_30d", "eth.monetary.burn_to_issuance_365d"}:
+            days = request.metric_key.rsplit("_", 1)[-1].removesuffix("d")
+            burn_key = f"eth.monetary.burn_{days}d_eth"
+            issuance_key = f"eth.monetary.issuance_{days}d_eth"
+            burn = reusable.get((request.asset, burn_key)) or routed.get((request.asset, burn_key))
+            issuance = reusable.get((request.asset, issuance_key)) or routed.get((request.asset, issuance_key))
+            burn_input = _fresh_input(burn, asset=request.asset, metric_key=burn_key, as_of=as_of) if burn is not None else None
+            issuance_input = _fresh_input(issuance, asset=request.asset, metric_key=issuance_key, as_of=as_of) if issuance is not None else None
+            value = None
+            if burn_input is not None and issuance_input is not None:
+                value = calculate_burn_to_issuance(burn_input[0], issuance_input[0])
+            derived = _derived_ratio_observation(
+                request.asset,
+                request.metric_key,
+                value,
+                (burn_input, issuance_input) if burn_input is not None and issuance_input is not None else (),
+                fetched_at=fetched_at,
+                unit="ratio",
+                calculation=f"{burn_key} / {issuance_key}",
+            ) if burn_input is not None and issuance_input is not None else None
+            dependencies = ((burn_key, burn), (issuance_key, issuance))
         elif request.metric_key == "derivatives.open_interest_to_market_cap":
             oi_identity = (request.asset, "derivatives.open_interest_usd")
             oi = reusable.get(oi_identity) or routed.get(oi_identity)
@@ -248,8 +552,18 @@ def derive_metric_observations(
 
 
 __all__ = [
+    "calculate_burn_to_issuance",
+    "calculate_eth_etf_flow_to_aum",
+    "calculate_exchange_flow_to_market_cap",
+    "calculate_net_supply_growth",
+    "calculate_staked_supply_pct",
+    "calculate_staking_netflow_ratio",
     "derive_metric_observations",
     "derive_btc_price_to_realized_price",
+    "derive_eth_exchange_flow_to_market_cap",
+    "derive_eth_price_to_realized_price",
+    "derive_eth_staked_supply_pct",
+    "derive_eth_staking_netflow_to_supply",
     "derive_fdv_market_cap_ratio",
     "derive_open_interest_to_market_cap",
 ]

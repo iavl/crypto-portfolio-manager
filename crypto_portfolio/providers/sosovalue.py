@@ -37,6 +37,8 @@ _ETF_KEYS = (
     "flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d",
     "flows.btc_etf_net_1d", "flows.btc_etf_net_to_aum_7d", "flows.btc_etf_net_to_aum_30d",
     "flows.btc_etf_aum_usd",
+    "flows.eth_etf_net_to_aum_7d", "flows.eth_etf_net_to_aum_30d",
+    "flows.eth_etf_aum_usd",
 )
 _ETF_TYPES = {"BTC": "us-btc-spot", "ETH": "us-eth-spot"}
 _DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -238,6 +240,8 @@ def _parse_points(
         raise ProviderUnsupportedMetric("SoSoValue ETF flow metric is not supported")
     if any(key.startswith("flows.btc_") for key in requested) and asset.strip().upper() != "BTC":
         raise ProviderUnsupportedMetric("BTC ETF normalized flow metrics require BTC scope")
+    if any(key.startswith("flows.eth_") for key in requested) and asset.strip().upper() != "ETH":
+        raise ProviderUnsupportedMetric("ETH ETF normalized flow metrics require ETH scope")
     points = _history_points(payload, as_of=as_of)
     result: list[Mapping[str, Any]] = []
     for key, days, period in (
@@ -284,6 +288,44 @@ def _parse_points(
             if anchor.aum is None:
                 raise ProviderDataError(
                     f"SoSoValue BTC ETF AUM is missing on the {period} flow anchor date"
+                )
+            normalized = _observation(
+                asset,
+                key,
+                sum(item.flow for item in selected) / anchor.aum,
+                points=points,
+                selected=selected,
+                fetched_at=fetched_at,
+                period=period,
+                endpoint=endpoint,
+            )
+            normalized["metadata"].update({
+                "normalization": "sum_completed_net_inflow / aligned_ending_aum",
+                "normalized_flow_ratio": normalized["value"],
+                "aum_anchor_date": anchor.source_date.isoformat(),
+                "aum_anchor_usd": anchor.aum,
+            })
+            result.append(normalized)
+    if asset.strip().upper() == "ETH":
+        latest = points[-1]
+        if "flows.eth_etf_aum_usd" in requested:
+            if latest.aum is None:
+                raise ProviderDataError("SoSoValue ETH ETF latest settled row has no AUM")
+            result.append(_observation(
+                asset, "flows.eth_etf_aum_usd", latest.aum,
+                points=points, selected=[latest], fetched_at=fetched_at,
+                period="current", endpoint=endpoint,
+            ))
+        for key, days, period in (
+            ("flows.eth_etf_net_to_aum_7d", 7, "7d"),
+            ("flows.eth_etf_net_to_aum_30d", 30, "30d"),
+        ):
+            if key not in requested:
+                continue
+            selected, anchor = _window(points, days)
+            if anchor.aum is None:
+                raise ProviderDataError(
+                    f"SoSoValue ETH ETF AUM is missing on the {period} flow anchor date"
                 )
             normalized = _observation(
                 asset,

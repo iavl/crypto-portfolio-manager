@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
+from .core_eligibility import eth_core_eligibility, relative_strength_score
 from .scoring import score_assessment
 
 
@@ -90,6 +91,121 @@ def _relative_multiplier(value: Any) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return 0.5 + min(1.0, max(0.0, float(value))) * 0.5
     return 1.0 if str(value).strip().upper() in {"STRONG", "OUTPERFORM", "POSITIVE", "HEALTHY"} else 0.75
+
+
+def _core_quality_multiplier(score: float) -> float:
+    return min(1.5, max(0.5, 0.5 + score / 100.0))
+
+
+def _btc_core_state(assessment: Any) -> str:
+    if _flag(_field(assessment, "thesis_broken", False), "thesis_broken"):
+        return "INELIGIBLE"
+    event = _event_risk_state(assessment)
+    if event in {"SEVERE", "CRITICAL"}:
+        return "INELIGIBLE"
+    liveness = _field(assessment, "chain_liveness_status", _field(assessment, "chain_liveness", None))
+    if isinstance(liveness, Mapping):
+        liveness = liveness.get("status", liveness.get("value"))
+    if liveness is not None and str(liveness).strip().upper() in {"HALTED", "UNKNOWN", "FAILED", "CONFLICT"}:
+        return "HOLD_ONLY"
+    if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
+        return "HOLD_ONLY"
+    return "HOLD_ONLY" if _confidence(_field(assessment, "confidence", "MEDIUM")) == "LOW" else "ELIGIBLE_INCREASE"
+
+
+def _core_relative_multiplier(value: Any, policy: Policy) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        score = float(value)
+        if 0 <= score <= 1:
+            score *= 100.0
+        if not math.isfinite(score) or not 0 <= score <= 100:
+            raise ValueError("ETH relative score must be finite and in [0, 100]")
+        return min(1.25, max(0.75, 1.0 + 0.25 * ((score - 50.0) / 50.0)))
+    state = str(value or "neutral").strip().lower()
+    aliases = {"outperform": "strong", "positive": "strong", "underperform": "weak", "negative": "weak"}
+    state = aliases.get(state, state)
+    return float(policy.core_allocation["relative_multipliers"].get(state, policy.core_allocation["relative_multipliers"]["neutral"]))
+
+
+def _allocate_core_v3(
+    policy: Policy,
+    budget: float,
+    assessments: Mapping[str, Any],
+    current_weights: Mapping[str, float],
+    single_asset_cap: float,
+    chain_liveness: Mapping[str, Any] | None = None,
+    structural_risk: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, float], float, tuple[str, ...]]:
+    config = policy.core_allocation
+    confidence_multipliers = config["confidence_multipliers"]
+    anchor = config["anchor"]
+    raw: dict[str, float] = {}
+    states: dict[str, str] = {}
+    for symbol in policy.core_symbols:
+        assessment = assessments.get(symbol)
+        score = _score(assessment, symbol) if assessment is not None else 50.0
+        confidence = _confidence(_field(assessment, "confidence", "MEDIUM")) if assessment is not None else "MEDIUM"
+        event_state = _event_risk_state(assessment) if assessment is not None else "NORMAL"
+        event_multiplier = _event_risk_multiplier(event_state, policy)
+        if symbol == "ETH":
+            supplied_structural = (structural_risk or {}).get(symbol)
+            if supplied_structural is None and assessment is not None:
+                supplied_structural = _field(assessment, "structural_risk", None)
+            state = eth_core_eligibility(
+                assessment,
+                policy,
+                current_weight=current_weights.get(symbol, 0.0),
+                chain_liveness=(chain_liveness or {}).get(symbol),
+                structural_risk=supplied_structural,
+            )
+            raw_relative = _field(
+                assessment,
+                "relative_strength_score",
+                _field(assessment, "relative_strength_vs_btc", _field(assessment, "relative_strength", None)),
+            ) if assessment is not None else None
+            relative = relative_strength_score(assessment) if assessment is not None else None
+            relative_multiplier = _core_relative_multiplier(
+                raw_relative if isinstance(raw_relative, str) else relative,
+                policy,
+            ) if relative is not None else 1.0
+        else:
+            state = _btc_core_state(assessment)
+            relative_multiplier = 1.0
+        states[symbol] = state
+        if state == "INELIGIBLE":
+            continue
+        raw[symbol] = (
+            anchor.get(symbol, 0.0)
+            * _core_quality_multiplier(score)
+            * confidence_multipliers[confidence]
+            * relative_multiplier
+            * event_multiplier
+        )
+    positive = {symbol: value for symbol, value in raw.items() if value > 0}
+    if not positive or budget <= 0:
+        return {}, max(0.0, budget), tuple(f"{symbol} core state {state}" for symbol, state in states.items())
+    total_raw = sum(positive.values())
+    desired = {symbol: budget * value / total_raw for symbol, value in positive.items()}
+    caps = {symbol: single_asset_cap for symbol in desired}
+    if "BTC" in caps and states.get("BTC") == "HOLD_ONLY":
+        caps["BTC"] = min(caps["BTC"], current_weights.get("BTC", 0.0))
+    if "ETH" in caps:
+        caps["ETH"] = min(caps["ETH"], budget * config["eth"]["max_core_sleeve_share"])
+        if states.get("ETH") == "HOLD_ONLY":
+            caps["ETH"] = min(caps["ETH"], current_weights.get("ETH", 0.0))
+        elif states.get("ETH") == "UNDERWEIGHT":
+            caps["ETH"] = min(caps["ETH"], current_weights.get("ETH", 0.0))
+        elif states.get("ETH") == "REDUCE":
+            caps["ETH"] = min(caps["ETH"], current_weights.get("ETH", 0.0) * 0.75)
+    result = {symbol: min(desired[symbol], caps[symbol]) for symbol in desired}
+    residual = max(0.0, budget - sum(result.values()))
+    if residual > 1e-12 and states.get("ETH") in {"HOLD_ONLY", "UNDERWEIGHT", "REDUCE", "INELIGIBLE"} and states.get("BTC") == "ELIGIBLE_INCREASE":
+        btc_capacity = max(0.0, caps.get("BTC", single_asset_cap) - result.get("BTC", 0.0))
+        add = min(residual, btc_capacity)
+        result["BTC"] = result.get("BTC", 0.0) + add
+        residual -= add
+    reasons = tuple(f"{symbol} core state {state}" for symbol, state in states.items())
+    return {symbol: weight for symbol, weight in result.items() if weight > 1e-12}, residual, reasons
 
 
 def _event_risk_state(value: Any) -> str:
@@ -220,6 +336,8 @@ def build_target_allocation(
     current_weights: Mapping[str, float] | None = None,
     *,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    chain_liveness: Mapping[str, Any] | None = None,
+    structural_risk: Mapping[str, Any] | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
     if overlays is not None:
@@ -265,6 +383,7 @@ def build_target_allocation(
     satellite_raw: dict[str, float] = {}
     satellite_hold: dict[str, float] = {}
     core_raw: dict[str, float] = {}
+    core_assessments: dict[str, Any] = {}
     for symbol in candidates:
         asset_type = resolved.classify(symbol)
         assessment = normalized_assessments.get(symbol)
@@ -345,8 +464,12 @@ def build_target_allocation(
                     reasons.append(f"{symbol} receives 0% satellite target because confidence is LOW")
             else:
                 reasons.append(f"{symbol} receives 0% satellite target because eligibility failed")
-        elif asset_type == "core" and event_risk not in {"SEVERE", "CRITICAL"} and not thesis_broken:
-            core_raw[symbol] = max(score, resolved.allocation["core_min_score"]) * event_multiplier
+        elif asset_type == "core":
+            if resolved.policy_version <= 2:
+                if event_risk not in {"SEVERE", "CRITICAL"} and not thesis_broken:
+                    core_raw[symbol] = max(score, resolved.allocation["core_min_score"]) * event_multiplier
+            else:
+                core_assessments[symbol] = assessment
 
     held_satellite_weights, _ = _bounded_allocate(
         satellite_hold, satellite_cap, limits.single_asset_max
@@ -361,7 +484,20 @@ def build_target_allocation(
     }
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight
-    core_weights, residual_core = _bounded_allocate(core_raw, core_budget, limits.single_asset_max)
+    if resolved.policy_version >= 3:
+        core_weights, residual_core, core_reasons = _allocate_core_v3(
+            resolved,
+            core_budget,
+            core_assessments,
+            current_weights,
+            limits.single_asset_max,
+            chain_liveness,
+            structural_risk,
+        )
+        reasons.extend(core_reasons)
+        constraints.append("v3 core sleeve uses configurable BTC/ETH anchor and ETH gates")
+    else:
+        core_weights, residual_core = _bounded_allocate(core_raw, core_budget, limits.single_asset_max)
     stable_target += residual_core
 
     target: dict[str, float] = _stable_targets(
@@ -397,8 +533,13 @@ def allocate(
     current_weights: Mapping[str, float] | None = None,
     *,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    chain_liveness: Mapping[str, Any] | None = None,
+    structural_risk: Mapping[str, Any] | None = None,
 ) -> AllocationResult:
-    return build_target_allocation(policy, regime, assessments, current_weights, overlays=overlays)
+    return build_target_allocation(
+        policy, regime, assessments, current_weights,
+        overlays=overlays, chain_liveness=chain_liveness, structural_risk=structural_risk,
+    )
 
 
 __all__ = ["AllocationResult", "allocate", "build_target_allocation", "satellite_eligibility"]

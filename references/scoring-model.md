@@ -114,8 +114,9 @@ raise a coverage cap.
 
 ## Relative strength versus BTC
 
-Raw 30D, 90D and 180D excess returns, relative drawdown, pair trend and the
-normalized signal remain visible for explanation. In v2 each horizon uses:
+Raw 30D, 90D, 180D and (for policy v3) 365D excess returns, relative drawdown,
+pair trend and the normalized signal remain visible for explanation. In v2/v3
+each horizon uses:
 
 ```text
 excess_h = asset_return_h - btc_return_h
@@ -133,6 +134,26 @@ clamped to 0–100 outside it. v1 replay retains its raw ±5% threshold behavior
 
 For non-BTC satellites, missing BTC-relative evidence is `HOLD_ONLY`, while a
 materially negative comparison is ineligible for new risk.
+
+### Ethereum-specific interpretation
+
+ETH keeps the default six-factor weights: trend 20%, valuation 20%,
+fundamentals 25%, on-chain 15%, capital flows 10%, and BTC-relative strength
+10%. Policy v3 enriches the evidence inside those factors with monetary supply
+and burn/issuance context, proof-of-stake security and staking flows, Ethereum
+L2 settlement rent, blob/data-availability demand, DeFi/stablecoin economics,
+realized valuation where supported, and ETH ETF flow/AUM ratios.
+
+L2 activity is not ETH value capture unless Ethereum settlement or DA use is
+shown. Rising staking share is not automatically bullish, and deflation is not
+automatically bullish; cause, persistence, liquidity, and security context
+remain part of the bounded semantic judgment. Raw ETH ETF USD flow is evidence
+context; normalized ETH flow/AUM owns capital-flow scoring authority.
+
+The ETH/BTC factor remains part of the base score, while policy v3 also applies
+it as a separate core-allocation opportunity-cost gate. This gate never mutates
+the base score. ETH FDV/market-cap is `NOT_APPLICABLE` and cannot contribute
+positive valuation evidence.
 
 ## Capital flows
 
@@ -197,5 +218,8 @@ Policy version 1 is parsed explicitly and dispatched to legacy arithmetic:
 legacy `scoring_weights`, missing-factor renormalization, legacy event-risk
 weighting where present, raw relative-strength thresholds, and binary flow
 classification. Historical JSONL is not rewritten. New live decisions use the
-version-2 profiles, typed availability, reliability-aware score, and separate
-event-risk gate; the resolved policy and hash remain the replay authority.
+version-3 profiles, typed availability, reliability-aware score, and separate
+event-risk gate; policy version 2 retains its original core allocation and
+three-horizon behavior; policy version 3 uses the ETH-specific metrics, 365D
+relative horizon, core gate, and anchored core allocation. The resolved policy
+and hash remain the replay authority.

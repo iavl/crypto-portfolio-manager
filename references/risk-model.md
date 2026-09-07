@@ -32,7 +32,24 @@ Indicative allocation envelope, not a fixed target:
 - ETH: 20–35% (default core allocation)
 - Satellites combined: 10–25%
 
-The BTC/ETH rows are the default core allocation. If the user changes `core_symbols`, apply the core risk posture to the configured core group instead of treating BTC/ETH as mandatory holdings. In every regime, the stablecoin lower bound is the larger of the regime default and `min_stablecoin_weight`; if the configured floor exceeds the default upper bound, raise that upper bound to the floor because stablecoins have no fixed maximum.
+The BTC/ETH rows are an indicative risk envelope, not an entitlement. Core
+classification never guarantees a target or score floor. Policy v3 starts the
+core risky sleeve from a configurable 70/30 BTC/ETH anchor, then applies score
+quality, confidence, ETH/BTC opportunity cost, event risk, liveness, and the
+existing portfolio caps. If the user changes `core_symbols`, apply the core
+risk posture to the configured core group instead of treating BTC/ETH as
+mandatory holdings. In every regime, the stablecoin lower bound is the larger
+of the regime default and `min_stablecoin_weight`; if the configured floor
+exceeds the default upper bound, raise that upper bound to the floor because
+stablecoins have no fixed maximum.
+
+For ETH, `ELIGIBLE_INCREASE`, `HOLD_ONLY`, `UNDERWEIGHT`, `REDUCE`, and
+`INELIGIBLE` are deterministic states. Missing ETH/BTC evidence and LOW
+confidence block new high-conviction ETH risk; severe/critical events,
+`HALTED` liveness, or a broken thesis make ETH ineligible. A weak ETH/BTC
+opportunity-cost case can underweight or reduce ETH without changing its base
+score. Residual unsafe capital goes to BTC only when BTC is eligible;
+otherwise it remains in the stable sleeve.
 
 ### DEFENSIVE
 

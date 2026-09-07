@@ -136,7 +136,12 @@ def _sosovalue_probe(provider: SoSoValueProvider, asset: str = "BTC") -> dict[st
                 "flows.btc_etf_net_to_aum_7d",
                 "flows.btc_etf_net_to_aum_30d",
                 "flows.btc_etf_aum_usd",
-            ) if asset.strip().upper() == "BTC" else ("flows.etf_net_1d",),
+            ) if asset.strip().upper() == "BTC" else (
+                "flows.etf_net_1d",
+                "flows.eth_etf_net_to_aum_7d",
+                "flows.eth_etf_net_to_aum_30d",
+                "flows.eth_etf_aum_usd",
+            ) if asset.strip().upper() == "ETH" else ("flows.etf_net_1d",),
         ))
         captured["value"] = value
         return value
@@ -157,12 +162,12 @@ def _sosovalue_probe(provider: SoSoValueProvider, asset: str = "BTC") -> dict[st
         result["history_rows"] = metadata.get("history_rows", len(observations))
         result["latest_source_date"] = metadata.get("source_end_date")
         result["normalized_7d"] = any(
-            item.get("metric_key") == "flows.btc_etf_net_to_aum_7d" for item in observations
+            item.get("metric_key") in {"flows.btc_etf_net_to_aum_7d", "flows.eth_etf_net_to_aum_7d"} for item in observations
         )
         result["normalized_30d"] = any(
-            item.get("metric_key") == "flows.btc_etf_net_to_aum_30d" for item in observations
+            item.get("metric_key") in {"flows.btc_etf_net_to_aum_30d", "flows.eth_etf_net_to_aum_30d"} for item in observations
         )
-        result["aum"] = any(item.get("metric_key") == "flows.btc_etf_aum_usd" for item in observations)
+        result["aum"] = any(item.get("metric_key") in {"flows.btc_etf_aum_usd", "flows.eth_etf_aum_usd"} for item in observations)
     transport = getattr(provider.client, "transport_metadata", lambda: {})()
     result.update({
         "python_ssl": transport.get("python_ssl"),

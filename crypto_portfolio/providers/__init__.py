@@ -43,6 +43,10 @@ from .coingecko import CoinGeckoProvider
 from .defillama import DeFiLlamaProvider, DefiLlamaProvider
 from .github_activity import GitHubActivityProvider
 from .sosovalue import SoSoValueProvider
+from .blobscan import BlobscanProvider
+from .growthepie import GrowthePieProvider, GrowthepieProvider
+from .l2beat import L2BEATProvider, L2BeatProvider, L2beatProvider
+from .ethereum_protocol import EthereumProtocolProvider
 
 __all__ = [
     "EventDataProvider",
@@ -89,4 +93,11 @@ __all__ = [
     "DefiLlamaProvider",
     "GitHubActivityProvider",
     "SoSoValueProvider",
+    "BlobscanProvider",
+    "GrowthePieProvider",
+    "GrowthepieProvider",
+    "L2BeatProvider",
+    "L2beatProvider",
+    "L2BEATProvider",
+    "EthereumProtocolProvider",
 ]

@@ -15,10 +15,18 @@ from crypto_portfolio.metrics_registry import METRIC_REGISTRY, validate_metric_o
 from crypto_portfolio.models.evidence import AssetAssessment, FactorScore
 from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
 from crypto_portfolio.models.market import Candle, OHLCVSeries
-from crypto_portfolio.models.policy import legacy_policy
+from crypto_portfolio.models.policy import legacy_policy, load_policy, policy_from_mapping
 
 
 class ScoringV2Tests(unittest.TestCase):
+    @staticmethod
+    def v2_policy():
+        data = json.loads(json.dumps(load_policy().as_dict()))
+        data["policy_version"] = 2
+        data["factor_rules"]["relative_strength"]["horizon_weights"] = {"30d": 0.2, "90d": 0.4, "180d": 0.4}
+        data.pop("core_allocation", None)
+        return policy_from_mapping(data)
+
     def test_drawdown_has_no_v2_trend_score_authority(self):
         from crypto_portfolio.engine.factors.trend import calculate_trend_factor
         common = dict(symbol="ETH", current_spot_price=100, ma20=100, ma50=100, ma100=100, ma200=100,
@@ -62,15 +70,16 @@ class ScoringV2Tests(unittest.TestCase):
                 timestamp = (datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(hours=hour)).isoformat()
                 candles.append(Candle(timestamp, price, price, price, price, 1))
             return OHLCVSeries(symbol, "1D" if hours == 24 else "4H", tuple(candles))
-        daily = calculate_relative_strength(series("ETH", 24), series("BTC", 24), symbol="ETH")
-        intraday = calculate_relative_strength(series("ETH", 4), series("BTC", 4), symbol="ETH")
+        policy = self.v2_policy()
+        daily = calculate_relative_strength(series("ETH", 24), series("BTC", 24), symbol="ETH", policy=policy)
+        intraday = calculate_relative_strength(series("ETH", 4), series("BTC", 4), symbol="ETH", policy=policy)
         self.assertEqual(daily.risk_adjusted_excess_returns, intraday.risk_adjusted_excess_returns)
         self.assertEqual(daily.score, intraday.score)
         stale = calculate_relative_strength(
             replace(series("ETH", 24), fetched_at="2025-08-01T00:00:00Z"),
-            replace(series("BTC", 24), fetched_at="2025-08-01T00:00:00Z"), symbol="ETH")
+            replace(series("BTC", 24), fetched_at="2025-08-01T00:00:00Z"), symbol="ETH", policy=policy)
         self.assertEqual(stale.facts.freshness, "STALE")
-        self.assertAlmostEqual(score_factors({"relative_strength_btc": stale}, {"relative_strength_btc": 1.0}).coverage, 0.5)
+        self.assertAlmostEqual(score_factors({"relative_strength_btc": stale}, {"relative_strength_btc": 1.0}, policy=policy).coverage, 0.5)
 
     def test_normalized_flow_representation_and_denominator_order(self):
         result = calculate_flow_factor({"aum_30d": 1000, "flow_30d": 5})

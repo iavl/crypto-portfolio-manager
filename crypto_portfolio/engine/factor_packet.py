@@ -10,6 +10,23 @@ from ..models.metrics_history import MetricObservation
 from .metric_history import build_facts_for_asset
 
 
+def _eth_fundamental_groups(fact: FactBase) -> Mapping[str, Any]:
+    """Add only metric-key grouping metadata; numeric facts remain flat and Python-owned."""
+    payload = fact.as_dict()
+    current = dict(payload.get("current", {}))
+    keys = tuple(current)
+    groups = {
+        "monetary_economics": [key for key in keys if key.startswith("eth.monetary.")],
+        "staking_security": [key for key in keys if key.startswith("eth.staking.")],
+        "settlement_da": [key for key in keys if key.startswith(("eth.l2.", "eth.da."))],
+        "defi_stablecoin": [key for key in keys if key.startswith("fundamentals.") and key not in {"fundamentals.developer_activity"}],
+        "developer_ecosystem": [key for key in keys if key == "fundamentals.developer_activity"],
+    }
+    current["semantic_groups"] = {name: values for name, values in groups.items() if values}
+    payload["current"] = current
+    return payload
+
+
 def build_asset_factor_packet(
     symbol: str,
     facts: Mapping[str, FactBase | Mapping[str, Any]] | None = None,
@@ -36,6 +53,8 @@ def build_asset_factor_packet(
     if observations is not None:
         values.update(build_facts_for_asset(observations, symbol, previous_observations=previous_observations))
     values.update({key.removesuffix("_facts"): value for key, value in factor_facts.items() if value is not None})
+    if symbol.strip().upper() == "ETH" and isinstance(values.get("fundamentals"), FactBase):
+        values["fundamentals"] = _eth_fundamental_groups(values["fundamentals"])
     ids = list(evidence_ids)
     for fact in values.values():
         if isinstance(fact, FactBase):

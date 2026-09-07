@@ -14,7 +14,8 @@ from ..metrics import annualized_volatility, simple_return
 from ..technical import completed_candles, expected_latest_completed_date
 
 
-_HORIZONS = (30, 90, 180)
+_LEGACY_HORIZONS = (30, 90, 180)
+_V3_HORIZONS = (30, 90, 180, 365)
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class RelativeStrengthFactorResult:
     volatility_adjusted_excess_return: float | None = None
     pair_trend: str = "UNKNOWN"
     risk_adjusted_excess_returns: Mapping[str, float | None] | None = None
+    relative_365d: float | None = None
 
     def __post_init__(self) -> None:
         score = float(self.score)
@@ -44,7 +46,7 @@ class RelativeStrengthFactorResult:
         confidence = str(self.confidence).strip().upper()
         if confidence not in {"HIGH", "MEDIUM", "LOW"}:
             raise ValueError("relative-strength confidence is unsupported")
-        for field in ("relative_30d", "relative_90d", "relative_180d"):
+        for field in ("relative_30d", "relative_90d", "relative_180d", "relative_365d"):
             value = getattr(self, field)
             if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(float(value))):
                 raise ValueError(f"{field} must be finite or null")
@@ -61,7 +63,7 @@ class RelativeStrengthFactorResult:
         if pair_trend not in {"BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"}:
             raise ValueError("pair_trend is unsupported")
         adjusted = dict(self.risk_adjusted_excess_returns or {})
-        if set(adjusted) - {f"{days}d" for days in _HORIZONS}:
+        if set(adjusted) - {f"{days}d" for days in _V3_HORIZONS}:
             raise ValueError("risk_adjusted_excess_returns contains an unknown horizon")
         for key, value in adjusted.items():
             if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(float(value))):
@@ -84,6 +86,7 @@ class RelativeStrengthFactorResult:
             "relative_30d": self.relative_30d,
             "relative_90d": self.relative_90d,
             "relative_180d": self.relative_180d,
+            "relative_365d": self.relative_365d,
             "state": self.state,
             "confidence": self.confidence,
             "facts": self.facts.as_dict(),
@@ -266,6 +269,7 @@ def calculate_relative_strength(
     if btc_prices is not None and btc_history is not None:
         raise ValueError("provide only one of btc_prices or btc_history")
     resolved = policy or resolve_policy()
+    horizons = _V3_HORIZONS if resolved.policy_version >= 3 else _LEGACY_HORIZONS
     normalized_symbol = str(symbol).strip().upper()
     if normalized_symbol == "BTC":
         facts = RelativeStrengthFacts(
@@ -284,6 +288,7 @@ def calculate_relative_strength(
             relative_30d=None,
             relative_90d=None,
             relative_180d=None,
+            relative_365d=None,
             state="NOT_APPLICABLE",
             confidence="LOW",
             facts=facts,
@@ -304,12 +309,12 @@ def calculate_relative_strength(
     elif isinstance(asset, tuple) and isinstance(btc, tuple) and len(asset) != len(btc):
         raise ValueError("asset and BTC histories must have equal lengths")
 
-    aligned_by_horizon = {days: _aligned_prices(asset, btc, days, daily=resolved.policy_version >= 2) for days in _HORIZONS}
+    aligned_by_horizon = {days: _aligned_prices(asset, btc, days, daily=resolved.policy_version >= 2) for days in horizons}
     asset_returns: dict[int, float | None] = {}
     btc_returns: dict[int, float | None] = {}
     relative: dict[int, float | None] = {}
     adjusted: dict[int, float | None] = {}
-    for days in _HORIZONS:
+    for days in horizons:
         aligned = aligned_by_horizon[days]
         if aligned is None:
             asset_returns[days] = btc_returns[days] = relative[days] = adjusted[days] = None
@@ -324,7 +329,7 @@ def calculate_relative_strength(
     weights = rules["horizon_weights"]
     signal = None
     if resolved.policy_version == 1:
-        available = [days for days in _HORIZONS if relative[days] is not None]
+        available = [days for days in horizons if relative[days] is not None]
         if available:
             positive = float(rules["positive_threshold"])
             negative = float(rules["negative_threshold"])
@@ -335,9 +340,9 @@ def calculate_relative_strength(
             ) / total_weight
         else:
             weighted_score = 50.0
-        states = [_state(relative[days], float(rules["positive_threshold"]), float(rules["negative_threshold"])) for days in _HORIZONS]
+        states = [_state(relative[days], float(rules["positive_threshold"]), float(rules["negative_threshold"])) for days in horizons]
     else:
-        available = [days for days in _HORIZONS if adjusted[days] is not None and weights[f"{days}d"] > 0]
+        available = [days for days in horizons if adjusted[days] is not None and weights[f"{days}d"] > 0]
         neutral = float(rules["risk_adjusted_neutral_band"])
         saturation = float(rules["risk_adjusted_saturation"])
         if available:
@@ -351,12 +356,12 @@ def calculate_relative_strength(
                 "UNKNOWN" if adjusted[days] is None else
                 "OUTPERFORM" if adjusted[days] > neutral else
                 "UNDERPERFORM" if adjusted[days] < -neutral else "NEUTRAL"
-                for days in _HORIZONS
+                for days in horizons
             ]
         else:
             weighted_score = 50.0
             signal = None
-            states = ["UNKNOWN"] * len(_HORIZONS)
+            states = ["UNKNOWN"] * len(horizons)
 
     non_unknown = [state for state in states if state != "UNKNOWN"]
     if not non_unknown:
@@ -371,14 +376,14 @@ def calculate_relative_strength(
         state = "UNDERPERFORM"
     else:
         state = "NEUTRAL"
-    coverage = len(available) / len(_HORIZONS) if resolved.policy_version == 1 else (
+    coverage = len(available) / len(horizons) if resolved.policy_version == 1 else (
         sum(weights[f"{days}d"] for days in available) / sum(weights.values())
     )
     confidence = "HIGH" if coverage == 1 else "MEDIUM" if coverage >= 2 / 3 else "LOW"
     reasons = tuple(
         [
-            *(f"{days}D excess return is {relative[days]:+.2%}" for days in _HORIZONS if relative[days] is not None),
-            *(f"{days}D risk-adjusted excess return is {adjusted[days]:+.3f}" for days in _HORIZONS if adjusted[days] is not None),
+            *(f"{days}D excess return is {relative[days]:+.2%}" for days in horizons if relative[days] is not None),
+            *(f"{days}D risk-adjusted excess return is {adjusted[days]:+.3f}" for days in horizons if adjusted[days] is not None),
         ]
         or ["relative return history is insufficient"]
     )
@@ -414,15 +419,15 @@ def calculate_relative_strength(
     facts = RelativeStrengthFacts(
         symbol=normalized_symbol,
         current={
-            **{f"relative_{days}d": relative[days] for days in _HORIZONS},
-            **{f"risk_adjusted_relative_{days}d": adjusted[days] for days in _HORIZONS},
+            **{f"relative_{days}d": relative[days] for days in horizons},
+            **{f"risk_adjusted_relative_{days}d": adjusted[days] for days in horizons},
             "relative_drawdown": relative_drawdown,
             "volatility_adjusted_excess_return": legacy_adjusted if resolved.policy_version == 1 else adjusted[90],
             "pair_trend": pair_trend,
         },
         previous={},
         changes={},
-        trends={f"relative_{days}d": states[index] for index, days in enumerate(_HORIZONS)},
+        trends={f"relative_{days}d": states[index] for index, days in enumerate(horizons)},
         coverage=coverage,
         freshness=freshness,
         source_ids=tuple(dict.fromkeys(ids)),
@@ -433,6 +438,7 @@ def calculate_relative_strength(
         relative_30d=relative[30],
         relative_90d=relative[90],
         relative_180d=relative[180],
+        relative_365d=relative[365] if 365 in relative else None,
         state=state,
         confidence=confidence,
         facts=facts,
@@ -442,7 +448,7 @@ def calculate_relative_strength(
         relative_drawdown=relative_drawdown,
         volatility_adjusted_excess_return=legacy_adjusted if resolved.policy_version == 1 else adjusted[90],
         pair_trend=pair_trend,
-        risk_adjusted_excess_returns={f"{days}d": adjusted[days] for days in _HORIZONS},
+        risk_adjusted_excess_returns={f"{days}d": adjusted[days] for days in horizons},
     )
 
 

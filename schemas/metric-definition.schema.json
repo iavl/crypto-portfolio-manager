@@ -17,7 +17,7 @@
     "trend_comparison_enabled": {"type": "boolean"},
     "trend_enabled": {"type": "boolean"},
     "asset_scope": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT"]},
+    "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT", "STRUCTURAL_RISK"]},
     "context_group": {"type": ["string", "null"]}
   },
   "additionalProperties": false
