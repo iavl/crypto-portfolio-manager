@@ -27,7 +27,7 @@ those contracts; it is not a second schema or routing implementation.
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
 | growthepie | Ethereum L2 rent and DA economics | None | L2 rent, Ethereum DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
 | Blobscan | Ethereum blob demand history | None | blob count, bytes, blob transactions, utilization | ETH-specific public route; RPC is a protocol cross-check |
-| L2BEAT | Ethereum-secured L2 context | None | filtered L2 TVS and activity | ETH-specific public route; project classification is required |
+| L2BEAT | Ethereum-secured L2 context | `L2BEAT_API_KEY` via official `apiKey` query parameter | filtered L2 TVS and activity | ETH-specific route; current OpenAPI contract and host-chain classification are required |
 | Ethereum JSON-RPC | canonical execution fields | None | `baseFeePerGas`, `gasUsed`, `blobGasUsed`, `excessBlobGas` | bounded protocol cross-check; no per-block review fan-out |
 | Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` current fields | optional; not historical burn authority |
 | beaconcha.in | validator queues/entities | `BEACONCHAIN_API_KEY` | optional queue/context fields | optional/context-only; never required for scoring |
@@ -61,6 +61,13 @@ activity, and SoSoValue owns structured ETH ETF flow/AUM. Derived metrics such a
 ETH/BTC opportunity ratios, ETH staking/exchange-flow normalization, market
 flow state, and BTC-relative returns are computed by Python and have no
 provider route.
+
+Before acquisition, provider preflight reports configuration, adapter,
+credential requirement/presence, runtime readiness, and one of
+`CONFIG_DISABLED`, `CREDENTIAL_MISSING`, or `ADAPTER_UNAVAILABLE` when not
+ready. Network/request failures remain separate diagnostics such as `HTTP_401`,
+`HTTP_403`, `HTTP_429`, `TLS_CERTIFICATE_VERIFY_FAILED`, and
+`PROVIDER_SCHEMA_ERROR`.
 
 The current repository has no daemon, scheduler, database, queue, or exchange
 execution service. API keys are referenced by environment-variable name only;
@@ -145,10 +152,16 @@ explicit identifiers are `ETH → ethereum`, `AAVE → aave`, `SOL → solana`,
 | GET | `https://api.llama.fi/protocol/{identifier}` | protocol payload where implemented |
 
 Outputs include `fundamentals.tvl`, `fundamentals.fees_30d`,
-`fundamentals.revenue_30d`, `fundamentals.stablecoin_liquidity`, and
-`valuation.fee_revenue_multiple` where the response supplies the required
+`fundamentals.revenue_30d`, and `valuation.fee_revenue_multiple` where the response supplies the required
 inputs. DeFiLlama is not the canonical broad market-cap/FDV provider; TVL or
 price is never used to fabricate those values.
+
+Chain stablecoin supply is a separate route:
+`GET https://stablecoins.llama.fi/stablecoincharts/{Ethereum|Solana|BSC}`;
+global supply uses `/stablecoincharts/all`. The parser reads
+`totalCirculatingUSD.peggedUSD`, filters by `as_of`, and retains the chain or
+global scope. It never reads `stablecoinLiquidity` from
+`api.llama.fi/protocol/{identifier}`.
 
 ## Alternative.me
 
@@ -218,6 +231,11 @@ fetches each raw series once per request, treats `.` as missing, enforces the
 latest revision; historical replay is explicitly `LATEST_REVISION`, not
 point-in-time ALFRED fidelity.
 
+FRED freshness is publication-aware and series-specific: DFF/DFII10 are
+bounded at 7 days, DTWEXBGS at 14 days, WALCL at 14 days, and M2SL at 75 days.
+These bounds account for normal publication lag without making a series
+indefinitely current.
+
 ## GitHub developer activity
 
 GitHub uses the public
@@ -265,13 +283,18 @@ ending ETF date; missing AUM is unavailable and never zero-filled.
 ## Ethereum-specific public data
 
 The ETH route is split by economic meaning. growthepie uses
-`/v1/metrics/rent_paid.json` and `/v1/datimeseries.json` for L2 rent and
-Ethereum DA/blob data, retaining `growthepie / orbal GmbH` and `CC BY 4.0`
-attribution. Blobscan uses `https://api.blobscan.com/stats/timeseries` for
-convenient blob history; canonical execution block fields remain a cross-check,
-not a favorable-value fallback. L2BEAT uses `/v1/projects`, `/v1/tvs`, and
-`/v1/activity`, and refuses to aggregate projects without explicit Ethereum
-settlement/DA classification.
+`/v1/master.json` and `/v1/fundamentals.json` (or the documented
+`/v1/export/rent_paid.json`) for L2 rent and compatible DA/blob metrics,
+retaining `growthepie / orbal GmbH` and `CC BY 4.0` attribution. The
+`daoverview.json` and `datimeseries.json` endpoints are attempted only when
+the current contract permits them; a 403 remains a bounded provider failure.
+Blobscan uses `https://api.blobscan.com/stats/timeseries` with
+`timeFrame`, `metrics`, and `sort`, then parses
+`data.timestamps` plus `data.series[].metrics`; no guessed `data[]` wrapper is
+accepted. L2BEAT uses `https://api.l2beat.com/openapi` as the contract,
+requires the declared `apiKey` query credential, fetches current project
+details, and aggregates only `hostChain=Ethereum` projects from the documented
+`TvsChartDataPoint` and `ActivityChartDataPoint` arrays.
 
 Coin Metrics Community is checked first for catalog-supported ETH `SplyCur`,
 issuance, staking, MVRV, realized-cap, and realized-price primitives; Pro is
@@ -279,6 +302,26 @@ the configured fallback. Python derives supply growth, staking ratios,
 exchange-flow/market-cap, staking-flow/supply, and ETH flow/AUM ratios. Provider
 failure, unsupported catalog metrics, missing denominators, and conflicting
 rows remain unavailable; they never become zero or neutral positive evidence.
+
+### L2BEAT authentication contract
+
+The verified contract is the current OpenAPI document at
+`https://api.l2beat.com/openapi` (also linked from
+`https://api.l2beat.com/docs/`): OpenAPI `3.1.0`, server
+`https://api.l2beat.com`, and `components.securitySchemes.apiKeyAuth` as an
+API key in the query parameter `apiKey`. Top-level security requires
+`apiKeyAuth`; the GET operations inherit it because they do not override
+operation-level security. `/v1/projects` has no extra parameter;
+`/v1/tvs/{projectId}` accepts `range=7d|30d|90d|180d|1y|max`; and
+`/v1/activity/{projectId}` accepts `range=30d|90d|180d|1y|max`. The adapter
+therefore uses `L2BEAT_API_KEY` only when configured, sends the key as the
+documented query parameter, and never treats a bare HTTP 401 as proof of a
+credential requirement without this contract check.
+
+The opt-in provider probe checks the OpenAPI document and then probes the
+projects, TVS, and activity operations with redacted diagnostics. Missing
+credentials remain `CREDENTIAL_MISSING`; a credential-present 401 is reported
+as an authentication rejection.
 
 ## EventScanner
 

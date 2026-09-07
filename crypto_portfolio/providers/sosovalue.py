@@ -350,15 +350,18 @@ def _partial_parse_error(error: ProviderError) -> Mapping[str, Any]:
     diagnostic = getattr(error, "diagnostic", None)
     if hasattr(diagnostic, "as_dict"):
         return dict(diagnostic.as_dict())
+    detail = redact_secrets(str(error)) or error.__class__.__name__
     return {
         "error_code": (
             "PROVIDER_INSUFFICIENT_HISTORY"
             if isinstance(error, ProviderInsufficientHistory)
             else "PROVIDER_UNSUPPORTED"
             if isinstance(error, ProviderUnsupportedMetric)
+            else "DERIVED_INPUT_UNAVAILABLE"
+            if "AUM" in detail or "aum" in detail
             else "PROVIDER_SCHEMA_ERROR"
         ),
-        "detail": redact_secrets(str(error)) or error.__class__.__name__,
+        "detail": detail,
     }
 
 

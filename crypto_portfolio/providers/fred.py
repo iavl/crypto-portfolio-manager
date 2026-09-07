@@ -32,14 +32,32 @@ class SeriesSpec:
     frequency: str
     freshness: str
     unit: str
+    expected_publication_lag_days: int = 0
+    max_expected_observation_age_days: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.expected_publication_lag_days < 0:
+            raise ValueError("expected_publication_lag_days must be non-negative")
+        maximum = self.max_expected_observation_age_days
+        if maximum is None:
+            if not self.freshness.endswith("d"):
+                raise ValueError("freshness must be a day window")
+            maximum = int(self.freshness[:-1])
+        if maximum <= 0:
+            raise ValueError("max_expected_observation_age_days must be positive")
+        object.__setattr__(self, "max_expected_observation_age_days", maximum)
+
+    @property
+    def observation_frequency(self) -> str:
+        return self.frequency
 
 
 FRED_SERIES: dict[str, SeriesSpec] = {
-    "macro.dff": SeriesSpec("macro.dff", "DFF", "daily", "7d", "percent"),
-    "macro.dfii10": SeriesSpec("macro.dfii10", "DFII10", "daily", "7d", "percent"),
-    "macro.dtwexbgs": SeriesSpec("macro.dtwexbgs", "DTWEXBGS", "daily", "7d", "index"),
-    "macro.walcl": SeriesSpec("macro.walcl", "WALCL", "weekly", "14d", "USD_millions"),
-    "macro.m2sl": SeriesSpec("macro.m2sl", "M2SL", "monthly", "45d", "USD_billions"),
+    "macro.dff": SeriesSpec("macro.dff", "DFF", "daily", "7d", "percent", 1, 7),
+    "macro.dfii10": SeriesSpec("macro.dfii10", "DFII10", "daily", "7d", "percent", 1, 7),
+    "macro.dtwexbgs": SeriesSpec("macro.dtwexbgs", "DTWEXBGS", "daily", "14d", "index", 3, 14),
+    "macro.walcl": SeriesSpec("macro.walcl", "WALCL", "weekly", "14d", "USD_millions", 7, 14),
+    "macro.m2sl": SeriesSpec("macro.m2sl", "M2SL", "monthly", "75d", "USD_billions", 45, 75),
 }
 FRED_DERIVED_INPUTS: dict[str, tuple[str, ...]] = {
     "macro.fed_funds_change_90d": ("macro.dff",),
@@ -185,6 +203,8 @@ def derive_macro_features(
                 "source_provider": source,
                 "source_series_id": FRED_SERIES[input_key].series_id,
                 "source_frequency": FRED_SERIES[input_key].frequency,
+                "expected_publication_lag_days": FRED_SERIES[input_key].expected_publication_lag_days,
+                "max_expected_observation_age_days": FRED_SERIES[input_key].max_expected_observation_age_days,
                 "source_mode": "DERIVED",
                 "calculation": "difference" if not relative else "current / prior - 1",
                 "lookback_days": days,
@@ -268,6 +288,9 @@ class FREDProvider:
                 "metadata": {
                     "series_id": spec.series_id,
                     "frequency": spec.frequency,
+                    "observation_frequency": spec.observation_frequency,
+                    "expected_publication_lag_days": spec.expected_publication_lag_days,
+                    "max_expected_observation_age_days": spec.max_expected_observation_age_days,
                     "vintage_semantics": "LATEST_REVISION",
                     "realtime_start": point.realtime_start,
                     "realtime_end": point.realtime_end,
@@ -291,6 +314,7 @@ __all__ = [
     "FRED_SERIES",
     "FREDProvider",
     "FREDPoint",
+    "SeriesSpec",
     "OBSERVATIONS_PATH",
     "derive_macro_features",
     "parse_fred_series",

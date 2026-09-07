@@ -55,6 +55,7 @@
           "displayed_current_price_usd": {"type": ["number", "null"], "minimum": 0},
           "displayed_average_cost_price_usd": {"type": ["number", "null"], "minimum": 0},
           "performance": {"type": "object"},
+          "management_status": {"const": "EXCLUDED / UNMANAGED"},
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
           "asset_type_hint": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]}
         },

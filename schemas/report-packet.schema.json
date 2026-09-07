@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/report-packet.schema.json",
   "title": "Final report packet",
   "type": "object",
-  "required": ["review_type", "market_regime", "scores", "current_weights", "target_weights", "actions", "approved_amounts", "execution_zones", "historical_changes", "risk_flags", "critical_missing_data", "data_quality", "failed_data_fetches"],
+  "required": ["review_type", "market_regime", "scores", "current_weights", "target_weights", "actions", "approved_amounts", "execution_zones", "historical_changes", "risk_flags", "critical_missing_data", "data_quality", "failed_data_fetches", "script_failures"],
   "properties": {
     "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
     "market_regime": {"enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
@@ -47,7 +47,13 @@
                 "error_code": {"type": ["string", "null"], "minLength": 1},
                 "reason": {"type": ["string", "null"], "minLength": 1},
                 "endpoint": {"type": ["string", "null"], "minLength": 1},
-                "status_code": {"type": ["integer", "null"], "minimum": 100, "maximum": 599}
+                "status_code": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+                "method": {"type": ["string", "null"], "minLength": 1},
+                "attempt": {"type": ["integer", "null"], "minimum": 1},
+                "exception_class": {"type": ["string", "null"], "minLength": 1},
+                "detail": {"type": ["string", "null"], "minLength": 1},
+                "retryable": {"type": ["boolean", "null"]},
+                "log": {"type": ["string", "null"], "minLength": 1}
               },
               "additionalProperties": false
             }
@@ -55,8 +61,24 @@
         },
         "additionalProperties": false
       }
-    }
-    ,"positioning_summaries": {"type": "object", "additionalProperties": {"type": "object"}}
+    },
+    "script_failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["script", "command", "status", "exit_code", "log_source", "log"],
+        "properties": {
+          "script": {"type": "string", "minLength": 1},
+          "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "status": {"enum": ["FAILED", "TIMEOUT", "LAUNCH_FAILED"]},
+          "exit_code": {"type": ["integer", "null"]},
+          "log_source": {"enum": ["STDERR", "STDOUT", "LAUNCHER"]},
+          "log": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "positioning_summaries": {"type": "object", "additionalProperties": {"type": "object"}}
     ,"btc_cycle_summary": {"type": ["object", "null"]}
     ,"overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]}
     ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}

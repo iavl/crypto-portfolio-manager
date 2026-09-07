@@ -317,6 +317,8 @@ def _assessment_symbols(
     symbols = list(policy.core_symbols) + list(policy.satellite_symbols)
     for raw_symbol in assessments:
         symbol = str(raw_symbol).strip().upper()
+        if policy.is_excluded(symbol):
+            continue
         if symbol not in symbols and policy.classify(symbol) in {"core", "satellite"}:
             symbols.append(symbol)
     return symbols

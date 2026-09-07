@@ -12,12 +12,19 @@ from .bybit import BASE_URL as BYBIT_BASE_URL
 from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, CoinMetricsProvider, catalog_metrics
 from .coingecko import BASE_URL as COINGECKO_BASE_URL, COINGECKO_IDS, CoinGeckoProvider
 from .chain_liveness import CHAIN_NATIVE_ASSETS, ChainLivenessProvider
-from .defillama import BASE_URL as DEFILLAMA_BASE_URL
 from .github_activity import BASE_URL as GITHUB_BASE_URL, GitHubActivityProvider, REPOSITORY_ALLOWLIST
 from .http import classify_transport_error, redact_secrets, redact_url
 from .fred import FREDProvider, FRED_SERIES, BASE_URL as FRED_BASE_URL, OBSERVATIONS_PATH
 from .router import ProviderRouter
 from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_HISTORICAL_INFLOW_PATH, SoSoValueProvider
+from .l2beat import (
+    BASE_URL as L2BEAT_BASE_URL,
+    OPENAPI_PATH as L2BEAT_OPENAPI_PATH,
+    PROJECTS_PATH,
+    L2BeatProvider,
+)
+from .growthepie import BASE_URL as GROWTHEPIE_BASE_URL, FUNDAMENTALS_PATH, MASTER_PATH, parse_master_payload
+from .blobscan import BASE_URL as BLOBCAN_BASE_URL, TIMESERIES_PATH as BLOBCAN_TIMESERIES_PATH, parse_timeseries as parse_blobscan_timeseries
 
 
 _NETWORK_FAILURES = {
@@ -74,6 +81,7 @@ def _probe_call(
         value = call()
         if validate is not None:
             validate(value)
+        result["http_status"] = 200
     except Exception as exc:  # probes report failures instead of aborting all providers
         diagnostic = _diagnostic(exc, endpoint)
         code = str(diagnostic["error_code"]).upper()
@@ -87,6 +95,8 @@ def _probe_call(
             "exception_class": diagnostic.get("exception_class"),
             "detail": redact_secrets(detail),
         })
+        if diagnostic.get("status_code") is not None:
+            result["http_status"] = diagnostic["status_code"]
         if "history is insufficient" in detail.lower() or "no data at or before" in detail.lower():
             result["history"] = "INSUFFICIENT"
         return result
@@ -103,6 +113,11 @@ def _require_list(value: Any) -> None:
         raise ProviderResponseError("probe response schema has no data list")
 
 
+def _require_array(value: Any) -> None:
+    if not isinstance(value, list):
+        raise ProviderResponseError("probe response schema is not an array")
+
+
 def _require_number(value: Any) -> None:
     if isinstance(value, bool):
         raise ProviderResponseError("probe response schema is not numeric")
@@ -116,6 +131,72 @@ def _require_observations(value: Any) -> None:
     observations = getattr(value, "observations", value)
     if isinstance(observations, (str, bytes)) or not isinstance(observations, Iterable) or not tuple(observations):
         raise ProviderResponseError("probe response schema has no normalized observations")
+
+
+def validate_l2beat_openapi(value: Any) -> dict[str, Any]:
+    """Validate the documented L2BEAT security and read-operation contract."""
+    if not isinstance(value, Mapping) or value.get("openapi") != "3.1.0":
+        raise ProviderResponseError("L2BEAT OpenAPI version is not 3.1.0")
+    servers = value.get("servers")
+    if not isinstance(servers, list) or not any(
+        isinstance(item, Mapping) and item.get("url") == L2BEAT_BASE_URL
+        for item in servers
+    ):
+        raise ProviderResponseError("L2BEAT OpenAPI server is not api.l2beat.com")
+    schemes = value.get("components", {}).get("securitySchemes", {})
+    if not isinstance(schemes, Mapping) or schemes.get("apiKeyAuth") != {
+        "in": "query", "name": "apiKey", "type": "apiKey",
+    }:
+        raise ProviderResponseError("L2BEAT OpenAPI apiKeyAuth schema changed")
+    if value.get("security") != [{"apiKeyAuth": []}]:
+        raise ProviderResponseError("L2BEAT OpenAPI top-level security changed")
+    paths = value.get("paths", {})
+    if not isinstance(paths, Mapping) or not all(
+        path in paths for path in ("/v1/projects", "/v1/tvs", "/v1/activity")
+    ):
+        raise ProviderResponseError("L2BEAT OpenAPI is missing required read paths")
+
+    def operation(path: str) -> Mapping[str, Any]:
+        raw_path = paths.get(path)
+        if not isinstance(raw_path, Mapping) or not isinstance(raw_path.get("get"), Mapping):
+            raise ProviderResponseError(f"L2BEAT OpenAPI is missing GET {path}")
+        operation_value = raw_path["get"]
+        if operation_value.get("security") is not None:
+            raise ProviderResponseError(f"L2BEAT GET {path} overrides top-level security")
+        return operation_value
+
+    projects = operation("/v1/projects")
+    if projects.get("parameters", []) != []:
+        raise ProviderResponseError("L2BEAT projects operation parameters changed")
+
+    def validate_range(path: str, allowed: list[str]) -> None:
+        parameters = operation(path).get("parameters", [])
+        if not isinstance(parameters, list):
+            raise ProviderResponseError(f"L2BEAT {path} parameters are malformed")
+        range_parameters = [
+            item for item in parameters
+            if isinstance(item, Mapping) and item.get("in") == "query" and item.get("name") == "range"
+        ]
+        if len(range_parameters) != 1:
+            raise ProviderResponseError(f"L2BEAT {path} range parameter changed")
+        schema = range_parameters[0].get("schema")
+        if not isinstance(schema, Mapping) or schema.get("enum") != allowed:
+            raise ProviderResponseError(f"L2BEAT {path} range values changed")
+
+    validate_range("/v1/tvs", ["7d", "30d", "90d", "180d", "1y", "max"])
+    validate_range("/v1/activity", ["30d", "90d", "180d", "1y", "max"])
+    return {
+        "openapi_version": "3.1.0",
+        "server": L2BEAT_BASE_URL,
+        "auth_scheme": "apiKey query parameter",
+        "top_level_security": "apiKeyAuth",
+        "operation_security": "inherits top-level security",
+        "expected_paths": ["/v1/projects", "/v1/tvs", "/v1/activity"],
+        "range_parameters": {
+            "/v1/tvs": ["7d", "30d", "90d", "180d", "1y", "max"],
+            "/v1/activity": ["30d", "90d", "180d", "1y", "max"],
+        },
+    }
 
 
 def _sosovalue_probe(provider: SoSoValueProvider, asset: str = "BTC") -> dict[str, Any]:
@@ -241,6 +322,101 @@ def probe_provider(
         return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
         return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
+    if name == "l2beat" and isinstance(provider, L2BeatProvider):
+        endpoint = L2BEAT_BASE_URL + L2BEAT_OPENAPI_PATH
+        contract: dict[str, Any] = {}
+        result = _probe_call(
+            "l2beat",
+            endpoint,
+            lambda: client.get_json(endpoint),
+            validate=lambda value: contract.update(validate_l2beat_openapi(value)),
+        )
+        result.update(contract)
+        rows = [_with_config(result, client)]
+        if "error_code" in result:
+            return tuple(rows)
+
+        captured: dict[str, Any] = {}
+        projects_endpoint = L2BEAT_BASE_URL + PROJECTS_PATH
+        projects = _probe_call(
+            "l2beat",
+            projects_endpoint,
+            lambda: captured.setdefault("projects", provider._get(PROJECTS_PATH)),
+            authenticated=True,
+            validate=_require_array,
+        )
+        rows.append(_with_config(projects, client))
+        project_rows = captured.get("projects", ())
+        project_id = next(
+            (
+                str(item.get("id")).strip()
+                for item in project_rows
+                if isinstance(item, Mapping) and item.get("id") is not None and str(item.get("id")).strip()
+            ),
+            None,
+        )
+        if project_id is None or "error_code" in projects:
+            return tuple(rows)
+        for path, range_value in (("/v1/tvs", "30d"), ("/v1/activity", "30d")):
+            endpoint = f"{L2BEAT_BASE_URL}{path}/{project_id}"
+            probe = _probe_call(
+                "l2beat",
+                endpoint,
+                lambda path=path: provider._get(f"{path}/{project_id}", params={"range": range_value}),
+                authenticated=True,
+                validate=_require_array,
+            )
+            probe["operation_path"] = path
+            rows.append(_with_config(probe, client))
+        return tuple(rows)
+    if name == "growthepie":
+        master_endpoint = GROWTHEPIE_BASE_URL + MASTER_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            master = client.get_json(master_endpoint)
+            captured["master"] = parse_master_payload(master)
+            fundamentals = client.get_json(GROWTHEPIE_BASE_URL + FUNDAMENTALS_PATH)
+            if not isinstance(fundamentals, list) or any(not isinstance(row, Mapping) for row in fundamentals[:10]):
+                raise ProviderResponseError("growthepie fundamentals response is not a row array")
+            captured["fundamentals_rows"] = len(fundamentals)
+            return master
+
+        result = _probe_call("growthepie", master_endpoint, call, validate=lambda value: parse_master_payload(value))
+        if "error_code" not in result:
+            result.update({
+                "master_version": captured["master"].get("last_updated_utc"),
+                "chain_count": len(captured["master"]["chains"]),
+                "fundamentals_rows": captured["fundamentals_rows"],
+                "endpoint_name": "master.json + fundamentals.json",
+            })
+        return (_with_config(result, client),)
+    if name == "blobscan":
+        endpoint = BLOBCAN_BASE_URL + BLOBCAN_TIMESERIES_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            payload = client.get_json(endpoint, params={
+                "timeFrame": "7d",
+                "metrics": "totalBlobs,totalBlobSize,totalBlobUsageSize,totalTransactions",
+                "sort": "asc",
+            })
+            captured["observations"] = parse_blobscan_timeseries(
+                payload,
+                ("eth.blobs.count_1d",),
+                fetched_at=_now(),
+            )
+            return payload
+
+        result = _probe_call("blobscan", endpoint, call, validate=lambda value: isinstance(value, Mapping))
+        if "error_code" not in result:
+            result.update({
+                "expected_metric": "totalBlobs",
+                "normalized_metric": "eth.blobs.count_1d",
+                "latest_value": captured["observations"][0]["value"],
+                "endpoint_name": "stats/timeseries",
+            })
+        return (_with_config(result, client),)
     if name == "fred" and isinstance(provider, FREDProvider):
         endpoint = FRED_BASE_URL + OBSERVATIONS_PATH
         captured: dict[str, Any] = {}
@@ -331,8 +507,13 @@ def probe_provider(
         endpoint = SPOT_BASE_URL + "/api/v3/ticker/price"
         return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"symbol": "BTCUSDT"}), validate=lambda value: _require_mapping(value)), client),)
     if name == "defillama":
-        endpoint = DEFILLAMA_BASE_URL + "/tvl/aave"
-        return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint), validate=_require_number), client),)
+        endpoint = "https://stablecoins.llama.fi/stablecoincharts/Ethereum"
+        return (_with_config(_probe_call(
+            name,
+            endpoint,
+            lambda: client.get_json(endpoint),
+            validate=_require_array,
+        ), client),)
     if name == "bybit":
         endpoint = BYBIT_BASE_URL + "/v5/market/tickers"
         return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint, params={"category": "spot", "symbol": "BTCUSDT"}), validate=lambda value: _require_mapping(value)), client),)
@@ -383,4 +564,4 @@ def probe_providers(
     return tuple(result)
 
 
-__all__ = ["probe_provider", "probe_providers"]
+__all__ = ["probe_provider", "probe_providers", "validate_l2beat_openapi"]

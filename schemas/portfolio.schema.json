@@ -33,6 +33,12 @@
           "uniqueItems": true,
           "description": "Resolved from config/policy.json unless explicitly overridden."
         },
+        "excluded_symbols": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "description": "Resolved from config/policy.json unless explicitly overridden."
+        },
         "min_stablecoin_weight": {
           "type": "number",
           "minimum": 0,

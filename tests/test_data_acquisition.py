@@ -8,19 +8,24 @@ from urllib.error import URLError
 from unittest.mock import patch
 
 from crypto_portfolio.acquisition import AcquisitionManager, FetchMode
-from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
+from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest, build_metric_collection_plan
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.models.events import EventScanResult
 from crypto_portfolio.models.market import Candle, OHLCVSeries
+from crypto_portfolio.models.portfolio import normalize_snapshot
+from crypto_portfolio.events import EventSourceScanResponse
 from crypto_portfolio.providers.alternative_me import parse_fear_greed
 from crypto_portfolio.providers.base import (
     ProviderAuthenticationError,
+    ProviderCapabilities,
     ProviderDiagnostic,
     ProviderRequest,
     ProviderRateLimited,
     ProviderResponseError,
     ProviderUnavailable,
+    ProviderUnsupportedMetric,
 )
+from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.providers.binance import BinanceProvider
 from crypto_portfolio.providers.bybit import BybitProvider
 from crypto_portfolio.providers.cache import CacheExpired, ProviderCache, request_hash
@@ -409,7 +414,7 @@ class DataAcquisitionTests(unittest.TestCase):
         class TvlClient:
             def get_json(self, url, *, params=None, headers=None):
                 self.url = url
-                return 123
+                return [{"date": "1788777600", "totalCirculatingUSD": {"peggedUSD": 123}}]
 
         from crypto_portfolio.providers.defillama import DeFiLlamaProvider
 
@@ -421,7 +426,7 @@ class DataAcquisitionTests(unittest.TestCase):
         result = probe_provider(router, "defillama")[0]
         self.assertEqual(result["network"], "OK")
         self.assertEqual(result["schema"], "OK")
-        self.assertEqual(client.url, "https://api.llama.fi/tvl/aave")
+        self.assertEqual(client.url, "https://stablecoins.llama.fi/stablecoincharts/Ethereum")
 
     def test_coinmetrics_catalog_omits_unsupported_assets_filter(self):
         class CatalogClient:
@@ -934,6 +939,179 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(by_key["market.flow_state"].source, "python-derived")
         self.assertEqual(result.summary["counts"]["FAILED"], 0)
 
+    def test_breadth_state_is_python_derived_from_breadth(self):
+        cached = normalize_metric_result({
+            "asset": "MARKET",
+            "metric_key": "market.breadth",
+            "value": 0.75,
+            "unit": "fraction",
+            "observed_at": "2026-09-05T23:00:00Z",
+            "fetched_at": "2026-09-05T23:00:00Z",
+            "source": "coingecko",
+            "confidence": "HIGH",
+        }).observation
+        result = AcquisitionManager(
+            ProviderRouter({}, config=config_for()),
+            persist=False,
+        ).run(
+            MetricCollectionPlan("SNAPSHOT_REVIEW", (
+                MetricRequest("MARKET", "market.breadth_state"),
+            )),
+            mode="AUTO",
+            cached_observations=(cached,),
+            as_of="2026-09-06T00:00:00Z",
+            now="2026-09-06T00:00:00Z",
+        )
+        self.assertEqual(result.results[0].status, "SUCCESS")
+        self.assertEqual(result.observations[0].value, "HEALTHY")
+        self.assertEqual(result.observations[0].source, "python-derived")
+
+    def test_lunc_is_excluded_before_provider_routing(self):
+        class FailedSpotProvider:
+            def __init__(self):
+                self.assets = []
+
+            capabilities = type("Capabilities", (), {"supports": lambda self, _key: True})()
+
+            def collect(self, request):
+                self.assets.append(request.asset)
+                if request.asset == "BTC":
+                    return [{
+                        "asset": "BTC",
+                        "metric_key": request.metric_keys[0],
+                        "value": 0.1,
+                        "unit": "fraction",
+                        "observed_at": "2026-09-06T00:00:00Z",
+                        "fetched_at": "2026-09-06T00:00:00Z",
+                        "source": "binance",
+                        "confidence": "HIGH",
+                    }]
+                raise ProviderUnavailable("LUNC spot kline unavailable")
+
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("BTC", "market.return_30d"),
+            MetricRequest("LUNC", "market.relative_volume"),
+        ))
+        provider = FailedSpotProvider()
+        result = AcquisitionManager(
+            ProviderRouter(
+                {"binance": provider, "bybit": provider},
+                config=config_for("binance", "bybit"),
+            ),
+            persist=False,
+        ).run(plan, mode="REFRESH", cached_observations=(), now="2026-09-06T00:00:00Z")
+        self.assertEqual(result.plan.excluded_assets, ("LUNC",))
+        self.assertTrue(result.results)
+        self.assertNotIn("LUNC", provider.assets)
+        self.assertEqual(result.summary["metrics_requested"], 1)
+        self.assertEqual(result.summary["pending_external_resolution"], 0)
+        self.assertEqual(result.summary["policy_weighted_coverage"], 1.0)
+
+    def test_realistic_portfolio_two_pass_acquisition_regression(self):
+        portfolio = normalize_snapshot({
+            "timestamp": "2026-09-06T00:00:00Z",
+            "total_value": 100000,
+            "positions": [
+                {"symbol": symbol, "value_usd": 10000}
+                for symbol in ("MARKET", "BTC", "ETH", "AAVE", "USDT", "USDC", "U", "USD1", "LUNC")
+            ],
+        })
+        types = {item["symbol"]: item["asset_type"] for item in portfolio["positions"]}
+        self.assertEqual(types["U"], "stablecoin")
+        self.assertEqual(types["USD1"], "stablecoin")
+        self.assertEqual(types["LUNC"], "other")
+        collection_plan = build_metric_collection_plan(portfolio)
+        self.assertEqual(collection_plan.excluded_assets, ("LUNC",))
+        self.assertNotIn("LUNC", collection_plan.assets)
+        self.assertEqual(collection_plan.for_asset("LUNC"), ())
+        self.assertNotIn("LUNC", collection_plan.discovery_required_assets)
+
+        class FixtureProvider:
+            def __init__(self, name, values):
+                self.name = name
+                self.values = values
+                self.capabilities = ProviderCapabilities(
+                    provider=name,
+                    metric_keys=tuple(values),
+                    supports_batching=True,
+                )
+
+            def collect(self, request):
+                return [{
+                    "asset": request.asset,
+                    "metric_key": key,
+                    "value": self.values[key],
+                    "unit": metric_definition(key).unit,
+                    "period": "1d",
+                    "observed_at": "2026-09-06T00:00:00Z",
+                    "fetched_at": "2026-09-06T00:00:00Z",
+                    "source": self.name,
+                    "confidence": "HIGH",
+                } for key in request.metric_keys]
+
+        config = config_for("binance", "coingecko", "defillama", "coinmetrics_community", "sosovalue", "fred")
+        providers = {
+            "binance": FixtureProvider("binance", {"market.spot_price": 2000}),
+            "coingecko": FixtureProvider("coingecko", {
+                "market.btc_dominance": 0.59,
+                "market.total_crypto_market_cap": 2_600_000_000_000,
+                "market.breadth": 0.65,
+            }),
+            "defillama": FixtureProvider("defillama", {
+                "market.stablecoin_supply": 180_000_000_000,
+                "fundamentals.stablecoin_liquidity": 80_000_000_000,
+            }),
+            "coinmetrics_community": FixtureProvider("coinmetrics_community", {
+                "btc_valuation.realized_price": 1500,
+                "eth_valuation.realized_price": 1500,
+            }),
+            "sosovalue": FixtureProvider("sosovalue", {
+                "flows.etf_net_7d": 100_000_000,
+                "flows.eth_etf_aum_usd": 10_000_000_000,
+            }),
+            "fred": FixtureProvider("fred", {"macro.dff": 5.0}),
+        }
+        plan = MetricCollectionPlan("EVENT_REVIEW", (
+            MetricRequest("MARKET", "market.btc_dominance"),
+            MetricRequest("MARKET", "market.total_crypto_market_cap"),
+            MetricRequest("MARKET", "market.stablecoin_supply"),
+            MetricRequest("MARKET", "market.breadth"),
+            MetricRequest("MARKET", "market.breadth_state"),
+            MetricRequest("BTC", "market.spot_price"),
+            MetricRequest("BTC", "btc_valuation.realized_price"),
+            MetricRequest("BTC", "btc_valuation.price_to_realized_price"),
+            MetricRequest("BTC", "macro.dff"),
+            MetricRequest("ETH", "market.spot_price"),
+            MetricRequest("ETH", "eth_valuation.realized_price"),
+            MetricRequest("ETH", "eth_valuation.price_to_realized_price"),
+            MetricRequest("ETH", "fundamentals.stablecoin_liquidity"),
+            MetricRequest("ETH", "flows.eth_etf_net_to_aum_7d"),
+            MetricRequest("ETH", "risk.security_event_status"),
+            MetricRequest("AAVE", "risk.security_event_status"),
+        ))
+        manager = AcquisitionManager(
+            ProviderRouter(providers, config=config),
+            persist=False,
+        )
+        first = manager.run(plan, mode="REFRESH", as_of="2026-09-06T00:00:00Z", now="2026-09-06T00:00:00Z")
+        self.assertTrue(first.pending_event_scans)
+        self.assertEqual(first.web_fallbacks, ())
+        self.assertTrue(any(item.metric_key == "btc_valuation.price_to_realized_price" for item in first.observations))
+        self.assertTrue(any(item.metric_key == "eth_valuation.price_to_realized_price" for item in first.observations))
+        responses = tuple(EventSourceScanResponse(
+            request.source_id, True, request.as_of, (), None
+        ) for request in first.pending_event_scans)
+        second = manager.run(
+            plan,
+            mode="REFRESH",
+            as_of="2026-09-06T00:00:00Z",
+            now="2026-09-06T00:00:00Z",
+            event_source_scan_responses=responses,
+        )
+        self.assertEqual(second.pending_event_scans, ())
+        second.require_scoring_ready()
+        self.assertTrue(all(item.status == "SUCCESS" for item in second.results))
+
     def test_disabled_provider_failure_keeps_a_stable_diagnostic_code(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
             MetricRequest("BTC", "sentiment.social_mentions_24h"),
@@ -945,8 +1123,8 @@ class DataAcquisitionTests(unittest.TestCase):
             persist=False,
         ).run(plan, mode="AUTO", cached_observations=())
         self.assertEqual(result.results[0].status, "SKIPPED")
-        self.assertEqual(result.results[0].event.refresh_error_code, "PROVIDER_DISABLED")
-        self.assertEqual(result.attempts[0]["error_code"], "PROVIDER_DISABLED")
+        self.assertEqual(result.results[0].event.refresh_error_code, "CONFIG_DISABLED")
+        self.assertEqual(result.attempts[0]["error_code"], "CONFIG_DISABLED")
 
     def test_chain_liveness_failure_keeps_a_stable_diagnostic_code(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
@@ -1033,6 +1211,7 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result.unresolved_details[0]["asset"], "BTC")
         self.assertEqual(result.unresolved_details[0]["metric_key"], "derivatives.funding_rate")
         self.assertEqual(result.unresolved_details[0]["providers_attempted"], ["binance", "bybit"])
+        self.assertIn("Traceback", result.attempts[0].log)
         self.assertNotIn("provider unavailable", str(result.unresolved_details[0]))
 
     def test_router_unresolved_details_only_include_missing_bundle_identities(self):
@@ -1191,6 +1370,61 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertFalse(row.adapter_available)
         self.assertFalse(row.runtime_ready)
 
+    def test_fred_auto_registers_from_the_runtime_environment(self):
+        config = config_for("fred")
+        config["providers"]["fred"] = {"enabled": "AUTO", "api_key_env": "FRED_API_KEY"}
+        with patch.dict("os.environ", {"FRED_API_KEY": "fake-32-char-key"}, clear=True):
+            router = ProviderRouter(config=config, http_client=object())
+            self.assertIn("fred", router.providers)
+            status = {item.provider: item for item in router.provider_runtime_status()}["fred"]
+        self.assertTrue(status.config_enabled)
+        self.assertTrue(status.credential_present)
+        self.assertTrue(status.adapter_available)
+        self.assertTrue(status.runtime_ready)
+
+    def test_optional_coinmetrics_pro_does_not_hide_community_unsupported_reason(self):
+        class CommunityProvider:
+            capabilities = type("Capabilities", (), {"supports": lambda self, _key: True})()
+
+            def collect(self, _request):
+                raise ProviderUnsupportedMetric("Community catalog has no required metric")
+
+        config = config_for("coinmetrics_community")
+        config["providers"]["coinmetrics_community"] = {"enabled": True}
+        result = AcquisitionManager(
+            ProviderRouter(
+                {"coinmetrics_community": CommunityProvider()},
+                config=config,
+            ),
+            persist=False,
+        ).run(
+            MetricCollectionPlan("SNAPSHOT_REVIEW", (
+                MetricRequest("BTC", "onchain.active_addresses"),
+            )),
+            mode="REFRESH",
+            cached_observations=(),
+            now="2026-09-06T00:00:00Z",
+        )
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertIn("PROVIDER_UNSUPPORTED", result.results[0].event.reason)
+        self.assertIn("optional Coin Metrics Pro fallback is not configured", result.results[0].event.reason)
+
+    def test_provider_preflight_uses_specific_unready_reason_codes(self):
+        config = config_for("sosovalue", "fred")
+        config["providers"]["sosovalue"] = {"enabled": "AUTO", "api_key_env": "SOSOVALUE_API_KEY"}
+        config["providers"]["fred"] = {"enabled": False, "api_key_env": "FRED_API_KEY"}
+        statuses = {item.provider: item for item in provider_runtime_status(
+            config, adapters={"sosovalue": object()}, environ={}
+        )}
+        self.assertEqual(statuses["sosovalue"].reason, "CREDENTIAL_MISSING")
+        self.assertEqual(statuses["fred"].reason, "CONFIG_DISABLED")
+        self.assertEqual(
+            {item.provider: item for item in provider_runtime_status(
+                config, adapters={}, environ={"SOSOVALUE_API_KEY": "key"}
+            )}["sosovalue"].reason,
+            "ADAPTER_UNAVAILABLE",
+        )
+
     def test_binance_spot_and_klines_use_public_endpoints(self):
         class FakeClient:
             def __init__(self): self.urls = []
@@ -1205,16 +1439,14 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertTrue(provider.candles("BTC").candles[0].completed)
         self.assertEqual([url.split("//", 1)[1].split("/", 1)[0] for url, _ in client.urls], ["api.binance.com", "api.binance.com"])
 
-    def test_binance_supports_lunc_public_pair(self):
+    def test_binance_does_not_advertise_excluded_lunc_pair(self):
         class FakeClient:
             def get_json(self, url, *, params=None, headers=None):
                 self.params = params
                 return {"symbol": "LUNCUSDT", "price": "0.00005"}
 
-        client = FakeClient()
-        price = BinanceProvider(client=client).spot_price("LUNC")
-        self.assertEqual(price.symbol, "LUNC")
-        self.assertEqual(client.params["symbol"], "LUNCUSDT")
+        with self.assertRaises(ProviderUnsupportedMetric):
+            BinanceProvider(client=FakeClient()).spot_price("LUNC")
 
 
 if __name__ == "__main__":

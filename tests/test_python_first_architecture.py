@@ -62,6 +62,9 @@ class PythonFirstArchitectureTests(unittest.TestCase):
         self.assertFalse(plan.for_asset("USDT"))
         self.assertTrue(plan.for_asset("SOL"))
         self.assertIn("market.spot_price", plan.metric_keys)
+        excluded = build_metric_collection_plan(["BTC", "LUNC"])
+        self.assertEqual(excluded.excluded_assets, ("LUNC",))
+        self.assertEqual(excluded.for_asset("LUNC"), ())
 
     def test_review_specific_criticality_is_resolved_by_plan(self):
         governance = METRIC_REGISTRY["risk.governance_event_status"]
@@ -266,6 +269,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             "factor-packet.schema.json": factor_packet.as_dict(),
             "decision-review-packet.schema.json": packet.as_dict(),
             "report-packet.schema.json": report.as_dict(),
+            "metric-collection-plan.schema.json": build_metric_collection_plan(["BTC", "LUNC"]).as_dict(),
         }
         for filename, payload in payloads.items():
             schema = json.loads((root / "schemas" / filename).read_text())

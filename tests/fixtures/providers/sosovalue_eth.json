@@ -1,0 +1,9 @@
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {"date": "2026-09-01", "totalNetInflow": 1000000, "totalNetAssets": 20000000000},
+    {"date": "2026-09-02", "totalNetInflow": -500000, "totalNetAssets": 19950000000},
+    {"date": "2026-09-03", "totalNetInflow": 750000, "totalNetAssets": 20025000000}
+  ]
+}

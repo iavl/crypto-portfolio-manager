@@ -51,6 +51,7 @@ class DocumentationTests(unittest.TestCase):
             "schemas/report-packet.schema.json",
             "schemas/factor-judgment.schema.json",
             "scripts",
+            "scripts/run_with_debug.py",
         )
         for relative_path in required_paths:
             with self.subTest(relative_path=relative_path):
@@ -83,6 +84,7 @@ class DocumentationTests(unittest.TestCase):
         for text in (
             "COINGECKO_API_KEY", "GITHUB_TOKEN", "SOSOVALUE_API_KEY",
             "CapMrktEstUSD", "historicalInflowChart", "PROVIDER_INSUFFICIENT_HISTORY",
+            "L2BEAT_API_KEY", "query parameter `apiKey`", "OpenAPI `3.1.0`",
             "`SKIPPED`", "`NOT_APPLICABLE`",
         ):
             with self.subTest(text=text):
@@ -134,6 +136,10 @@ class DocumentationTests(unittest.TestCase):
             "NAV Return",
             "成本数据覆盖率",
             "scoring/decision effect",
+            "Debug 报告",
+            "脚本执行异常",
+            "程序失败日志",
+            "直接失败日志",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, template)
@@ -148,6 +154,11 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertIn("MATERIAL_EVENT_FOUND` means a relevant proposal or announcement", skill)
         self.assertIn("result.pending_event_scans", skill)
+        self.assertIn("result.finalized", skill)
+        self.assertIn("policy.universe.excluded", skill)
+        self.assertIn("pending external", skill)
+        self.assertIn("scripts/run_with_debug.py", skill)
+        self.assertIn("script_executions", skill)
         self.assertNotIn("result.event_source_scan_requests", skill)
         self.assertIn("not proof of an exploit, approval, or execution", template)
 

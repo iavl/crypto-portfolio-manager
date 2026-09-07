@@ -64,20 +64,26 @@ def _timestamp(value: Any) -> str:
     return normalize_timestamp(value, "Blobscan row timestamp")
 
 
-def _rows(payload: Any) -> tuple[Mapping[str, Any], ...]:
-    if isinstance(payload, list):
-        raw = payload
-    elif isinstance(payload, Mapping):
-        raw = payload.get("data", payload.get("rows", payload.get("result")))
-        if isinstance(raw, Mapping):
-            raw = raw.get("data", raw.get("rows", raw.get("result")))
-    else:
-        raw = None
-    if not isinstance(raw, list):
-        raise ProviderResponseError("Blobscan response has no row list")
-    if any(not isinstance(row, Mapping) for row in raw):
-        raise ProviderDataError("Blobscan response contains a malformed row")
-    return tuple(raw)
+def _series(payload: Any) -> tuple[tuple[str, ...], tuple[Mapping[str, Any], ...]]:
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("data"), Mapping):
+        raise ProviderResponseError("Blobscan response must contain a data object")
+    data = payload["data"]
+    timestamps = data.get("timestamps")
+    series = data.get("series")
+    if not isinstance(timestamps, list) or not isinstance(series, list):
+        raise ProviderResponseError("Blobscan timeseries data requires timestamps and series")
+    parsed_timestamps = tuple(_timestamp(item) for item in timestamps)
+    parsed_series: list[Mapping[str, Any]] = []
+    for index, item in enumerate(series):
+        if not isinstance(item, Mapping) or set(item) != {"dimension", "startTimestampIdx", "metrics"}:
+            raise ProviderResponseError(f"Blobscan series {index} does not match the official schema")
+        if not isinstance(item["dimension"], Mapping) or not isinstance(item["metrics"], Mapping):
+            raise ProviderDataError(f"Blobscan series {index} is malformed")
+        start = item["startTimestampIdx"]
+        if isinstance(start, bool) or not isinstance(start, (int, float)) or int(start) != start or start < 0:
+            raise ProviderDataError("Blobscan startTimestampIdx is invalid")
+        parsed_series.append({"dimension": dict(item["dimension"]), "startTimestampIdx": int(start), "metrics": dict(item["metrics"])})
+    return parsed_timestamps, tuple(parsed_series)
 
 
 def _field(row: Mapping[str, Any], names: Iterable[str], *, fraction: bool = False) -> float | None:
@@ -98,52 +104,73 @@ def parse_timeseries(
     requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
     if not requested or any(key not in _KEYS for key in requested):
         raise ProviderUnsupportedMetric("Blobscan does not support the requested metrics")
+    timestamps, series = _series(payload)
     cutoff = parse_timestamp(as_of) if as_of else None
-    by_day: dict[str, Mapping[str, Any]] = {}
-    for row in _rows(payload):
-        timestamp = _timestamp(row.get("date", row.get("timestamp", row.get("time"))))
-        if cutoff is not None and parse_timestamp(timestamp) > cutoff:
-            continue
-        day = timestamp[:10]
-        previous = by_day.get(day)
-        if previous is not None and previous != row:
-            raise ProviderDataError(f"Blobscan has conflicting duplicate interval for {day}")
-        by_day[day] = row
-    if not by_day:
-        raise ProviderInsufficientHistory("Blobscan time series is empty")
-    ordered = sorted(by_day.items())
-    latest_day = ordered[-1][0]
-    latest_timestamp = _timestamp(ordered[-1][1].get("date", ordered[-1][1].get("timestamp", ordered[-1][1].get("time"))))
-    start_day = (parse_timestamp(latest_day + "T00:00:00Z") - timedelta(days=29)).date().isoformat()
-    selected = [(day, row) for day, row in ordered if day >= start_day]
-    if not selected:
-        raise ProviderInsufficientHistory("Blobscan time series has no selected interval")
-    count_values = [(_field(row, ("blob_count", "blobCount", "count", "blobs"))) for _, row in selected]
-    bytes_values = [(_field(row, ("data_bytes", "dataBytes", "blob_data_bytes"))) for _, row in selected]
-    tx_values = [(_field(row, ("blob_transactions", "blobTransactions", "transactions", "transaction_count"))) for _, row in selected]
-    utilization_values = [(_field(row, ("utilization", "blob_utilization"), fraction=True)) for _, row in selected]
-    if any(value is not None and value > 1 for value in utilization_values):
-        utilization_values = [value / 100 if value is not None else None for value in utilization_values]
+    global_series = next((item for item in series if item["dimension"].get("type") == "global"), None)
+    if global_series is None:
+        raise ProviderUnsupportedMetric("Blobscan timeseries has no global dimension")
+    metric_values: dict[str, list[tuple[str, float]]] = {}
+    start = global_series["startTimestampIdx"]
+    for metric, values in global_series["metrics"].items():
+        if not isinstance(values, list):
+            raise ProviderDataError(f"Blobscan metric {metric} is not an array")
+        points = []
+        for offset, value in enumerate(values):
+            index = start + offset
+            if index >= len(timestamps):
+                raise ProviderResponseError(f"Blobscan metric {metric} exceeds timestamp array")
+            points.append((timestamps[index], _number(value, f"Blobscan {metric}")))
+        metric_values[metric] = points
+    if not metric_values:
+        raise ProviderInsufficientHistory("Blobscan time series has no metrics")
+    latest_candidates = [timestamp for points in metric_values.values() for timestamp, _ in points if cutoff is None or parse_timestamp(timestamp) <= cutoff]
+    if not latest_candidates:
+        raise ProviderInsufficientHistory("Blobscan time series has no value at or before as_of")
+    latest_timestamp = max(latest_candidates, key=parse_timestamp)
+    start_time = parse_timestamp(latest_timestamp) - timedelta(days=29)
+
+    def selected(metric: str) -> list[tuple[str, float]]:
+        return [
+            (timestamp, value)
+            for timestamp, value in metric_values.get(metric, ())
+            if parse_timestamp(timestamp) <= parse_timestamp(latest_timestamp)
+            and parse_timestamp(timestamp) >= start_time
+        ]
+
+    count_values = selected("totalBlobs")
+    bytes_values = selected("totalBlobUsageSize")
+    max_bytes_values = selected("totalBlobSize")
+    tx_values = selected("totalTransactions")
+    if not count_values:
+        raise ProviderInsufficientHistory("Blobscan totalBlobs series is empty")
     result: list[Mapping[str, Any]] = []
     for key in requested:
         if key.endswith("count_1d"):
-            value = count_values[-1]
+            latest_count = [value for timestamp, value in count_values if timestamp == latest_timestamp]
+            if not latest_count:
+                raise ProviderInsufficientHistory("Blobscan totalBlobs has no latest value")
+            value = latest_count[0]
             period = "1d"
         elif key.endswith("count_30d"):
-            values = [value for value in count_values if value is not None]
-            value = sum(values) if values else None
+            if not count_values:
+                raise ProviderUnsupportedMetric("Blobscan cannot derive count_30d without totalBlobs")
+            value = sum(value for _, value in count_values)
             period = "30d"
         elif key.endswith("data_bytes_30d"):
-            values = [value for value in bytes_values if value is not None]
-            value = sum(values) if values else None
+            if not bytes_values:
+                raise ProviderUnsupportedMetric("Blobscan cannot derive data_bytes_30d without totalBlobUsageSize")
+            value = sum(value for _, value in bytes_values)
             period = "30d"
         elif key.endswith("blob_transactions_30d"):
-            values = [value for value in tx_values if value is not None]
-            value = sum(values) if values else None
+            if not tx_values:
+                raise ProviderUnsupportedMetric("Blobscan cannot derive blob_transactions_30d without totalTransactions")
+            value = sum(value for _, value in tx_values)
             period = "30d"
         else:
-            values = [value for value in utilization_values if value is not None]
-            value = sum(values) / len(values) if values else None
+            if not bytes_values or not max_bytes_values:
+                raise ProviderUnsupportedMetric("Blobscan cannot derive utilization_30d without blob usage and capacity series")
+            denominator = sum(value for _, value in max_bytes_values)
+            value = sum(value for _, value in bytes_values) / denominator if denominator > 0 else None
             period = "30d"
         if value is None:
             raise ProviderUnsupportedMetric(f"Blobscan cannot derive {key}")
@@ -161,7 +188,9 @@ def parse_timeseries(
                 "source_dataset": "stats/timeseries",
                 "source_url": BASE_URL + endpoint,
                 "window": period,
-                "rows_used": len(selected),
+                "rows_used": len(count_values),
+                "raw_metrics": ["totalBlobs", "totalBlobUsageSize", "totalBlobSize", "totalTransactions"],
+                "utilization_methodology": "sum(totalBlobUsageSize) / sum(totalBlobSize)",
                 "protocol_cross_check_policy": "sample Ethereum JSON-RPC blobGasUsed/excessBlobGas when available",
             },
         })
@@ -189,9 +218,9 @@ class BlobscanProvider:
         payload = self.client.get_json(
             BASE_URL + TIMESERIES_PATH,
             params={
-                "start": request.parameters.get("start"),
-                "end": request.parameters.get("end"),
-                "interval": "day",
+                "timeFrame": "30d",
+                "metrics": "totalBlobs,totalBlobSize,totalBlobUsageSize,totalTransactions",
+                "sort": "asc",
             },
         )
         return ProviderResponse(observations=parse_timeseries(

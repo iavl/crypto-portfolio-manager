@@ -1,0 +1,4 @@
+[
+  {"id": "arbitrum", "slug": "arbitrum", "name": "Arbitrum One", "hostChain": "Ethereum", "stacks": ["OP Stack"]},
+  {"id": "celestia-rollup", "slug": "celestia-rollup", "name": "Other Rollup", "hostChain": "Celestia", "stacks": []}
+]

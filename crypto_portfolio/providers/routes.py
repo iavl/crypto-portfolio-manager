@@ -64,14 +64,13 @@ PROVIDER_ROUTES = {
 def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]:
     key = normalize_metric_key(metric_key)
     symbol = asset.strip().upper() if isinstance(asset, str) and asset.strip() else None
-    if key in {
-        "market.btc_dominance",
-        "market.total_crypto_market_cap",
-        "market.stablecoin_supply",
-        "market.breadth",
-        "market.breadth_state",
-        "market.flow_state",
-    }:
+    if key in {"market.btc_dominance", "market.total_crypto_market_cap"}:
+        return ("coingecko",)
+    if key == "market.breadth":
+        return ("coingecko",)
+    if key == "market.stablecoin_supply":
+        return ("defillama",)
+    if key in {"market.breadth_state", "market.flow_state"}:
         return ()
     if key == "risk.chain_liveness_status":
         return PROVIDER_ROUTES["chain_liveness"]
@@ -127,7 +126,9 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("lunarcrush",)
     if key == "fundamentals.developer_activity":
         return ("github",)
-    if key in {"fundamentals.active_users", "fundamentals.stablecoin_liquidity"} and symbol == "AAVE":
+    if key == "fundamentals.stablecoin_liquidity":
+        return ("defillama",) if symbol in {"ETH", "SOL", "BNB"} else ()
+    if key == "fundamentals.active_users" and symbol == "AAVE":
         return ()
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"}:
         return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH"} else ()
@@ -151,6 +152,14 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
 
 def dataset_for_metric(metric_key: str) -> str:
     key = normalize_metric_key(metric_key)
+    if key in {"market.btc_dominance", "market.total_crypto_market_cap"}:
+        return "market_global"
+    if key == "market.breadth":
+        return "market_breadth"
+    if key in {"market.breadth_state", "market.flow_state"}:
+        return "derived"
+    if key == "market.stablecoin_supply" or key == "fundamentals.stablecoin_liquidity":
+        return "stablecoin"
     if key == "market.spot_price":
         return "spot"
     if key == "risk.chain_liveness_status":
@@ -173,9 +182,9 @@ def dataset_for_metric(metric_key: str) -> str:
         return "derived"
     if key.startswith("eth_valuation."):
         return "ethereum_valuation"
-    if key.startswith("eth.l2.rent_paid"):
+    if key.startswith(("eth.l2.rent_paid", "eth.da.")):
         return "ethereum_l2"
-    if key.startswith("eth.da.") or key.startswith("eth.blobs."):
+    if key.startswith("eth.blobs."):
         return "ethereum_da"
     if key.startswith("eth.l2."):
         return "ethereum_l2"
@@ -195,7 +204,7 @@ def dataset_for_metric(metric_key: str) -> str:
         return "basis"
     if key.startswith("derivatives.") and "liquidations" in key:
         return "liquidations"
-    if key.startswith(("flows.etf_", "flows.btc_etf_")):
+    if key.startswith(("flows.etf_", "flows.btc_etf_", "flows.eth_etf_")):
         return "etf"
     if key == "flows.exchange_netflow" or key.startswith(("onchain.", "btc_valuation.", "btc_network.")) or key in {
         "tokenomics.annualized_emissions", "tokenomics.supply_growth",

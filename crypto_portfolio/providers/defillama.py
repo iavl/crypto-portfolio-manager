@@ -9,11 +9,22 @@ from urllib.parse import quote
 
 from ..metrics_registry import metric_definition
 from ..models.time import normalize_timestamp, parse_timestamp
-from .base import ProviderCapabilities, ProviderDataError, ProviderRequest, ProviderResponse, ProviderResponseError, ProviderUnsupportedMetric
+from .base import (
+    ProviderCapabilities,
+    ProviderDataError,
+    ProviderInsufficientHistory,
+    ProviderNotApplicable,
+    ProviderRequest,
+    ProviderResponse,
+    ProviderResponseError,
+    ProviderUnsupportedMetric,
+)
 from .http import HttpClient, classify_transport_error, redact_secrets
 
 
 BASE_URL = "https://api.llama.fi"
+STABLECOINS_BASE_URL = "https://stablecoins.llama.fi"
+STABLECOIN_CHARTS_PATH = "/stablecoincharts"
 ASSET_IDENTIFIERS = {
     "AAVE": "aave",
     "ETH": "ethereum",
@@ -53,6 +64,11 @@ def _number(value: Any, field: str) -> float:
 def _timestamp(value: Any, field: str, fallback: str) -> str:
     if value is None:
         return fallback
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            pass
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         number = _number(value, field)
         if number > 100_000_000_000:
@@ -116,6 +132,51 @@ def _latest_numeric_series(
     return sum(value for timestamp, value in rows if parse_timestamp(timestamp).timestamp() >= lower), latest_timestamp
 
 
+def parse_stablecoin_chart(
+    payload: Any,
+    *,
+    asset: str,
+    metric_key: str,
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str,
+) -> Mapping[str, Any]:
+    if not isinstance(payload, list):
+        raise ProviderResponseError("DeFiLlama stablecoin chart response must be a list")
+    cutoff = parse_timestamp(as_of) if as_of else None
+    rows: list[tuple[str, float]] = []
+    for index, row in enumerate(payload):
+        if not isinstance(row, Mapping):
+            raise ProviderDataError(f"DeFiLlama stablecoin row {index} is malformed")
+        observed = _timestamp(row.get("date"), "DeFiLlama stablecoin date", fetched_at)
+        if cutoff is not None and parse_timestamp(observed) > cutoff:
+            continue
+        total = row.get("totalCirculatingUSD")
+        if not isinstance(total, Mapping) or total.get("peggedUSD") is None:
+            raise ProviderDataError("DeFiLlama stablecoin row has no peggedUSD total")
+        rows.append((observed, _number(total["peggedUSD"], "DeFiLlama stablecoin supply")))
+    if not rows:
+        raise ProviderInsufficientHistory("DeFiLlama stablecoin history has no value at or before as_of")
+    observed, value = max(rows, key=lambda item: parse_timestamp(item[0]))
+    return {
+        "asset": asset.strip().upper(),
+        "metric_key": metric_key,
+        "value": value,
+        "unit": metric_definition(metric_key).unit,
+        "period": "current",
+        "observed_at": observed,
+        "fetched_at": fetched_at,
+        "source": "defillama",
+        "confidence": "MEDIUM",
+        "metadata": {
+            "source_dataset": "stablecoincharts",
+            "source_url": endpoint,
+            "methodology": "latest_totalCirculatingUSD.peggedUSD",
+            "scope": "global" if asset.upper() == "MARKET" else CHAIN_NAMES.get(asset.upper()),
+        },
+    }
+
+
 def parse_protocol_payload(
     payload: Mapping[str, Any],
     asset: str,
@@ -143,7 +204,6 @@ def parse_protocol_payload(
     scalar_names = {
         "fundamentals.fees_30d": ("fees30d", "fees_30d", "total30d", "fees"),
         "fundamentals.revenue_30d": ("revenue30d", "revenue_30d", "revenue"),
-        "fundamentals.stablecoin_liquidity": ("stablecoinLiquidity", "stablecoin_liquidity"),
     }
     for metric, names in scalar_names.items():
         if metric == "fundamentals.revenue_30d" and revenue_payload is not None:
@@ -203,14 +263,34 @@ class DeFiLlamaProvider:
             provider=self.name,
             metric_keys=(
                 "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
-                "fundamentals.stablecoin_liquidity", "valuation.fee_revenue_multiple",
+                "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "valuation.fee_revenue_multiple",
             ),
-            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d"),
+            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "fundamentals.stablecoin_liquidity", "market.stablecoin_supply"),
             supports_batching=True,
             requires_api_key=False,
         )
 
     def collect(self, request: ProviderRequest) -> ProviderResponse:
+        if request.dataset == "stablecoin":
+            key = next((item for item in request.metric_keys if item in {"market.stablecoin_supply", "fundamentals.stablecoin_liquidity"}), None)
+            if key is None:
+                raise ProviderUnsupportedMetric("DeFiLlama stablecoin API does not support the requested metrics")
+            asset = request.asset.strip().upper()
+            if asset == "MARKET":
+                scope = "all"
+            else:
+                scope = CHAIN_NAMES.get(asset)
+                if scope is None:
+                    raise ProviderNotApplicable("stablecoin supply is defined only for global or chain scope")
+            endpoint = STABLECOINS_BASE_URL + STABLECOIN_CHARTS_PATH + "/" + scope
+            return ProviderResponse((parse_stablecoin_chart(
+                self.client.get_json(endpoint),
+                asset=asset,
+                metric_key=key,
+                fetched_at=_now(self.clock),
+                as_of=request.parameters.get("as_of"),
+                endpoint=endpoint,
+            ),))
         identifier = identifier_for_asset(request.asset)
         url = BASE_URL + "/protocol/" + quote(identifier, safe="")
         fetched = _now(self.clock)
@@ -290,7 +370,10 @@ class DeFiLlamaProvider:
 __all__ = [
     "ASSET_IDENTIFIERS",
     "BASE_URL",
+    "STABLECOINS_BASE_URL",
+    "STABLECOIN_CHARTS_PATH",
     "DeFiLlamaProvider",
     "identifier_for_asset",
+    "parse_stablecoin_chart",
     "parse_protocol_payload",
 ]

@@ -394,6 +394,9 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
         position_performance_record(position, position_result)
         for position, position_result in zip(snapshot.positions, performance.positions)
     ]
+    for position in positions:
+        if resolved_policy.is_excluded(position["symbol"]):
+            position["management_status"] = "EXCLUDED / UNMANAGED"
     warnings.extend(performance.validation_notes)
     values = {
         "stablecoin": {"stablecoin", "cash"},

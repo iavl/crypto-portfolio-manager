@@ -38,6 +38,7 @@ _SECRET_NAMES = {
     "coingecko_api_key", "x_cg_demo_api_key",
 }
 _MACOS_CA_BUNDLE = Path("/etc/ssl/cert.pem")
+_MAX_LOG_CHARS = 12_000
 
 
 def _system_ca_bundle() -> Path | None:
@@ -102,6 +103,30 @@ def redact_secrets(value: Any, secrets: tuple[str, ...] = ()) -> Any:
         )
         return result
     return value
+
+
+def redact_log(value: Any, secrets: tuple[str, ...] = (), *, max_chars: int = _MAX_LOG_CHARS) -> str:
+    """Redact secrets and bound diagnostic text before it enters a report."""
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 128:
+        raise ValueError("max_chars must be an integer >= 128")
+    text = str(redact_secrets(value, secrets)).replace("\x00", "").strip()
+    lowered = text.lstrip().lower()
+    if (
+        lowered.startswith(("{", "["))
+        or "<html" in lowered
+        or "<!doctype" in lowered
+        or "response body" in lowered
+        or "raw response" in lowered
+        or '"headers"' in lowered
+        or '"body"' in lowered
+    ):
+        return "[REDACTED]"
+    if len(text) <= max_chars:
+        return text
+    marker = "\n...[truncated]...\n"
+    tail_chars = max_chars // 3
+    head_chars = max_chars - len(marker) - tail_chars
+    return text[:head_chars] + marker + text[-tail_chars:]
 
 
 def redact_url(url: str, secrets: tuple[str, ...] = ()) -> str:
@@ -428,7 +453,10 @@ class HttpClient:
             value for key, value in safe_headers.items()
             if _secret_name(key)
         )
-        request = Request(redact_url(url, request_secrets), data=body, headers=safe_headers, method=method)
+        # Query credentials are required by a few official APIs (notably FRED).
+        # Keep the real URL on the wire; redaction is applied to diagnostics and
+        # never to the request itself.
+        request = Request(url, data=body, headers=safe_headers, method=method)
         retry_allowed = method == "GET" or idempotent
         last_error: Exception | None = None
         for attempt in range(self.max_attempts):
@@ -586,6 +614,7 @@ __all__ = [
     "ProviderRateLimited",
     "ProviderResponseError",
     "ProviderUnavailable",
+    "redact_log",
     "redact_secrets",
     "redact_url",
 ]

@@ -83,6 +83,7 @@ class EventSourceScanRequest:
     tier: int = 1
     required_for_full_coverage: bool = True
     instructions: str = EVENT_SCAN_SAFETY_INSTRUCTIONS
+    source_urls: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "asset", _text(self.asset, "event scan asset").upper())
@@ -93,6 +94,14 @@ class EventSourceScanRequest:
         if urlsplit(url).scheme not in {"http", "https"} or not urlsplit(url).netloc:
             raise ValueError("source_url must use http or https")
         object.__setattr__(self, "source_url", url)
+        if isinstance(self.source_urls, str) or not isinstance(self.source_urls, (tuple, list)):
+            raise ValueError("source_urls must be a sequence")
+        source_urls = tuple(_text(item, "source url") for item in self.source_urls)
+        for source_url in source_urls:
+            parts = urlsplit(source_url)
+            if parts.scheme not in {"http", "https"} or not parts.netloc:
+                raise ValueError("source_urls must contain http or https URLs")
+        object.__setattr__(self, "source_urls", tuple(dict.fromkeys((url, *source_urls))))
         object.__setattr__(self, "authority", _text(self.authority, "authority"))
         start = _timestamp(self.lookback_start, "lookback_start")
         end = _timestamp(self.as_of, "as_of")
@@ -114,6 +123,7 @@ class EventSourceScanRequest:
             "source_id": self.source_id,
             "source_name": self.source_name,
             "source_url": self.source_url,
+            "source_urls": list(self.source_urls),
             "authority": self.authority,
             "lookback_start": self.lookback_start,
             "as_of": self.as_of,
@@ -240,6 +250,15 @@ class EventScanner:
         if len({source.id for source in self.sources}) != len(self.sources):
             raise ValueError("event source catalog contains duplicate IDs")
 
+    def _is_excluded(self, asset: str) -> bool:
+        if isinstance(self.policy, Policy):
+            return self.policy.is_excluded(asset)
+        universe = self.policy.get("universe", {}) if isinstance(self.policy, Mapping) else {}
+        excluded = universe.get("excluded", ()) if isinstance(universe, Mapping) else ()
+        return str(asset).strip().upper() in {
+            str(symbol).strip().upper() for symbol in excluded
+        }
+
     def lookback_days(self, category: str, *, review_type: str = "SNAPSHOT_REVIEW") -> int:
         category = _category(category)
         review = _review_type(review_type)
@@ -279,6 +298,8 @@ class EventScanner:
         category = _category(category)
         review = _review_type(review_type)
         end = _timestamp(as_of, "as_of")
+        if self._is_excluded(asset):
+            return ()
         days = self.lookback_days(category, review_type=review) if lookback_days is None else lookback_days
         if isinstance(days, bool) or not isinstance(days, int) or days < 1:
             raise ValueError("lookback_days must be a positive integer")
@@ -295,6 +316,7 @@ class EventScanner:
                 as_of=end,
                 tier=source.tier,
                 required_for_full_coverage=source.required_for_full_coverage,
+                source_urls=source.transport_candidates,
             )
             for source in self.sources
             if source.category == category and source.applies_to(asset)
@@ -406,7 +428,13 @@ class EventScanner:
         review_type: str = "SNAPSHOT_REVIEW",
         fetch_mode: FetchMode | str = FetchMode.AUTO,
     ) -> dict[str, EventScanResult]:
-        symbols = tuple(dict.fromkeys(_text(asset, "asset").upper() for asset in assets))
+        symbols = tuple(
+            dict.fromkeys(
+                _text(asset, "asset").upper()
+                for asset in assets
+                if not self._is_excluded(asset)
+            )
+        )
         if not symbols:
             return {}
         market = self.scan(

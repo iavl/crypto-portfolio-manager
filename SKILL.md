@@ -35,6 +35,10 @@ constants and deterministic factor thresholds. Python models and engine modules 
 the Agent supplies current evidence, bounded qualitative judgments, and
 explanations.
 
+Never collect or research an asset in `policy.universe.excluded`. Exclusion is
+an unmanaged-universe decision, not an automatic sell; an existing excluded
+holding remains visible in snapshot accounting with any supplied value.
+
 ## Python-first model boundaries
 
 Before delegating work to an LLM, first determine whether the result can be
@@ -107,6 +111,9 @@ display data, so the engine uses value ÷ quantity and records a note.
    `AcquisitionManager` in `AUTO` (or the explicit `CACHE_ONLY`/
    `REFRESH`) mode. It checks fresh normalized observations, provider cache,
    and free structured APIs before producing unresolved work for `LUNA_MAX`.
+   Show provider preflight before acquisition: configured state, adapter
+   availability, credential requirement/presence, runtime readiness, and a
+   precise configuration reason when a provider is not ready.
    `risk.chain_liveness_status` uses the structured `chain_liveness` provider
    for chain-native assets only; routine liveness is never collected with a
    generic Web search.
@@ -128,15 +135,21 @@ display data, so the engine uses value ÷ quantity and records a note.
    If a hard-critical event group is unresolved, stop before scoring and
    return the structured resolution state. This is pass 1 only. The external
    stage consumes `result.pending_event_scans` to obtain the unresolved
-   `EventSourceScanRequest` objects; do not access an undocumented
-   `event_source_scan_requests` field. Resolve every request externally and
+   `EventSourceScanRequest` objects; use the canonical pending-scan property.
+   Resolve every request externally and
    return exactly one matching `EventSourceScanResponse` per request, including
    `reachable=false` with a bounded error when a source cannot be fetched.
    Rerun acquisition as pass 2 with those responses, then call
    `result.require_scoring_ready()` immediately before scoring. Never score
    between the two passes, and do not treat an unreachable source as
    `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`.
-   If structured chain-liveness acquisition fails, retain the hard-critical
+   Resolve every `result.pending_event_scans` item before final reporting;
+   `result.finalized` must be true and pending external resolution must be
+   zero before building a final Portfolio Report or `ReportPacket`.
+   A derived metric with an empty provider chain must first expand and resolve
+   its registered dependencies; unresolved inputs are
+   `DERIVED_INPUT_UNAVAILABLE`, not `NO_PROVIDER_ROUTE`. A route that succeeds
+   through a fallback is not a final failure. If structured chain-liveness acquisition fails, retain the hard-critical
    missing evidence and do not invent `HEALTHY`, `DEGRADED`, or `HALTED`.
 9. Compare current observations with previous observations and build
    `Evidence`, `FactorScore`, and `AssetAssessment` records. Keep complete
@@ -168,8 +181,9 @@ display data, so the engine uses value ÷ quantity and records a note.
 21. Bind the plan to exactly one matching approved `RebalanceAction`, create
     `execution_technical` evidence, and cache normalized OHLCV and Volume
     Profile artifacts by hash before persistence.
-22. Build a finalized immutable ReportPacket with the current
-    `AcquisitionResult`; do not discard final failed metric events or provider
+22. Build a finalized immutable ReportPacket only when the current
+    `AcquisitionResult` is finalized and has zero pending external
+    resolutions; do not discard final failed metric events or provider
     attempts. Python determines `failed_data_fetches` (final status, failure
     stage, provider, error code, structured reason, and decision effect), and
     the report writer only formats those finalized values. Produce the Chinese
@@ -177,7 +191,14 @@ display data, so the engine uses value ÷ quantity and records a note.
     section 1, render every `ReportPacket.failed_data_fetches` item, including
     the no-failure message when empty; never invent a cause, change an error
     code, turn `SKIPPED` into `FAILED`, omit a failed metric, or report a
-    provider failure when a fallback succeeded. Every normal review shows Position P&L
+    provider failure when a fallback succeeded.
+    Run every repository script used by this review through
+    `scripts/run_with_debug.py`; pass its execution records through
+    `build_report_packet(..., script_executions=...)`. Render every non-success
+    script in the section 1 `Debug 报告` with its exit status and captured
+    failure log. Keep logs redacted and bounded; do not include raw response
+    bodies, credentials, headers, or private reasoning.
+    Every normal review shows Position P&L
     when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
     `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
     return. `FULL_REVIEW` also compares the prior/current return by asset in

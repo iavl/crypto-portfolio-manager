@@ -278,7 +278,8 @@ stage less 或返回 WAIT，但不能增加 approved USD 或提交订单。
 - `DecisionReviewPacket`：资产摘要、current/target weights、actions、risk flags、
   missing data 和 overlays；
 - `ReportPacket`：finalized regime、scores、weights、actions、amounts、zones、
-  historical changes、risk flags、data quality 和 overlay 结果。
+  historical changes、risk flags、data quality、overlay 结果、最终数据抓取失败
+  和脚本执行失败日志。
 
 Packet 是 frozen/validated model。报告阶段可以解释 finalized values，但不能
 重新计算或修改 score、weight、amount、zone、Action 或 risk flag。报告中的
@@ -302,6 +303,8 @@ Evidence -> fact meaning -> portfolio constraint -> risk gate
 - technical freshness、coverage、setup quality 或 CAPITAL_PRESERVATION 可以
   返回 `WAIT` 或保留未部署资金；
 - `NO_TRADE` 是合法结果，不是系统错误。
+- Provider traceback 和脚本 `stderr` 只以脱敏、限长的 Debug 报告上下文保留；
+  没有直接日志时保持结构化失败原因，不猜测日志内容。
 
 核心原则：
 

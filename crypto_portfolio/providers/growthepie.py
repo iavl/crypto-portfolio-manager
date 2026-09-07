@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import math
+import time
 from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import metric_definition
@@ -13,6 +14,7 @@ from .base import (
     ProviderDataError,
     ProviderInsufficientHistory,
     ProviderRequest,
+    ProviderRateLimited,
     ProviderResponse,
     ProviderResponseError,
     ProviderUnsupportedMetric,
@@ -21,12 +23,15 @@ from .http import HttpClient, classify_transport_error
 
 
 BASE_URL = "https://api.growthepie.com/v1"
-RENT_PATH = "/metrics/rent_paid.json"
+RENT_PATH = "/fundamentals.json"
+FUNDAMENTALS_PATH = "/fundamentals.json"
+EXPORT_RENT_PATH = "/export/rent_paid.json"
 DA_OVERVIEW_PATH = "/daoverview.json"
 DA_TIMESERIES_PATH = "/datimeseries.json"
 MASTER_PATH = "/master.json"
 ATTRIBUTION = "growthepie / orbal GmbH"
 LICENSE = "CC BY 4.0"
+MAX_CALLS_PER_MINUTE = 10
 
 _RENT_KEYS = {"eth.l2.rent_paid_30d_usd", "eth.l2.rent_paid_90d_usd"}
 _DA_KEYS = {
@@ -154,6 +159,123 @@ def _filtered_rows(payload: Any, as_of: str | None) -> list[tuple[str, Mapping[s
         values.append((timestamp, row))
     values.sort(key=lambda item: parse_timestamp(item[0]))
     return values
+
+
+def parse_master_payload(payload: Any) -> Mapping[str, Any]:
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("chains"), Mapping):
+        raise ProviderResponseError("growthepie master response has no chains object")
+    chains = payload["chains"]
+    if not isinstance(payload.get("metrics"), Mapping):
+        raise ProviderResponseError("growthepie master response has no metrics object")
+    return {"chains": dict(chains), "metrics": dict(payload["metrics"]), "last_updated_utc": payload.get("last_updated_utc")}
+
+
+def _eligible_chain_keys(master: Mapping[str, Any], metric_name: str) -> set[str]:
+    metric = master.get("metrics", {}).get(metric_name, {})
+    supported = metric.get("supported_chains", ()) if isinstance(metric, Mapping) else ()
+    if isinstance(supported, str):
+        supported = (supported,)
+    result = set()
+    for chain in supported:
+        row = master["chains"].get(chain)
+        if not isinstance(row, Mapping) or row.get("deployment") in {"DEV", "ARCHIVED"}:
+            continue
+        if row.get("chain_type") == "l1":
+            continue
+        result.add(str(chain).strip().lower())
+    return result
+
+
+def _ethereum_da_chain_keys(master: Mapping[str, Any]) -> tuple[set[str], set[str]]:
+    eligible: set[str] = set()
+    tracked: set[str] = set()
+    for chain, row in master["chains"].items():
+        if not isinstance(row, Mapping) or row.get("deployment") in {"DEV", "ARCHIVED"}:
+            continue
+        layer = str(row.get("da_layer") or "").strip().lower()
+        if not layer:
+            continue
+        tracked.add(str(chain).strip().lower())
+        if "ethereum" in layer and "blob" in layer:
+            eligible.add(str(chain).strip().lower())
+    return eligible, tracked
+
+
+def parse_fundamentals_payload(
+    payload: Any,
+    master_payload: Any,
+    metric_keys: Iterable[str],
+    *,
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str = FUNDAMENTALS_PATH,
+) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(payload, list) or any(not isinstance(row, Mapping) for row in payload):
+        raise ProviderResponseError("growthepie fundamentals response must be an array of rows")
+    master = parse_master_payload(master_payload)
+    requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
+    allowed = _RENT_KEYS | _DA_KEYS
+    if not requested or any(key not in allowed for key in requested):
+        raise ProviderUnsupportedMetric("growthepie fundamentals does not support the requested metrics")
+    cutoff = parse_timestamp(as_of) if as_of else None
+    rows: list[tuple[str, str, str, float]] = []
+    source_metrics = {"rent_paid_usd", "blob_size_bytes", "costs_blobs_usd"}
+    for index, row in enumerate(payload):
+        if set(row) != {"metric_key", "origin_key", "date", "value"}:
+            raise ProviderResponseError(f"growthepie fundamentals row {index} does not match the documented schema")
+        metric_name = str(row["metric_key"]).strip()
+        if metric_name not in source_metrics:
+            continue
+        timestamp = _timestamp(row["date"], "growthepie fundamentals date")
+        if cutoff is not None and parse_timestamp(timestamp) > cutoff:
+            continue
+        if row["value"] is None:
+            continue
+        rows.append((metric_name, str(row["origin_key"]).strip().lower(), timestamp, _number(row["value"], "growthepie fundamentals value")))
+    if not rows:
+        raise ProviderInsufficientHistory("growthepie fundamentals has no rows at or before as_of")
+    rent_chains = _eligible_chain_keys(master, "rent_paid")
+    da_chains, tracked_da_chains = _ethereum_da_chain_keys(master)
+    result: list[Mapping[str, Any]] = []
+
+    def window(metric: str, chains: set[str], days: int) -> tuple[float, str, int, set[str]]:
+        selected = [(date, origin, value) for key, origin, date, value in rows if key == metric and origin in chains]
+        if not selected:
+            raise ProviderUnsupportedMetric(f"growthepie fundamentals has no {metric} rows for the eligible chain set")
+        latest = max(item[0] for item in selected)
+        start = parse_timestamp(latest[:10] + "T00:00:00Z") - timedelta(days=days - 1)
+        within = [item for item in selected if parse_timestamp(item[0]) >= start]
+        if not within or parse_timestamp(min(item[0] for item in within)) > start + timedelta(days=7):
+            raise ProviderInsufficientHistory(f"growthepie fundamentals history is insufficient for {days}d")
+        return sum(item[2] for item in within), latest, len(within), {item[1] for item in within}
+
+    for key in requested:
+        if key in _RENT_KEYS:
+            days = 30 if key.endswith("30d_usd") else 90
+            value, observed, rows_used, chains = window("rent_paid_usd", rent_chains, days)
+            result.append(_observation(
+                "ETH", key, value, observed_at=observed, fetched_at=fetched_at,
+                period=f"{days}d", endpoint=endpoint,
+                metadata={"window": f"{days}d", "rows_used": rows_used, "chain_set": sorted(chains), "source_contract": "master.json + fundamentals.json"},
+            ))
+            continue
+        metric = "blob_size_bytes" if key.endswith("blob_data_30d_mb") or key.endswith("share_of_tracked_da_bytes_30d") else "costs_blobs_usd"
+        numerator, observed, rows_used, chains = window(metric, da_chains, 30)
+        if key.endswith("share_of_tracked_da_bytes_30d") or key.endswith("share_of_tracked_da_fees_30d"):
+            denominator, _, _, _ = window(metric, tracked_da_chains, 30)
+            if denominator <= 0:
+                raise ProviderUnsupportedMetric(f"growthepie cannot derive {key} without a tracked DA denominator")
+            value = numerator / denominator
+        elif key.endswith("blob_data_30d_mb"):
+            value = numerator / 1_000_000
+        else:
+            value = numerator
+        result.append(_observation(
+            "ETH", key, value, observed_at=observed, fetched_at=fetched_at,
+            period="30d", endpoint=endpoint,
+            metadata={"window": "30d", "rows_used": rows_used, "chain_set": sorted(chains), "source_contract": "master.json + fundamentals.json", "metric_key": metric},
+        ))
+    return tuple(result)
 
 
 def parse_rent_payload(
@@ -291,6 +413,8 @@ class GrowthepieProvider:
     def __init__(self, *, client: HttpClient | Any | None = None, clock: Any | None = None) -> None:
         self.client = client or HttpClient()
         self.clock = clock
+        self._master_payload: Mapping[str, Any] | None = None
+        self._request_times: list[float] = []
         self.capabilities = ProviderCapabilities(
             provider=self.name,
             metric_keys=tuple(sorted(_RENT_KEYS | _DA_KEYS)),
@@ -307,31 +431,30 @@ class GrowthepieProvider:
         values: list[Mapping[str, Any]] = []
         diagnostics: dict[str, Mapping[str, Any]] = {}
         as_of = request.parameters.get("as_of")
-        if any(key in _RENT_KEYS for key in requested):
-            try:
-                values.extend(parse_rent_payload(
-                    self.client.get_json(BASE_URL + RENT_PATH),
-                    tuple(key for key in requested if key in _RENT_KEYS),
-                    fetched_at=fetched_at,
-                    as_of=as_of,
-                ))
-            except Exception as exc:
-                for key in requested:
-                    if key in _RENT_KEYS:
-                        diagnostics[key] = _diagnostic(exc)
-        if any(key in _DA_KEYS for key in requested):
-            try:
-                values.extend(parse_da_payload(
-                    self.client.get_json(BASE_URL + DA_TIMESERIES_PATH),
-                    tuple(key for key in requested if key in _DA_KEYS),
-                    fetched_at=fetched_at,
-                    as_of=as_of,
-                ))
-            except Exception as exc:
-                for key in requested:
-                    if key in _DA_KEYS:
-                        diagnostics[key] = _diagnostic(exc)
-        return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=int(any(key in _RENT_KEYS for key in requested)) + int(any(key in _DA_KEYS for key in requested)))
+
+        def get_json(url: str) -> Any:
+            now = time.monotonic()
+            self._request_times[:] = [stamp for stamp in self._request_times if now - stamp < 60]
+            if len(self._request_times) >= MAX_CALLS_PER_MINUTE:
+                raise ProviderRateLimited("growthepie request budget exceeded: 10 calls per minute")
+            self._request_times.append(now)
+            return self.client.get_json(url)
+
+        try:
+            if self._master_payload is None:
+                self._master_payload = parse_master_payload(get_json(BASE_URL + MASTER_PATH))
+            fundamentals = get_json(BASE_URL + FUNDAMENTALS_PATH)
+            values.extend(parse_fundamentals_payload(
+                fundamentals,
+                self._master_payload,
+                requested,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ))
+        except Exception as exc:
+            for key in requested:
+                diagnostics[key] = _diagnostic(exc)
+        return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=2)
 
 
 __all__ = [
@@ -339,10 +462,15 @@ __all__ = [
     "BASE_URL",
     "DA_OVERVIEW_PATH",
     "DA_TIMESERIES_PATH",
+    "EXPORT_RENT_PATH",
+    "FUNDAMENTALS_PATH",
+    "MAX_CALLS_PER_MINUTE",
     "GrowthepieProvider",
     "LICENSE",
     "MASTER_PATH",
     "RENT_PATH",
     "parse_da_payload",
+    "parse_fundamentals_payload",
+    "parse_master_payload",
     "parse_rent_payload",
 ]

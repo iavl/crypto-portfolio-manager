@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, TextIO
 
 from .metric_availability import metric_availability
+from .engine.metric_plan import DERIVED_METRIC_DEPENDENCIES
 from .metrics_registry import REVIEW_TYPES, metric_definition
 from .models.metrics_history import CollectionEvent, MetricObservation
 from .models.policy import Policy, resolve_policy
@@ -21,19 +22,16 @@ from .state.metrics import (
 
 _STATUS_ORDER = ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED")
 _FETCH_FAILURE_STATUSES = {"FAILED", "STALE"}
-_DERIVED_METRICS = {
-    "derivatives.open_interest_to_market_cap",
-    "market.flow_state",
-    "relative.return_vs_btc_180d",
-    "relative.return_vs_btc_30d",
-    "relative.return_vs_btc_90d",
-    "valuation.fdv_market_cap_ratio",
-}
+_DERIVED_METRICS = set(DERIVED_METRIC_DEPENDENCIES) | {"market.flow_state"}
 _ERROR_CODE_DESCRIPTIONS = {
     "CACHE_CORRUPT": "provider cache was corrupt",
     "CACHE_EXPIRED": "provider cache entry expired",
     "CACHE_MISS": "provider cache has no usable value",
+    "CONFIG_DISABLED": "provider is disabled by configuration",
+    "CREDENTIAL_MISSING": "provider credential is not visible to the runtime",
+    "ADAPTER_UNAVAILABLE": "provider adapter is not registered",
     "DERIVED_INPUT_UNAVAILABLE": "derived input was unavailable",
+    "METHODOLOGY_NOT_DEFINED": "no supported methodology is defined for this scope",
     "DNS_RESOLUTION_FAILED": "provider hostname could not be resolved",
     "HTTP_400": "provider rejected the request",
     "HTTP_401": "provider authentication failed",
@@ -49,6 +47,8 @@ _ERROR_CODE_DESCRIPTIONS = {
     "PROVIDER_NOT_APPLICABLE": "provider does not apply to this metric",
     "PROVIDER_PLAN_RESTRICTED": "provider plan does not permit this metric",
     "PROVIDER_UNSUPPORTED": "provider does not support this metric",
+    "RATE_LIMITED": "provider rate limit was exceeded",
+    "NO_MARKET_DATA": "no compatible market data was available",
     "TLS_CERTIFICATE_VERIFY_FAILED": "provider TLS certificate verification failed",
 }
 
@@ -97,6 +97,31 @@ def _safe_text(value: Any) -> str | None:
     from .providers.http import redact_secrets
 
     text = str(redact_secrets(value)).strip()
+    if not text:
+        return None
+    lowered = text.lstrip().lower()
+    if (
+        lowered.startswith(("{", "["))
+        or "<html" in lowered
+        or "<!doctype" in lowered
+        or "authorization:" in lowered
+        or "cookie:" in lowered
+        or "response body" in lowered
+        or "raw response" in lowered
+        or "content-type:" in lowered
+        or '"headers"' in lowered
+        or '"body"' in lowered
+    ):
+        return None
+    return text
+
+
+def _safe_log(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    from .providers.http import redact_log
+
+    text = redact_log(value)
     if not text:
         return None
     lowered = text.lstrip().lower()
@@ -192,12 +217,28 @@ def _attempt_entry(attempt: Mapping[str, Any]) -> dict[str, Any]:
     reason = _safe_text(attempt.get("reason")) or _safe_text(attempt.get("detail"))
     if reason is not None:
         result["reason"] = reason
+    for field_name in ("exception_class", "detail"):
+        value = _safe_text(attempt.get(field_name))
+        if value is not None:
+            result[field_name] = value
     endpoint = _safe_endpoint(attempt.get("endpoint"))
     if endpoint is not None:
         result["endpoint"] = endpoint
+    method = _safe_text(attempt.get("method"))
+    if method is not None:
+        result["method"] = method.upper()
+    attempt_number = attempt.get("attempt")
+    if isinstance(attempt_number, int) and not isinstance(attempt_number, bool) and attempt_number >= 1:
+        result["attempt"] = attempt_number
+    retryable = attempt.get("retryable")
+    if isinstance(retryable, bool):
+        result["retryable"] = retryable
     status_code = attempt.get("status_code")
     if isinstance(status_code, int) and not isinstance(status_code, bool):
         result["status_code"] = status_code
+    log = _safe_log(attempt.get("log"))
+    if log is not None:
+        result["log"] = log
     return result
 
 
@@ -313,9 +354,37 @@ def build_failed_data_fetches(
     event_scans = tuple(_mapping(item, "acquisition.event_scans") for item in raw_event_scans)
     raw_web_fallbacks = _sequence(_acquisition_field(acquisition, "web_fallbacks"), "acquisition.web_fallbacks")
     web_fallbacks = tuple(_mapping(item, "acquisition.web_fallbacks") for item in raw_web_fallbacks)
+    raw_pending = _sequence(
+        _acquisition_field(acquisition, "pending_event_scans"),
+        "acquisition.pending_event_scans",
+    )
+    pending_event_groups: set[tuple[str, str]] = set()
+    for item in raw_pending:
+        if isinstance(item, Mapping):
+            asset = str(item.get("asset", "")).strip().upper()
+            category = str(item.get("category", "")).strip().lower()
+        else:
+            asset = str(getattr(item, "asset", "")).strip().upper()
+            category = str(getattr(item, "category", "")).strip().lower()
+        if asset and category:
+            pending_event_groups.add((asset, category))
+    pending_web_identities = {
+        (
+            str(item.get("asset", "")).strip().upper(),
+            str(item.get("metric_key", "")).strip().lower(),
+        )
+        for item in web_fallbacks
+    }
     rows: list[dict[str, Any]] = []
     for raw_result in results:
         event = _result_event(raw_result)
+        category = _event_category(event.metric_key)
+        group = ("MARKET", category) if category == "regulatory" else (event.asset, category)
+        if (
+            (category is not None and group in pending_event_groups)
+            or (event.asset, event.metric_key) in pending_web_identities
+        ):
+            continue
         relevant_attempts = tuple(item for item in attempts if _attempt_matches(item, event))
         include = event.status == "FAILED" or (
             event.status == "STALE"
@@ -382,16 +451,25 @@ def collection_summary(
         if review_type not in REVIEW_TYPES:
             raise ValueError(f"review_type must be one of {list(REVIEW_TYPES)}")
     counts = Counter(event.status for event in values)
+    resolved_policy = policy or resolve_policy()
+
+    def policy_scoped(event: CollectionEvent) -> bool:
+        if event.asset == "MARKET":
+            return True
+        if hasattr(resolved_policy, "is_excluded") and resolved_policy.is_excluded(event.asset):
+            return False
+        classify = getattr(resolved_policy, "classify", None)
+        return classify is None or classify(event.asset) != "other"
+
     scoring_events = [
         event for event in values
-        if metric_definition(event.metric_key).decision_role == "SCORING_FACTOR"
+        if metric_definition(event.metric_key).decision_role == "SCORING_FACTOR" and policy_scoped(event)
     ]
     applicable = [
         event for event in scoring_events
         if event.status != "NOT_APPLICABLE"
         and not (event.status == "SKIPPED" and metric_availability(event.asset, event.metric_key).is_skippable)
     ]
-    resolved_policy = policy or resolve_policy()
     if isinstance(resolved_policy, Mapping):
         policy_weights = dict(resolved_policy["scoring_profiles"]["default"])
         scoring_policy = resolved_policy.get("scoring", {})
@@ -550,6 +628,7 @@ def format_collection_summary(summary: Mapping[str, Any]) -> str:
             f"Per-request coverage: {summary.get('per_request_coverage', summary['coverage']):.0%}",
             f"Policy-weighted coverage: {summary.get('policy_weighted_coverage', summary['coverage']):.0%}",
             f"Decision confidence: {summary['confidence']}",
+            f"Pending external resolution: {summary.get('pending_external_resolution', 0)}",
             f"Overlay context metrics: {summary.get('overlay_requested', 0)}",
         )
     )

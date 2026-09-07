@@ -1,0 +1,10 @@
+[
+  {"metric_key": "rent_paid_usd", "origin_key": "arbitrum", "date": "2026-09-05", "value": 2.0},
+  {"metric_key": "rent_paid_usd", "origin_key": "base", "date": "2026-09-05", "value": 3.0},
+  {"metric_key": "blob_size_bytes", "origin_key": "arbitrum", "date": "2026-09-05", "value": 10.0},
+  {"metric_key": "blob_size_bytes", "origin_key": "base", "date": "2026-09-05", "value": 20.0},
+  {"metric_key": "blob_size_bytes", "origin_key": "celestia-rollup", "date": "2026-09-05", "value": 30.0},
+  {"metric_key": "costs_blobs_usd", "origin_key": "arbitrum", "date": "2026-09-05", "value": 4.0},
+  {"metric_key": "costs_blobs_usd", "origin_key": "base", "date": "2026-09-05", "value": 6.0},
+  {"metric_key": "costs_blobs_usd", "origin_key": "celestia-rollup", "date": "2026-09-05", "value": 10.0}
+]

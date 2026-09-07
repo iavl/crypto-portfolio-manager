@@ -11,6 +11,7 @@ from crypto_portfolio.engine.metric_plan import (
     MetricRequest,
     build_metric_collection_plan,
 )
+from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.models.portfolio import normalize_snapshot
 from crypto_portfolio.providers.binance import BinanceProvider
@@ -73,6 +74,8 @@ class MetricDependencyTests(unittest.TestCase):
             "valuation.fdv_market_cap_ratio": "AAVE",
             "derivatives.open_interest_to_market_cap": "BTC",
             "btc_valuation.price_to_realized_price": "BTC",
+            "eth_valuation.price_to_realized_price": "ETH",
+            "market.breadth_state": "MARKET",
         }
         for derived, dependencies in DERIVED_METRIC_DEPENDENCIES.items():
             with self.subTest(derived=derived):
@@ -81,6 +84,42 @@ class MetricDependencyTests(unittest.TestCase):
                     definition = metric_definition(dependency)
                     asset = scope_examples.get(derived, "ETH")
                     self.assertTrue(definition.applies_to(asset))
+
+    def test_eth_realized_price_route_expands_and_derives_from_cached_inputs(self):
+        plan = MetricCollectionPlan(
+            "SNAPSHOT_REVIEW",
+            (MetricRequest("ETH", "eth_valuation.price_to_realized_price"),),
+        )
+        expanded = _expand_derived_dependencies(plan)
+        self.assertEqual(
+            {(item.asset, item.metric_key) for item in expanded.requests},
+            {
+                ("ETH", "eth_valuation.price_to_realized_price"),
+                ("ETH", "market.spot_price"),
+                ("ETH", "eth_valuation.realized_price"),
+            },
+        )
+        cached = tuple(normalize_metric_result({
+            "asset": asset,
+            "metric_key": metric,
+            "value": value,
+            "unit": unit,
+            "observed_at": NOW,
+            "fetched_at": NOW,
+            "source": "fixture",
+            "confidence": "HIGH",
+        }).observation for asset, metric, value, unit in (
+            ("ETH", "market.spot_price", 2000, "USD"),
+            ("ETH", "eth_valuation.realized_price", 1500, "USD"),
+        ))
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter({}, config=_config(), cache=ProviderCache(Path(directory) / "cache")),
+                persist=False,
+            ).run(plan, mode="AUTO", cached_observations=cached, as_of=NOW, now=NOW)
+        self.assertEqual(result.results[0].status, "SUCCESS")
+        self.assertAlmostEqual(result.observations[0].value, 2000 / 1500)
+        self.assertEqual(result.observations[0].source, "python-derived")
 
     def test_relative_mapping_is_the_plan_source_of_truth(self):
         plan = build_metric_collection_plan(["ETH", "AAVE"])
@@ -94,6 +133,13 @@ class MetricDependencyTests(unittest.TestCase):
             {metric: (dependency,) for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()},
             {metric: DERIVED_METRIC_DEPENDENCIES[metric] for metric in RELATIVE_RETURN_DEPENDENCIES},
         )
+
+    def test_excluded_watchlist_symbol_is_not_planned(self):
+        plan = build_metric_collection_plan(["AAVE"], watchlist=["LUNC", "AAVE"])
+        self.assertEqual(plan.excluded_assets, ("LUNC",))
+        self.assertTrue(plan.for_asset("AAVE"))
+        self.assertEqual(plan.for_asset("LUNC"), ())
+        self.assertNotIn("LUNC", plan.discovery_required_assets)
 
     def test_realistic_portfolio_expands_365d_dependencies(self):
         portfolio = {
@@ -112,7 +158,11 @@ class MetricDependencyTests(unittest.TestCase):
         self.assertEqual(positions["USDC"], "stablecoin")
 
         plan = build_metric_collection_plan(portfolio)
-        self.assertEqual(plan.discovery_required_assets, ("LUNC",))
+        self.assertEqual(plan.excluded_assets, ("LUNC",))
+        self.assertEqual(plan.discovery_required_assets, ())
+        self.assertNotIn("LUNC", plan.assets)
+        self.assertEqual(plan.for_asset("LUNC"), ())
+        self.assertTrue(all(request.asset != "LUNC" for request in plan.requests))
         expanded = _expand_derived_dependencies(plan)
         identities = {(request.asset, request.metric_key) for request in expanded.requests}
         for asset in ("ETH", "AAVE"):

@@ -182,6 +182,15 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "valuation.fdv_market_cap_ratio": ("valuation.fdv", "valuation.market_cap"),
     "derivatives.open_interest_to_market_cap": ("derivatives.open_interest_usd", "valuation.market_cap"),
     "btc_valuation.price_to_realized_price": ("market.spot_price", "btc_valuation.realized_price"),
+    "eth_valuation.price_to_realized_price": ("market.spot_price", "eth_valuation.realized_price"),
+    "market.breadth_state": ("market.breadth",),
+    "eth.staking.staked_supply_pct": ("eth.staking.staked_supply_eth", "eth.monetary.current_supply_eth"),
+    "flows.eth_exchange_netflow_to_market_cap": ("flows.exchange_netflow", "valuation.market_cap"),
+    "flows.eth_staking_netflow_to_supply_30d": ("eth.staking.staked_supply_change_30d", "eth.monetary.current_supply_eth"),
+    "flows.eth_etf_net_to_aum_7d": ("flows.etf_net_7d", "flows.eth_etf_aum_usd"),
+    "flows.eth_etf_net_to_aum_30d": ("flows.etf_net_30d", "flows.eth_etf_aum_usd"),
+    "eth.monetary.burn_to_issuance_30d": ("eth.monetary.burn_30d_eth", "eth.monetary.issuance_30d_eth"),
+    "eth.monetary.burn_to_issuance_365d": ("eth.monetary.burn_365d_eth", "eth.monetary.issuance_365d_eth"),
     **{
         metric: (dependency,)
         for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()
@@ -406,6 +415,7 @@ class MetricCollectionPlan:
     requests: tuple[MetricRequest, ...]
     assets: tuple[str, ...] = ()
     discovery_required_assets: tuple[str, ...] = ()
+    excluded_assets: tuple[str, ...] = ()
     collector_model: str = "LUNA_MAX"
 
     def __post_init__(self) -> None:
@@ -440,11 +450,21 @@ class MetricCollectionPlan:
             raise ValueError("plan assets must include every requested asset")
         object.__setattr__(self, "requests", requests)
         object.__setattr__(self, "assets", assets or requested_assets)
+        excluded_assets = _unique_symbols(self.excluded_assets, "excluded asset")
+        requested_excluded = sorted({item.asset for item in requests if item.asset in excluded_assets})
+        if requested_excluded:
+            raise ValueError(
+                "excluded assets must not have metric requests: "
+                + ", ".join(requested_excluded)
+            )
+        object.__setattr__(self, "excluded_assets", excluded_assets)
         object.__setattr__(
             self,
             "discovery_required_assets",
             _unique_symbols(self.discovery_required_assets, "discovery asset"),
         )
+        if set(self.discovery_required_assets) & set(excluded_assets):
+            raise ValueError("excluded assets must not be discovery assets")
         if str(self.collector_model).strip().upper() != "LUNA_MAX":
             raise ValueError("metric collection plans must use LUNA_MAX")
         object.__setattr__(self, "collector_model", "LUNA_MAX")
@@ -479,6 +499,7 @@ class MetricCollectionPlan:
             "collector_model": self.collector_model,
             "critical_metric_keys": list(self.critical_metric_keys),
             "discovery_required_assets": list(self.discovery_required_assets),
+            "excluded_assets": list(self.excluded_assets),
         }
 
     @classmethod
@@ -486,7 +507,10 @@ class MetricCollectionPlan:
         if not isinstance(value, Mapping):
             raise ValueError("metric collection plan must be an object")
         data = dict(value)
-        allowed = {"review_type", "requests", "assets", "discovery_required_assets", "collector_model", "critical_metric_keys"}
+        allowed = {
+            "review_type", "requests", "assets", "discovery_required_assets", "excluded_assets",
+            "collector_model", "critical_metric_keys",
+        }
         unknown = set(data) - allowed
         if unknown:
             raise ValueError(f"metric collection plan contains unknown fields: {', '.join(sorted(unknown))}")
@@ -498,6 +522,7 @@ class MetricCollectionPlan:
             requests=data["requests"],
             assets=data["assets"],
             discovery_required_assets=data["discovery_required_assets"],
+            excluded_assets=data["excluded_assets"],
             collector_model=data["collector_model"],
         )
         if tuple(data["critical_metric_keys"]) != model.critical_metric_keys:
@@ -643,7 +668,11 @@ def build_metric_collection_plan(
     add("BTC", "market.volatility_state", "BTC volatility regime input")
 
     discovery: list[str] = []
+    excluded: list[str] = []
     for symbol in symbols:
+        if resolved.is_excluded(symbol):
+            excluded.append(symbol)
+            continue
         asset_type = resolved.classify(symbol)
         if asset_type in {"stablecoin", "cash"}:
             continue
@@ -667,8 +696,9 @@ def build_metric_collection_plan(
     return MetricCollectionPlan(
         review_type=review,
         requests=tuple(requests),
-        assets=tuple(["MARKET", *symbols]),
+        assets=tuple(["MARKET", *(symbol for symbol in symbols if not resolved.is_excluded(symbol))]),
         discovery_required_assets=tuple(discovery),
+        excluded_assets=tuple(excluded),
     )
 
 

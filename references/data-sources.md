@@ -117,6 +117,14 @@ Useful:
 - breadth/alt relative strength;
 - BTC volatility and drawdown.
 
+`market.breadth` is defined as the fraction of the deterministic top-20
+CoinGecko market-cap universe with a positive completed 30D return. Stablecoin
+symbols and wrapped/staked duplicate IDs are excluded; rows without a defined
+30D return are unavailable rather than negative. Python derives
+`market.breadth_state` from that fraction: `HEALTHY` at or above 0.60, `WEAK`
+at or below 0.40, and `NEUTRAL` between those bounds. This is context, not an
+automatic trade signal.
+
 ### Chain liveness
 
 `risk.chain_liveness_status` is a structured operational metric for chain-native
@@ -179,6 +187,13 @@ Metrics `CapMrktEstUSD` as market-cap-only fallback. Python derives
 `valuation.fdv_market_cap_ratio`; DeFiLlama failure must not make
 BTC/ETH/BNB/AAVE market cap unavailable when these routes are available.
 
+`market.btc_dominance` and `market.total_crypto_market_cap` share one
+CoinGecko `/global` request. Chain-native `fundamentals.stablecoin_liquidity`
+uses the DeFiLlama stablecoin API's latest
+`totalCirculatingUSD.peggedUSD` value for Ethereum, Solana, or BSC; it is not
+protocol TVL. `market.stablecoin_supply` uses the same global stablecoin
+methodology from `/stablecoincharts/all`.
+
 ### Events
 
 Check for:
@@ -220,6 +235,16 @@ Full required-source coverage with no material item is
 `INSUFFICIENT_SOURCE_COVERAGE` and is never reported as safety.
 
 ## Freshness standards
+
+### FRED publication-aware macro freshness
+
+Macro freshness uses a bounded age for each FRED series rather than one global
+TTL. The current policy is DFF and DFII10 at 7 days, DTWEXBGS at 14 days,
+WALCL at 14 days, and M2SL at 75 days. These windows account for the expected
+publication lag of daily, weekly, and monthly official observations while
+still marking genuinely old data `STALE`. Historical replay still applies the
+`as_of` cutoff and uses the latest revision; it does not claim ALFRED vintage
+fidelity.
 
 ### Derivatives positioning
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Mapping
 import json
 
@@ -13,6 +14,49 @@ from ..models.report_packet import ReportPacket
 REPORT_PROMPT_RULE = "DO NOT recompute or alter numeric conclusions. Use the supplied structured outputs as authoritative."
 
 
+def _require_acquisition_finalized(acquisition: Any) -> None:
+    if hasattr(acquisition, "require_finalized"):
+        acquisition.require_finalized()
+        return
+    if isinstance(acquisition, Mapping):
+        summary = acquisition.get("summary", {})
+        pending = acquisition.get("pending_external_resolution")
+        if pending is None and isinstance(summary, Mapping):
+            pending = summary.get("pending_external_resolution", 0)
+        if pending is None:
+            pending = len(acquisition.get("pending_event_scans", ())) + len(
+                acquisition.get("pending_web_fallbacks", ())
+            )
+        if acquisition.get("finalized") is False or pending:
+            from ..acquisition import AcquisitionResolutionRequired
+
+            raise AcquisitionResolutionRequired(
+                "acquisition requires external resolution before final reporting"
+            )
+
+
+def _failed_script_executions(value: Any) -> tuple[Mapping[str, Any], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, Mapping):
+        values = (value,)
+    elif hasattr(value, "as_dict"):
+        values = (value.as_dict(),)
+    elif isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        raise ValueError("script_executions must be a sequence")
+    else:
+        values = tuple(value)
+    failures = []
+    for index, item in enumerate(values):
+        if hasattr(item, "as_dict"):
+            item = item.as_dict()
+        if not isinstance(item, Mapping):
+            raise ValueError(f"script_executions[{index}] must be an object")
+        if str(item.get("status", "")).strip().upper() != "SUCCESS":
+            failures.append(item)
+    return tuple(failures)
+
+
 def build_report_packet(
     decision_packet: DecisionReviewPacket | Mapping[str, Any],
     sol_review: SolReview | Mapping[str, Any] | None = None,
@@ -21,7 +65,10 @@ def build_report_packet(
     data_quality: Mapping[str, Any] | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
     acquisition: Any | None = None,
+    script_executions: Iterable[Mapping[str, Any]] | Mapping[str, Any] | None = None,
 ) -> ReportPacket:
+    if acquisition is not None:
+        _require_acquisition_finalized(acquisition)
     overlay = overlays
     packet = decision_packet if isinstance(decision_packet, DecisionReviewPacket) else DecisionReviewPacket.from_mapping(decision_packet)
     final_scores = scores
@@ -83,6 +130,7 @@ def build_report_packet(
         critical_missing_data=packet.critical_missing_data,
         data_quality=data_quality or {},
         failed_data_fetches=build_failed_data_fetches(acquisition, review_type=packet.review_type),
+        script_failures=_failed_script_executions(script_executions),
         positioning_summaries=positioning_summaries,
         btc_cycle_summary=btc_cycle_summary,
         overlay_confidence=overlay_confidence,
@@ -106,6 +154,7 @@ def build_final_review_output(
     packet = report_packet if isinstance(report_packet, ReportPacket) else ReportPacket.from_mapping(report_packet)
     packet_value = packet.as_dict()
     if acquisition is not None:
+        _require_acquisition_finalized(acquisition)
         if hasattr(acquisition, "require_scoring_ready"):
             acquisition.require_scoring_ready()
         elif isinstance(acquisition, Mapping) and acquisition.get("ready_for_scoring") is False:
@@ -127,6 +176,10 @@ def build_final_review_output(
         },
         "pnl": pnl,
         "collection": collection,
+        "debug_report": {
+            "data_fetch_failures": packet_value["failed_data_fetches"],
+            "script_failures": packet_value["script_failures"],
+        },
         "scores": packet_value["scores"],
         "regime": packet.market_regime,
         "allocation": dict(packet.target_weights),

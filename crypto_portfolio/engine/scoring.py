@@ -42,10 +42,16 @@ def ensure_acquisition_ready(acquisition: Any) -> None:
     if hasattr(acquisition, "require_scoring_ready"):
         acquisition.require_scoring_ready()
         return
-    if isinstance(acquisition, Mapping) and acquisition.get("ready_for_scoring") is False:
-        from ..acquisition import AcquisitionResolutionRequired
+    if isinstance(acquisition, Mapping):
+        pending = acquisition.get("pending_external_resolution")
+        if pending is None:
+            pending = len(acquisition.get("pending_event_scans", ())) + len(
+                acquisition.get("pending_web_fallbacks", ())
+            )
+        if acquisition.get("finalized") is False or pending or acquisition.get("ready_for_scoring") is False:
+            from ..acquisition import AcquisitionResolutionRequired
 
-        raise AcquisitionResolutionRequired("hard-critical event scan resolution required")
+            raise AcquisitionResolutionRequired("hard-critical event scan resolution required")
     raise ValueError("acquisition must expose ready_for_scoring")
 
 
@@ -306,6 +312,8 @@ def score_factors(
     if acquisition is not None:
         ensure_acquisition_ready(acquisition)
     resolved_policy = policy or resolve_policy()
+    if resolved_policy.is_excluded(symbol):
+        raise ValueError(f"excluded asset {symbol.strip().upper()} cannot be scored")
     factors = _factor_mapping(factor_scores)
     if not isinstance(critical_data_complete, bool):
         raise ValueError("critical_data_complete must be boolean")

@@ -29,13 +29,13 @@ def main() -> int:
     config = load_provider_config()
     router = ProviderRouter(config=config)
     if args.status or not any((args.list, args.metric, args.plan, args.probe)):
-        print("provider               config    adapter   credential   runtime")
+        print("provider               config    adapter   credential   runtime    reason")
         for row in router.provider_status():
             config_state = "ENABLED" if row["config_enabled"] else "DISABLED"
             adapter = "YES" if row["adapter_available"] else "NO"
             credential = "N/A" if not row["credential_required"] else ("YES" if row["credential_present"] else "NO")
             runtime = "READY" if row["runtime_ready"] else "NOT_READY"
-            print(f"{row['provider']:<22} {config_state:<9} {adapter:<9} {credential:<12} {runtime}")
+            print(f"{row['provider']:<22} {config_state:<9} {adapter:<9} {credential:<12} {runtime:<10} {row.get('reason') or '-'}")
     if args.list:
         for name, provider in sorted(router.providers.items()):
             capabilities = router.capabilities(name)

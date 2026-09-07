@@ -37,7 +37,7 @@ SPOT_BASE_URL = "https://api.binance.com"
 FUTURES_BASE_URL = "https://fapi.binance.com"
 _INTERVALS = {"1H": "1h", "4H": "4h", "1D": "1d"}
 _QUOTE = "USDT"
-BINANCE_SYMBOLS = {symbol: f"{symbol}{_QUOTE}" for symbol in ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE", "LUNC")}
+BINANCE_SYMBOLS = {symbol: f"{symbol}{_QUOTE}" for symbol in ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")}
 
 
 def _now(clock: Any | None = None) -> str:

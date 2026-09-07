@@ -71,6 +71,12 @@ class ReportFailureTests(unittest.TestCase):
             "error_code": "HTTP_403_RATE_LIMIT",
             "reason": "rate limited GITHUB_TOKEN=fake-secret",
             "endpoint": "https://api.github.com/repos/example?api_key=fake-secret",
+            "method": "GET",
+            "attempt": 2,
+            "exception_class": "ProviderRateLimited",
+            "detail": "request was rate limited",
+            "retryable": True,
+            "log": "Traceback\nProviderRateLimited: GITHUB_TOKEN=fake-secret",
             "status_code": 403,
             "request_hash": "must-not-escape",
         },)
@@ -80,6 +86,10 @@ class ReportFailureTests(unittest.TestCase):
         self.assertEqual(rows[0]["error_code"], "HTTP_403_RATE_LIMIT")
         self.assertEqual(rows[0]["provider"], "github")
         self.assertEqual(rows[0]["attempts"][0]["status_code"], 403)
+        self.assertEqual(rows[0]["attempts"][0]["exception_class"], "ProviderRateLimited")
+        self.assertEqual(rows[0]["attempts"][0]["method"], "GET")
+        self.assertEqual(rows[0]["attempts"][0]["attempt"], 2)
+        self.assertIn("Traceback", rows[0]["attempts"][0]["log"])
         encoded = json.dumps(rows, ensure_ascii=False)
         self.assertNotIn("fake-secret", encoded)
         self.assertNotIn("request_hash", encoded)
@@ -179,13 +189,11 @@ class ReportFailureTests(unittest.TestCase):
         self.assertEqual(validation["provider"], "defillama")
 
         web = result("ARB", "market.spot_price", reason="no configured source")
-        web_row = build_failed_data_fetches(acquisition((web,), web_fallbacks=({
+        self.assertEqual(build_failed_data_fetches(acquisition((web,), web_fallbacks=({
             "asset": "ARB",
             "metric_key": "market.spot_price",
             "reason": "no configured source",
-        },)))[0]
-        self.assertEqual(web_row["failure_stage"], "WEB_FALLBACK")
-        self.assertNotIn("provider", web_row)
+        },))), ())
 
     def test_rows_sort_critical_then_asset_and_metric(self):
         rows = build_failed_data_fetches(acquisition((

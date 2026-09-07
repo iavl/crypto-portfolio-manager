@@ -12,7 +12,7 @@
     "credential_required": {"type": "boolean"},
     "credential_present": {"type": "boolean"},
     "runtime_ready": {"type": "boolean"},
-    "reason": {"type": ["string", "null"]}
+    "reason": {"type": ["string", "null"], "enum": ["CONFIG_DISABLED", "CREDENTIAL_MISSING", "ADAPTER_UNAVAILABLE", null]}
   },
   "additionalProperties": false
 }

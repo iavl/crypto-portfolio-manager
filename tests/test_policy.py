@@ -11,6 +11,11 @@ class PolicyTests(unittest.TestCase):
         policy = load_policy()
         self.assertEqual(policy.policy_version, 3)
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
+        self.assertEqual(policy.excluded_symbols, ("LUNC",))
+        self.assertTrue(policy.is_excluded(" lunc "))
+        self.assertNotIn("LUNC", policy.core_symbols + policy.satellite_symbols + policy.stable_symbols)
+        self.assertIn("U", policy.stable_symbols)
+        self.assertIn("USD1", policy.stable_symbols)
         self.assertEqual(policy.classify(" usdc "), "stablecoin")
         self.assertEqual(policy.classify("USD"), "cash")
         self.assertEqual(policy.events["lookback_days"]["FULL_REVIEW"]["security"], 90)
@@ -116,6 +121,10 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.core_symbols, ("ALPHA",))
         self.assertEqual(policy.classify("alpha"), "core")
 
+        excluded = resolve_policy({"excluded_symbols": ["lunc", " foo "]})
+        self.assertEqual(excluded.excluded_symbols, ("LUNC", "FOO"))
+        self.assertTrue(excluded.is_excluded("foo"))
+
     def test_invalid_override_values_fail(self):
         for override in (
             {"min_stablecoin_weight": -0.1},
@@ -123,6 +132,10 @@ class PolicyTests(unittest.TestCase):
             {"min_stablecoin_weight": float("nan")},
             {"unknown": True},
             {"core_symbols": ["BTC"], "satellite_symbols": [" btc "]},
+            {"excluded_symbols": ["LUNC", "lunc"]},
+            {"excluded_symbols": ["BTC"]},
+            {"excluded_symbols": ["U"]},
+            {"excluded_symbols": ["AAVE"]},
         ):
             with self.subTest(override=override):
                 with self.assertRaises(PolicyError):
@@ -143,6 +156,10 @@ class PolicyTests(unittest.TestCase):
         invalid_nested = json.loads(json.dumps(original))
         invalid_nested["risk"]["extra"] = 1
         cases.append(invalid_nested)
+        for group in ("core", "satellites", "stable"):
+            invalid_overlap = json.loads(json.dumps(original))
+            invalid_overlap["universe"]["excluded"] = [invalid_overlap["universe"][group][0]]
+            cases.append(invalid_overlap)
         for data in cases:
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "policy.json"

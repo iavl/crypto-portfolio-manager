@@ -11,6 +11,8 @@ from crypto_portfolio.engine.scoring import score_factors
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.events import EventScanner, EventSourceScanResponse, source_catalog
+from crypto_portfolio.engine.decision_packet import build_decision_review_packet
+from crypto_portfolio.engine.report_packet import build_final_review_output, build_report_packet
 
 
 AS_OF = "2026-09-04T00:00:00Z"
@@ -54,6 +56,55 @@ class EventScannerTests(unittest.TestCase):
         self.assertEqual(len(regulatory), 3)
         self.assertTrue(all(source.required_for_full_coverage for source in btc + eth + regulatory))
         self.assertTrue(all(source.tier == 1 for source in regulatory))
+
+    def test_excluded_asset_has_no_event_source_requests(self):
+        scanner = EventScanner()
+        self.assertEqual(scanner.build_requests("LUNC", "security", AS_OF), ())
+        self.assertEqual(scanner.build_requests("LUNC", "regulatory", AS_OF), ())
+        calls = []
+
+        def fetch(request):
+            calls.append(request)
+            raise AssertionError("excluded asset must not reach EventScanner fetch")
+
+        self.assertEqual(scanner.scan_shared_regulatory(("LUNC",), AS_OF, source_fetcher=fetch), {})
+        self.assertEqual(calls, [])
+
+    def test_cftc_keeps_one_authority_with_official_transport_candidates(self):
+        scanner = EventScanner()
+        request = next(
+            item for item in scanner.build_requests("MARKET", "regulatory", AS_OF)
+            if item.source_id == "cftc-digital-assets"
+        )
+        self.assertEqual(request.authority, "U.S. CFTC")
+        self.assertEqual(request.source_url, "https://www.cftc.gov/PressRoom/PressReleases")
+        self.assertEqual(request.source_urls, (
+            "https://www.cftc.gov/PressRoom/PressReleases",
+            "https://www.cftc.gov/RSS/RSSGP/rssgp.xml",
+            "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",
+        ))
+
+    def test_cftc_local_failure_remains_external_resolution_until_authoritative_response(self):
+        plan = MetricCollectionPlan("EVENT_REVIEW", (
+            MetricRequest("BTC", "risk.regulatory_event_status"),
+        ))
+        manager = AcquisitionManager(persist=False)
+        first = manager.run(plan, mode="AUTO", as_of=AS_OF, now=AS_OF)
+        cftc = next(item for item in first.pending_event_scans if item.source_id == "cftc-digital-assets")
+        self.assertIn("https://www.cftc.gov/RSS/RSSGP/rssgp.xml", cftc.source_urls)
+        responses = tuple(
+            EventSourceScanResponse(item.source_id, True, AS_OF, (), None)
+            for item in first.pending_event_scans
+        )
+        second = manager.run(
+            plan,
+            mode="AUTO",
+            as_of=AS_OF,
+            now=AS_OF,
+            event_source_scan_responses=responses,
+        )
+        second.require_scoring_ready()
+        self.assertEqual(second.results[0].status, "SUCCESS")
 
     def test_scan_request_and_response_schemas_match_models(self):
         scanner = EventScanner()
@@ -173,6 +224,11 @@ class EventScannerTests(unittest.TestCase):
             self.assertEqual(len(result.event_scan_requests), 9)
             self.assertEqual({item.category for item in result.event_scan_requests}, {"security", "governance", "regulatory"})
             self.assertTrue(all(item.status == "FAILED" for item in result.results))
+            self.assertFalse(result.finalized)
+            self.assertEqual(result.pending_external_resolution, 9)
+            self.assertEqual(result.summary["pending_external_resolution"], 9)
+            self.assertEqual(result.summary["counts"]["FAILED"], 0)
+            self.assertEqual(result.summary["counts"]["PENDING_EXTERNAL_RESOLUTION"], 3)
 
         result = AcquisitionManager(persist=False).run(
             plan, mode="CACHE_ONLY", as_of=AS_OF, now=AS_OF,
@@ -211,6 +267,8 @@ class EventScannerTests(unittest.TestCase):
         manager = AcquisitionManager(persist=False)
         first = manager.run(plan, mode="AUTO", as_of=AS_OF, now=AS_OF)
         self.assertTrue(first.requires_external_resolution)
+        self.assertFalse(first.finalized)
+        self.assertEqual(first.pending_external_resolution, 3)
         self.assertEqual(first.pending_event_scans, first.event_scan_requests)
         self.assertEqual(first.hard_critical_unresolved, (("ETH", "risk.security_event_status"),))
         self.assertFalse(first.ready_for_scoring)
@@ -232,8 +290,40 @@ class EventScannerTests(unittest.TestCase):
         )
         self.assertEqual(second.event_scan_requests, ())
         self.assertEqual(len(second.event_scans), 1)
+        self.assertTrue(second.finalized)
+        self.assertEqual(second.pending_external_resolution, 0)
         self.assertTrue(second.ready_for_scoring)
         self.assertTrue(second.results[0].status == "SUCCESS")
+
+    def test_final_report_requires_second_pass(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("ETH", "risk.security_event_status"),
+        ))
+        manager = AcquisitionManager(persist=False)
+        first = manager.run(plan, mode="AUTO", as_of=AS_OF, now=AS_OF)
+        packet = build_decision_review_packet(
+            review_type="SNAPSHOT_REVIEW",
+            market_regime="NORMAL",
+            current_weights={"ETH": 1.0},
+            target_weights={"ETH": 1.0},
+            assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH"}},
+        )
+        with self.assertRaisesRegex(RuntimeError, "external resolution"):
+            build_report_packet(packet, acquisition=first)
+        responses = tuple(
+            EventSourceScanResponse(request.source_id, True, AS_OF, ())
+            for request in first.pending_event_scans
+        )
+        second = manager.run(
+            plan,
+            mode="AUTO",
+            as_of=AS_OF,
+            now=AS_OF,
+            event_source_scan_responses=responses,
+        )
+        report = build_report_packet(packet, acquisition=second)
+        output = build_final_review_output(report, acquisition=second)
+        self.assertEqual(output["collection"]["pending_external_resolution"], 0)
 
     def test_two_pass_contract_resolves_every_pending_source_request(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (

@@ -284,6 +284,42 @@ def _derived_ratio_observation(
     }
 
 
+def _derived_text_observation(
+    asset: str,
+    metric_key: str,
+    value: str,
+    input_value: tuple[float, str, str | None, Mapping[str, Any]],
+    *,
+    fetched_at: str,
+    calculation: str,
+) -> Mapping[str, Any]:
+    return {
+        "asset": asset,
+        "metric_key": metric_key,
+        "value": value,
+        "period": "current",
+        "observed_at": input_value[1],
+        "fetched_at": fetched_at,
+        "source": "python-derived",
+        "confidence": "MEDIUM",
+        "summary": f"Derived from {calculation}.",
+        "metadata": {
+            "source_mode": "DERIVED",
+            "calculation": calculation,
+            "input_observation_ids": [input_value[2]] if input_value[2] else [],
+            "input_sources": [input_value[3]],
+        },
+    }
+
+
+def _breadth_state(value: float) -> str:
+    if value >= 0.6:
+        return "HEALTHY"
+    if value <= 0.4:
+        return "WEAK"
+    return "NEUTRAL"
+
+
 def derive_eth_price_to_realized_price(
     asset: str,
     spot_price: MetricObservation | Mapping[str, Any],
@@ -406,6 +442,7 @@ def derive_metric_observations(
     unresolved: dict[tuple[str, str], str] = {}
     for request in requests:
         if request.metric_key not in {
+            "market.breadth_state",
             "derivatives.open_interest_to_market_cap",
             "valuation.fdv_market_cap_ratio",
             "btc_valuation.price_to_realized_price",
@@ -420,6 +457,21 @@ def derive_metric_observations(
         }:
             continue
         identity = (request.asset, request.metric_key)
+        if request.metric_key == "market.breadth_state":
+            raw = reusable.get((request.asset, "market.breadth")) or routed.get((request.asset, "market.breadth"))
+            breadth = _fresh_input(raw, asset=request.asset, metric_key="market.breadth", as_of=as_of) if raw is not None else None
+            if breadth is None:
+                unresolved[identity] = "DERIVED_INPUT_UNAVAILABLE: missing dependencies: market.breadth"
+            else:
+                values[identity] = _derived_text_observation(
+                    request.asset,
+                    request.metric_key,
+                    _breadth_state(breadth[0]),
+                    breadth,
+                    fetched_at=fetched_at,
+                    calculation="breadth fraction thresholds [0.4, 0.6]",
+                )
+            continue
         cap_identity = (request.asset, "valuation.market_cap")
         cap = reusable.get(cap_identity) or routed.get(cap_identity)
         if request.metric_key == "btc_valuation.price_to_realized_price":

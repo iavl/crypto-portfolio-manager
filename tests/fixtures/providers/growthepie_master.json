@@ -1,0 +1,15 @@
+{
+  "current_version": "2026-09-07",
+  "last_updated_utc": "2026-09-07T00:00:00Z",
+  "chains": {
+    "arbitrum": {"deployment": "PROD", "chain_type": "rollup", "da_layer": "Ethereum (blobs)"},
+    "base": {"deployment": "PROD", "chain_type": "rollup", "da_layer": "Ethereum (blobs)"},
+    "celestia-rollup": {"deployment": "PROD", "chain_type": "rollup", "da_layer": "Celestia"},
+    "dev-chain": {"deployment": "DEV", "chain_type": "rollup", "da_layer": "Ethereum (blobs)"}
+  },
+  "metrics": {
+    "rent_paid": {"metric_keys": ["rent_paid_usd", "rent_paid_eth"], "supported_chains": ["arbitrum", "base"]},
+    "blob_size": {"metric_keys": ["blob_size_bytes"], "supported_chains": ["arbitrum", "base", "celestia-rollup"]},
+    "fees": {"metric_keys": ["costs_blobs_usd"], "supported_chains": ["arbitrum", "base", "celestia-rollup"]}
+  }
+}

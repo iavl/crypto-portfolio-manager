@@ -346,7 +346,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     ),
     "macro.dtwexbgs": _definition(
         "macro.dtwexbgs", "macro_liquidity", "number", "index", "CONTEXTUAL",
-        freshness="7d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+        freshness="14d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
     ),
     "macro.walcl": _definition(
         "macro.walcl", "macro_liquidity", "number", "USD_millions", "CONTEXTUAL",
@@ -354,7 +354,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     ),
     "macro.m2sl": _definition(
         "macro.m2sl", "macro_liquidity", "number", "USD_billions", "CONTEXTUAL",
-        freshness="45d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+        freshness="75d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
     ),
     "macro.fed_funds_change_90d": _definition(
         "macro.fed_funds_change_90d", "macro_liquidity", "number", "percentage_points", "LOWER_IS_BETTER",
@@ -366,7 +366,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     ),
     "macro.broad_dollar_change_90d": _definition(
         "macro.broad_dollar_change_90d", "macro_liquidity", "number", "fraction", "LOWER_IS_BETTER",
-        freshness="7d", asset_scope=("BTC",),
+        freshness="14d", asset_scope=("BTC",),
     ),
     "macro.fed_balance_sheet_change_13w": _definition(
         "macro.fed_balance_sheet_change_13w", "macro_liquidity", "number", "fraction", "HIGHER_IS_BETTER",
@@ -374,11 +374,11 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     ),
     "macro.m2_change_6m": _definition(
         "macro.m2_change_6m", "macro_liquidity", "number", "fraction", "HIGHER_IS_BETTER",
-        freshness="45d", asset_scope=("BTC",),
+        freshness="75d", asset_scope=("BTC",),
     ),
     "macro.m2_change_12m": _definition(
         "macro.m2_change_12m", "macro_liquidity", "number", "fraction", "HIGHER_IS_BETTER",
-        freshness="45d", asset_scope=("BTC",),
+        freshness="75d", asset_scope=("BTC",),
     ),
     "relative.return_vs_btc_30d": _definition("relative.return_vs_btc_30d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_90d": _definition("relative.return_vs_btc_90d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),

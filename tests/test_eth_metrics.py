@@ -1,6 +1,8 @@
+import json
 import math
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 
 from crypto_portfolio.engine.derived_metrics import (
     calculate_burn_to_issuance,
@@ -17,7 +19,7 @@ from crypto_portfolio.models.policy import load_policy
 from crypto_portfolio.providers.base import ProviderRequest
 from crypto_portfolio.providers.blobscan import parse_timeseries as parse_blobscan
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider
-from crypto_portfolio.providers.growthepie import parse_da_payload, parse_rent_payload
+from crypto_portfolio.providers.growthepie import parse_da_payload, parse_fundamentals_payload, parse_rent_payload
 from crypto_portfolio.providers.l2beat import ethereum_project_ids, parse_tvs_payload
 from crypto_portfolio.providers.ethereum_protocol import block_burn_eth, execution_base_fee_burn
 from crypto_portfolio.providers.sosovalue import parse_etf_flow_history
@@ -121,6 +123,25 @@ class EthMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(values["flows.eth_etf_net_to_aum_7d"], 0.07)
         self.assertEqual(values["flows.eth_etf_aum_usd"], 1000)
 
+    def test_eth_sosovalue_missing_aum_is_a_derived_input_failure(self):
+        payload = {
+            "code": 0,
+            "data": [
+                {"date": f"2026-08-{index:02d}", "total_net_inflow": 10}
+                for index in range(1, 32)
+            ],
+        }
+        from crypto_portfolio.providers.sosovalue import SoSoValueProvider
+        class Client:
+            def post_json(self, *_args, **_kwargs):
+                return payload
+
+        result = SoSoValueProvider(client=Client(), api_key="fake").collect(
+            ProviderRequest("sosovalue", "etf", "ETH", {}, ("flows.eth_etf_net_to_aum_7d",))
+        )
+        self.assertEqual(result.observations, ())
+        self.assertEqual(result.diagnostics["flows.eth_etf_net_to_aum_7d"]["error_code"], "DERIVED_INPUT_UNAVAILABLE")
+
     def test_eth_normalized_etf_flow_owns_flow_factor(self):
         result = calculate_flow_factor({
             "flows.etf_net_7d": -10_000_000,
@@ -135,11 +156,52 @@ class EthMetricsTests(unittest.TestCase):
         da = {"data": [{"date": "2026-08-31", "layer": "ethereum", "data_bytes": 10, "fees_usd": 2}, {"date": "2026-08-31", "layer": "other", "data_bytes": 5, "fees_usd": 1}]}
         share = parse_da_payload(da, ("eth.da.ethereum_share_of_tracked_da_bytes_30d",), fetched_at="2026-09-01T00:00:00Z")[0]["value"]
         self.assertAlmostEqual(share, 10 / 15)
-        blob = {"data": [{"date": "2026-08-31", "blob_count": 2, "data_bytes": 100, "blob_transactions": 1, "utilization": 0.5}]}
-        self.assertEqual(parse_blobscan(blob, ("eth.blobs.count_1d",), fetched_at="2026-09-01T00:00:00Z")[0]["value"], 2)
-        ids = ethereum_project_ids({"data": [{"id": "a", "settlementLayer": "Ethereum"}, {"id": "b", "settlementLayer": "Celestia"}]})
-        tvs = parse_tvs_payload({"data": [{"id": "a", "date": "2026-08-31", "tvs": 7}, {"id": "b", "date": "2026-08-31", "tvs": 9}]}, ids, fetched_at="2026-09-01T00:00:00Z")
-        self.assertEqual(tvs["value"], 7)
+        blob = json.loads((Path(__file__).parent / "fixtures/providers/blobscan_timeseries.json").read_text())
+        self.assertEqual(parse_blobscan(blob, ("eth.blobs.count_1d",), fetched_at="2026-09-01T00:00:00Z")[0]["value"], 42000)
+        l2beat_fixture = Path(__file__).parent / "fixtures/providers"
+        ids = ethereum_project_ids(json.loads((l2beat_fixture / "l2beat_projects.json").read_text()))
+        tvs = parse_tvs_payload(
+            json.loads((l2beat_fixture / "l2beat_tvs.json").read_text()),
+            ids,
+            fetched_at="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(tvs["value"], 123456789.0)
+
+    def test_growthepie_current_master_and_fundamentals_contract(self):
+        master = {
+            "chains": {
+                "arbitrum": {"deployment": "PROD", "chain_type": "rollup", "da_layer": "Ethereum (blobs)"},
+                "base": {"deployment": "PROD", "chain_type": "rollup", "da_layer": "Ethereum (blobs)"},
+                "celestia-rollup": {"deployment": "PROD", "chain_type": "rollup", "da_layer": "Celestia"},
+            },
+            "metrics": {
+                "rent_paid": {"supported_chains": ["arbitrum", "base"]},
+            },
+        }
+        rows = []
+        for index in range(30):
+            day = date(2026, 8, 3) + timedelta(days=index)
+            stamp = day.isoformat()
+            for origin, rent, blob, fee in (
+                ("arbitrum", 2, 10, 4),
+                ("base", 3, 20, 6),
+                ("celestia-rollup", 99, 30, 10),
+            ):
+                rows.extend((
+                    {"metric_key": "rent_paid_usd", "origin_key": origin, "date": stamp, "value": rent},
+                    {"metric_key": "blob_size_bytes", "origin_key": origin, "date": stamp, "value": blob},
+                    {"metric_key": "costs_blobs_usd", "origin_key": origin, "date": stamp, "value": fee},
+                ))
+        values = parse_fundamentals_payload(
+            rows,
+            master,
+            ("eth.l2.rent_paid_30d_usd", "eth.da.ethereum_blob_data_30d_mb", "eth.da.ethereum_share_of_tracked_da_bytes_30d"),
+            fetched_at="2026-09-02T00:00:00Z",
+        )
+        by_key = {item["metric_key"]: item["value"] for item in values}
+        self.assertEqual(by_key["eth.l2.rent_paid_30d_usd"], 150)
+        self.assertAlmostEqual(by_key["eth.da.ethereum_blob_data_30d_mb"], 900 / 1_000_000)
+        self.assertAlmostEqual(by_key["eth.da.ethereum_share_of_tracked_da_bytes_30d"], 900 / 1800)
 
     def test_ethereum_protocol_burn_uses_canonical_block_fields(self):
         block = {

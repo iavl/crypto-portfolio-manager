@@ -62,7 +62,7 @@ _TOP_LEVEL_FIELDS = {
     "events",
     "event_risk_multipliers",
 }
-_UNIVERSE_FIELDS = {"core", "satellites", "stable"}
+_UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
 _CHAIN_LIVENESS_FIELDS = {"degraded_deployment_factor", "BTC", "ETH", "BNB", "SOL"}
 _CHAIN_HEAD_FIELDS = {
@@ -239,6 +239,7 @@ _OVERRIDE_FIELDS = {
     "core_symbols",
     "satellite_symbols",
     "stable_symbols",
+    "excluded_symbols",
     "min_stablecoin_weight",
     "max_portfolio_drawdown",
 }
@@ -468,6 +469,7 @@ class Policy:
     core_symbols: tuple[str, ...]
     satellite_symbols: tuple[str, ...]
     stable_symbols: tuple[str, ...]
+    excluded_symbols: tuple[str, ...]
     min_stablecoin_weight: float
     max_portfolio_drawdown: float
     benchmarks: Mapping[str, Mapping[str, float]]
@@ -504,6 +506,11 @@ class Policy:
     def canonical_hash(self) -> str:
         return policy_hash(self)
 
+    def is_excluded(self, symbol: str) -> bool:
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise PolicyError("symbol must be a non-empty string")
+        return symbol.strip().upper() in self.excluded_symbols
+
     def classify(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
             raise PolicyError("symbol must be a non-empty string")
@@ -534,6 +541,7 @@ class Policy:
                 "core": list(self.core_symbols),
                 "satellites": list(self.satellite_symbols),
                 "stable": list(self.stable_symbols),
+                "excluded": list(self.excluded_symbols),
             },
             "risk": {
                 "min_stablecoin_weight": self.min_stablecoin_weight,
@@ -592,6 +600,7 @@ class Policy:
             "core_symbols": list(self.core_symbols),
             "satellite_symbols": list(self.satellite_symbols),
             "stable_symbols": list(self.stable_symbols),
+            "excluded_symbols": list(self.excluded_symbols),
             "min_stablecoin_weight": self.min_stablecoin_weight,
             "max_portfolio_drawdown": self.max_portfolio_drawdown,
         }
@@ -601,12 +610,14 @@ class Policy:
         core = _symbols(values["core_symbols"], "config.core_symbols")
         satellites = _symbols(values["satellite_symbols"], "config.satellite_symbols")
         stable = _symbols(values["stable_symbols"], "config.stable_symbols")
-        _check_overlaps(core, satellites, stable)
+        excluded = _symbols(values["excluded_symbols"], "config.excluded_symbols")
+        _check_overlaps(core, satellites, stable, excluded)
         return _replace_policy(
             self,
             core_symbols=core,
             satellite_symbols=satellites,
             stable_symbols=stable,
+            excluded_symbols=excluded,
             min_stablecoin_weight=_fraction(
                 values["min_stablecoin_weight"], "config.min_stablecoin_weight"
             ),
@@ -623,9 +634,19 @@ def _replace_policy(policy: Policy, **changes: Any) -> Policy:
     return Policy(**values)
 
 
-def _check_overlaps(core: tuple[str, ...], satellites: tuple[str, ...], stable: tuple[str, ...]) -> None:
+def _check_overlaps(
+    core: tuple[str, ...],
+    satellites: tuple[str, ...],
+    stable: tuple[str, ...],
+    excluded: tuple[str, ...] = (),
+) -> None:
     owners: dict[str, str] = {}
-    for name, symbols in (("core", core), ("satellites", satellites), ("stable", stable)):
+    for name, symbols in (
+        ("core", core),
+        ("satellites", satellites),
+        ("stable", stable),
+        ("excluded", excluded),
+    ):
         for symbol in symbols:
             if symbol in owners:
                 raise PolicyError(f"symbol {symbol} appears in both {owners[symbol]} and {name}")
@@ -1388,11 +1409,12 @@ def _parse_policy(
         raise PolicyError("universe must be an object")
     _unknown_fields(universe, _UNIVERSE_FIELDS, "universe")
     if set(universe) != _UNIVERSE_FIELDS:
-        raise PolicyError("universe must contain core, satellites, and stable")
+        raise PolicyError("universe must contain core, satellites, stable, and excluded")
     core = _symbols(universe["core"], "universe.core")
     satellites = _symbols(universe["satellites"], "universe.satellites")
     stable = _symbols(universe["stable"], "universe.stable")
-    _check_overlaps(core, satellites, stable)
+    excluded = _symbols(universe["excluded"], "universe.excluded")
+    _check_overlaps(core, satellites, stable, excluded)
 
     risk = data["risk"]
     if not isinstance(risk, dict):
@@ -1561,6 +1583,7 @@ def _parse_policy(
         core_symbols=core,
         satellite_symbols=satellites,
         stable_symbols=stable,
+        excluded_symbols=excluded,
         min_stablecoin_weight=_fraction(
             risk["min_stablecoin_weight"], "risk.min_stablecoin_weight"
         ),

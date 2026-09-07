@@ -12,9 +12,10 @@ from crypto_portfolio.providers.coingecko import (
     BASE_URL,
     COINGECKO_API_KEY_HEADER,
     CoinGeckoProvider,
+    parse_breadth_payload,
 )
 from crypto_portfolio.providers.config import load_provider_config
-from crypto_portfolio.providers.defillama import DeFiLlamaProvider, parse_protocol_payload
+from crypto_portfolio.providers.defillama import DeFiLlamaProvider, parse_protocol_payload, parse_stablecoin_chart
 from crypto_portfolio.providers.http import redact_secrets
 from crypto_portfolio.providers.router import ProviderRouter
 from crypto_portfolio.providers.routes import (
@@ -117,6 +118,10 @@ class ValuationProviderTests(unittest.TestCase):
         self.assertEqual(response.diagnostics["valuation.market_cap"]["error_code"], "COINGECKO_SCHEMA")
 
     def test_routes_dataset_ttl_and_config(self):
+        self.assertEqual(provider_chain("market.btc_dominance", "MARKET"), ("coingecko",))
+        self.assertEqual(provider_chain("market.total_crypto_market_cap", "MARKET"), ("coingecko",))
+        self.assertEqual(provider_chain("market.stablecoin_supply", "MARKET"), ("defillama",))
+        self.assertEqual(provider_chain("market.breadth_state", "MARKET"), ())
         self.assertEqual(provider_chain("valuation.market_cap", "BTC"), (
             "coingecko", "coinmetrics_community", "coinmetrics_pro",
         ))
@@ -133,6 +138,53 @@ class ValuationProviderTests(unittest.TestCase):
         )[0]
         self.assertTrue(current.mutable)
         self.assertFalse(historical.mutable)
+
+    def test_coingecko_global_contract_batches_dominance_and_market_cap(self):
+        client = FakeClient({
+            "data": {
+                "updated_at": 1788779806,
+                "market_cap_percentage": {"btc": 59.1},
+                "total_market_cap": {"usd": 2_690_000_000_000},
+            },
+        })
+        response = CoinGeckoProvider(client=client, api_key="fake-key").collect(ProviderRequest(
+            "coingecko", "market_global", "MARKET", {},
+            ("market.btc_dominance", "market.total_crypto_market_cap"),
+        ))
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0][0], BASE_URL + "/global")
+        values = {item["metric_key"]: item["value"] for item in response.observations}
+        self.assertAlmostEqual(values["market.btc_dominance"], 0.591)
+        self.assertEqual(values["market.total_crypto_market_cap"], 2_690_000_000_000)
+
+    def test_coingecko_breadth_uses_current_top20_return_contract(self):
+        rows = [
+            {
+                "id": f"asset-{index}",
+                "symbol": f"a{index}",
+                "price_change_percentage_30d_in_currency": 1 if index < 12 else -1,
+                "last_updated": "2026-09-07T00:00:00Z",
+            }
+            for index in range(20)
+        ]
+        value = parse_breadth_payload(rows, fetched_at=NOW)
+        self.assertEqual(value["metric_key"], "market.breadth")
+        self.assertEqual(value["value"], 0.6)
+        self.assertEqual(value["metadata"]["universe_size"], 20)
+
+    def test_defillama_stablecoin_chart_is_chain_supply_not_protocol_tvl(self):
+        value = parse_stablecoin_chart(
+            [
+                {"date": "1788691200", "totalCirculatingUSD": {"peggedUSD": 100}},
+                {"date": "1788777600", "totalCirculatingUSD": {"peggedUSD": 125}},
+            ],
+            asset="ETH",
+            metric_key="fundamentals.stablecoin_liquidity",
+            fetched_at=NOW,
+            endpoint="https://stablecoins.llama.fi/stablecoincharts/Ethereum",
+        )
+        self.assertEqual(value["value"], 125)
+        self.assertEqual(value["metadata"]["scope"], "Ethereum")
 
     def test_defillama_no_longer_owns_market_valuation(self):
         capabilities = DeFiLlamaProvider(client=object()).capabilities

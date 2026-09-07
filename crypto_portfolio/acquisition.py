@@ -25,6 +25,7 @@ from .events import EventScanner, EventSourceScanRequest, EventSourceScanRespons
 from .metrics_registry import metric_definition
 from .models.events import EventScanResult
 from .models.metrics_history import MetricObservation
+from .models.policy import Policy, resolve_policy
 from .models.time import normalize_timestamp, parse_timestamp
 from .providers.base import FetchMode
 from .providers.config import load_provider_config
@@ -49,6 +50,9 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "CACHE_EXPIRED",
     "CACHE_CORRUPT",
     "PROVIDER_INSUFFICIENT_HISTORY",
+    "CONFIG_DISABLED",
+    "CREDENTIAL_MISSING",
+    "ADAPTER_UNAVAILABLE",
 }
 class AcquisitionResolutionRequired(RuntimeError):
     """Control-flow signal that hard-critical external evidence is pending."""
@@ -117,6 +121,15 @@ class AcquisitionResult:
         return self.web_fallbacks
 
     @property
+    def pending_external_resolution(self) -> int:
+        return len(self.pending_event_scans) + len(self.pending_web_fallbacks)
+
+    @property
+    def finalized(self) -> bool:
+        """Whether every externally resolved acquisition stage has completed."""
+        return not self.pending_event_scans and not self.pending_web_fallbacks
+
+    @property
     def hard_critical_unresolved(self) -> tuple[tuple[str, str], ...]:
         pending_groups = {
             (request.asset, request.category)
@@ -155,13 +168,21 @@ class AcquisitionResult:
 
     @property
     def requires_external_resolution(self) -> bool:
-        return bool(self.pending_event_scans or self.pending_web_fallbacks or self.hard_critical_unresolved)
+        return not self.finalized
 
     @property
     def ready_for_scoring(self) -> bool:
-        return not self.hard_critical_unresolved
+        return self.finalized and not self.hard_critical_unresolved
+
+    def require_finalized(self) -> None:
+        if not self.finalized:
+            raise AcquisitionResolutionRequired(
+                "hard-critical event scan or external resolution required "
+                f"({self.pending_external_resolution} pending request(s))"
+            )
 
     def require_scoring_ready(self) -> None:
+        self.require_finalized()
         if not self.ready_for_scoring:
             pending = ", ".join(f"{asset}:{key}" for asset, key in self.hard_critical_unresolved)
             raise AcquisitionResolutionRequired(f"hard-critical event scan resolution required: {pending}")
@@ -178,6 +199,8 @@ class AcquisitionResult:
             "requires_external_resolution": self.requires_external_resolution,
             "pending_event_scans": [item.as_dict() for item in self.pending_event_scans],
             "pending_web_fallbacks": [item.as_dict() for item in self.pending_web_fallbacks],
+            "pending_external_resolution": self.pending_external_resolution,
+            "finalized": self.finalized,
             "hard_critical_unresolved": [list(item) for item in self.hard_critical_unresolved],
             "ready_for_scoring": self.ready_for_scoring,
         }
@@ -247,6 +270,8 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
         f"Web fallbacks: {summary.get('web_fallbacks', 0)}",
         f"Event scan source requests: {summary.get('event_scan_requests', 0)}",
         f"Event scans completed: {summary.get('event_scans', 0)}",
+        f"Pending external resolution: {summary.get('pending_external_resolution', 0)}",
+        f"Finalized: {summary.get('finalized', True)}",
         f"Provider failures: {summary.get('provider_failures_by_error_code', {})}",
         f"Failed after all fallbacks: {summary.get('failed_after_fallbacks', 0)}",
     ))
@@ -288,6 +313,7 @@ def _expand_derived_dependencies(plan: MetricCollectionPlan) -> MetricCollection
         requests=(*plan.requests, *additions),
         assets=plan.assets,
         discovery_required_assets=plan.discovery_required_assets,
+        excluded_assets=plan.excluded_assets,
         collector_model=plan.collector_model,
     )
 
@@ -305,6 +331,7 @@ class AcquisitionManager:
         persist: bool = True,
         fetch_mode: FetchMode | str | None = None,
         event_scanner: EventScanner | None = None,
+        policy: Policy | None = None,
     ) -> None:
         self.config = dict(config or load_provider_config())
         self.router = router or ProviderRouter(config=self.config)
@@ -312,7 +339,8 @@ class AcquisitionManager:
         self.event_path = event_path
         self.persist = persist
         self.fetch_mode = resolve_fetch_mode(fetch_mode)
-        self.event_scanner = event_scanner or EventScanner()
+        self.policy = policy or resolve_policy()
+        self.event_scanner = event_scanner or EventScanner(policy=self.policy)
 
     def run(
         self,
@@ -328,6 +356,29 @@ class AcquisitionManager:
         event_source_fetcher: Callable[[EventSourceScanRequest], Any] | None = None,
     ) -> AcquisitionResult:
         requested_model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
+        excluded = list(requested_model.excluded_assets)
+        kept_requests = []
+        for request in requested_model.requests:
+            if self.policy.is_excluded(request.asset):
+                if request.asset not in excluded:
+                    excluded.append(request.asset)
+                continue
+            kept_requests.append(request)
+        if len(kept_requests) != len(requested_model.requests) or tuple(excluded) != requested_model.excluded_assets:
+            requested_model = MetricCollectionPlan(
+                review_type=requested_model.review_type,
+                requests=tuple(kept_requests),
+                assets=tuple(
+                    asset for asset in requested_model.assets
+                    if not self.policy.is_excluded(asset)
+                ),
+                discovery_required_assets=tuple(
+                    asset for asset in requested_model.discovery_required_assets
+                    if not self.policy.is_excluded(asset)
+                ),
+                excluded_assets=tuple(excluded),
+                collector_model=requested_model.collector_model,
+            )
         model = _expand_derived_dependencies(requested_model)
         selected_mode = resolve_fetch_mode(mode if mode is not None else self.fetch_mode)
         current = _now(now)
@@ -558,6 +609,14 @@ class AcquisitionManager:
             (item.asset, item.category, item.source_id): item for item in event_scan_requests
         }
         event_scan_requests = list(unique_event_requests.values())
+        pending_event_groups = {(item.asset, item.category) for item in event_scan_requests}
+        pending_event_identities = {
+            (request.asset, request.metric_key)
+            for request in model.requests
+            if (category := event_metric_category(request.metric_key)) is not None
+            and ("MARKET" if category == "regulatory" else request.asset, category)
+            in pending_event_groups
+        }
         for (asset, category), scan in tuple(event_scans.items()):
             if not isinstance(scan, EventScanResult):
                 continue
@@ -584,6 +643,9 @@ class AcquisitionManager:
                 or event_metric_category(request.metric_key) is not None
                 or request.metric_key == "risk.chain_liveness_status"
                 or request.metric_key.startswith(("macro.", "btc_valuation."))
+                or request.metric_key in DERIVED_METRIC_DEPENDENCIES
+                or request.metric_key in RELATIVE_RETURN_DEPENDENCIES
+                or request.metric_key in {"market.breadth_state", "market.flow_state"}
             ):
                 return
             chain = provider_chain(request.metric_key, request.asset)
@@ -646,6 +708,9 @@ class AcquisitionManager:
                     )
                     if diagnostic is None:
                         diagnostic = {"detail": reason}
+                elif identity in routed_reasons:
+                    reason = routed_reasons[identity]
+                    diagnostic = routed_diagnostics.get(identity)
                 elif not provider_chain(request.metric_key, request.asset):
                     reason = "no configured structured provider route for this metric"
                     diagnostic = {"error_code": "NO_PROVIDER_ROUTE", "detail": reason}
@@ -713,6 +778,41 @@ class AcquisitionManager:
 
         events = tuple(item.event for item in results)
         summary = collection_summary(events, review_type=model.review_type)
+        pending_web_identities = {
+            (item.asset, item.metric_key) for item in web_fallbacks
+        }
+        pending_identities = pending_event_identities | pending_web_identities
+        pending_event_metrics = sum(
+            event.status in {"FAILED", "STALE", "CONFLICT"}
+            and (event.asset, event.metric_key) in pending_event_identities
+            for event in events
+        )
+        pending_external_metrics = sum(
+            event.status in {"FAILED", "STALE", "CONFLICT"}
+            and (event.asset, event.metric_key) in pending_identities
+            for event in events
+        )
+        pending_critical_failures = sum(
+            event.status in {"FAILED", "STALE", "CONFLICT"}
+            and (event.asset, event.metric_key) in pending_identities
+            and metric_definition(event.metric_key).is_critical_for(model.review_type)
+            for event in events
+        )
+        for status in ("FAILED", "STALE", "CONFLICT"):
+            summary["counts"][status] = max(
+                0,
+                summary["counts"].get(status, 0)
+                - sum(
+                    event.status == status
+                    and (event.asset, event.metric_key) in pending_identities
+                    for event in events
+                ),
+            )
+        summary["counts"]["PENDING_EXTERNAL_RESOLUTION"] = pending_external_metrics
+        summary["critical_failures"] = max(
+            0, summary["critical_failures"] - pending_critical_failures
+        )
+        summary["hard_critical_failure"] = bool(summary["critical_failures"])
         provider_failures = Counter(
             str(attempt.error_code)
             for attempt in routed.attempts
@@ -745,10 +845,19 @@ class AcquisitionManager:
             "api_derived_metrics": routed.api_derived_metrics,
             "provider_fallbacks": routed.provider_fallbacks,
             "web_fallbacks": len(web_fallbacks),
-            "failed_after_fallbacks": sum(item.status in {"FAILED", "STALE", "CONFLICT"} for item in events),
+            "failed_after_fallbacks": sum(
+                item.status in {"FAILED", "STALE", "CONFLICT"}
+                and (item.asset, item.metric_key) not in pending_identities
+                for item in events
+            ),
             "fetch_mode": selected_mode.value,
             "event_scan_requests": len(event_scan_requests),
             "event_scans": len(event_scans),
+            "pending_external_resolution": len(event_scan_requests) + len(web_fallbacks),
+            "pending_event_sources": len(event_scan_requests),
+            "pending_event_metrics": pending_event_metrics,
+            "pending_web_metrics": len(pending_web_identities),
+            "finalized": not event_scan_requests and not web_fallbacks,
             "provider_failures_by_error_code": dict(sorted(provider_failures.items())),
             "event_sources_reachable": event_sources_reachable,
             "event_sources_required": event_sources_required,
@@ -960,6 +1069,9 @@ class AcquisitionManager:
         responses: Iterable[EventSourceScanResponse],
     ) -> tuple[EventSourceScanResponse, ...]:
         requests = tuple(requests)
+        responses = tuple(responses)
+        if len({response.source_id for response in responses}) != len(responses):
+            raise ValueError("event source scan responses contain duplicate source IDs")
         by_source = {response.source_id: response for response in responses}
         return tuple(
             by_source.get(

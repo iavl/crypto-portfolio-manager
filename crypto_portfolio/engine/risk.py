@@ -239,6 +239,19 @@ def run_risk_gate(
     except ValueError as exc:
         return RiskCheckResult((RiskViolation("ERROR", "INVALID_WEIGHTS", str(exc)),))
     violations: list[RiskViolation] = []
+    excluded_targets = {
+        symbol for symbol, weight in weights.items()
+        if weight > 0 and resolved.is_excluded(symbol)
+    }
+    if excluded_targets:
+        violations.append(
+            RiskViolation(
+                "ERROR",
+                "EXCLUDED_ASSET_TARGET",
+                "excluded assets cannot receive target allocation: "
+                + ", ".join(sorted(excluded_targets)),
+            )
+        )
     total = sum(weights.values())
     if not math.isclose(total, 1.0, abs_tol=1e-9):
         violations.append(RiskViolation("ERROR", "TOTAL_NOT_ONE", "target weights must sum to 1"))
@@ -319,6 +332,8 @@ def run_risk_gate(
     event_caps: dict[str, float] = {}
     for raw_symbol, assessment in assessments.items():
         symbol = str(raw_symbol).strip().upper()
+        if resolved.is_excluded(symbol):
+            continue
         confidence, event_risk, risk_tier = _assessment(assessment)
         if event_risk != "NORMAL" and weights.get(symbol, 0.0) > 0:
             event_caps[symbol] = event_risk_deployment_factor(event_risk, policy=resolved)

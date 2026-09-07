@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "metric": "CapMVRVCur",
+      "data_type": "numeric",
+      "product": "Community",
+      "frequencies": [{"frequency": "1d", "assets": ["btc", "eth"]}]
+    },
+    {
+      "metric": "CapMrktCurUSD",
+      "data_type": "numeric",
+      "product": "Community",
+      "frequencies": [{"frequency": "1d", "assets": ["btc", "eth"]}]
+    },
+    {
+      "metric": "CapMrktEstUSD",
+      "data_type": "numeric",
+      "product": "Community",
+      "frequencies": [{"frequency": "1d", "assets": ["btc", "eth", "bnb"]}]
+    },
+    {
+      "metric": "SplyCur",
+      "data_type": "numeric",
+      "product": "Community",
+      "frequencies": [{"frequency": "1d", "assets": ["btc", "eth"]}]
+    },
+    {
+      "metric": "AdrActCnt",
+      "data_type": "numeric",
+      "product": "Community",
+      "frequencies": [{"frequency": "1d", "assets": ["btc", "eth"]}]
+    },
+    {
+      "metric": "TxCnt",
+      "data_type": "numeric",
+      "product": "Community",
+      "frequencies": [{"frequency": "1d", "assets": ["btc", "eth"]}]
+    }
+  ]
+}

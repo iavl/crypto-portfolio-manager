@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+import traceback
 from typing import Any, Iterable, Mapping
 
 from ..models.market import OHLCVSeries
@@ -22,8 +23,11 @@ from .base import (
 )
 from .cache import CacheCorruption, CacheExpired, ProviderCache, merge_ohlcv_series, missing_series_range, request_hash
 from .config import load_provider_config, provider_api_key, provider_enabled
-from .http import HttpClient, classify_transport_error, redact_secrets
+from .http import HttpClient, classify_transport_error, redact_log, redact_secrets
 from .routes import BASIS_METHODOLOGY, build_provider_requests, current_delivery_basis, provider_chain
+
+
+_OPTIONAL_FALLBACK_PROVIDERS = {"coinmetrics_pro"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,7 @@ class ProviderAttempt:
     detail: str | None = None
     retryable: bool | None = None
     status_code: int | None = None
+    log: str | None = None
 
     @property
     def success(self) -> bool:
@@ -76,6 +81,7 @@ class ProviderAttempt:
             "detail": self.detail,
             "retryable": self.retryable,
             "status_code": self.status_code,
+            "log": self.log,
         }
 
 
@@ -192,7 +198,6 @@ class ProviderRouter:
             "chain_liveness": ChainLivenessProvider(client=client),
             "blobscan": BlobscanProvider(client=client),
             "growthepie": GrowthepieProvider(client=client),
-            "l2beat": L2BeatProvider(client=client),
             "ethereum_protocol": EthereumProtocolProvider(client=client),
         }
         if provider_enabled("fred", self.config):
@@ -221,6 +226,11 @@ class ProviderRouter:
             providers["sosovalue"] = SoSoValueProvider(
                 client=client,
                 api_key=provider_api_key("sosovalue", self.config),
+            )
+        if provider_enabled("l2beat", self.config):
+            providers["l2beat"] = L2BeatProvider(
+                client=client,
+                api_key=provider_api_key("l2beat", self.config),
             )
         return providers
 
@@ -327,9 +337,10 @@ class ProviderRouter:
                 )
                 provider = self.providers.get(provider_name)
                 if provider is None or not self._enabled(provider_name):
+                    diagnostic_code = self._disabled_error_code(provider_name, provider)
                     diagnostic = {
-                        "error_code": "PROVIDER_DISABLED",
-                        "detail": "provider disabled or unavailable",
+                        "error_code": diagnostic_code,
+                        "detail": diagnostic_code,
                     }
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, request.metric_keys,
@@ -445,6 +456,7 @@ class ProviderRouter:
                     if not diagnostic:
                         diagnostic = {"error_code": classify_transport_error(exc), "detail": redact_secrets(str(exc), (secret,) if secret else ())}
                     reason = self._format_diagnostic(diagnostic, fallback=redact_secrets(str(exc), (secret,) if secret else ()) or exc.__class__.__name__)
+                    failure_log = redact_log(traceback.format_exc(), (secret,) if secret else ())
                     failed_network_requests = self._last_network_requests
                     attempts.append(ProviderAttempt(
                         provider_name, request.dataset, request.asset, request.metric_keys,
@@ -457,6 +469,7 @@ class ProviderRouter:
                         detail=str(diagnostic.get("detail", reason)),
                         retryable=diagnostic.get("retryable"),
                         status_code=diagnostic.get("status_code"),
+                        log=failure_log or None,
                     ))
                     api_requests += failed_network_requests
                     if first["index"] > 0:
@@ -493,6 +506,20 @@ class ProviderRouter:
             return name in self.providers
         return provider_enabled(name, self.config)
 
+    def _disabled_error_code(self, name: str, provider: Any | None) -> str:
+        settings = self.config.get("providers", {}).get(name)
+        if isinstance(settings, Mapping):
+            enabled = settings.get("enabled", True)
+            if enabled is False:
+                return "CONFIG_DISABLED"
+            if str(enabled).strip().upper() == "AUTO":
+                env_name = settings.get("api_key_env")
+                if env_name and not provider_api_key(name, self.config):
+                    return "CREDENTIAL_MISSING"
+            if provider is None and enabled is True:
+                return "ADAPTER_UNAVAILABLE"
+        return "PROVIDER_DISABLED"
+
     @staticmethod
     def _error_status(error: Exception) -> str:
         if isinstance(error, CacheExpired):
@@ -515,17 +542,20 @@ class ProviderRouter:
         reason: str,
     ) -> dict[str, Any]:
         attempted = tuple(dict.fromkeys(str(provider) for provider in item.get("attempted", ())))
+        final_reason = str(item.get("root_reason") or reason)
+        if item.get("optional_fallback_missing") and "optional fallback" not in final_reason.lower():
+            final_reason += "; optional Coin Metrics Pro fallback is not configured"
         result = {
             "asset": identity[0],
             "metric_key": identity[1],
-            "reason": reason,
+            "reason": final_reason,
             "providers_attempted": list(attempted),
         }
         if attempted:
             result["provider"] = attempted[-1]
-        diagnostic = item.get("last_diagnostic")
+        diagnostic = item.get("root_diagnostic") or item.get("last_diagnostic")
         if isinstance(diagnostic, Mapping):
-            for field in ("endpoint", "method", "attempt", "error_code", "exception_class", "detail", "retryable", "status_code"):
+            for field in ("endpoint", "method", "attempt", "error_code", "exception_class", "detail", "retryable", "status_code", "log"):
                 if diagnostic.get(field) is not None:
                     result[field] = diagnostic[field]
         return result
@@ -548,9 +578,16 @@ class ProviderRouter:
                 continue
             attempted = item.setdefault("attempted", [])
             attempted.append(provider)
+            previous_reason = item.get("last_reason")
+            previous_diagnostic = item.get("last_diagnostic")
             item["last_status"] = status
             item["last_reason"] = reason
             item["last_diagnostic"] = dict(diagnostic or {})
+            if provider in _OPTIONAL_FALLBACK_PROVIDERS and status == "DISABLED":
+                item["optional_fallback_missing"] = True
+                if previous_reason:
+                    item["root_reason"] = previous_reason
+                    item["root_diagnostic"] = dict(previous_diagnostic or {})
             item["index"] += 1
             if item["index"] >= len(item["chain"]):
                 pending.pop(identity, None)

@@ -185,6 +185,15 @@ def recommend_rebalance(
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
     target = _weights(target_weights, "target_weights")
+    excluded_targets = {
+        symbol for symbol, weight in target.items()
+        if weight > 0 and resolved.is_excluded(symbol)
+    }
+    if excluded_targets:
+        raise ValueError(
+            "excluded assets cannot be allocation targets: "
+            + ", ".join(sorted(excluded_targets))
+        )
     if not math.isclose(sum(target.values()), 1.0, abs_tol=1e-9):
         raise ValueError("target_weights must sum to 1")
     portfolio_value = float(portfolio_value)
@@ -240,7 +249,11 @@ def recommend_rebalance(
     effective_current[stable_symbol] = effective_current.get(stable_symbol, 0.0) + unallocated + new_cash_available
     effective_target = {symbol: weight for symbol, weight in target.items() if symbol not in stable_symbols}
     effective_target.update(stable_target)
-    symbols = sorted(set(effective_current) | set(effective_target) | broken)
+    symbols = sorted(
+        symbol
+        for symbol in set(effective_current) | set(effective_target) | broken
+        if not resolved.is_excluded(symbol)
+    )
     candidates: list[dict[str, Any]] = []
     for symbol in symbols:
         current_amount = effective_current.get(symbol, 0.0)

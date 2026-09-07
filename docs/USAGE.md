@@ -92,7 +92,25 @@ $crypto-portfolio-manager
 - `STALE`、`FAILED`、`SKIPPED`、Position P&L、NAV Return 和成本数据覆盖率
   都会说明其对 confidence 和交易资格的影响。
 
-## 5. 模型与 Python 边界
+## 5. Debug 报告与脚本日志
+
+复盘中实际执行的仓库脚本统一通过包装器运行：
+
+```bash
+python3 scripts/run_with_debug.py \
+  --script scripts/providers.py -- \
+  python3 scripts/providers.py --probe coingecko
+```
+
+包装器捕获非零退出、超时和启动异常，并输出可传给
+`build_report_packet(..., script_executions=...)` 的 JSON 记录。最终报告的
+`Debug 报告`同时列出最终数据抓取失败、Provider 尝试日志和异常脚本日志。
+包装器会用记录中的 `status` 表示子脚本失败，但自身返回 0，确保报告流程不会
+因 `set -e` 在收集日志前中断。
+日志会脱敏并限制长度；不会保存凭证、请求头、原始响应 body 或私有 reasoning。
+成功脚本和仅包含普通 warning 的脚本不会列入异常列表。
+
+## 6. 模型与 Python 边界
 
 系统采用 Python-first 流程：
 
@@ -117,7 +135,7 @@ python3 scripts/model_routing.py --list-profiles
 python3 scripts/model_routing.py --show-effective
 ```
 
-## 6. 提供结构化 JSON
+## 7. 提供结构化 JSON
 
 ```json
 {
@@ -140,7 +158,7 @@ python3 scripts/portfolio_snapshot.py portfolio.json
 决定。Policy override 必须放在顶层 `config`，无效值、重复资产、重叠资产组
 和冲突的 `asset_type` 会被拒绝。
 
-## 7. 数据获取
+## 8. 数据获取
 
 默认获取顺序是：
 
@@ -167,7 +185,7 @@ export CRYPTO_PORTFOLIO_FETCH_MODE=REFRESH
 [数据源策略](../references/data-sources.md)与
 [数据 Provider 策略](../references/data-providers.md)。
 
-## 8. 链运行状态
+## 9. 链运行状态
 
 `BTC`、`ETH`、`BNB` 和 `SOL` 使用结构化 block/slot provider 获取
 `risk.chain_liveness_status`。AAVE 和 LINK 不作为独立链检查。
@@ -187,7 +205,7 @@ python3 scripts/providers.py --probe chain_liveness --asset SOL
 python3 scripts/providers.py --probe chain_liveness --asset BNB
 ```
 
-## 9. Position P&L、NAV 和现金流
+## 10. Position P&L、NAV 和现金流
 
 Position P&L 是剩余仓位的未实现表现，不是已实现收益或组合终身收益。
 成本覆盖率表示当前价值中有可用成本数据的比例。
@@ -199,7 +217,7 @@ Position P&L 是剩余仓位的未实现表现，不是已实现收益或组合�
 截图中的 `$0.00` 成本若精度不足，按未知成本处理；稳定币和现金仍计入组合
 总值及 stable sleeve。
 
-## 10. 执行计划和 Volume Profile
+## 11. 执行计划和 Volume Profile
 
 只有 Python 再平衡先批准 `INCREASE` 后，才会进入技术执行阶段。技术层可以
 减少立即部署金额或返回 `WAIT`，不能增加组合层批准金额，也不能下单。
@@ -215,7 +233,7 @@ LVN。它是历史成交量集中度代理，不是持仓者精确成本；LVN �
 v1 只生成 `PULLBACK` 计划。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。
 `planned_amount_usd` 是建议分配额度，不代表已经成交。
 
-## 11. 历史数据与隐私
+## 12. 历史数据与隐私
 
 运行时数据默认位于：
 
@@ -233,7 +251,7 @@ v1 只生成 `PULLBACK` 计划。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。
 可以设置 `CRYPTO_PORTFOLIO_DATA_DIR` 修改目录。不要把真实余额、数量、成本
 基础、账户标识、凭证、私钥或助记词提交到 Git。
 
-## 12. Provider 状态与 TLS 排查
+## 13. Provider 状态与 TLS 排查
 
 ```bash
 python3 scripts/providers.py --status
@@ -259,7 +277,7 @@ export CRYPTO_PORTFOLIO_CA_BUNDLE=/path/to/trusted-ca-bundle.pem
 `/etc/ssl/cert.pem`。不要使用 `verify=False`、未验证 SSL context 或
 `curl -k`。
 
-## 13. 可选 API key
+## 14. 可选 API key
 
 API key 只通过环境变量提供，绝不写入配置、cache、JSONL、日志或报告：
 
@@ -282,7 +300,7 @@ python3 scripts/providers.py --probe github --asset AAVE
 python3 scripts/providers.py --probe sosovalue --asset BTC
 python3 scripts/providers.py --probe sosovalue --asset ETH
 
-## 14. 开发检查
+## 15. 开发检查
 
 ```bash
 python3 -m unittest discover -s tests -v

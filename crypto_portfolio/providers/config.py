@@ -187,13 +187,13 @@ def provider_runtime_status(
         runtime_ready = config_enabled and adapter_available and (not credential_required or credential_present)
         reason = None
         if not is_configured:
-            reason = "provider is not present in configuration"
+            reason = "CONFIG_DISABLED"
         elif not config_enabled:
-            reason = "provider is disabled by configuration" if settings.get("enabled") is False else "required credential is missing"
+            reason = "CONFIG_DISABLED" if settings.get("enabled") is False else "CREDENTIAL_MISSING"
         elif not adapter_available:
-            reason = "provider adapter is unavailable"
+            reason = "ADAPTER_UNAVAILABLE"
         elif credential_required and not credential_present:
-            reason = "required credential is missing"
+            reason = "CREDENTIAL_MISSING"
         rows.append(ProviderRuntimeStatus(
             provider=name,
             configured=is_configured,

@@ -18,11 +18,16 @@ _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
 _FAILURE_STATUSES = {"FAILED", "STALE"}
 _FAILURE_STAGES = {"PROVIDER", "WEB_FALLBACK", "EVENT_SCAN", "DERIVED", "VALIDATION", "UNKNOWN"}
+_SCRIPT_FAILURE_STATUSES = {"FAILED", "TIMEOUT", "LAUNCH_FAILED"}
+_SCRIPT_LOG_SOURCES = {"STDERR", "STDOUT", "LAUNCHER"}
 _FAILURE_FIELDS = {
     "asset", "metric_key", "status", "failure_stage", "reason", "error_code", "provider",
     "endpoint", "last_observation_at", "critical", "decision_role", "decision_effect", "attempts",
 }
-_ATTEMPT_FIELDS = {"provider", "status", "error_code", "reason", "endpoint", "status_code"}
+_ATTEMPT_FIELDS = {
+    "provider", "status", "error_code", "reason", "endpoint", "status_code", "method", "attempt",
+    "exception_class", "detail", "retryable", "log",
+}
 
 
 def _text(value: Any, field: str) -> str:
@@ -128,6 +133,15 @@ def _failure_endpoint(value: Any, field: str) -> str:
         return text
 
 
+def _failure_log(value: Any, field: str) -> str:
+    text = _failure_text(value, field)
+    if text == "[REDACTED]":
+        return text
+    from ..providers.http import redact_log
+
+    return redact_log(text)
+
+
 def _failed_data_fetches(value: Any, *, review_type: str) -> tuple[Mapping[str, Any], ...]:
     if value is None:
         return ()
@@ -194,8 +208,26 @@ def _failed_data_fetches(value: Any, *, review_type: str) -> tuple[Mapping[str, 
                     attempt[field_name] = _failure_text(raw_attempt[field_name], f"attempt {field_name}")
                     if field_name == "error_code":
                         attempt[field_name] = attempt[field_name].upper()
+            for field_name in ("exception_class", "detail"):
+                if raw_attempt.get(field_name) is not None:
+                    attempt[field_name] = _failure_text(raw_attempt[field_name], f"attempt {field_name}")
             if raw_attempt.get("endpoint") is not None:
                 attempt["endpoint"] = _failure_endpoint(raw_attempt["endpoint"], "attempt endpoint")
+            if raw_attempt.get("method") is not None:
+                attempt["method"] = _failure_text(raw_attempt["method"], "attempt method").upper()
+            if raw_attempt.get("attempt") is not None:
+                attempt_number = raw_attempt["attempt"]
+                if (
+                    isinstance(attempt_number, bool)
+                    or not isinstance(attempt_number, int)
+                    or attempt_number < 1
+                ):
+                    raise ValueError("attempt attempt must be a positive integer")
+                attempt["attempt"] = attempt_number
+            if raw_attempt.get("retryable") is not None:
+                if not isinstance(raw_attempt["retryable"], bool):
+                    raise ValueError("attempt retryable must be boolean")
+                attempt["retryable"] = raw_attempt["retryable"]
             if "status_code" in raw_attempt and raw_attempt["status_code"] is not None:
                 status_code = raw_attempt["status_code"]
                 if (
@@ -205,6 +237,8 @@ def _failed_data_fetches(value: Any, *, review_type: str) -> tuple[Mapping[str, 
                 ):
                     raise ValueError("attempt status_code must be an HTTP status or null")
                 attempt["status_code"] = status_code
+            if raw_attempt.get("log") is not None:
+                attempt["log"] = _failure_log(raw_attempt["log"], "attempt log")
             safe_attempts.append(attempt)
         record: dict[str, Any] = {
             "asset": asset,
@@ -232,6 +266,58 @@ def _failed_data_fetches(value: Any, *, review_type: str) -> tuple[Mapping[str, 
     return tuple(records)
 
 
+def _script_failures(value: Any) -> tuple[Mapping[str, Any], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("script_failures must be a sequence")
+    records: list[Mapping[str, Any]] = []
+    required = {"script", "command", "status", "exit_code", "log_source", "log"}
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"script_failures[{index}] must be an object")
+        unknown = set(raw) - required
+        if unknown:
+            raise ValueError(
+                f"script_failures[{index}] contains unknown fields: {', '.join(sorted(unknown))}"
+            )
+        missing = required - set(raw)
+        if missing:
+            raise ValueError(
+                f"script_failures[{index}] is missing fields: {', '.join(sorted(missing))}"
+            )
+        script = _text(raw["script"], f"script_failures[{index}].script")
+        status = _text(raw["status"], f"script_failures[{index}].status").upper()
+        if status not in _SCRIPT_FAILURE_STATUSES:
+            raise ValueError("script_failures status is unsupported")
+        command = raw["command"]
+        if isinstance(command, (str, bytes)) or not isinstance(command, (list, tuple)) or not command:
+            raise ValueError(f"script_failures[{index}].command must be a non-empty sequence")
+        safe_command = [
+            _failure_text(item, f"script_failures[{index}].command[{command_index}]")
+            for command_index, item in enumerate(command)
+        ]
+        exit_code = raw["exit_code"]
+        if exit_code is not None and (isinstance(exit_code, bool) or not isinstance(exit_code, int)):
+            raise ValueError("script_failures exit_code must be an integer or null")
+        if status == "FAILED" and (exit_code is None or exit_code == 0):
+            raise ValueError("FAILED script_failures require a non-zero exit_code")
+        if status != "FAILED" and exit_code is not None:
+            raise ValueError(f"{status} script_failures require a null exit_code")
+        log_source = _text(raw["log_source"], f"script_failures[{index}].log_source").upper()
+        if log_source not in _SCRIPT_LOG_SOURCES:
+            raise ValueError("script_failures log_source is unsupported")
+        records.append(freeze_packet_value({
+            "script": script,
+            "command": safe_command,
+            "status": status,
+            "exit_code": exit_code,
+            "log_source": log_source,
+            "log": _failure_log(raw["log"], f"script_failures[{index}].log"),
+        }, path=f"script_failures[{index}]"))
+    return tuple(records)
+
+
 @dataclass(frozen=True)
 class ReportPacket:
     review_type: str
@@ -253,6 +339,7 @@ class ReportPacket:
     overlay_warnings: tuple[str, ...] = ()
     effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
     failed_data_fetches: tuple[Mapping[str, Any], ...] = ()
+    script_failures: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -294,6 +381,7 @@ class ReportPacket:
                 raise ValueError(f"{field_name} must be an object")
             object.__setattr__(self, field_name, freeze_packet_value(getattr(self, field_name), path=field_name))
         object.__setattr__(self, "failed_data_fetches", _failed_data_fetches(self.failed_data_fetches, review_type=review))
+        object.__setattr__(self, "script_failures", _script_failures(self.script_failures))
         if not isinstance(self.positioning_summaries, Mapping):
             raise ValueError("positioning_summaries must be an object")
         summaries = {}
@@ -361,6 +449,7 @@ class ReportPacket:
             "critical_missing_data": list(self.critical_missing_data),
             "data_quality": thaw_packet_value(self.data_quality),
             "failed_data_fetches": thaw_packet_value(self.failed_data_fetches),
+            "script_failures": thaw_packet_value(self.script_failures),
             "positioning_summaries": {
                 symbol: thaw_packet_value(summary)
                 for symbol, summary in self.positioning_summaries.items()
@@ -375,8 +464,9 @@ class ReportPacket:
     def from_mapping(cls, value: Mapping[str, Any]) -> "ReportPacket":
         if not isinstance(value, Mapping):
             raise ValueError("report packet must be an object")
-        if "failed_data_fetches" not in value:
-            raise ValueError("report packet is missing failed_data_fetches")
+        for field_name in ("failed_data_fetches", "script_failures"):
+            if field_name not in value:
+                raise ValueError(f"report packet is missing {field_name}")
         return cls(**dict(value))
 
 

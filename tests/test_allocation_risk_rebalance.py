@@ -6,6 +6,7 @@ from crypto_portfolio.engine.execution import validate_execution_plan
 from crypto_portfolio.engine.risk import run_risk_gate
 from crypto_portfolio.models.evidence import AssetAssessment
 from crypto_portfolio.models.policy import resolve_policy
+from crypto_portfolio.engine.scoring import score_factors
 
 
 class AllocationRiskRebalanceTests(unittest.TestCase):
@@ -59,6 +60,26 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         )
         self.assertGreater(allocation.target_weights.get("U", 0), 0)
         self.assertGreater(allocation.target_weights.get("USD1", 0), 0)
+
+    def test_excluded_asset_has_no_score_target_or_rebalance_action(self):
+        policy = resolve_policy()
+        allocation = build_target_allocation(
+            policy=policy,
+            assessments={"LUNC": {"weighted_score": 100, "confidence": "HIGH"}},
+            current_weights={"BTC": 0.7, "USDT": 0.1, "LUNC": 0.2},
+        )
+        self.assertNotIn("LUNC", allocation.target_weights)
+        rebalance = recommend_rebalance(
+            {"BTC": 0.7, "USDT": 0.1, "LUNC": 0.2},
+            allocation.target_weights,
+            1000,
+            policy=policy,
+        )
+        self.assertNotIn("LUNC", {item.symbol for item in rebalance})
+        with self.assertRaises(ValueError):
+            score_factors({"trend": 80}, policy=policy, symbol="LUNC")
+        risk = run_risk_gate({"BTC": 0.7, "USDT": 0.1, "LUNC": 0.2}, policy=policy)
+        self.assertIn("EXCLUDED_ASSET_TARGET", {item.code for item in risk.violations})
 
     def test_risk_gate_reports_constraints(self):
         result = run_risk_gate(

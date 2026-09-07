@@ -75,6 +75,23 @@ class PortfolioSnapshotTests(unittest.TestCase):
         self.assertEqual(result["satellite_weight"], 0.0)
         self.assertEqual(classify("CUP"), "other")
 
+    def test_excluded_holding_remains_visible_and_unmanaged(self):
+        result = normalize(
+            {
+                "timestamp": "2026-09-01T00:00:00Z",
+                "positions": [
+                    {"symbol": "BTC", "value_usd": 80},
+                    {"symbol": "LUNC", "quantity": 100, "value_usd": 20},
+                ],
+            }
+        )
+        lunc = next(position for position in result["positions"] if position["symbol"] == "LUNC")
+        self.assertEqual(lunc["asset_type"], "other")
+        self.assertEqual(lunc["quantity"], 100)
+        self.assertEqual(lunc["value_usd"], 20)
+        self.assertEqual(lunc["management_status"], "EXCLUDED / UNMANAGED")
+        self.assertIn("LUNC", result["config"]["universe"]["excluded"])
+
     def test_custom_config_replaces_defaults_and_classifies_deterministically(self):
         result = normalize(
             {

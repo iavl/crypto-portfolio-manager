@@ -11,7 +11,10 @@
     "defillama": {"enabled": true},
     "growthepie": {"enabled": true},
     "blobscan": {"enabled": true},
-    "l2beat": {"enabled": true},
+    "l2beat": {
+      "enabled": "AUTO",
+      "api_key_env": "L2BEAT_API_KEY"
+    },
     "etherscan": {
       "enabled": "AUTO",
       "api_key_env": "ETHERSCAN_API_KEY"

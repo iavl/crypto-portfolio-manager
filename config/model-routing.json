@@ -1,7 +1,7 @@
 {
   "routing_policy_version": 2,
   "runtime": "AUTO",
-  "default_profile": "balanced",
+  "default_profile": "efficient",
   "luna_policy": "LUNA_MAX_ONLY",
   "models": {
     "luna_max": {

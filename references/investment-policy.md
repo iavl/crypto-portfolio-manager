@@ -34,6 +34,7 @@ This is not an automatic buy list. Any eligible asset may have 0% target weight.
 
 ### Excluded
 
+- `LUNC` is excluded by default in `config/policy.json`.
 - small-cap altcoins;
 - illiquid tokens;
 - meme/speculative tokens without durable analyzable fundamentals;
@@ -41,6 +42,12 @@ This is not an automatic buy list. Any eligible asset may have 0% target weight.
 - leveraged tokens;
 - margin positions;
 - borrowed positions.
+
+An excluded asset is outside the managed investment universe: do not research,
+score, allocate, rebalance, or automatically sell it. If it is present in a
+portfolio snapshot, retain its symbol, quantity, and supplied value as an
+`EXCLUDED / UNMANAGED` holding for accounting and visibility; unavailable
+values remain unavailable.
 
 ## Stablecoins and cash
 

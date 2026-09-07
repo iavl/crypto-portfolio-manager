@@ -54,7 +54,11 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
         return MetricAvailabilityPolicy(key, "PREMIUM_ONLY", "PREMIUM_PROVIDER_NOT_CONFIGURED")
     if key == "fundamentals.developer_activity":
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
-    if key in {"fundamentals.active_users", "fundamentals.stablecoin_liquidity"} and asset == "AAVE":
+    if key == "fundamentals.stablecoin_liquidity" and asset not in {"ETH", "SOL", "BNB"}:
+        if asset == "AAVE":
+            return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
+        return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
+    if key == "fundamentals.active_users" and asset == "AAVE":
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"} and asset not in {"BTC", "ETH"}:
         return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")

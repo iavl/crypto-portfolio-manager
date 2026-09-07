@@ -29,6 +29,7 @@ class EventSource:
     required_for_full_coverage: bool
     tier: int = 1
     name: str | None = None
+    transport_urls: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "event source id").lower())
@@ -55,10 +56,22 @@ class EventSource:
             raise ValueError("event source tier must be 1, 2, or 3")
         if self.name is not None:
             object.__setattr__(self, "name", _text(self.name, "event source name"))
+        if isinstance(self.transport_urls, str) or not isinstance(self.transport_urls, (tuple, list)):
+            raise ValueError("event source transport_urls must be a sequence")
+        transports = tuple(_text(item, "event source transport url") for item in self.transport_urls)
+        for transport in transports:
+            parts = urlsplit(transport)
+            if parts.scheme not in {"http", "https"} or not parts.netloc:
+                raise ValueError("event source transport url must use http or https")
+        object.__setattr__(self, "transport_urls", tuple(dict.fromkeys((self.url, *transports))))
 
     @property
     def source_name(self) -> str:
         return self.name or self.authority
+
+    @property
+    def transport_candidates(self) -> tuple[str, ...]:
+        return self.transport_urls
 
     def applies_to(self, asset: str) -> bool:
         symbol = _text(asset, "asset").upper()
@@ -75,6 +88,7 @@ class EventSource:
             "required_for_full_coverage": self.required_for_full_coverage,
             "tier": self.tier,
             "name": self.name,
+            "transport_urls": list(self.transport_urls),
         }
 
 
@@ -162,6 +176,10 @@ EVENT_SOURCE_CATALOG = (
     EventSource(
         "cftc-digital-assets", "regulatory", ("MARKET",), "U.S. CFTC", "official",
         "https://www.cftc.gov/PressRoom/PressReleases", True, name="CFTC press releases",
+        transport_urls=(
+            "https://www.cftc.gov/RSS/RSSGP/rssgp.xml",
+            "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",
+        ),
     ),
     EventSource(
         "esma-mica", "regulatory", ("MARKET",), "ESMA", "official",

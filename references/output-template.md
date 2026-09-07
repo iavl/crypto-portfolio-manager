@@ -30,6 +30,8 @@ target deviation, active threshold, stablecoin floor, concentration and
 turnover constraints. If evidence is missing, say `无法确认` and state the
 decision effect; never replace missing evidence with a neutral assumption.
 
+### Debug 报告
+
 ### 本轮数据抓取失败明细
 
 Render every item from `ReportPacket.failed_data_fetches` using this table. The
@@ -37,8 +39,8 @@ list is metric-centric: one row per final `(asset/scope, metric)` result, with
 matching provider attempts shown as one compact ordered path under the failure
 reason when needed.
 
-| 资产/范围 | Metric | 最终状态 | 阶段 / Provider | 错误码 | 失败原因 | 最近可用数据 | 决策影响 |
-|---|---|---|---|---|---|---|---|
+| 资产/范围 | Metric | 最终状态 | 阶段 / Provider | 错误码 | 失败原因 | 程序失败日志 | 最近可用数据 | 决策影响 |
+|---|---|---|---|---|---|---|---|---|
 
 If the list is empty, write `本轮没有最终抓取失败的数据。` For a `STALE`
 refresh failure, write `当前刷新失败；最近可用数据为 <timestamp>，因此本轮按 STALE 处理。`
@@ -48,6 +50,30 @@ and must not appear in this subsection; keep them in section 9.
 
 When multiple attempts belong to one final metric, keep them under the same
 row, for example: `尝试路径：CoinGecko HTTP_429 → Coin Metrics Community PROVIDER_UNSUPPORTED`.
+For each attempt, show `exception_class`, `detail`, and the bounded `log` when
+present. If no direct program log was captured, write `未捕获直接日志` and keep
+the structured reason unchanged.
+
+### 本轮脚本执行异常
+
+Render every item from `ReportPacket.script_failures`:
+
+| 脚本 | 状态 | Exit code | 日志来源 | 直接失败日志 |
+|---|---|---:|---|---|
+
+If the list is empty, write `本轮没有脚本执行异常。` The log must be the
+sanitized, bounded `stderr` excerpt from `scripts/run_with_debug.py`, or the
+captured `stdout`/launcher error when stderr is empty. Do not treat a successful
+script with ordinary warnings as an execution failure.
+
+### Excluded holdings
+
+If a snapshot contains an asset from `policy.universe.excluded`, show it as
+`EXCLUDED / UNMANAGED` with its supplied quantity/value when available. Keep it
+out of scored asset, target-allocation, and rebalance-recommendation tables;
+exclusion is not an automatic sell signal. Pass-1 diagnostics may separately
+show `PENDING_EXTERNAL_RESOLUTION`, but a final portfolio report requires
+`pending_external_resolution == 0`.
 
 ## 2. 组合诊断
 

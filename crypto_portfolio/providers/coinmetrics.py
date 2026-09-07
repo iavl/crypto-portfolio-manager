@@ -54,8 +54,8 @@ COINMETRICS_BTC_NETWORK_METRICS = {
 COINMETRICS_BTC_VALUATION_INPUTS = {
     "btc_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
     "btc_valuation.mvrv_zscore": ("CapMVRVZ",),
-    "btc_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur"),
-    "btc_valuation.realized_cap_usd": ("CapRealUSD",),
+    "btc_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur", "CapMVRVCur", "CapMrktCurUSD"),
+    "btc_valuation.realized_cap_usd": ("CapRealUSD", "CapMVRVCur", "CapMrktCurUSD"),
 }
 COINMETRICS_TOKENOMICS_INPUTS = {
     "tokenomics.annualized_emissions": ("IssTotNtv", "SplyCur"),
@@ -76,8 +76,8 @@ COINMETRICS_ETH_INPUTS = {
     "eth.staking.staked_supply_change_90d": ("SplyStkedNtv", "SplyTotStkedNtv"),
     "eth.staking.participation_rate": ("SplyActStkedNtv", "SplyTotStkedNtv"),
     "eth_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
-    "eth_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur"),
-    "eth_valuation.realized_cap_usd": ("CapRealUSD",),
+    "eth_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur", "CapMVRVCur", "CapMrktCurUSD"),
+    "eth_valuation.realized_cap_usd": ("CapRealUSD", "CapMVRVCur", "CapMrktCurUSD"),
 }
 COINMETRICS_ETH_SUPPORTED_METRICS = tuple(COINMETRICS_ETH_INPUTS)
 COINMETRICS_METRIC_MAP = {
@@ -95,6 +95,7 @@ COINMETRICS_SUPPORTED_METRICS = tuple(dict.fromkeys((
 )))
 SUPPLY_LOOKBACK_DAYS = 365
 SUPPLY_LOOKBACK_TOLERANCE_DAYS = 7
+CATALOG_TTL_SECONDS = 86400
 
 
 def _now(clock: Any | None = None) -> str:
@@ -310,6 +311,17 @@ def _parse_btc_valuation(
                     value = float(realized_cap) / float(supply)
                     mode = "DERIVED"
                     methodology = "CapRealUSD / SplyCur"
+                elif all(row.get(item) is not None for item in ("CapMVRVCur", "CapMrktCurUSD", "SplyCur")):
+                    value = float(row["CapMrktCurUSD"]) / float(row["CapMVRVCur"]) / float(row["SplyCur"])
+                    mode = "DERIVED"
+                    methodology = "CapMrktCurUSD / CapMVRVCur / SplyCur"
+        elif key == "btc_valuation.realized_cap_usd":
+            if row.get("CapRealUSD") is not None:
+                value = float(row["CapRealUSD"])
+            elif all(row.get(item) is not None for item in ("CapMVRVCur", "CapMrktCurUSD")) and float(row["CapMVRVCur"]) > 0:
+                value = float(row["CapMrktCurUSD"]) / float(row["CapMVRVCur"])
+                mode = "DERIVED"
+                methodology = "CapMrktCurUSD / CapMVRVCur"
         else:
             metric = inputs[0]
             if row.get(metric) is not None:
@@ -511,9 +523,22 @@ def parse_eth_metrics(
             direct = current["values"].get("PriceRealizedUSD")
             realized = current["values"].get("CapRealUSD")
             supply = current["values"].get("SplyCur")
-            add(key, direct if direct is not None else realized / supply if realized is not None and supply and supply > 0 else None, "PriceRealizedUSD or CapRealUSD / SplyCur")
+            mvrv = current["values"].get("CapMVRVCur")
+            market = current["values"].get("CapMrktCurUSD")
+            add(
+                key,
+                direct
+                if direct is not None
+                else realized / supply if realized is not None and supply and supply > 0
+                else market / mvrv / supply if market is not None and mvrv and mvrv > 0 and supply and supply > 0
+                else None,
+                "PriceRealizedUSD or CapRealUSD / SplyCur or CapMrktCurUSD / CapMVRVCur / SplyCur",
+            )
         elif key == "eth_valuation.realized_cap_usd":
-            add(key, current["values"].get("CapRealUSD"), "CapRealUSD")
+            realized = current["values"].get("CapRealUSD")
+            mvrv = current["values"].get("CapMVRVCur")
+            market = current["values"].get("CapMrktCurUSD")
+            add(key, realized if realized is not None else market / mvrv if market is not None and mvrv and mvrv > 0 else None, "CapRealUSD or CapMrktCurUSD / CapMVRVCur")
         else:
             raise ProviderUnsupportedMetric(f"Coin Metrics does not have an ETH parser for {key}")
 
@@ -587,6 +612,7 @@ class CoinMetricsProvider:
         self.base_url = AUTHENTICATED_BASE_URL if authenticated else COMMUNITY_BASE_URL
         self._catalog: frozenset[str] | None = None
         self._catalog_by_asset: dict[str, frozenset[str]] | None = None
+        self._catalog_fetched_at: datetime | None = None
         self.capabilities = ProviderCapabilities(
             provider=self.name,
             metric_keys=COINMETRICS_SUPPORTED_METRICS,
@@ -608,13 +634,19 @@ class CoinMetricsProvider:
         return {}
 
     def catalog(self) -> frozenset[str]:
-        if self._catalog_by_asset is None:
+        now = datetime.now(timezone.utc)
+        if (
+            self._catalog_by_asset is None
+            or self._catalog_fetched_at is None
+            or (now - self._catalog_fetched_at).total_seconds() >= CATALOG_TTL_SECONDS
+        ):
             payload = self.client.get_json(
                 self.base_url + "/v4/catalog/asset-metrics",
                 headers=self._headers(),
             )
             self._catalog = catalog_metrics(payload)
             self._catalog_by_asset = catalog_metrics_by_asset(payload)
+            self._catalog_fetched_at = now
         return self._catalog
 
     def available_metrics_for_asset(self, asset: str) -> frozenset[str]:
@@ -645,8 +677,12 @@ class CoinMetricsProvider:
                     selected_inputs = (candidates[0],)
                 elif key == "btc_valuation.mvrv" and all(item.lower() in available for item in candidates[1:]):
                     selected_inputs = candidates[1:]
-                elif key == "btc_valuation.realized_price" and all(item.lower() in available for item in candidates[1:]):
-                    selected_inputs = candidates[1:]
+                elif key == "btc_valuation.realized_price" and {"caprealusd", "splycur"} <= available:
+                    selected_inputs = ("CapRealUSD", "SplyCur")
+                elif key == "btc_valuation.realized_price" and {"capmvrvcur", "capmrktcurusd", "splycur"} <= available:
+                    selected_inputs = ("CapMVRVCur", "CapMrktCurUSD", "SplyCur")
+                elif key == "btc_valuation.realized_cap_usd" and {"capmvrvcur", "capmrktcurusd"} <= available:
+                    selected_inputs = ("CapMVRVCur", "CapMrktCurUSD")
                 elif all(item.lower() in available for item in candidates[:1]):
                     selected_inputs = candidates[:1]
                 else:
@@ -672,6 +708,16 @@ class CoinMetricsProvider:
                         if "pricerealizedusd" in available_fields
                         else ("CapRealUSD", "SplyCur")
                         if {"caprealusd", "splycur"} <= available_fields
+                        else ("CapMVRVCur", "CapMrktCurUSD", "SplyCur")
+                        if {"capmvrvcur", "capmrktcurusd", "splycur"} <= available_fields
+                        else ()
+                    )
+                elif key == "eth_valuation.realized_cap_usd":
+                    selected_inputs = (
+                        ("CapRealUSD",)
+                        if "caprealusd" in available_fields
+                        else ("CapMVRVCur", "CapMrktCurUSD")
+                        if {"capmvrvcur", "capmrktcurusd"} <= available_fields
                         else ()
                     )
                 elif key == "eth.staking.participation_rate":
@@ -793,6 +839,7 @@ class CoinMetricsAuthenticatedProvider(CoinMetricsProvider):
 
 __all__ = [
     "AUTHENTICATED_BASE_URL",
+    "CATALOG_TTL_SECONDS",
     "COINMETRICS_ASSETS",
     "COINMETRICS_BTC_CYCLE_METRICS",
     "COINMETRICS_BTC_NETWORK_METRICS",
