@@ -59,6 +59,8 @@ def _timestamp(value: Any) -> str:
         return normalize_timestamp(datetime.fromtimestamp(number, timezone.utc).isoformat(), "Blobscan timestamp")
     if not isinstance(value, str) or not value.strip():
         raise ProviderDataError("Blobscan row timestamp is missing")
+    if isinstance(value, str) and len(value) == 10:
+        value += "T00:00:00Z"
     return normalize_timestamp(value, "Blobscan row timestamp")
 
 
@@ -200,9 +202,6 @@ class BlobscanProvider:
         ))
 
 
-parse_blob_timeseries = parse_timeseries
-
-
 __all__ = [
     "BASE_URL",
     "BLOCKS_PATH",
@@ -210,5 +209,4 @@ __all__ = [
     "OVERALL_PATH",
     "TIMESERIES_PATH",
     "parse_timeseries",
-    "parse_blob_timeseries",
 ]

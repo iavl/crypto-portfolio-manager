@@ -20,12 +20,9 @@ def build_report_packet(
     scores: Mapping[str, Any] | None = None,
     data_quality: Mapping[str, Any] | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
-    market_overlays: MarketOverlays | Mapping[str, Any] | None = None,
     acquisition: Any | None = None,
 ) -> ReportPacket:
-    if overlays is not None and market_overlays is not None:
-        raise ValueError("provide only one of overlays or market_overlays")
-    overlay = overlays if overlays is not None else market_overlays
+    overlay = overlays
     packet = decision_packet if isinstance(decision_packet, DecisionReviewPacket) else DecisionReviewPacket.from_mapping(decision_packet)
     final_scores = scores
     if final_scores is None:
@@ -92,10 +89,6 @@ def build_report_packet(
         overlay_warnings=overlay_warnings,
         effective_deployment_caps=deployment_caps,
     )
-
-
-report_packet = build_report_packet
-build_report_payload = build_report_packet
 
 
 def validate_report_packet(value: ReportPacket | Mapping[str, Any]) -> bool:
@@ -169,8 +162,6 @@ __all__ = [
     "REPORT_PROMPT_RULE",
     "build_final_review_output",
     "build_report_packet",
-    "build_report_payload",
-    "report_packet",
     "validate_final_review_output",
     "validate_report_packet",
 ]

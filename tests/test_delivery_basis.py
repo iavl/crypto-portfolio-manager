@@ -174,20 +174,20 @@ class DeliveryBasisTests(unittest.TestCase):
         historical = self.manager.run(self.plan, mode="CACHE_ONLY", now=NOW, as_of=NOW.isoformat(), cached_observations=first.observations)
         self.assertEqual(historical.summary["fresh_observation_hits"], 1)
 
-    def test_legacy_normalized_basis_is_history_only_and_refreshes(self):
+    def test_outdated_basis_is_ignored_and_refreshed(self):
         raw = self.provider.collect(self.request)[0]
         raw["metadata"] = {"contract": "PERPETUAL"}
-        legacy = normalize_metric_result(raw, now=NOW).observation
-        before = legacy.as_dict()
+        outdated = normalize_metric_result(raw, now=NOW).observation
+        before = outdated.as_dict()
         self.client.calls.clear()
-        result = self.manager.run(self.plan, now=NOW, cached_observations=(legacy,))
+        result = self.manager.run(self.plan, now=NOW, cached_observations=(outdated,))
         self.assertEqual(result.summary["fresh_observation_hits"], 0)
         self.assertEqual(result.results[0].status, "SUCCESS")
         self.assertEqual(result.observations[0].metadata["methodology"], BASIS_METHODOLOGY)
-        self.assertEqual(legacy.as_dict(), before)
+        self.assertEqual(outdated.as_dict(), before)
         self.assertEqual(len(self.client.calls), 2)
 
-    def test_legacy_and_expired_response_caches_are_not_reused(self):
+    def test_outdated_and_expired_response_caches_are_not_reused(self):
         raw = self.provider.collect(self.request)[0]
         for metadata in ({"contract": "PERPETUAL"}, {**raw["metadata"], "delivery_at": NOW.isoformat()}):
             with self.subTest(metadata=metadata):

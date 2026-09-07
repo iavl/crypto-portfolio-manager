@@ -40,12 +40,12 @@ from .binance import BinanceProvider
 from .bybit import BybitProvider
 from .coinmetrics import CoinMetricsAuthenticatedProvider, CoinMetricsProvider
 from .coingecko import CoinGeckoProvider
-from .defillama import DeFiLlamaProvider, DefiLlamaProvider
+from .defillama import DeFiLlamaProvider
 from .github_activity import GitHubActivityProvider
 from .sosovalue import SoSoValueProvider
 from .blobscan import BlobscanProvider
-from .growthepie import GrowthePieProvider, GrowthepieProvider
-from .l2beat import L2BEATProvider, L2BeatProvider, L2beatProvider
+from .growthepie import GrowthepieProvider
+from .l2beat import L2BeatProvider
 from .ethereum_protocol import EthereumProtocolProvider
 
 __all__ = [
@@ -90,14 +90,10 @@ __all__ = [
     "CoinMetricsProvider",
     "CoinGeckoProvider",
     "DeFiLlamaProvider",
-    "DefiLlamaProvider",
     "GitHubActivityProvider",
     "SoSoValueProvider",
     "BlobscanProvider",
-    "GrowthePieProvider",
     "GrowthepieProvider",
     "L2BeatProvider",
-    "L2beatProvider",
-    "L2BEATProvider",
     "EthereumProtocolProvider",
 ]

@@ -199,7 +199,7 @@ class ReportFailureTests(unittest.TestCase):
             (False, "ETH", "fundamentals.tvl"),
         ])
 
-    def test_report_packet_round_trip_compatibility_and_immutability(self):
+    def test_report_packet_round_trip_and_immutability(self):
         failed = result("ETH", "fundamentals.developer_activity", reason="provider unavailable")
         acq = acquisition((failed,), attempts=({
             "provider": "github",
@@ -220,9 +220,10 @@ class ReportFailureTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             packet.failed_data_fetches[0]["attempts"][0]["status"] = "changed"
 
-        old = packet.as_dict()
-        old.pop("failed_data_fetches")
-        self.assertEqual(ReportPacket.from_mapping(old).failed_data_fetches, ())
+        incomplete = packet.as_dict()
+        incomplete.pop("failed_data_fetches")
+        with self.assertRaises(ValueError):
+            ReportPacket.from_mapping(incomplete)
 
         output = build_final_review_output(packet, acquisition=acq)
         self.assertEqual(output["collection"]["failed_data_fetches"], packet.as_dict()["failed_data_fetches"])

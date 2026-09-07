@@ -9,7 +9,7 @@
     "based_on_snapshot_id": {"type": ["string", "null"], "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
     "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "policy_version": {"type": "integer", "minimum": 1},
+    "policy_version": {"const": 3},
     "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "resolved_policy": {"type": "object"},
     "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
@@ -43,7 +43,7 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["symbol", "factor_scores", "weighted_score", "confidence", "asset_type", "relative_strength_vs_btc", "severe_event", "thesis_broken", "critical_data_complete", "risk_tier"],
+        "required": ["symbol", "factor_scores", "weighted_score", "confidence", "asset_type", "relative_strength_vs_btc", "thesis_broken", "critical_data_complete", "risk_tier"],
         "properties": {
           "symbol": {"type": "string", "minLength": 1},
           "factor_scores": {
@@ -60,13 +60,12 @@
           "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
           "relative_strength_vs_btc": {"type": ["number", "string", "null"]},
-          "severe_event": {"type": "boolean"},
           "thesis_broken": {"type": "boolean"},
           "critical_data_complete": {"type": "boolean"},
         "risk_tier": {"type": "string", "minLength": 1},
         "event_risk": {"oneOf": [{"$ref": "#/$defs/eventRisk"}, {"type": "null"}]},
         "scoring_profile_name": {"type": ["string", "null"]},
-        "scoring_model_version": {"type": ["integer", "null"], "minimum": 1},
+        "scoring_model_version": {"enum": [2, null]},
         "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
         },
         "additionalProperties": false
@@ -142,7 +141,7 @@
       "type": "object",
       "required": ["execution_plan_version", "symbol", "action", "approved_amount_usd", "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode", "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash"],
       "properties": {
-        "execution_plan_version": {"type": "integer", "minimum": 1},
+        "execution_plan_version": {"const": 2},
         "symbol": {"type": "string", "minLength": 1},
         "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
         "approved_amount_usd": {"type": "number", "minimum": 0},
@@ -152,11 +151,10 @@
         "entry_mode": {"type": "string", "enum": ["PULLBACK", "BREAKOUT", "WAIT"]},
         "technical_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
         "tranches": {"type": "array", "items": {"$ref": "#/$defs/executionTranche"}},
-        "invalidation": {"$ref": "#/$defs/invalidationOrLegacy"},
+        "invalidation": {"oneOf": [{"$ref": "#/$defs/invalidation"}, {"type": "null"}]},
         "rationale": {"type": "string"},
         "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "volume_profile_metadata": {"type": ["object", "null"]},
         "ohlcv_metadata": {"$ref": "#/$defs/ohlcvMetadata"},
         "technical_summary": {"$ref": "#/$defs/technicalSummary"}
@@ -201,13 +199,6 @@
         "automatic_order": {"const": false}
       },
       "additionalProperties": false
-    },
-    "invalidationOrLegacy": {
-      "oneOf": [
-        {"$ref": "#/$defs/invalidation"},
-        {"type": "string", "minLength": 1},
-        {"type": "null"}
-      ]
     },
     "ohlcvMetadata": {
       "type": ["object", "null"],

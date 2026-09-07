@@ -242,22 +242,6 @@ class VolumeProfile:
             raise ValueError("profile_hash does not match profile content")
         object.__setattr__(self, "profile_hash", expected_hash)
 
-    @property
-    def volume_profile_hash(self) -> str:
-        return self.profile_hash
-
-    @property
-    def val(self) -> float:
-        return self.value_area_low
-
-    @property
-    def vah(self) -> float:
-        return self.value_area_high
-
-    @property
-    def confidence(self) -> str:
-        return self.data_confidence
-
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "VolumeProfile":
         if not isinstance(value, Mapping):
@@ -265,17 +249,11 @@ class VolumeProfile:
         allowed = {
             "symbol", "as_of", "timeframe", "lookback_days", "total_volume", "bins", "poc",
             "value_area_low", "value_area_high", "high_volume_nodes", "low_volume_nodes",
-            "data_confidence", "source", "ohlcv_hash", "value_area_fraction", "metadata", "profile_hash", "volume_profile_hash",
+            "data_confidence", "source", "ohlcv_hash", "value_area_fraction", "metadata", "profile_hash",
         }
         unknown = set(value) - allowed
         if unknown:
             raise ValueError(f"volume profile contains unknown fields: {', '.join(sorted(unknown))}")
-        if (
-            value.get("profile_hash") is not None
-            and value.get("volume_profile_hash") is not None
-            and value["profile_hash"] != value["volume_profile_hash"]
-        ):
-            raise ValueError("profile_hash and volume_profile_hash disagree")
         required = {"symbol", "as_of", "timeframe", "lookback_days", "total_volume", "bins", "poc", "value_area_low", "value_area_high", "data_confidence", "source", "ohlcv_hash"}
         missing = required - set(value)
         if missing:
@@ -300,7 +278,7 @@ class VolumeProfile:
             ohlcv_hash=value["ohlcv_hash"],
             value_area_fraction=value.get("value_area_fraction", 0.7),
             metadata=value.get("metadata"),
-            profile_hash=value.get("profile_hash", value.get("volume_profile_hash")),
+            profile_hash=value.get("profile_hash"),
         )
 
     def as_dict(self) -> dict[str, Any]:

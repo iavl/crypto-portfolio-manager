@@ -43,42 +43,6 @@ _METRIC_FIELDS = {
     "sentiment.social_attention_percentile": "social_attention_percentile",
     "sentiment.market_fear_greed": "market_fear_greed",
 }
-_ALIASES = {key.rsplit(".", 1)[-1]: key for key in _METRIC_FIELDS}
-_DEFAULTS = {
-    "minimum_derivatives_confirmations_for_crowded": 2,
-    "minimum_derivatives_confirmations_for_extreme": 3,
-    "funding_rate": {
-        "elevated_positive": 0.0003,
-        "extreme_positive": 0.001,
-        "elevated_negative": -0.0003,
-        "extreme_negative": -0.001,
-    },
-    "open_interest_change_7d": {"building": 0.20, "rapid": 0.40},
-    "long_short_ratio": {
-        "long_crowded": 1.50,
-        "short_crowded": 0.67,
-        "long_extreme": 1.75,
-        "short_extreme": 0.57,
-    },
-    "futures_basis": {
-        "elevated_positive": 0.10,
-        "extreme_positive": 0.20,
-        "elevated_negative": -0.10,
-        "extreme_negative": -0.20,
-    },
-    "social": {
-        "fearful_bullish_share": 0.20,
-        "optimistic_bullish_share": 0.60,
-        "euphoric_bullish_share": 0.80,
-        "attention_growth_extreme": 2.0,
-    },
-    "deleveraging": {
-        "liquidation_to_open_interest": 0.10,
-        "normalized_funding_abs": 0.0003,
-    },
-}
-
-
 @dataclass(frozen=True)
 class _Point:
     key: str
@@ -89,30 +53,15 @@ class _Point:
     metadata: Mapping[str, Any]
 
 
-def _copy_defaults(value: Mapping[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, item in value.items():
-        result[key] = _copy_defaults(item) if isinstance(item, Mapping) else item
-    return result
-
-
 def _settings(policy: Policy | None) -> dict[str, Any]:
-    result = _copy_defaults(_DEFAULTS)
-    configured = getattr(policy or resolve_policy(), "positioning", {})
-    if isinstance(configured, Mapping):
-        for key, value in configured.items():
-            if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
-                result[key].update(value)
-            else:
-                result[key] = value
-    return result
+    return dict((policy or resolve_policy()).positioning)
 
 
 def _canonical_key(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("positioning metric key must be a non-empty string")
     raw = value.strip().lower()
-    key = _ALIASES.get(raw, raw)
+    key = raw
     if key not in _METRIC_FIELDS:
         raise ValueError(f"unknown positioning metric key: {raw}")
     return key
@@ -279,7 +228,6 @@ def build_positioning_facts(
     observations: Any = None,
     symbol: str = "BTC",
     *,
-    metrics: Mapping[str, Any] | None = None,
     previous_observations: Any = None,
     policy: Policy | None = None,
     as_of: str | datetime | None = None,
@@ -290,14 +238,6 @@ def build_positioning_facts(
     ``previous_observations`` is accepted for API symmetry and source checks,
     but no future or incompatible series is used in current classification.
     """
-    if isinstance(observations, str) and isinstance(symbol, Mapping):
-        observations, symbol = symbol, observations
-    elif isinstance(observations, str) and symbol == "BTC":
-        symbol, observations = observations, None
-    if metrics is not None:
-        if observations is not None:
-            raise ValueError("provide only one of observations or metrics")
-        observations = metrics
     normalized_symbol = _text(symbol, "positioning symbol").upper()
     raw_as_of = as_of.isoformat() if isinstance(as_of, datetime) else as_of
     point_values = _points(observations, raw_as_of)
@@ -522,14 +462,8 @@ def build_positioning_facts(
     )
 
 
-build_positioning_overlay = build_positioning_facts
-classify_positioning = build_positioning_facts
-
-
 __all__ = [
     "build_positioning_facts",
-    "build_positioning_overlay",
-    "classify_positioning",
     "source_compatible",
     "validate_source_compatibility",
 ]

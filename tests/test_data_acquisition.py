@@ -1181,7 +1181,6 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertTrue({item.provider: item for item in ready}["sosovalue"].runtime_ready)
         status = provider_status(config, {"SOSOVALUE_API_KEY": "secret"}, adapters=adapters)
         row = {item["provider"]: item for item in status}["sosovalue"]
-        self.assertTrue(row["enabled"])
         self.assertTrue(row["config_enabled"])
         self.assertTrue(row["runtime_ready"])
         self.assertNotIn("secret", str(status))

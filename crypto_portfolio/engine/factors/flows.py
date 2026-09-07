@@ -12,7 +12,7 @@ from ...models.policy import Policy, resolve_policy
 from ..metric_history import build_factor_facts
 
 
-_DEFAULT_V1_RULES = {"positive_threshold": 0.0, "negative_threshold": 0.0}
+_CONTEXT_THRESHOLDS = {"positive_threshold": 0.0, "negative_threshold": 0.0}
 _HORIZON_WEIGHTS = {"1d": 0.1, "7d": 0.3, "30d": 0.6}
 
 
@@ -98,9 +98,9 @@ def _number(value: Any) -> float | None:
 def _context_rules(policy: Policy) -> Mapping[str, float]:
     # Sign classification is regime context; v2 scoring uses normalized ratios.
     return {
-        **_DEFAULT_V1_RULES,
+        **_CONTEXT_THRESHOLDS,
         **(
-            {key: value for key, value in policy.factor_rules.get("flows", {}).items() if key in _DEFAULT_V1_RULES}
+            {key: value for key, value in policy.factor_rules.get("flows", {}).items() if key in _CONTEXT_THRESHOLDS}
         ),
     }
 
@@ -340,20 +340,6 @@ def calculate_flow_factor(
             freshness="CURRENT" if number is not None else "UNKNOWN",
         )
 
-    if resolved.policy_version == 1:
-        latest = next(reversed(tuple(facts.current.values())), None) if facts.current else None
-        state = classify_flow_state(latest, policy=resolved)
-        score = {"POSITIVE": 100.0, "NEUTRAL": 50.0, "NEGATIVE": 0.0}.get(state)
-        reason = "flow is unavailable" if state == "UNKNOWN" else f"flow state is {state}"
-        return FlowFactorResult(
-            score=score,
-            state=state,
-            facts=facts,
-            confidence="HIGH" if facts.coverage >= 1 else "LOW",
-            coverage=facts.coverage,
-            reasons=(reason,),
-            evidence_ids=facts.source_ids,
-        )
 
     ratios = _normalized_ratios(value if value is not None else facts)
     available = {key: ratio for key, ratio in ratios.items() if ratio is not None}
@@ -389,18 +375,8 @@ def calculate_flow_factor(
     )
 
 
-flow_factor = calculate_flow_factor
-deterministic_flow_state = classify_flow_state
-calculate_flow_state = classify_flow_state
-flow_state = classify_flow_state
-
-
 __all__ = [
     "FlowFactorResult",
     "calculate_flow_factor",
-    "calculate_flow_state",
     "classify_flow_state",
-    "deterministic_flow_state",
-    "flow_factor",
-    "flow_state",
 ]

@@ -3,27 +3,8 @@
   "$id": "https://example.local/crypto-portfolio-manager/model-routing.schema.json",
   "title": "Model routing policy",
   "type": "object",
-  "oneOf": [
-    {"$ref": "#/$defs/v1"},
-    {"$ref": "#/$defs/v2"}
-  ],
+  "$ref": "#/$defs/v2",
   "$defs": {
-    "v1": {
-      "type": "object",
-      "required": ["routing_policy_version", "mode", "luna_policy", "stages"],
-      "properties": {
-        "routing_policy_version": {"const": 1},
-        "mode": {"enum": ["AUTO", "MANUAL"]},
-        "luna_policy": {"const": "LUNA_MAX_ONLY"},
-        "stages": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": {"enum": ["LUNA_MAX", "TERRA", "SOL", "PYTHON"]}
-        },
-        "sol_thresholds": {"$ref": "#/$defs/sol_thresholds"}
-      },
-      "additionalProperties": false
-    },
     "v2": {
       "type": "object",
       "required": [

@@ -31,7 +31,6 @@ from .http import HttpClient, redact_secrets
 BASE_URL = "https://api.sosovalue.xyz"
 API_KEY_HEADER = "x-soso-api-key"
 ETF_HISTORICAL_INFLOW_PATH = "/openapi/v2/etf/historicalInflowChart"
-ETF_FLOW_PATH = ETF_HISTORICAL_INFLOW_PATH
 ETF_FLOW_PATHS = {"BTC": ETF_HISTORICAL_INFLOW_PATH, "ETH": ETF_HISTORICAL_INFLOW_PATH, "MARKET": ETF_HISTORICAL_INFLOW_PATH}
 _ETF_KEYS = (
     "flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d",
@@ -549,7 +548,6 @@ __all__ = [
     "API_KEY_HEADER",
     "BASE_URL",
     "ETF_HISTORICAL_INFLOW_PATH",
-    "ETF_FLOW_PATH",
     "ETF_FLOW_PATHS",
     "SoSoValueProvider",
     "parse_etf_flow_history",

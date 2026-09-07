@@ -82,10 +82,6 @@ class MarketOverlays:
         object.__setattr__(self, "warnings", warnings)
         object.__setattr__(self, "effective_deployment_caps", _factors(self.effective_deployment_caps))
 
-    @property
-    def positioning(self) -> Mapping[str, PositioningFacts]:
-        return self.positioning_by_asset
-
     def compact_summary(self) -> dict[str, Any]:
         return {
             "positioning": {
@@ -122,19 +118,15 @@ class MarketOverlays:
         if not isinstance(value, Mapping):
             raise ValueError("market overlays must be an object")
         allowed = {
-            "positioning_by_asset", "positioning", "positioning_summaries", "btc_cycle",
-            "btc_cycle_summary", "overlay_confidence", "warnings", "effective_deployment_caps",
+            "positioning_by_asset", "btc_cycle", "overlay_confidence", "warnings",
+            "effective_deployment_caps",
         }
         unknown = set(value) - allowed
         if unknown:
             raise ValueError(f"market overlays contain unknown fields: {', '.join(sorted(unknown))}")
-        positioning = value.get(
-            "positioning_by_asset",
-            value.get("positioning", value.get("positioning_summaries", {})),
-        )
         return cls(
-            positioning_by_asset=positioning,
-            btc_cycle=value.get("btc_cycle", value.get("btc_cycle_summary")),
+            positioning_by_asset=value.get("positioning_by_asset", {}),
+            btc_cycle=value.get("btc_cycle"),
             overlay_confidence=value.get("overlay_confidence", "LOW"),
             warnings=tuple(value.get("warnings", ())),
             effective_deployment_caps=value.get("effective_deployment_caps", {}),

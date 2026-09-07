@@ -146,7 +146,7 @@ class BinancePositionObservation:
 class BinancePortfolioObservation:
     captured_at: str
     display_currency: str = "USD"
-    reported_total_value: float | None = None
+    total_value: float | None = None
     positions: tuple[BinancePositionObservation, ...] = ()
     source: str = BINANCE_WALLET_SCREENSHOT_SOURCE
 
@@ -158,13 +158,13 @@ class BinancePortfolioObservation:
         if currency != "USD":
             raise ValueError("Binance screenshot P&L import requires display_currency USD")
         object.__setattr__(self, "display_currency", currency)
-        if self.reported_total_value is not None:
+        if self.total_value is not None:
             object.__setattr__(
                 self,
-                "reported_total_value",
+                "total_value",
                 _optional_display_number(
-                    self.reported_total_value,
-                    "reported_total_value",
+                    self.total_value,
+                    "total_value",
                     minimum=0,
                 ),
             )
@@ -197,9 +197,7 @@ class BinancePortfolioObservation:
         return cls(
             captured_at=captured_at,
             display_currency=value.get("display_currency", value.get("base_currency", "USD")),
-            reported_total_value=value.get(
-                "reported_total_value", value.get("reported_total_value_usd")
-            ),
+            total_value=value.get("total_value"),
             positions=tuple(BinancePositionObservation.from_mapping(item) for item in raw_positions),
             source=value.get("source", BINANCE_WALLET_SCREENSHOT_SOURCE),
         )
@@ -211,8 +209,8 @@ class BinancePortfolioObservation:
             "base_currency": "USD",
             "positions": [position.to_position_mapping() for position in self.positions],
         }
-        if self.reported_total_value is not None:
-            result["reported_total_value"] = self.reported_total_value
+        if self.total_value is not None:
+            result["total_value"] = self.total_value
         return result
 
     def to_snapshot(self, *, policy: Policy | None = None) -> PortfolioSnapshot:
@@ -222,7 +220,7 @@ class BinancePortfolioObservation:
         return {
             "captured_at": self.captured_at,
             "display_currency": self.display_currency,
-            "reported_total_value": self.reported_total_value,
+            "total_value": self.total_value,
             "positions": [position.as_dict() for position in self.positions],
             "source": self.source,
         }

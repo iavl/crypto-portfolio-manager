@@ -1,14 +1,13 @@
 import math
 import unittest
 
-from scripts.metrics import (
+from crypto_portfolio.engine.metrics import (
     annualized_volatility,
     benchmark_70_30,
     current_drawdown,
     max_drawdown,
     moving_average,
     simple_return,
-    weighted_score,
 )
 
 
@@ -23,12 +22,6 @@ class MetricsTests(unittest.TestCase):
 
     def test_moving_average(self):
         self.assertAlmostEqual(moving_average([1, 2, 3, 4], 3), 3.0)
-
-    def test_weighted_score_renormalizes_missing(self):
-        weights = {"trend": 0.25, "fundamentals": 0.20, "onchain": 0.10}
-        scores = {"trend": 80, "fundamentals": 60}
-        expected = (80 * 0.25 + 60 * 0.20) / 0.45
-        self.assertAlmostEqual(weighted_score(scores, weights), expected)
 
     def test_volatility_non_negative(self):
         vol = annualized_volatility([100, 101, 99, 102, 103])

@@ -212,8 +212,8 @@ social metrics, halving timing, and optional BTC on-chain metrics retain their
 source, scope/methodology, observed time, and evidence IDs.
 
 These are overlays, not new weighted factors. They do not enter `FactorScore`,
-base `scoring_weights`, missing-factor renormalization, or base evidence
-coverage. Positioning needs multiple compatible derivatives confirmations for
+the six-factor base weights, or base evidence coverage. Positioning needs
+multiple compatible derivatives confirmations for
 `CROWDED`/`EXTREME`; social-only euphoria never creates an extreme state. The
 halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
 `REDUCE`, or `EXIT`.
@@ -357,7 +357,7 @@ spot observation and reliable volume where available. When adequate OHLCV exists
 manually invent moving averages, ATR, swing levels, zone prices, tranche
 arithmetic, or estimated quantities. The technical engine may return `WAIT` or
 leave part of the approved amount unallocated, but it can never increase the
-approved amount or place an order. v1 generates pullback plans only:
+approved amount or place an order. The planner generates pullback plans only:
 `BREAKOUT` returns `WAIT` and `MIXED` is rejected until those semantics are
 implemented.
 
@@ -377,15 +377,16 @@ merely to satisfy a preferred symbol.
 
 Critical missing data—current price, recent trend history, portfolio value, or
 an unresolved material security event—precludes a high-conviction entry.
-Missing non-critical scoring factors may be removed and renormalized by the
-scoring engine, but confidence is capped by actual coverage. Unknown factor
-keys fail validation, and missing BTC-relative evidence makes a satellite
-`HOLD_ONLY` rather than positive evidence for a new allocation.
+Missing non-critical scoring factors keep their configured weights and shrink
+toward neutral 50 according to reliability; confidence is capped by actual
+coverage. Unknown factor keys fail validation, and missing BTC-relative
+evidence makes a satellite `HOLD_ONLY` rather than positive evidence for a
+new allocation.
 
 When a material change between snapshots has no explicit cash-flow
 classification, continue allocation/risk review if possible but mark NAV
 performance `PROVISIONAL`; do not infer a deposit or investment return from
-stablecoin growth alone. Use `external_cash_flow_usd` with
+stablecoin growth alone. Use `external_cash_flow` with
 `external_cash_flow_type` (`DEPOSIT`, `WITHDRAWAL`, or explicit `NONE`) when
 the user confirms the classification.
 
@@ -401,7 +402,7 @@ public market/profile artifacts use
 `volume-profiles/sha256/<profile_hash>.json`. Provider acquisition artifacts
 use `provider-cache/responses/` and `provider-cache/series/`.
 
-For a compatibility normalization check, run:
+For a snapshot normalization check, run:
 
 ```bash
 python3 scripts/portfolio_snapshot.py path/to/fake-snapshot.json

@@ -93,9 +93,6 @@ def stable_observation_id(
     return hashlib.sha256(encoded).hexdigest()
 
 
-observation_id_for = stable_observation_id
-
-
 @dataclass(frozen=True)
 class MetricObservation:
     observation_id: str
@@ -265,8 +262,6 @@ class MetricObservation:
             metadata=metadata,
         )
 
-    as_evidence = to_evidence
-
 
 @dataclass(frozen=True)
 class CollectionEvent:
@@ -365,6 +360,5 @@ class CollectionEvent:
 __all__ = [
     "CollectionEvent",
     "MetricObservation",
-    "observation_id_for",
     "stable_observation_id",
 ]

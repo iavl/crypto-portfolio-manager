@@ -88,27 +88,6 @@ def moving_average(prices: Sequence[float], window: int) -> float:
     return sum(values[-window:]) / window
 
 
-def weighted_score(factor_scores: Mapping[str, float], weights: Mapping[str, float]) -> float:
-    """Compute a missing-data-aware 0–100 score with weight renormalization."""
-    common = [key for key in weights if key in factor_scores and factor_scores[key] is not None]
-    if not common:
-        raise ValueError("no scored factors available")
-    for key in common:
-        score = float(factor_scores[key])
-        if not math.isfinite(score) or not 0 <= score <= 100:
-            raise ValueError(f"factor {key!r} score must be in [0, 100]")
-    available_weights = []
-    for key in common:
-        weight = float(weights[key])
-        if not math.isfinite(weight) or weight < 0:
-            raise ValueError(f"weight {key!r} must be finite and >= 0")
-        available_weights.append(weight)
-    total_weight = sum(available_weights)
-    if total_weight <= 0:
-        raise ValueError("sum of available weights must be > 0")
-    return sum(float(factor_scores[key]) * float(weights[key]) for key in common) / total_weight
-
-
 def portfolio_weighted_return(weights: Mapping[str, float], returns: Mapping[str, float]) -> float:
     """Return a weighted portfolio return; missing held assets fail explicitly."""
     if not weights:
@@ -158,5 +137,4 @@ __all__ = [
     "period_returns",
     "portfolio_weighted_return",
     "simple_return",
-    "weighted_score",
 ]

@@ -15,18 +15,7 @@ from ..technical import build_technical_snapshot
 
 
 _CONFIDENCE_ORDER = ("LOW", "MEDIUM", "HIGH")
-_DEFAULT_RULES = {
-    "base_score": 50.0,
-    "price_ma_points": 6.0,
-    "alignment_points": 12.0,
-    "return_points": 6.0,
-    "drawdown_points": 6.0,
-    "support_points": 5.0,
-    "volume_points": 5.0,
-    "drawdown_tolerance": 0.25,
-    "extension_threshold_atr": 2.0,
-    "extension_penalty": 10.0,
-}
+
 
 
 @dataclass(frozen=True)
@@ -73,7 +62,7 @@ class TrendFactorResult:
 def _snapshot(
     value: TechnicalSnapshot | OHLCVSeries | Mapping[str, Any],
     *,
-    spot: SpotPrice | Mapping[str, Any] | float | None,
+    spot: SpotPrice | Mapping[str, Any] | None,
     policy: Policy,
     as_of: str | None,
 ) -> TechnicalSnapshot:
@@ -99,13 +88,12 @@ def _snapshot(
                     )
             return TechnicalSnapshot(**data)
     if isinstance(value, OHLCVSeries):
-        supplied_spot = spot if spot is not None else value.candles[-1].close
-        return build_technical_snapshot(value, supplied_spot, as_of=as_of, policy=policy)
+        return build_technical_snapshot(value, spot, as_of=as_of, policy=policy)
     raise ValueError("trend input must be a TechnicalSnapshot or OHLCVSeries")
 
 
 def _rules(policy: Policy) -> Mapping[str, float]:
-    return {**_DEFAULT_RULES, **policy.factor_rules.get("trend", {})}
+    return policy.factor_rules["trend"]
 
 
 def _confidence(coverage: float, data_confidence: str) -> str:
@@ -119,7 +107,7 @@ def _confidence(coverage: float, data_confidence: str) -> str:
 def calculate_trend_factor(
     value: TechnicalSnapshot | OHLCVSeries | Mapping[str, Any],
     *,
-    spot: SpotPrice | Mapping[str, Any] | float | None = None,
+    spot: SpotPrice | Mapping[str, Any] | None = None,
     as_of: str | None = None,
     policy: Policy | None = None,
     evidence_ids: tuple[str, ...] | list[str] = (),
@@ -171,16 +159,6 @@ def calculate_trend_factor(
             reasons.append(f"{name} return is negative")
 
     # Drawdown belongs to valuation in v2; retain it only as trend context.
-    if resolved.policy_version == 1:
-        total += 1
-        if snapshot.current_drawdown is not None:
-            available += 1
-            if snapshot.current_drawdown >= -rules["drawdown_tolerance"]:
-                score += rules["drawdown_points"]
-                reasons.append("drawdown is within the trend tolerance")
-            elif snapshot.current_drawdown <= -0.60:
-                score -= rules["drawdown_points"]
-                reasons.append("drawdown is materially elevated")
 
     total += 1
     if snapshot.support_zones:
@@ -255,21 +233,7 @@ def calculate_trend_factor(
     )
 
 
-trend_factor = calculate_trend_factor
-score_trend_factor = calculate_trend_factor
-build_trend_factor = calculate_trend_factor
-score_trend = calculate_trend_factor
-calculate_trend_score = calculate_trend_factor
-trend_score = calculate_trend_factor
-
-
 __all__ = [
     "TrendFactorResult",
-    "build_trend_factor",
     "calculate_trend_factor",
-    "calculate_trend_score",
-    "score_trend",
-    "score_trend_factor",
-    "trend_factor",
-    "trend_score",
 ]

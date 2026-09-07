@@ -118,8 +118,10 @@ class OverlayTests(unittest.TestCase):
             price_at_halving=60,
             distance_from_ath=0.05,
             price_extension_atr=3,
-            mvrv_zscore=5,
-            lth_net_position_change=-0.1,
+            observations={
+                "onchain.btc.mvrv_zscore": 5,
+                "onchain.btc.lth_net_position_change": -0.1,
+            },
             positioning=positioning,
         )
         self.assertEqual(cycle.market_cycle_state, "OVERHEATED")

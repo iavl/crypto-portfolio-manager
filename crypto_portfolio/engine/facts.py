@@ -38,13 +38,9 @@ def build_asset_facts(
     )
 
 
-build_facts = build_deterministic_facts
-
-
 __all__ = [
     "build_asset_facts",
     "build_btc_cycle_context",
     "build_deterministic_facts",
-    "build_facts",
     "build_positioning_facts",
 ]

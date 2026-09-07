@@ -100,7 +100,6 @@ class AssetDecisionSummary:
     action: str = "HOLD"
     approved_amount_usd: float = 0.0
     thesis_broken: bool = False
-    severe_event: bool = False
     portfolio_constraint: str = ""
     event_risk: Mapping[str, Any] | None = None
 
@@ -150,9 +149,8 @@ class AssetDecisionSummary:
         object.__setattr__(self, "approved_amount_usd", amount)
         if action in {"INCREASE", "REDUCE", "EXIT"} and amount <= 0:
             raise ValueError(f"{action} requires a positive approved_amount_usd")
-        for field_name in ("thesis_broken", "severe_event"):
-            if not isinstance(getattr(self, field_name), bool):
-                raise ValueError(f"{field_name} must be boolean")
+        if not isinstance(self.thesis_broken, bool):
+            raise ValueError("thesis_broken must be boolean")
         if self.event_risk is not None:
             event_risk = (
                 self.event_risk.as_dict()
@@ -189,16 +187,10 @@ class AssetDecisionSummary:
             "action": self.action,
             "approved_amount_usd": self.approved_amount_usd,
             "thesis_broken": self.thesis_broken,
-            "severe_event": self.severe_event,
             "portfolio_constraint": self.portfolio_constraint,
             "event_risk": thaw_packet_value(self.event_risk) if self.event_risk is not None else None,
         }
         return result
-
-    @property
-    def weighted_score(self) -> float | None:
-        return self.score
-
 
 @dataclass(frozen=True)
 class SolReview:
@@ -321,27 +313,6 @@ class DecisionReviewPacket:
             if not isinstance(getattr(self, field_name), bool):
                 raise ValueError(f"{field_name} must be boolean")
 
-    @property
-    def asset_summaries(self) -> tuple[AssetDecisionSummary, ...]:
-        return self.assets
-
-    @property
-    def positioning_summary(self) -> Mapping[str, Any]:
-        return self.positioning_summaries
-
-    @property
-    def btc_cycle(self) -> Mapping[str, Any] | None:
-        return self.btc_cycle_summary
-
-    @property
-    def high_impact_flags(self) -> tuple[str, ...]:
-        flags = list(self.risk_flags) + list(self.critical_missing_data) + list(self.major_conflicts)
-        if self.major_event_risk:
-            flags.append("MAJOR_EVENT")
-        if self.risk_budget_breach:
-            flags.append("RISK_BUDGET_BREACH")
-        return tuple(dict.fromkeys(flags))
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "review_type": self.review_type,
@@ -374,23 +345,11 @@ class DecisionReviewPacket:
         if not isinstance(value, Mapping):
             raise ValueError("decision review packet must be an object")
         data = dict(value)
-        if data.get("market_overlays") is not None:
-            from .market_overlays import MarketOverlays
-
-            compact = MarketOverlays.from_mapping(data.pop("market_overlays")).compact_summary()
-            data.setdefault("positioning_summaries", compact["positioning"])
-            data.setdefault("btc_cycle_summary", compact["btc_cycle"])
-            data.setdefault("overlay_confidence", compact["overlay_confidence"])
-            data.setdefault("overlay_warnings", compact["warnings"])
-            data.setdefault("effective_deployment_caps", compact["effective_deployment_caps"])
-        raw_assets = data.get("assets", data.get("asset_summaries", ()))
-        if isinstance(raw_assets, Mapping):
-            raw_assets = [dict(item, symbol=symbol) for symbol, item in raw_assets.items()]
+        raw_assets = data.get("assets", ())
         data["assets"] = tuple(
             item if isinstance(item, AssetDecisionSummary) else AssetDecisionSummary.from_mapping(item)
             for item in raw_assets
         )
-        data.pop("asset_summaries", None)
         return cls(**data)
 
 

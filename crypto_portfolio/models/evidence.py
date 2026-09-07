@@ -261,11 +261,10 @@ class AssetAssessment:
     confidence: str = "LOW"
     asset_type: str = "other"
     relative_strength_vs_btc: float | str | None = None
-    severe_event: bool = False
     risk_tier: str = "normal"
     thesis_broken: bool = False
     critical_data_complete: bool = True
-    event_risk: EventRiskAssessment | Mapping[str, Any] | str | None = None
+    event_risk: EventRiskAssessment | Mapping[str, Any] | None = None
     scoring_profile_name: str | None = None
     scoring_model_version: int | None = None
     score_coverage: float | None = None
@@ -349,8 +348,6 @@ class AssetAssessment:
             if not math.isfinite(value):
                 raise ValueError("relative_strength_vs_btc must be finite")
             object.__setattr__(self, "relative_strength_vs_btc", value)
-        if not isinstance(self.severe_event, bool):
-            raise ValueError("severe_event must be boolean")
         if not isinstance(self.thesis_broken, bool):
             raise ValueError("thesis_broken must be boolean")
         if not isinstance(self.critical_data_complete, bool):
@@ -358,15 +355,6 @@ class AssetAssessment:
         event_risk = self.event_risk
         if event_risk is not None and not isinstance(event_risk, EventRiskAssessment):
             event_risk = EventRiskAssessment.from_mapping(event_risk)
-        if self.severe_event and (event_risk is None or not event_risk.blocks_new_risk):
-            event_risk = EventRiskAssessment(
-                "SEVERE",
-                reasons=tuple(dict.fromkeys((*event_risk.reasons, "legacy severe_event flag"))) if event_risk else ("legacy severe_event flag",),
-                evidence_ids=event_risk.evidence_ids if event_risk else (),
-                unresolved=event_risk.unresolved if event_risk else False,
-            )
-        if event_risk is not None and event_risk.blocks_new_risk:
-            object.__setattr__(self, "severe_event", True)
         object.__setattr__(self, "event_risk", event_risk)
         if self.scoring_profile_name is not None:
             object.__setattr__(
@@ -377,9 +365,9 @@ class AssetAssessment:
         if self.scoring_model_version is not None and (
             isinstance(self.scoring_model_version, bool)
             or not isinstance(self.scoring_model_version, int)
-            or self.scoring_model_version < 1
+            or self.scoring_model_version != 2
         ):
-            raise ValueError("scoring_model_version must be a positive integer or null")
+            raise ValueError("scoring_model_version must be 2 or null")
         if self.score_coverage is not None:
             coverage = float(self.score_coverage)
             if not math.isfinite(coverage) or not 0 <= coverage <= 1:
@@ -410,7 +398,6 @@ class AssetAssessment:
             "confidence": self.confidence,
             "asset_type": self.asset_type,
             "relative_strength_vs_btc": self.relative_strength_vs_btc,
-            "severe_event": self.severe_event,
             "thesis_broken": self.thesis_broken,
             "critical_data_complete": self.critical_data_complete,
             "risk_tier": self.risk_tier,

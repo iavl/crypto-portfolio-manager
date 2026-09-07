@@ -121,8 +121,6 @@ class EventScanResult:
             },
         }
 
-    as_observation = to_observation
-
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "EventScanResult":
         if not isinstance(value, Mapping):
@@ -195,13 +193,9 @@ def event_scan_observation(
     return model.to_observation(metric_key, fetched_at=fetched_at)
 
 
-normalize_event_scan = EventScanResult.from_mapping
-
-
 __all__ = [
     "EventRiskAssessment",
     "EventScanResult",
     "build_event_scan_result",
     "event_scan_observation",
-    "normalize_event_scan",
 ]

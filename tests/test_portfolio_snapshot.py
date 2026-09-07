@@ -20,7 +20,7 @@ class PortfolioSnapshotTests(unittest.TestCase):
         self.assertIsNone(cash_flow_adjusted_performance((previous, current))["return"])
         confirmed = {
             **current,
-            "external_cash_flow_usd": 10000,
+            "external_cash_flow": 10000,
             "external_cash_flow_type": "DEPOSIT",
         }
         self.assertEqual(detect_external_cash_flow(previous, confirmed)["status"], "CONFIRMED")
@@ -29,10 +29,9 @@ class PortfolioSnapshotTests(unittest.TestCase):
     def test_classify_accepts_partial_config(self):
         self.assertEqual(classify("alpha", {"core_symbols": ["ALPHA"]}), "core")
 
-    def test_legacy_snapshot_without_timestamp_remains_normalizable(self):
-        result = normalize({"positions": [{"symbol": "BTC", "value_usd": 100}]})
-        self.assertIsNone(result["timestamp"])
-        self.assertTrue(any("timestamp is missing" in warning for warning in result["warnings"]))
+    def test_snapshot_without_timestamp_is_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize({"positions": [{"symbol": "BTC", "value_usd": 100}]})
 
     def test_defaults_classify_assets(self):
         result = normalize(
@@ -55,8 +54,8 @@ class PortfolioSnapshotTests(unittest.TestCase):
             types,
             {"BTC": "core", "AAVE": "satellite", "ARB": "other", "USDC": "stablecoin"},
         )
-        self.assertEqual(result["config"]["min_stablecoin_weight"], 0.10)
-        self.assertEqual(result["config"]["max_portfolio_drawdown"], 0.20)
+        self.assertEqual(result["config"]["risk"]["min_stablecoin_weight"], 0.10)
+        self.assertEqual(result["config"]["risk"]["max_portfolio_drawdown"], 0.20)
 
     def test_u_and_usd1_are_stablecoins_in_the_stable_sleeve(self):
         result = normalize(
@@ -111,8 +110,8 @@ class PortfolioSnapshotTests(unittest.TestCase):
                 "USDT": "stablecoin",
             },
         )
-        self.assertEqual(result["config"]["core_symbols"], ["SOL"])
-        self.assertEqual(result["config"]["min_stablecoin_weight"], 0.30)
+        self.assertEqual(result["config"]["universe"]["core"], ["SOL"])
+        self.assertEqual(result["config"]["risk"]["min_stablecoin_weight"], 0.30)
         self.assertNotIn("stablecoin weight", " ".join(result["warnings"]))
 
     def test_conflicting_asset_type_hint_is_rejected(self):
@@ -142,14 +141,15 @@ class PortfolioSnapshotTests(unittest.TestCase):
         result = normalize(
             {
                 "config": {"min_stablecoin_weight": 0.50, "max_portfolio_drawdown": 0.10},
-                "portfolio_peak_value": 100,
                 "timestamp": "2026-09-01T00:00:00Z",
                 "positions": [{"symbol": "BTC", "value_usd": 80}],
             }
         )
         warnings = " ".join(result["warnings"])
         self.assertIn("stablecoin weight", warnings)
-        self.assertIn("exceeds configured maximum", warnings)
+        self.assertIsNone(result["portfolio_drawdown"])
+        with self.assertRaisesRegex(ValueError, "portfolio_peak_value"):
+            normalize({"timestamp": "2026-09-01T00:00:00Z", "portfolio_peak_value": 100, "positions": [{"symbol": "BTC", "value_usd": 80}]})
 
         with self.assertRaises(ValueError):
             resolve_config({"core_symbols": ["BTC"], "satellite_symbols": ["btc"]})

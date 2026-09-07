@@ -266,9 +266,6 @@ class BTCCycleContext:
         return cls(**{key: value[key] for key in value if key in allowed})
 
 
-BTCCycle = BTCCycleContext
-
-
 __all__ = [
     "BTCCycleContext",
     "CycleRisk",
@@ -276,5 +273,4 @@ __all__ = [
     "HalvingContext",
     "HolderBehaviorState",
     "MarketCycleState",
-    "BTCCycle",
 ]

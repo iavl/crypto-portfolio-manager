@@ -15,7 +15,7 @@ def _total_value(value: PortfolioSnapshot | Mapping[str, Any]) -> float:
         return value.total_value_usd
     if not isinstance(value, Mapping):
         raise ValueError("snapshot must be a PortfolioSnapshot or mapping")
-    for field in ("total_value_usd", "total_value", "reported_total_value"):
+    for field in ("total_value_usd", "total_value"):
         if field in value and value[field] is not None:
             total = value[field]
             break
@@ -36,10 +36,8 @@ def _flow(value: PortfolioSnapshot | Mapping[str, Any]) -> tuple[float, str, boo
         return amount, kind, kind != "UNRESOLVED"
     if not isinstance(value, Mapping):
         raise ValueError("snapshot must be a PortfolioSnapshot or mapping")
-    if "external_cash_flow" in value and "external_cash_flow_usd" in value and value["external_cash_flow"] != value["external_cash_flow_usd"]:
-        raise ValueError("external_cash_flow and external_cash_flow_usd disagree")
-    amount_supplied = "external_cash_flow" in value or "external_cash_flow_usd" in value
-    raw_amount = value.get("external_cash_flow", value.get("external_cash_flow_usd", 0.0))
+    amount_supplied = "external_cash_flow" in value
+    raw_amount = value.get("external_cash_flow", 0.0)
     if isinstance(raw_amount, bool) or not isinstance(raw_amount, (int, float)) or not math.isfinite(float(raw_amount)):
         raise ValueError("external cash flow must be finite numeric")
     amount = float(raw_amount)

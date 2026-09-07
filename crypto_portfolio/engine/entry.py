@@ -266,7 +266,6 @@ def build_entry_plan(
     policy: Policy | None = None,
     entry_mode: str | None = None,
     breakout_confirmed: bool = False,
-    severe_event: bool = False,
     thesis_broken: bool = False,
     relative_strength_confirmed: bool = False,
     positioning: PositioningFacts | Mapping[str, Any] | None = None,

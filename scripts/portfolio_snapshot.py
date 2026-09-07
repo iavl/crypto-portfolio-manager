@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin compatibility CLI for portfolio snapshot normalization."""
+"""Thin CLI for portfolio snapshot normalization."""
 
 from __future__ import annotations
 
@@ -16,12 +16,9 @@ from crypto_portfolio.models.policy import resolve_policy
 from crypto_portfolio.models.portfolio import classify_symbol, normalize_snapshot
 
 
-_CONFIG_MISSING = object()
-
-
-def resolve_config(raw_config: Any = _CONFIG_MISSING) -> dict[str, Any]:
-    """Return the legacy config shape from the canonical policy."""
-    return resolve_policy(None if raw_config is _CONFIG_MISSING else raw_config).legacy_config()
+def resolve_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the resolved current policy."""
+    return resolve_policy(raw_config).as_dict()
 
 
 def classify(symbol: str, config: dict[str, Any] | None = None) -> str:

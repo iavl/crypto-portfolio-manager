@@ -168,8 +168,6 @@ class AcquisitionResult:
             pending = ", ".join(f"{asset}:{key}" for asset, key in self.hard_critical_unresolved)
             raise AcquisitionResolutionRequired(f"hard-critical event scan resolution required: {pending}")
 
-    assert_ready_for_scoring = require_scoring_ready
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "plan": self.plan.as_dict(),
@@ -193,9 +191,6 @@ def resolve_fetch_mode(value: FetchMode | str | None = None) -> FetchMode:
     import os
 
     return FetchMode.parse(os.environ.get("CRYPTO_PORTFOLIO_FETCH_MODE", "AUTO"))
-
-
-fetch_mode_from_env = resolve_fetch_mode
 
 
 def _now(value: str | datetime | None) -> str:
@@ -321,7 +316,6 @@ class AcquisitionManager:
         plan: MetricCollectionPlan | Mapping[str, Any],
         *,
         mode: FetchMode | str | None = None,
-        fetch_mode: FetchMode | str | None = None,
         as_of: str | datetime | None = None,
         now: str | datetime | None = None,
         cached_observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
@@ -332,12 +326,12 @@ class AcquisitionManager:
     ) -> AcquisitionResult:
         requested_model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
         model = _expand_derived_dependencies(requested_model)
-        selected_mode = resolve_fetch_mode(fetch_mode if fetch_mode is not None else (mode if mode is not None else self.fetch_mode))
+        selected_mode = resolve_fetch_mode(mode if mode is not None else self.fetch_mode)
         current = _now(now)
         cutoff = as_of if as_of is not None else current
         local = _observations(cached_observations)
         if cached_observations is None:
-            local = read_metric_observations(self.observation_path, invalid=[])
+            local = read_metric_observations(self.observation_path)
         reusable: dict[tuple[str, str], MetricObservation] = {}
         stale: dict[tuple[str, str], MetricObservation] = {}
         preflight_skips: dict[tuple[str, str], str] = {}
@@ -459,12 +453,8 @@ class AcquisitionManager:
         scanner = self.event_scanner
         if event_scan_results is not None and event_source_scan_responses is not None:
             raise ValueError("provide only one of event_scan_results or event_source_scan_responses")
-        source_response_input = event_source_scan_responses
-        if source_response_input is None and self._contains_event_source_responses(event_scan_results):
-            source_response_input = event_scan_results
-            event_scan_results = None
         event_scans = self._coerce_event_scans(event_scan_results)
-        source_responses = self._coerce_event_source_responses(source_response_input)
+        source_responses = self._coerce_event_source_responses(event_source_scan_responses)
         event_errors: dict[tuple[str, str], str] = {}
         missing_event_identities = [
             (request.asset, request.metric_key)
@@ -770,9 +760,6 @@ class AcquisitionManager:
             tuple(event_scans.values()),
         )
 
-    collect = run
-    acquire = run
-
     @staticmethod
     def _failure(
         request: MetricRequest,
@@ -939,23 +926,6 @@ class AcquisitionManager:
                 identity = (target, category)
             result[identity] = scan
         return result
-
-    @staticmethod
-    def _contains_event_source_responses(value: Any) -> bool:
-        if value is None:
-            return False
-        if isinstance(value, EventSourceScanResponse):
-            return True
-        if isinstance(value, Mapping):
-            if "source_id" in value and "reachable" in value:
-                return True
-            return any(AcquisitionManager._contains_event_source_responses(item) for item in value.values())
-        if isinstance(value, (str, bytes)):
-            return False
-        try:
-            return any(AcquisitionManager._contains_event_source_responses(item) for item in value)
-        except TypeError:
-            return False
 
     @staticmethod
     def _coerce_event_source_responses(
@@ -1209,17 +1179,12 @@ class AcquisitionManager:
         return result, reasons
 
 
-MetricAcquisitionManager = AcquisitionManager
-
-
 __all__ = [
     "AcquisitionManager",
     "AcquisitionResult",
     "AcquisitionResolutionRequired",
     "FetchMode",
-    "MetricAcquisitionManager",
     "WebFallbackRequest",
     "format_acquisition_summary",
     "resolve_fetch_mode",
-    "fetch_mode_from_env",
 ]

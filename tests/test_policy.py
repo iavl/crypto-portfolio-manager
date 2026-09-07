@@ -99,18 +99,17 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(PolicyError):
                 load_policy(path)
 
-    def test_old_resolved_execution_policy_remains_hash_stable(self):
+    def test_incomplete_resolved_execution_policy_is_rejected(self):
         policy = load_policy()
-        legacy = json.loads(json.dumps(policy.as_dict()))
+        incomplete = json.loads(json.dumps(policy.as_dict()))
         for field in (
             "maximum_daily_candle_lag_days", "minimum_daily_coverage_ratio",
             "maximum_daily_gap_days", "maximum_zone_span_atr",
             "maximum_spot_close_gap_atr", "zone_quality",
         ):
-            legacy["execution"].pop(field)
-        parsed = policy_from_mapping(legacy)
-        self.assertEqual(parsed.as_dict(), legacy)
-        self.assertEqual(policy_hash(parsed), policy_hash(legacy))
+            incomplete["execution"].pop(field)
+        with self.assertRaises(PolicyError):
+            policy_from_mapping(incomplete)
 
     def test_partial_override_is_explicit_and_uppercase(self):
         policy = resolve_policy({"core_symbols": [" alpha "]})
@@ -159,9 +158,10 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(PolicyError):
                 load_policy(path)
 
-        legacy = json.loads(json.dumps(original))
-        legacy.pop("events")
-        self.assertEqual(policy_from_mapping(legacy).events, {})
+        incomplete = json.loads(json.dumps(original))
+        incomplete.pop("events")
+        with self.assertRaises(PolicyError):
+            policy_from_mapping(incomplete)
 
     def test_v2_scoring_profiles_and_event_multipliers_are_strict(self):
         original = load_policy().as_dict()

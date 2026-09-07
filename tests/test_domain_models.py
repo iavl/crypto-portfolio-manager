@@ -55,31 +55,31 @@ class DomainModelTests(unittest.TestCase):
 
     def test_decision_rejects_invalid_weights_and_preserves_evidence(self):
         evidence = Evidence(
-            "e-1", "BTC", "trend", "example", "2026-09-01", "2026-09-01", "CURRENT", "HIGH"
+            "e-1", "BTC", "trend", "example", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "CURRENT", "HIGH"
         )
         decision = Decision(
             "2026-09-01T00:00:00Z",
             "NORMAL",
-            1,
+            3,
             {"BTC": 1.0},
             {"BTC": 0.9, "USDC": 0.1},
             evidence=(evidence,),
         )
         result = decision.as_dict()
         self.assertEqual(result["evidence_ids"], ["e-1"])
-        self.assertEqual(result["policy_version"], 1)
+        self.assertEqual(result["policy_version"], 3)
         with self.assertRaises(ValueError):
-            Decision("2026-09-01", "NORMAL", 1, {"BTC": math.nan}, {"BTC": 1.0})
+            Decision("2026-09-01T00:00:00Z", "NORMAL", 3, {"BTC": math.nan}, {"BTC": 1.0})
 
     def test_factor_score_evidence_references_are_integral(self):
         evidence = Evidence(
-            "e-1", "BTC", "trend", "example", "2026-09-01", "2026-09-01", "CURRENT", "HIGH"
+            "e-1", "BTC", "trend", "example", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "CURRENT", "HIGH"
         )
         with self.assertRaisesRegex(ValueError, "missing evidence"):
             Decision(
-                "2026-09-01",
+                "2026-09-01T00:00:00Z",
                 "NORMAL",
-                1,
+                3,
                 {"BTC": 1.0},
                 {"BTC": 1.0},
                 evidence=(evidence,),
@@ -91,12 +91,12 @@ class DomainModelTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "wrong asset"):
             Decision(
-                "2026-09-01",
+                "2026-09-01T00:00:00Z",
                 "NORMAL",
-                1,
+                3,
                 {"BTC": 1.0},
                 {"BTC": 1.0},
-                evidence=(Evidence("e-2", "ETH", "trend", "example", "2026-09-01", "2026-09-01", "CURRENT", "HIGH"),),
+                evidence=(Evidence("e-2", "ETH", "trend", "example", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "CURRENT", "HIGH"),),
                 factor_scores={
                     "BTC": AssetAssessment(
                         "BTC", {"trend": FactorScore("trend", 80, ("e-2",))}

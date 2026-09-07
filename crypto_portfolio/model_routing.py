@@ -59,13 +59,13 @@ _DEFAULT_RUNTIME_FALLBACK = {
     "log_fallback": True,
 }
 _DEFAULT_PATH = Path(__file__).resolve().parents[1] / "config" / "model-routing.json"
-_V1_PRESETS = {
+_LOGICAL_PRESETS = {
     LUNA_MAX: "luna_max",
     TERRA: "terra_medium",
     SOL: "sol_medium",
     PYTHON: "python",
 }
-_V1_MODELS = set(_V1_PRESETS)
+_LOGICAL_MODELS = set(_LOGICAL_PRESETS)
 
 
 def _text(value: Any, field_name: str) -> str:
@@ -99,12 +99,12 @@ def _runtime(value: Any, field_name: str = "runtime") -> str:
     return value
 
 
-def _legacy_model(value: Any, field_name: str) -> str:
+def _validate_logical_model(value: Any, field_name: str) -> str:
     model = _text(value, field_name).upper()
     if model.startswith("LUNA") and model != LUNA_MAX:
         raise RoutingError("Luna-family stages may target only LUNA_MAX")
-    if model not in _V1_MODELS:
-        raise RoutingError(f"{field_name} must be one of {sorted(_V1_MODELS)}")
+    if model not in _LOGICAL_MODELS:
+        raise RoutingError(f"{field_name} must be one of {sorted(_LOGICAL_MODELS)}")
     return model
 
 
@@ -177,16 +177,6 @@ class ModelSpec:
         if self.supported_reasoning_efforts is not None:
             result["supported_reasoning_efforts"] = list(self.supported_reasoning_efforts)
         return result
-
-
-@dataclass(frozen=True)
-class StageRoute:
-    stage: str
-    preset: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "stage", _text(self.stage, "stage"))
-        object.__setattr__(self, "preset", _text(self.preset, f"stages.{self.stage}"))
 
 
 @dataclass(frozen=True)
@@ -435,12 +425,10 @@ def _logical_model(spec: ModelSpec) -> str:
 
 @dataclass(frozen=True)
 class ModelRouting:
-    """Validated v2 routing, with the old constructor/fields retained."""
+    """Validated model routing profiles."""
 
     routing_policy_version: int
-    mode: str | None = None
     luna_policy: str = "LUNA_MAX_ONLY"
-    stages: Mapping[str, str] | None = None
     sol_thresholds: Mapping[str, float] = field(default_factory=dict)
     runtime: str = "AUTO"
     default_profile: str = "balanced"
@@ -449,57 +437,22 @@ class ModelRouting:
     runtime_fallback: Mapping[str, Any] = field(default_factory=dict)
     active_profile: str | None = None
     run_overrides: Mapping[str, str] = field(default_factory=dict)
+    _stage_models: Mapping[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
             isinstance(self.routing_policy_version, bool)
             or not isinstance(self.routing_policy_version, int)
-            or self.routing_policy_version < 1
+            or self.routing_policy_version != 2
         ):
-            raise RoutingError("routing_policy_version must be a positive integer")
+            raise RoutingError("routing_policy_version must be 2")
         policy = _text(self.luna_policy, "luna_policy").upper()
         if policy != "LUNA_MAX_ONLY":
             raise RoutingError("luna_policy must be LUNA_MAX_ONLY")
         thresholds = _normalize_thresholds(self.sol_thresholds)
         fallback = _normalize_fallback(self.runtime_fallback)
 
-        legacy = self.routing_policy_version == 1
-        if legacy:
-            if not isinstance(self.stages, Mapping) or not self.stages:
-                raise RoutingError("stages must be a non-empty object")
-            old_mode = _text(self.mode or "AUTO", "mode").upper()
-            if old_mode not in {"AUTO", "MANUAL"}:
-                raise RoutingError("mode must be AUTO or MANUAL")
-            legacy_stages = {
-                _text(stage, "stage"): _legacy_model(value, f"stages.{stage}")
-                for stage, value in self.stages.items()
-            }
-            specs = _builtin_models()
-            profile_name = _text(self.active_profile or "legacy", "active_profile")
-            profile_map = {
-                profile_name: {
-                    "description": "Normalized v1 routing profile.",
-                    "stages": {
-                        stage: _V1_PRESETS[model] for stage, model in legacy_stages.items()
-                    },
-                }
-            }
-            object.__setattr__(self, "mode", old_mode)
-            object.__setattr__(self, "runtime", "AUTO")
-            object.__setattr__(self, "default_profile", profile_name)
-            object.__setattr__(self, "active_profile", profile_name)
-            object.__setattr__(self, "models", specs)
-            object.__setattr__(self, "profiles", profile_map)
-            object.__setattr__(self, "runtime_fallback", fallback)
-            object.__setattr__(self, "sol_thresholds", thresholds)
-            object.__setattr__(self, "luna_policy", policy)
-            object.__setattr__(self, "stages", legacy_stages)
-            object.__setattr__(self, "run_overrides", {})
-            return
-
-        if self.routing_policy_version != 2:
-            raise RoutingError("routing_policy_version must be 1 or 2")
-        runtime_name = _runtime(self.runtime or self.mode or "AUTO")
+        runtime_name = _runtime(self.runtime)
         specs = _normalize_models(self.models)
         profile_map = _profiles(self.profiles)
         default_profile = _text(self.default_profile, "default_profile")
@@ -513,18 +466,17 @@ class ModelRouting:
             profile_stages = _resolve_profile_stages(profile_map, name)
             _validate_stages(profile_stages, specs, name)
         _validate_stages(selected, specs, active_profile)
-        if fallback["unavailable_model"].upper() in _V1_PRESETS:
-            fallback["unavailable_model"] = _V1_PRESETS[fallback["unavailable_model"].upper()]
+        if fallback["unavailable_model"].upper() in _LOGICAL_PRESETS:
+            fallback["unavailable_model"] = _LOGICAL_PRESETS[fallback["unavailable_model"].upper()]
         if fallback["unavailable_model"] not in specs:
             raise RoutingError(f"Unknown model preset: {fallback['unavailable_model']}")
         if fallback["unsupported_reasoning"] not in {"inherit", "error", "fail"}:
             fallback_name = fallback["unsupported_reasoning"]
-            if fallback_name.upper() in _V1_PRESETS:
-                fallback_name = _V1_PRESETS[fallback_name.upper()]
+            if fallback_name.upper() in _LOGICAL_PRESETS:
+                fallback_name = _LOGICAL_PRESETS[fallback_name.upper()]
             if fallback_name not in specs:
                 raise RoutingError(f"Unknown model preset: {fallback_name}")
             fallback["unsupported_reasoning"] = fallback_name
-        object.__setattr__(self, "mode", runtime_name)
         object.__setattr__(self, "runtime", runtime_name)
         object.__setattr__(self, "default_profile", default_profile)
         object.__setattr__(self, "active_profile", active_profile)
@@ -534,11 +486,9 @@ class ModelRouting:
         object.__setattr__(self, "sol_thresholds", thresholds)
         object.__setattr__(self, "luna_policy", policy)
         object.__setattr__(self, "run_overrides", overrides)
-        object.__setattr__(
-            self,
-            "stages",
-            {stage: _logical_model(specs[preset]) for stage, preset in selected.items()},
-        )
+        object.__setattr__(self, "_stage_models", {
+            stage: _logical_model(specs[preset]) for stage, preset in selected.items()
+        })
 
     @property
     def profile(self) -> str:
@@ -568,7 +518,7 @@ class ModelRouting:
     def model_for_stage(self, stage: str) -> str:
         name = _text(stage, "stage")
         try:
-            return self.stages[name]
+            return self._stage_models[name]
         except KeyError as exc:
             raise RoutingError(f"unknown routing stage: {name}") from exc
 
@@ -582,14 +532,6 @@ class ModelRouting:
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     def as_dict(self) -> dict[str, Any]:
-        if self.routing_policy_version == 1:
-            return {
-                "routing_policy_version": 1,
-                "mode": self.mode,
-                "luna_policy": self.luna_policy,
-                "stages": dict(self.stages or {}),
-                "sol_thresholds": dict(self.sol_thresholds),
-            }
         return {
             "routing_policy_version": 2,
             "runtime": self.runtime,
@@ -630,8 +572,6 @@ def _validate_stage_preset(
         raise RoutingError(f"LLM-owned stage {stage} cannot use PYTHON")
 
 
-def _is_v1(value: Mapping[str, Any]) -> bool:
-    return value.get("routing_policy_version") == 1 or "stages" in value or "mode" in value
 
 
 def validate_model_routing(value: Mapping[str, Any] | ModelRouting) -> ModelRouting:
@@ -639,23 +579,6 @@ def validate_model_routing(value: Mapping[str, Any] | ModelRouting) -> ModelRout
         return value
     if not isinstance(value, Mapping):
         raise RoutingError("model routing must be an object")
-    if _is_v1(value):
-        allowed = {"routing_policy_version", "mode", "luna_policy", "stages", "sol_thresholds"}
-        unknown = set(value) - allowed
-        if unknown:
-            raise RoutingError(f"model routing contains unknown fields: {', '.join(sorted(unknown))}")
-        missing = {"routing_policy_version", "mode", "luna_policy", "stages"} - set(value)
-        if missing:
-            raise RoutingError(f"model routing is missing fields: {', '.join(sorted(missing))}")
-        if value["routing_policy_version"] != 1:
-            raise RoutingError("v1 routing_policy_version must be 1")
-        return ModelRouting(
-            routing_policy_version=1,
-            mode=value["mode"],
-            luna_policy=value["luna_policy"],
-            stages=value["stages"],
-            sol_thresholds=value.get("sol_thresholds", _DEFAULT_SOL_THRESHOLDS),
-        )
     allowed = {
         "routing_policy_version",
         "runtime",
@@ -773,11 +696,6 @@ def load_model_routing(
     local_profile: str | None = None
     if override_path is not None and override_path.exists():
         override = _read_json(override_path)
-        if _is_v1(override):
-            routing = validate_model_routing(override)
-            if profile is not None:
-                raise RoutingError("v1 routing config does not support profile selection")
-            return routing
         _validate_override(override, override_path)
         local_profile = override.get("active_profile")
         merged = _merge_mapping(base, override)
@@ -805,9 +723,6 @@ def default_runtime_capabilities(runtime: str = "AUTO") -> RuntimeCapabilities:
     return RuntimeCapabilities(runtime, False, False)
 
 
-def runtime_capabilities(runtime: str = "AUTO") -> RuntimeCapabilities:
-    """Compatibility alias for the conservative default capability adapter."""
-    return default_runtime_capabilities(runtime)
 
 
 def _routing(value: ModelRouting | Mapping[str, Any] | None) -> ModelRouting:
@@ -826,8 +741,8 @@ def _capabilities(value: RuntimeCapabilities | None, routing: ModelRouting) -> R
 
 def _fallback_spec(routing: ModelRouting, name: str) -> ModelSpec:
     normalized = _text(name, "fallback preset")
-    if normalized.upper() in _V1_PRESETS:
-        normalized = _V1_PRESETS[normalized.upper()]
+    if normalized.upper() in _LOGICAL_PRESETS:
+        normalized = _LOGICAL_PRESETS[normalized.upper()]
     return routing.model_spec(normalized)
 
 
@@ -1024,8 +939,8 @@ def _logical_for_value(value: Any, routing: ModelRouting, field_name: str) -> st
         return _logical_model(value)
     text = _text(value, field_name)
     upper = text.upper()
-    if upper in _V1_MODELS:
-        return _legacy_model(text, field_name)
+    if upper in _LOGICAL_MODELS:
+        return _validate_logical_model(text, field_name)
     if text in routing.models:
         return _logical_model(routing.models[text])
     for spec in routing.models.values():
@@ -1048,25 +963,6 @@ def validate_stage_model(
     return True
 
 
-def validate_historical_stage_model(stage: str, model: str) -> bool:
-    """Validate a persisted stage model without comparing against current config.
-
-    Append-only decision records carry ``stages_used`` metadata that was valid
-    under the routing policy current when the record was written. The current
-    config may later change those stage assignments, so historical records are
-    checked only for a well-formed, permitted model name (including the
-    Luna-family ``LUNA_MAX``-only rule) rather than for a match with the
-    current stage mapping.
-    """
-    name = _text(stage, "stage")
-    if name not in REQUIRED_STAGES:
-        raise RoutingError(f"Unknown stage: {name}")
-    value = _text(model, f"model for {name}")
-    if value.upper() in _V1_MODELS:
-        _legacy_model(value, f"model for {name}")
-    else:
-        _logical_for_value(value, _routing(None), f"model for {name}")
-    return True
 
 
 def luna_max_only(model: str) -> bool:
@@ -1116,7 +1012,10 @@ def routing_metadata(
     if not isinstance(sol_review_performed, bool):
         raise RoutingError("sol_review_performed must be boolean")
     if isinstance(stages_used, ModelRouting):
-        used = dict(stages_used.stages or {})
+        used = {
+            stage: stages_used.preset_for_stage(stage)
+            for stage in stages_used.profile_stages()
+        }
     elif stages_used is None:
         used = {stage: resolved.model_for_stage(stage) for stage in resolved.profile_stages()}
     elif isinstance(stages_used, Mapping):
@@ -1127,7 +1026,7 @@ def routing_metadata(
         _profile_stages(run_override, "run_override") if run_override is not None else {}
     )
     routes: dict[str, ResolvedStageRoute] = {}
-    legacy_used: dict[str, str] = {}
+    logical_used: dict[str, str] = {}
     for stage, value in used.items():
         name = _text(stage, "stage")
         if isinstance(value, ResolvedStageRoute):
@@ -1171,14 +1070,14 @@ def routing_metadata(
                     f"stage {name} is configured for {expected_stage}, not {requested_preset}"
                 )
         routes[name] = route
-        legacy_used[name] = _logical_model(resolved.model_spec(route.requested_preset))
+        logical_used[name] = _logical_model(resolved.model_spec(route.requested_preset))
     return {
         "routing_policy_version": resolved.routing_policy_version,
         "profile": resolved.profile,
         "runtime": (runtime_capabilities.runtime if runtime_capabilities else resolved.runtime),
         "config_hash": resolved.config_hash,
         "stages": {stage: route.as_dict() for stage, route in routes.items()},
-        "stages_used": legacy_used,
+        "stages_used": logical_used,
         "escalations": list(escalations),
         "sol_review_performed": sol_review_performed,
         "fallback_count": sum(route.fallback_used for route in routes.values()),
@@ -1187,11 +1086,6 @@ def routing_metadata(
 
 def routing_config_hash(routing: ModelRouting | Mapping[str, Any] | None = None) -> str:
     return _routing(routing).config_hash
-
-
-load_routing_config = load_model_routing
-validate_routing_config = validate_model_routing
-stage_model = model_for_stage
 
 
 __all__ = [
@@ -1208,12 +1102,10 @@ __all__ = [
     "RuntimeCapabilities",
     "RUNTIMES",
     "SOL",
-    "StageRoute",
     "TERRA",
     "default_runtime_capabilities",
     "format_route_log",
     "load_model_routing",
-    "load_routing_config",
     "log_route",
     "luna_max_only",
     "model_for_stage",
@@ -1221,10 +1113,6 @@ __all__ = [
     "resolve_stage_route",
     "routing_config_hash",
     "routing_metadata",
-    "runtime_capabilities",
-    "stage_model",
     "validate_model_routing",
-    "validate_routing_config",
     "validate_stage_model",
-    "validate_historical_stage_model",
 ]

@@ -178,7 +178,7 @@ def _factor_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _weight_mapping(value: Mapping[str, float], *, legacy: bool) -> dict[str, float]:
+def _weight_mapping(value: Mapping[str, float]) -> dict[str, float]:
     if not isinstance(value, Mapping):
         raise ValueError("scoring weights must be an object")
     result: dict[str, float] = {}
@@ -191,9 +191,9 @@ def _weight_mapping(value: Mapping[str, float], *, legacy: bool) -> dict[str, fl
         weight = math.nan if isinstance(raw_weight, bool) else float(raw_weight)
         if not math.isfinite(weight) or weight < 0:
             raise ValueError(f"scoring weight {factor!r} must be finite and >= 0")
-        if not legacy and factor not in SCORING_FACTORS:
+        if factor not in SCORING_FACTORS:
             raise ValueError(f"unknown scoring factor {factor}")
-        if not legacy and factor == "event_risk":
+        if factor == "event_risk":
             raise ValueError("event_risk is not a v2 scoring factor")
         result[factor] = weight
     if not result or sum(result.values()) <= 0:
@@ -216,64 +216,6 @@ def _confidence_for_coverage(
     return _CONFIDENCE_ORDER[index]
 
 
-def _score_factors_v1(
-    factor_scores: Mapping[str, Any],
-    weights: Mapping[str, float],
-    *,
-    confidence: str | None,
-    critical_data_complete: bool,
-    policy: Policy,
-    profile_name: str,
-) -> ScoreResult:
-    resolved_weights = _weight_mapping(weights, legacy=True)
-    unknown = sorted(set(factor_scores) - set(resolved_weights))
-    if unknown:
-        raise ValueError(f"unknown scoring factor(s): {', '.join(unknown)}")
-    available: dict[str, float] = {}
-    missing: list[str] = []
-    availability: dict[str, str] = {}
-    reliability: dict[str, float] = {}
-    not_applicable: list[str] = []
-    for factor in resolved_weights:
-        if factor not in factor_scores:
-            missing.append(factor)
-            availability[factor] = "MISSING"
-            reliability[factor] = 0.0
-            continue
-        score, state, _ = _extract(factor_scores[factor], factor)
-        availability[factor] = state
-        reliability[factor] = 1.0 if state == "AVAILABLE" else 0.0
-        if state == "NOT_APPLICABLE":
-            if factor == "relative_strength_btc":
-                not_applicable.append(factor)
-        if state == "AVAILABLE" and resolved_weights[factor] > 0:
-            available[factor] = score  # type: ignore[assignment]
-        elif state != "NOT_APPLICABLE":
-            missing.append(factor)
-    available_weight = sum(resolved_weights[factor] for factor in available)
-    if available_weight <= 0:
-        raise ValueError("no scored factors available")
-    total_weight = sum(resolved_weights.values())
-    effective_weights = {
-        factor: resolved_weights[factor] / available_weight for factor in available
-    }
-    result_score = sum(available[factor] * effective_weights[factor] for factor in available)
-    coverage = available_weight / total_weight
-    return ScoreResult(
-        score=result_score,
-        effective_weights=effective_weights,
-        effective_factor_scores=available,
-        factor_reliability=reliability,
-        factor_availability=availability,
-        missing_factors=tuple(dict.fromkeys(missing)),
-        not_applicable_factors=tuple(not_applicable),
-        confidence=_confidence_for_coverage(confidence, coverage, critical_data_complete, policy),
-        confidence_adjustment=coverage,
-        coverage=coverage,
-        critical_data_complete=critical_data_complete,
-        profile_name=profile_name,
-        scoring_model_version=1,
-    )
 
 
 def _score_factors_v2(
@@ -286,7 +228,7 @@ def _score_factors_v2(
     profile_name: str,
     symbol: str,
 ) -> ScoreResult:
-    resolved_weights = _weight_mapping(weights, legacy=False)
+    resolved_weights = _weight_mapping(weights)
     if not math.isclose(sum(resolved_weights.values()), 1.0, rel_tol=0, abs_tol=1e-9):
         raise ValueError("v2 scoring weights must sum to 1")
     unknown = sorted(set(factor_scores) - set(resolved_weights))
@@ -373,15 +315,6 @@ def score_factors(
     else:
         profile_name = "custom"
         raw_weights = weights
-    if resolved_policy.policy_version == 1:
-        return _score_factors_v1(
-            factors,
-            raw_weights,
-            confidence=confidence,
-            critical_data_complete=critical_data_complete,
-            policy=resolved_policy,
-            profile_name=profile_name,
-        )
     return _score_factors_v2(
         factors,
         raw_weights,
@@ -417,7 +350,6 @@ def score_assessment(
         confidence=result.confidence,
         asset_type=assessment.asset_type,
         relative_strength_vs_btc=assessment.relative_strength_vs_btc,
-        severe_event=assessment.severe_event,
         thesis_broken=assessment.thesis_broken,
         critical_data_complete=assessment.critical_data_complete,
         risk_tier=assessment.risk_tier,
@@ -453,12 +385,8 @@ def weighted_score(
 __all__ = [
     "ScoreResult",
     "calculate_factor_reliability",
-    "derive_factor_reliability",
     "ensure_acquisition_ready",
     "score_assessment",
     "score_factors",
     "weighted_score",
 ]
-
-
-derive_factor_reliability = calculate_factor_reliability

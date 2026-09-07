@@ -207,10 +207,6 @@ def build_factor_facts(
     )
 
 
-def build_metric_facts(*args: Any, **kwargs: Any) -> FactBase:
-    return build_factor_facts(*args, **kwargs)
-
-
 def build_facts_for_asset(
     observations: Iterable[MetricObservation | Mapping[str, Any]],
     symbol: str,
@@ -236,37 +232,8 @@ def build_facts_for_asset(
     }
 
 
-compare_metric_history = compare_metric_observations
-build_historical_facts = build_factor_facts
-compare_metric_values = compare_metric_observations
-build_metric_comparison = compare_metric_observations
-compare_observations = compare_metric_observations
-build_facts = build_factor_facts
-
-
-def build_metric_history(current: Any, previous: Any = None, **kwargs: Any) -> Any:
-    """Support both one-point comparison and grouped historical fact building."""
-    if isinstance(current, MetricObservation) or (
-        isinstance(current, Mapping) and "metric_key" in current
-    ):
-        return compare_metric_observations(current, previous)
-    return build_factor_facts(
-        current,
-        previous_observations=previous,
-        **kwargs,
-    )
-
-
 __all__ = [
     "build_factor_facts",
     "build_facts_for_asset",
-    "build_historical_facts",
-    "build_metric_facts",
-    "build_metric_comparison",
-    "build_metric_history",
-    "build_facts",
-    "compare_metric_history",
     "compare_metric_observations",
-    "compare_observations",
-    "compare_metric_values",
 ]

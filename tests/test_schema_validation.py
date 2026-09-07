@@ -59,8 +59,8 @@ class SchemaValidationTests(unittest.TestCase):
                 "BTC",
                 "trend",
                 "test",
-                "2026-09-01",
-                "2026-09-01",
+                "2026-09-01T00:00:00Z",
+                "2026-09-01T00:00:00Z",
                 "CURRENT",
                 "HIGH",
             )
@@ -69,7 +69,7 @@ class SchemaValidationTests(unittest.TestCase):
                 Decision(
                     "2026-09-01T00:00:00Z",
                     "NORMAL",
-                    1,
+                    3,
                     {"BTC": 1.0},
                     {"BTC": 0.9, "USDT": 0.1},
                     evidence=(evidence,),
@@ -91,7 +91,7 @@ class SchemaValidationTests(unittest.TestCase):
         value = {
             "timestamp": "2026-09-01T00:00:00Z",
             "base_currency": "USD",
-            "reported_total_value": 300,
+            "total_value": 300,
             "positions": [
                 {
                     "symbol": "AAA",
@@ -124,7 +124,7 @@ class SchemaValidationTests(unittest.TestCase):
         series = OHLCVSeries(
             "ETH",
             "1D",
-            (Candle("2026-08-31", 99, 101, 98, 100, 10),),
+            (Candle("2026-08-31T00:00:00Z", 99, 101, 98, 100, 10),),
             source="exchange",
         )
         self.validate("market.schema.json", spot.as_dict())

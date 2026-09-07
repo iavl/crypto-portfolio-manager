@@ -150,23 +150,13 @@ def load_volume_profile(
     return profile
 
 
-cache_ohlcv_series = cache_ohlcv
-load_ohlcv_by_hash = load_ohlcv
-cache_volume_profile_by_hash = cache_volume_profile
-load_volume_profile_by_hash = load_volume_profile
-
-
 __all__ = [
     "cache_ohlcv",
-    "cache_ohlcv_series",
     "cache_volume_profile",
-    "cache_volume_profile_by_hash",
     "default_market_data_dir",
     "default_volume_profile_dir",
     "load_ohlcv",
-    "load_ohlcv_by_hash",
     "load_volume_profile",
-    "load_volume_profile_by_hash",
     "market_data_path",
     "volume_profile_path",
 ]

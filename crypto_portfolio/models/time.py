@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -10,11 +10,6 @@ def parse_timestamp(value: Any, field: str = "timestamp") -> datetime:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty RFC3339 timestamp")
     text = value.strip()
-    if len(text) == 10:
-        try:
-            return datetime.combine(date.fromisoformat(text), datetime.min.time(), tzinfo=timezone.utc)
-        except ValueError as exc:
-            raise ValueError(f"{field} must be a valid RFC3339 timestamp") from exc
     if len(text) < 11 or text[10] not in {"T", "t"}:
         raise ValueError(f"{field} must be a valid RFC3339 timestamp")
     try:

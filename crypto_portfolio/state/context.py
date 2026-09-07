@@ -95,20 +95,18 @@ def previous_asset_assessment(
 
 def _position_performance_records(
     path: str | Path | None = None,
-) -> dict[str, list[tuple[str | None, PositionPerformance]]]:
+) -> dict[str, list[tuple[str, PositionPerformance]]]:
     records = []
     for index, record in enumerate(read_snapshots(path)):
         snapshot, _, _ = snapshot_from_mapping(record)
-        timestamp = None if snapshot.timestamp == "UNSPECIFIED" else snapshot.timestamp
-        records.append((timestamp, index, calculate_portfolio_position_performance(snapshot)))
+        records.append((snapshot.timestamp, index, calculate_portfolio_position_performance(snapshot)))
     records.sort(
         key=lambda item: (
-            item[0] is None,
-            parse_timestamp(item[0]) if item[0] is not None else None,
+            parse_timestamp(item[0]),
             item[1],
         )
     )
-    result: dict[str, list[tuple[str | None, PositionPerformance]]] = {}
+    result: dict[str, list[tuple[str, PositionPerformance]]] = {}
     for timestamp, _, summary in records:
         for position in summary.positions:
             result.setdefault(position.symbol, []).append((timestamp, position))
@@ -196,8 +194,7 @@ def build_history_context(
         previous_assessments = dict(parsed_decision.factor_scores)
     position_pnl = build_position_pnl_context(snapshot_path)
     cash_flow_review = external_cash_flow_review(snapshot_path)
-    invalid_observations: list[str] = []
-    observations = read_metric_observations(metrics_path, invalid=invalid_observations)
+    observations = read_metric_observations(metrics_path)
     assets = {
         position.get("symbol", "").strip().upper()
         for position in (snapshot or {}).get("positions", ())
@@ -224,12 +221,10 @@ def build_history_context(
             asset,
             sorted(keys),
             path=metrics_path,
-            invalid=invalid_observations,
         )
         for asset, keys in sorted(keys_by_asset.items())
         if keys
     }
-    history_warnings = tuple(dict.fromkeys(invalid_observations))
     return {
         "latest_snapshot": snapshot,
         "latest_decision": decision,
@@ -246,7 +241,6 @@ def build_history_context(
         "full_review_due": full_review_due,
         "position_pnl": position_pnl,
         "metric_history_summary": metric_history_summary,
-        "history_warnings": history_warnings,
     }
 
 

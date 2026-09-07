@@ -75,6 +75,8 @@ def _timestamp(value: Any, field: str) -> str:
         return normalize_timestamp(datetime.fromtimestamp(number, timezone.utc).isoformat(), field)
     if not isinstance(value, str) or not value.strip():
         raise ProviderDataError(f"{field} is missing")
+    if isinstance(value, str) and len(value) == 10:
+        value += "T00:00:00Z"
     return normalize_timestamp(value, field)
 
 
@@ -332,23 +334,15 @@ class GrowthepieProvider:
         return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=int(any(key in _RENT_KEYS for key in requested)) + int(any(key in _DA_KEYS for key in requested)))
 
 
-GrowthePieProvider = GrowthepieProvider
-parse_rent_series = parse_rent_payload
-parse_da_timeseries = parse_da_payload
-
-
 __all__ = [
     "ATTRIBUTION",
     "BASE_URL",
     "DA_OVERVIEW_PATH",
     "DA_TIMESERIES_PATH",
     "GrowthepieProvider",
-    "GrowthePieProvider",
     "LICENSE",
     "MASTER_PATH",
     "RENT_PATH",
     "parse_da_payload",
-    "parse_da_timeseries",
     "parse_rent_payload",
-    "parse_rent_series",
 ]

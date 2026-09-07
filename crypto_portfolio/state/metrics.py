@@ -73,10 +73,7 @@ def append_metric_observation(
 ) -> Path:
     model = _observation(observation)
     destination = Path(path or default_observations_path())
-    # Legacy records may no longer parse; they cannot collide with the new
-    # observation's dedup identity, so read tolerantly and continue.
-    invalid: list[str] = []
-    existing = read_metric_observations(destination, invalid=invalid)
+    existing = read_metric_observations(destination)
     for item in existing:
         if item.observation_id == model.observation_id:
             if _same_identity(item, model):
@@ -127,25 +124,9 @@ def read_metric_observations(
     metric_key: str | None = None,
     start: str | datetime | None = None,
     end: str | datetime | None = None,
-    invalid: list[str] | None = None,
 ) -> list[MetricObservation]:
-    """Read canonical observations.
-
-    Persistence is strictly validated, but *historical* files are append-only
-    and may contain records written before registry/schema changes. History
-    must inform, not block, a new review, so records that no longer parse are
-    skipped and reported through ``invalid`` (a collector for human-readable
-    messages) instead of failing the whole read. Callers that require strict
-    reads simply omit ``invalid`` and keep the raising behavior.
-    """
-    records: list[MetricObservation] = []
-    for item in read_records(path or default_observations_path()):
-        try:
-            records.append(MetricObservation.from_mapping(item))
-        except ValueError as exc:
-            if invalid is None:
-                raise
-            invalid.append(str(exc))
+    """Read and validate current-format observations."""
+    records = [MetricObservation.from_mapping(item) for item in read_records(path or default_observations_path())]
     if asset is not None and (not isinstance(asset, str) or not asset.strip()):
         raise ValueError("asset must be a non-empty string or null")
     normalized_asset = asset.strip().upper() if asset is not None else None
@@ -164,28 +145,11 @@ def read_metric_observations(
 
 def read_collection_events(
     path: str | Path | None = None,
-    *,
-    invalid: list[str] | None = None,
 ) -> list[CollectionEvent]:
-    """Read collection events, skipping legacy records that no longer parse.
-
-    See :func:`read_metric_observations` for the historical-file rationale.
-    """
-    records: list[CollectionEvent] = []
-    for item in read_records(path or default_collection_events_path()):
-        try:
-            records.append(CollectionEvent.from_mapping(item))
-        except ValueError as exc:
-            if invalid is None:
-                raise
-            invalid.append(str(exc))
-    return records
+    """Read and validate current-format collection events."""
+    return [CollectionEvent.from_mapping(item) for item in read_records(path or default_collection_events_path())]
 
 
-default_metric_observation_path = default_observations_path
-default_collection_event_path = default_collection_events_path
-append_observation = append_metric_observation
-read_observations = read_metric_observations
 
 
 def _series(
@@ -195,10 +159,9 @@ def _series(
     path: str | Path | None = None,
     start: str | datetime | None = None,
     end: str | datetime | None = None,
-    invalid: list[str] | None = None,
 ) -> list[MetricObservation]:
     values = read_metric_observations(
-        path, asset=asset, metric_key=metric_key, start=start, end=end, invalid=invalid
+        path, asset=asset, metric_key=metric_key, start=start, end=end
     )
     return sorted(enumerate(values), key=lambda item: (parse_timestamp(item[1].observed_at), item[0]))
 
@@ -210,12 +173,11 @@ def metric_series(
     start: str | datetime | None = None,
     end: str | datetime | None = None,
     path: str | Path | None = None,
-    invalid: list[str] | None = None,
 ) -> list[MetricObservation]:
     return [
         item
         for _, item in _series(
-            asset, metric_key, path=path, start=start, end=end, invalid=invalid
+            asset, metric_key, path=path, start=start, end=end
         )
     ]
 
@@ -225,9 +187,8 @@ def latest_metric(
     metric_key: str,
     *,
     path: str | Path | None = None,
-    invalid: list[str] | None = None,
 ) -> MetricObservation | None:
-    values = metric_series(asset, metric_key, path=path, invalid=invalid)
+    values = metric_series(asset, metric_key, path=path)
     return values[-1] if values else None
 
 
@@ -272,14 +233,13 @@ def latest_usable_observation(
     as_of: str | datetime | None = None,
     path: str | Path | None = None,
     observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
-    invalid: list[str] | None = None,
     max_age_seconds: int | float | None = None,
 ) -> MetricObservation | None:
     """Return the newest compatible observation, not merely the newest line."""
     normalized_asset = asset.strip().upper()
     normalized_key = metric_definition(metric_key).key
     if observations is None:
-        values = metric_series(normalized_asset, normalized_key, path=path, invalid=invalid)
+        values = metric_series(normalized_asset, normalized_key, path=path)
     else:
         source: Any = observations
         if isinstance(source, Mapping):
@@ -304,9 +264,8 @@ def previous_metric(
     metric_key: str,
     *,
     path: str | Path | None = None,
-    invalid: list[str] | None = None,
 ) -> MetricObservation | None:
-    values = metric_series(asset, metric_key, path=path, invalid=invalid)
+    values = metric_series(asset, metric_key, path=path)
     if not values:
         return None
     latest_time = values[-1].observed_at
@@ -355,9 +314,8 @@ def trend_summary(
     *,
     path: str | Path | None = None,
     limit: int | None = None,
-    invalid: list[str] | None = None,
 ) -> dict[str, Any]:
-    values = metric_series(asset, metric_key, path=path, invalid=invalid)
+    values = metric_series(asset, metric_key, path=path)
     canonical_key = metric_definition(metric_key).key
     if values and canonical_key in _SOURCE_SENSITIVE_METRICS:
         latest = values[-1]
@@ -411,10 +369,9 @@ def compare_latest_metric(
     metric_key: str,
     *,
     path: str | Path | None = None,
-    invalid: list[str] | None = None,
 ) -> dict[str, Any]:
-    latest = latest_metric(asset, metric_key, path=path, invalid=invalid)
-    previous = previous_metric(asset, metric_key, path=path, invalid=invalid)
+    latest = latest_metric(asset, metric_key, path=path)
+    previous = previous_metric(asset, metric_key, path=path)
     canonical_key = metric_definition(metric_key).key
     result: dict[str, Any] = {
         "asset": asset.strip().upper(),
@@ -433,7 +390,7 @@ def compare_latest_metric(
         "trend": "INSUFFICIENT_HISTORY",
         "stale": bool(latest and latest.freshness != "CURRENT"),
     }
-    result["recent_trend"] = trend_summary(asset, canonical_key, path=path, limit=3, invalid=invalid)
+    result["recent_trend"] = trend_summary(asset, canonical_key, path=path, limit=3)
     if latest is None or previous is None:
         return result
     absolute, percentage = _numeric_change(latest.value, previous.value)
@@ -452,12 +409,11 @@ def metric_history_context(
     metric_keys: Iterable[str],
     *,
     path: str | Path | None = None,
-    invalid: list[str] | None = None,
 ) -> dict[str, Any]:
     normalized_asset = asset.strip().upper()
     return {
         metric_definition(key).key: compare_latest_metric(
-            normalized_asset, key, path=path, invalid=invalid
+            normalized_asset, key, path=path
         )
         for key in metric_keys
     }
@@ -466,14 +422,11 @@ def metric_history_context(
 __all__ = [
     "append_collection_event",
     "append_metric_observation",
-    "append_observation",
     "classify_metric_change",
     "compare_latest_metric",
     "default_collection_events_path",
     "default_metrics_dir",
     "default_observations_path",
-    "default_metric_observation_path",
-    "default_collection_event_path",
     "latest_metric",
     "latest_usable_observation",
     "metric_history_context",
@@ -482,6 +435,5 @@ __all__ = [
     "previous_metric",
     "read_collection_events",
     "read_metric_observations",
-    "read_observations",
     "trend_summary",
 ]

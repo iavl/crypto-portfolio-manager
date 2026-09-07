@@ -393,17 +393,10 @@ def collection_summary(
     ]
     resolved_policy = policy or resolve_policy()
     if isinstance(resolved_policy, Mapping):
-        if "scoring_profiles" in resolved_policy:
-            policy_weights = dict(resolved_policy["scoring_profiles"].get("default", {}))
-        else:
-            policy_weights = dict(resolved_policy.get("scoring_weights", {}))
+        policy_weights = dict(resolved_policy["scoring_profiles"]["default"])
         scoring_policy = resolved_policy.get("scoring", {})
     else:
-        policy_weights = dict(
-            resolved_policy.scoring_profile(asset)
-            if asset is not None and resolved_policy.policy_version >= 2
-            else resolved_policy.scoring_weights
-        )
+        policy_weights = dict(resolved_policy.scoring_profile(asset or "MARKET"))
         scoring_policy = resolved_policy.scoring
     supplied_weights = policy_weights if weights is None else weights
     if not isinstance(supplied_weights, Mapping):
@@ -648,12 +641,8 @@ class CollectionReporter:
         return result
 
 
-DataCollectionLog = CollectionReporter
-
-
 __all__ = [
     "CollectionReporter",
-    "DataCollectionLog",
     "collection_summary",
     "build_failed_data_fetches",
     "collection_decision_effect",

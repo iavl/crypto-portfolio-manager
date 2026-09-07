@@ -121,7 +121,7 @@ class BTCSpecificTests(unittest.TestCase):
         cycle = build_btc_cycle_context(
             as_of="2026-09-07T00:00:00Z",
             current_price=100,
-            mvrv_zscore=10,
+            observations={"onchain.btc.mvrv_zscore": 10},
         )
         self.assertNotIn(cycle.cycle_risk, {"ELEVATED", "HIGH"})
         self.assertEqual(cycle_deployment_factor(cycle), 1.0)

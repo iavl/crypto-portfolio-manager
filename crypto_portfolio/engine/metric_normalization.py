@@ -435,22 +435,12 @@ def validate_metric_observation(value: MetricObservation | Mapping[str, Any]) ->
     return True
 
 
-normalize_observation = normalize_metric_observation
-normalise_metric_observation = normalize_metric_observation
-normalize_result = normalize_metric_result
-normalize_metric = normalize_metric_observation
-
-
 __all__ = [
     "NormalizedMetricResult",
     "normalize_collection_event",
     "normalize_metric_observation",
-    "normalize_metric",
     "normalize_metric_result",
     "normalize_collection_results",
-    "normalize_observation",
-    "normalise_metric_observation",
-    "normalize_result",
     "persist_metric_result",
     "persist_collection_results",
     "validate_metric_observation",

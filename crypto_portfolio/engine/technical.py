@@ -240,11 +240,6 @@ def average_true_range(candles: Sequence[Candle], period: int = 14) -> float | N
     return sum(true_ranges(values)[-period:]) / period
 
 
-atr = average_true_range
-atr14 = average_true_range
-calculate_atr = average_true_range
-
-
 def realized_volatility(
     prices: Sequence[float] | Sequence[Candle], window: int, *, annualization_days: int = 365
 ) -> float | None:
@@ -258,9 +253,6 @@ def realized_volatility(
     return annualized_volatility(values[-window - 1:], annualization_days)
 
 
-calculate_realized_volatility = realized_volatility
-
-
 def volume_moving_average(volumes: Sequence[float], window: int = 20) -> float | None:
     window = _positive_int(window, "window")
     values = [_number(value, "volume", minimum=0.0) for value in volumes]
@@ -270,9 +262,6 @@ def volume_moving_average(volumes: Sequence[float], window: int = 20) -> float |
     if not previous or sum(previous) <= 0:
         return None
     return sum(previous) / window
-
-
-volume_ma20 = volume_moving_average
 
 
 def relative_volume(volumes: Sequence[float], window: int = 20) -> float | None:
@@ -475,11 +464,6 @@ def build_structural_zones(
     return tuple(zones)
 
 
-build_price_zones = build_structural_zones
-build_support_zones = build_structural_zones
-detect_swing_points = detect_swings
-
-
 def _trend_state(
     closes: Sequence[float],
     moving_averages: Mapping[str, float | None],
@@ -653,10 +637,8 @@ def _profile_context(
 
 def build_technical_snapshot(
     series: OHLCVSeries | Mapping[str, Any],
-    spot: SpotPrice | Mapping[str, Any] | float | None = None,
+    spot: SpotPrice | Mapping[str, Any] | None = None,
     *,
-    current_spot_price: float | None = None,
-    spot_price: float | None = None,
     as_of: str | datetime | None = None,
     policy: Policy | None = None,
     execution_config: Mapping[str, Any] | None = None,
@@ -674,31 +656,9 @@ def build_technical_snapshot(
         raise ValueError("technical snapshots use authoritative 1D OHLCV; pass intraday data as profile_series")
     if not isinstance(volume_reliable, bool):
         raise ValueError("volume_reliable must be boolean")
-    supplied_legacy_spot = False
-    supplied_spot = spot
-    if current_spot_price is not None or spot_price is not None:
-        if supplied_spot is not None or (current_spot_price is not None and spot_price is not None):
-            raise ValueError("provide one spot observation")
-        supplied_spot = current_spot_price if current_spot_price is not None else spot_price
-    if isinstance(supplied_spot, Mapping):
-        supplied_spot = SpotPrice.from_mapping(supplied_spot)
-    elif supplied_spot is not None and not isinstance(supplied_spot, SpotPrice):
-        if as_of is not None:
-            raise ValueError("historical replay requires a timestamped SpotPrice")
-        supplied_legacy_spot = True
-        supplied_spot = _number(supplied_spot, "current_spot_price", minimum=0.0)
-    if supplied_spot is None:
-        raise ValueError("a timestamped SpotPrice is required")
+    supplied_spot = SpotPrice.from_mapping(spot) if isinstance(spot, Mapping) else spot
     if not isinstance(supplied_spot, SpotPrice):
-        last_timestamp = parse_timestamp(series.candles[-1].timestamp)
-        legacy_as_of = normalize_timestamp((last_timestamp + timedelta(days=1)).isoformat(), "as_of")
-        supplied_spot = SpotPrice(
-            series.symbol,
-            supplied_spot,
-            legacy_as_of,
-            series.source,
-            series.fetched_at,
-        )
+        raise ValueError("a timestamped SpotPrice is required")
     if supplied_spot.symbol != series.symbol:
         raise ValueError("spot.symbol must match series.symbol")
     config = dict((policy or resolve_policy()).execution)
@@ -781,7 +741,7 @@ def build_technical_snapshot(
             as_of=as_of_value,
             volume_reliable=volume_reliable,
         )
-    elif policy_volume_profile.get("enabled") and policy_volume_profile.get("allow_daily_approximation"):
+    elif policy_volume_profile["enabled"] and policy_volume_profile["allow_daily_approximation"]:
         profiles = build_multi_horizon_profiles(
             series,
             lookback_days=policy_volume_profile["lookback_days"],
@@ -790,7 +750,7 @@ def build_technical_snapshot(
             as_of=as_of_value,
             volume_reliable=volume_reliable,
         )
-    preferred_days = policy_volume_profile.get("preferred_lookback_days")
+    preferred_days = policy_volume_profile["preferred_lookback_days"]
     profile_summary, profile_metadata = _profile_context(profiles, preferred_days)
     profile_source_mismatch = bool(
         profiles
@@ -851,7 +811,6 @@ def build_technical_snapshot(
         str(value).strip().lower() in {"synthetic", "test"}
         for value in (series.source, supplied_spot.source)
     )
-    spot_time_valid = not supplied_legacy_spot or test_semantics
     provenance_complete = (
         series.fetched_at is not None and supplied_spot.fetched_at is not None
     ) or test_semantics
@@ -877,8 +836,6 @@ def build_technical_snapshot(
         data_quality_flags.append("UNKNOWN_PROVENANCE")
     if not provenance_complete:
         data_quality_flags.append("INCOMPLETE_PROVENANCE")
-    if not spot_time_valid:
-        data_quality_flags.append("UNTIMESTAMPED_SPOT")
     if not volume_available:
         data_quality_flags.append("VOLUME_UNRELIABLE")
     if not atr_available:
@@ -918,7 +875,6 @@ def build_technical_snapshot(
         and provenance_consistent
         and volume_available
         and provenance_complete
-        and (spot_time_valid or test_semantics)
         and len(candles) >= config["preferred_history_days"]
         and not coverage["missing_day_count"]
     ):
@@ -994,7 +950,7 @@ def build_technical_snapshot(
         market_data_fresh=market_data_fresh,
         cadence_valid=cadence_valid,
         source_known=source_known,
-        spot_time_valid=spot_time_valid,
+        spot_time_valid=True,
         volume_reliable=volume_available,
         spot_close_gap_atr=spot_close_gap_atr,
         provenance_consistent=provenance_consistent,
@@ -1013,15 +969,8 @@ def build_technical_snapshot(
     )
 
 
-technical_snapshot = build_technical_snapshot
-
-
 __all__ = [
-    "atr",
-    "atr14",
     "average_true_range",
-    "build_price_zones",
-    "build_support_zones",
     "build_structural_zones",
     "build_technical_snapshot",
     "calendar_lookback_return",
@@ -1029,10 +978,7 @@ __all__ = [
     "calendar_realized_volatility",
     "completed_candles",
     "canonical_ohlcv_hash",
-    "calculate_atr",
-    "calculate_realized_volatility",
     "detect_swings",
-    "detect_swing_points",
     "daily_coverage",
     "expected_latest_completed_date",
     "history_position",
@@ -1040,10 +986,8 @@ __all__ = [
     "realized_volatility",
     "relative_volume",
     "structural_confluence",
-    "technical_snapshot",
     "true_range",
     "true_ranges",
     "moving_average",
     "volume_moving_average",
-    "volume_ma20",
 ]

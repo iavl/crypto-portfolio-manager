@@ -25,15 +25,15 @@ class StateSchemaProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             snapshot_path = Path(directory) / "portfolio.jsonl"
             snapshot = {
-                "timestamp": "2026-09-01",
-                "policy_version": 1,
+                "timestamp": "2026-09-01T00:00:00Z",
+                "policy_version": 3,
                 "positions": [
                     {"symbol": "BTC", "value_usd": 100},
                     {"symbol": "USDT", "value_usd": 100},
                 ],
             }
             append_snapshot(snapshot, snapshot_path)
-            append_snapshot({**snapshot, "timestamp": "2026-09-02"}, snapshot_path)
+            append_snapshot({**snapshot, "timestamp": "2026-09-02T00:00:00Z"}, snapshot_path)
             self.assertEqual(len(read_snapshots(snapshot_path)), 2)
             self.assertEqual(read_snapshots(snapshot_path)[0]["timestamp"], "2026-09-01T00:00:00Z")
             self.assertEqual(len(read_snapshots(snapshot_path)[0]["policy_hash"]), 64)
@@ -41,9 +41,9 @@ class StateSchemaProviderTests(unittest.TestCase):
 
             decision_path = Path(directory) / "decisions.jsonl"
             decision = Decision(
-                "2026-09-01",
+                "2026-09-01T00:00:00Z",
                 "NORMAL",
-                1,
+                3,
                 {"BTC": 1.0},
                 {"BTC": 0.9, "USDT": 0.1},
             )
@@ -53,7 +53,7 @@ class StateSchemaProviderTests(unittest.TestCase):
             self.assertTrue(read_decisions(decision_path)[0]["decision_id"])
             with self.assertRaises(ValueError):
                 append_decision(
-                    {"timestamp": "2026-09-02", "policy_version": 1, "market_regime": "NORMAL"},
+                    {"timestamp": "2026-09-02T00:00:00Z", "policy_version": 3, "market_regime": "NORMAL"},
                     decision_path,
                 )
 
@@ -64,13 +64,13 @@ class StateSchemaProviderTests(unittest.TestCase):
             decision = Decision(
                 "2026-09-01T00:00:00Z",
                 "NORMAL",
-                1,
+                3,
                 {"BTC": 1.0},
                 {"BTC": 1.0},
                 decision_id="decision-1",
             )
             append_decision(decision, decision_path)
-            event = DecisionStatusEvent("decision-1", "2026-09-02", "CONFIRMED")
+            event = DecisionStatusEvent("decision-1", "2026-09-02T00:00:00Z", "CONFIRMED")
             append_status_event(event, event_path)
             self.assertEqual(len(read_decisions(decision_path)), 1)
             self.assertEqual(len(read_status_events(event_path)), 1)
@@ -105,7 +105,7 @@ class StateSchemaProviderTests(unittest.TestCase):
                     Decision(
                         "2026-09-01T00:00:00Z",
                         "NORMAL",
-                        1,
+                        3,
                         {"BTC": 1.0},
                         {"BTC": 1.0},
                         evidence=("missing-evidence",),

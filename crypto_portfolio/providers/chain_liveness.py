@@ -26,7 +26,6 @@ from .base import (
 from .http import HttpClient, classify_transport_error, redact_secrets, redact_url
 
 
-_CHAIN_NATIVE_ASSETS = CHAIN_NATIVE_ASSETS
 HEALTHY = "HEALTHY"
 DEGRADED = "DEGRADED"
 HALTED = "HALTED"
@@ -148,8 +147,8 @@ class ChainLivenessSource:
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "source.id"))
         asset = _text(self.asset, "source.asset").upper()
-        if asset not in _CHAIN_NATIVE_ASSETS:
-            raise ValueError(f"source.asset must be one of {_CHAIN_NATIVE_ASSETS}")
+        if asset not in CHAIN_NATIVE_ASSETS:
+            raise ValueError(f"source.asset must be one of {CHAIN_NATIVE_ASSETS}")
         object.__setattr__(self, "asset", asset)
         object.__setattr__(self, "url", _url(self.url, "source.url"))
         object.__setattr__(self, "source_type", _text(self.source_type, "source.source_type").lower())
@@ -194,8 +193,8 @@ class ChainLivenessAssessment:
 
     def __post_init__(self) -> None:
         asset = _text(self.asset, "assessment.asset").upper()
-        if asset not in _CHAIN_NATIVE_ASSETS:
-            raise ValueError(f"assessment.asset must be one of {_CHAIN_NATIVE_ASSETS}")
+        if asset not in CHAIN_NATIVE_ASSETS:
+            raise ValueError(f"assessment.asset must be one of {CHAIN_NATIVE_ASSETS}")
         object.__setattr__(self, "asset", asset)
         status = _text(self.status, "assessment.status").upper()
         if status not in (*LIVENESS_STATUSES, CONFLICT):
@@ -328,11 +327,7 @@ def _thresholds(policy: Policy | Mapping[str, Any] | None, asset: str) -> dict[s
     elif policy is not None:
         raw = getattr(policy, "chain_liveness", None)
     if isinstance(raw, Mapping):
-        assets = raw.get("assets")
-        if isinstance(assets, Mapping):
-            raw_asset = assets.get(asset)
-        else:
-            raw_asset = raw.get(asset)
+        raw_asset = raw.get(asset)
         if isinstance(raw_asset, Mapping):
             result.update(raw_asset)
     for key, value in tuple(result.items()):
@@ -360,7 +355,7 @@ def chain_liveness_sources(
     """Return the vetted source catalog with optional local endpoint overrides."""
     environment = environ if environ is not None else os.environ
     result: list[ChainLivenessSource] = []
-    for asset in _CHAIN_NATIVE_ASSETS:
+    for asset in CHAIN_NATIVE_ASSETS:
         override = str(environment.get(_OVERRIDE_ENV[asset], "")).strip()
         if override:
             first = _DEFAULT_SOURCES[asset][0]
@@ -374,9 +369,6 @@ def chain_liveness_sources(
             ))
         result.extend(ChainLivenessSource(*item) if not isinstance(item, ChainLivenessSource) else item for item in _DEFAULT_SOURCES[asset])
     return tuple(result)
-
-
-default_chain_liveness_sources = chain_liveness_sources
 
 
 class ChainLivenessProvider:
@@ -423,7 +415,7 @@ class ChainLivenessProvider:
             items = mapped_sources()
         else:
             items = iter(value)
-        grouped: dict[str, list[ChainLivenessSource]] = {asset: [] for asset in _CHAIN_NATIVE_ASSETS}
+        grouped: dict[str, list[ChainLivenessSource]] = {asset: [] for asset in CHAIN_NATIVE_ASSETS}
         for item in items:
             source = _source_from_value(item)
             grouped[source.asset].append(source)
@@ -434,8 +426,8 @@ class ChainLivenessProvider:
 
     def sources_for(self, asset: str) -> tuple[ChainLivenessSource, ...]:
         normalized = _text(asset, "asset").upper()
-        if normalized not in _CHAIN_NATIVE_ASSETS:
-            raise ValueError(f"chain liveness asset must be one of {_CHAIN_NATIVE_ASSETS}")
+        if normalized not in CHAIN_NATIVE_ASSETS:
+            raise ValueError(f"chain liveness asset must be one of {CHAIN_NATIVE_ASSETS}")
         return self._sources[normalized]
 
     def _now(self, value: Any | None = None) -> str:
@@ -750,8 +742,8 @@ class ChainLivenessProvider:
 
     def assess(self, asset: str, *, checked_at: str | datetime | None = None) -> ChainLivenessAssessment:
         normalized_asset = _text(asset, "asset").upper()
-        if normalized_asset not in _CHAIN_NATIVE_ASSETS:
-            raise ValueError(f"chain liveness asset must be one of {_CHAIN_NATIVE_ASSETS}")
+        if normalized_asset not in CHAIN_NATIVE_ASSETS:
+            raise ValueError(f"chain liveness asset must be one of {CHAIN_NATIVE_ASSETS}")
         checked = self._now(checked_at)
         self._network_requests = 0
         attempted: list[str] = []
@@ -775,9 +767,6 @@ class ChainLivenessProvider:
             tuple(failures),
         )
 
-    assess_liveness = assess
-    check = assess
-
     def _observation(self, assessment: ChainLivenessAssessment) -> Mapping[str, Any]:
         metric_definition("risk.chain_liveness_status")
         metadata: dict[str, Any] = {
@@ -799,7 +788,7 @@ class ChainLivenessProvider:
             ),
             "sources_checked": list(assessment.sources_checked),
             "independent_sources": list(assessment.evidence.get("independent_groups", ())),
-            "threshold_policy_version": getattr(self.policy, "policy_version", 1),
+            "threshold_policy_version": getattr(self.policy, "policy_version", 3),
         }
         if assessment.source_failures:
             metadata["source_failures"] = [dict(item) for item in assessment.source_failures]
@@ -820,7 +809,7 @@ class ChainLivenessProvider:
             raise ValueError("request must be a ProviderRequest")
         if request.dataset != self.name:
             raise ProviderUnsupportedMetric(f"{self.name} does not support dataset {request.dataset}")
-        if request.asset not in _CHAIN_NATIVE_ASSETS:
+        if request.asset not in CHAIN_NATIVE_ASSETS:
             raise ProviderUnsupportedMetric(f"{self.name} does not apply to {request.asset}")
         if request.metric_keys != ("risk.chain_liveness_status",):
             raise ProviderUnsupportedMetric(f"{self.name} supports only risk.chain_liveness_status")
@@ -881,5 +870,4 @@ __all__ = [
     "ChainLivenessProvider",
     "ChainLivenessSource",
     "chain_liveness_sources",
-    "default_chain_liveness_sources",
 ]

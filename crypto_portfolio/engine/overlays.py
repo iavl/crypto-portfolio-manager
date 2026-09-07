@@ -290,17 +290,11 @@ def build_market_overlays(
     )
 
 
-deployment_factor = effective_deployment_factor
-apply_deployment_cap = apply_overlay_deployment_cap
-
-
 __all__ = [
     "OverlayDeployment",
-    "apply_deployment_cap",
     "apply_overlay_deployment_cap",
     "build_market_overlays",
     "cycle_deployment_factor",
-    "deployment_factor",
     "effective_deployment_factor",
     "overlay_wait_required",
     "positioning_deployment_factor",

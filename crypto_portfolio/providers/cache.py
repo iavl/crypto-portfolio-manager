@@ -92,10 +92,6 @@ def request_hash(request: ProviderRequest | Mapping[str, Any]) -> str:
     return content_hash(request_identity(request))
 
 
-request_cache_key = request_hash
-hash_request = request_hash
-
-
 class CacheError(ValueError):
     """Base class for a cache entry that cannot be used."""
 
@@ -204,8 +200,6 @@ class ProviderCache:
         _atomic_write(destination, encoded)
         return destination
 
-    cache_response = save_response
-
     def _read_response_record(self, request: ProviderRequest | Mapping[str, Any]) -> dict[str, Any] | None:
         path = self.response_path(request)
         if not path.exists():
@@ -256,8 +250,6 @@ class ProviderCache:
                 raise CacheExpired(f"provider cache entry expired for {record['provider']}/{record['dataset']}")
         return record.get("payload")
 
-    get_response = load_response
-
     def load_response_record(
         self,
         request: ProviderRequest | Mapping[str, Any],
@@ -271,8 +263,6 @@ class ProviderCache:
         if record is None or payload is None:
             return None
         return record
-
-    get_response_record = load_response_record
 
     def quarantine(self, request: ProviderRequest | Mapping[str, Any]) -> Path | None:
         path = self.response_path(request)
@@ -312,8 +302,6 @@ class ProviderCache:
 
     def manifest_path(self, provider: str, symbol: str, timeframe: str, *, market: str = "spot", quote_currency: str = "USDT") -> Path:
         return self.series_directory(provider, symbol, timeframe, market=market, quote_currency=quote_currency) / "manifest.json"
-
-    series_manifest_path = manifest_path
 
     def load_manifest(self, provider: str, symbol: str, timeframe: str, *, market: str = "spot", quote_currency: str = "USDT") -> dict[str, Any] | None:
         path = self.manifest_path(provider, symbol, timeframe, market=market, quote_currency=quote_currency)
@@ -398,10 +386,6 @@ class ProviderCache:
         _atomic_write(directory / "manifest.json", canonical_json(manifest) + "\n")
         return directory / "manifest.json"
 
-    cache_series = store_series
-    put_series = store_series
-    get_series = load_series
-
     def quarantine_series(
         self,
         provider: str,
@@ -444,9 +428,6 @@ class ProviderCache:
                     path.unlink()
                     removed += 1
         return removed
-
-
-ProviderResponseCache = ProviderCache
 
 
 def merge_ohlcv_series(existing: OHLCVSeries | None, incoming: OHLCVSeries) -> OHLCVSeries:
@@ -524,14 +505,11 @@ __all__ = [
     "CacheError",
     "CacheExpired",
     "ProviderCache",
-    "ProviderResponseCache",
     "canonical_json",
     "content_hash",
     "merge_ohlcv_series",
     "missing_series_range",
     "provider_cache_stats",
-    "request_cache_key",
-    "hash_request",
     "request_hash",
     "request_identity",
 ]

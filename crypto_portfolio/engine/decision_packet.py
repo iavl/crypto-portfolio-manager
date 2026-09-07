@@ -139,7 +139,7 @@ def _asset_summary(
     action_name = str(action_dict.get("action", "HOLD")).strip().upper()
     if action_name not in _ACTIONS:
         raise ValueError(f"unknown action {action_name}")
-    amount = float(action_dict.get("amount_usd", action_dict.get("approved_amount_usd", 0.0)))
+    amount = float(action_dict.get("amount_usd", 0.0))
     if action_name in {"HOLD", "WAIT", "NO_TRADE"}:
         amount = 0.0
     raw_event_risk = (
@@ -154,16 +154,13 @@ def _asset_summary(
         if raw_event_risk is not None
         else None
     )
-    severe_event = _bool_flag(assessment_dict.get("severe_event", False), "severe_event")
-    if event_risk is not None and event_risk["state"] in {"SEVERE", "CRITICAL"}:
-        severe_event = True
     return AssetDecisionSummary(
         symbol=symbol,
         factor_scores=factor_scores,
         score=(
             assessment.weighted_score
             if isinstance(assessment, AssetAssessment)
-            else assessment_dict.get("weighted_score", assessment_dict.get("score"))
+            else assessment_dict.get("weighted_score")
         ),
         confidence=str(assessment_dict.get("confidence", "LOW")),
         previous_score=previous_score,
@@ -176,7 +173,6 @@ def _asset_summary(
         action=action_name,
         approved_amount_usd=amount,
         thesis_broken=_bool_flag(assessment_dict.get("thesis_broken", False), "thesis_broken"),
-        severe_event=severe_event,
         portfolio_constraint=str(action_dict.get("rationale", "")),
         event_risk=event_risk,
     )
@@ -278,11 +274,7 @@ def build_decision_review_packet(
     risk_escalation: bool = False,
     recommendation_reversal: bool = False,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
-    market_overlays: MarketOverlays | Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
-    if overlays is not None and market_overlays is not None:
-        raise ValueError("provide only one of overlays or market_overlays")
-    overlays = market_overlays if market_overlays is not None else overlays
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
     if overlays is None and source.get("market_overlays") is not None:
@@ -318,12 +310,12 @@ def build_decision_review_packet(
     positioning_summaries = (
         overlay.get("positioning", {})
         if overlay
-        else source.get("positioning_summaries", source.get("positioning", {}))
+        else source.get("positioning_summaries", {})
     )
     btc_cycle_summary = (
         overlay.get("btc_cycle")
         if overlay
-        else source.get("btc_cycle_summary", source.get("btc_cycle"))
+        else source.get("btc_cycle_summary")
     )
     overlay_confidence = overlay.get("overlay_confidence", source.get("overlay_confidence", "LOW"))
     overlay_warnings = overlay.get("warnings", source.get("overlay_warnings", ()))
@@ -423,8 +415,6 @@ def sol_final_review_reasons(
         reasons.append("risk-budget breach")
     if any(item.thesis_broken for item in packet.assets):
         reasons.append("thesis_broken")
-    if any(item.severe_event for item in packet.assets):
-        reasons.append("major event risk")
     if packet.major_event_risk:
         reasons.append("major event risk")
     event_words = ("EXPLOIT", "REGULATORY", "GOVERNANCE", "SOLVENCY", "SECURITY", "THESIS")
@@ -524,9 +514,6 @@ def should_run_sol_final_review(
     )
 
 
-sol_review_required = should_run_sol_final_review
-
-
 def validate_decision_review_packet(value: DecisionReviewPacket | Mapping[str, Any]) -> bool:
     DecisionReviewPacket.from_mapping(value) if not isinstance(value, DecisionReviewPacket) else value
     return True
@@ -536,6 +523,5 @@ __all__ = [
     "build_decision_review_packet",
     "should_run_sol_final_review",
     "sol_final_review_reasons",
-    "sol_review_required",
     "validate_decision_review_packet",
 ]

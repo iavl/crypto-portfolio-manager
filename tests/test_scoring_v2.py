@@ -15,17 +15,13 @@ from crypto_portfolio.metrics_registry import METRIC_REGISTRY, validate_metric_o
 from crypto_portfolio.models.evidence import AssetAssessment, FactorScore
 from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
 from crypto_portfolio.models.market import Candle, OHLCVSeries
-from crypto_portfolio.models.policy import legacy_policy, load_policy, policy_from_mapping
+from crypto_portfolio.models.policy import load_policy
 
 
 class ScoringV2Tests(unittest.TestCase):
     @staticmethod
     def v2_policy():
-        data = json.loads(json.dumps(load_policy().as_dict()))
-        data["policy_version"] = 2
-        data["factor_rules"]["relative_strength"]["horizon_weights"] = {"30d": 0.2, "90d": 0.4, "180d": 0.4}
-        data.pop("core_allocation", None)
-        return policy_from_mapping(data)
+        return load_policy()
 
     def test_drawdown_has_no_v2_trend_score_authority(self):
         from crypto_portfolio.engine.factors.trend import calculate_trend_factor
@@ -36,13 +32,10 @@ class ScoringV2Tests(unittest.TestCase):
                       volume_profile_poc=None, volume_profile_val=None, volume_profile_vah=None,
                       market_data_fresh=True, data_quality_flags=(), data_confidence="HIGH")
         results = []
-        legacy = []
         for drawdown in (-0.05, -0.7):
             with patch("crypto_portfolio.engine.factors.trend._snapshot", return_value=SimpleNamespace(**common, current_drawdown=drawdown)):
                 results.append(calculate_trend_factor({}).score)
-                legacy.append(calculate_trend_factor({}, policy=legacy_policy()).score)
         self.assertEqual(results[0], results[1])
-        self.assertGreater(legacy[0], legacy[1])
 
     def test_factor_schema_rejects_inconsistent_availability(self):
         from jsonschema import Draft202012Validator
@@ -79,16 +72,16 @@ class ScoringV2Tests(unittest.TestCase):
             replace(series("ETH", 24), fetched_at="2025-08-01T00:00:00Z"),
             replace(series("BTC", 24), fetched_at="2025-08-01T00:00:00Z"), symbol="ETH", policy=policy)
         self.assertEqual(stale.facts.freshness, "STALE")
-        self.assertAlmostEqual(score_factors({"relative_strength_btc": stale}, {"relative_strength_btc": 1.0}, policy=policy).coverage, 0.5)
+        self.assertAlmostEqual(score_factors({"relative_strength_btc": stale}, {"relative_strength_btc": 1.0}, policy=policy).coverage, 0.35)
 
     def test_normalized_flow_representation_and_denominator_order(self):
         result = calculate_flow_factor({"aum_30d": 1000, "flow_30d": 5})
         self.assertAlmostEqual(result.normalized_flow, 0.005)
         self.assertIsNone(calculate_flow_factor({"aum_30d": 1000}).score)
         observation = MetricObservation(
-            stable_observation_id("BTC", "flows.etf_net_30d", "2026-09-01", "test", 5),
+            stable_observation_id("BTC", "flows.etf_net_30d", "2026-09-01T00:00:00Z", "test", 5),
             "BTC", "flows.etf_net_30d", "capital_flows", 5, "USD", "30d",
-            "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH", metadata={"aum": 1000},
+            "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH", metadata={"aum": 1000},
         )
         for value in (observation, observation.as_dict(), [observation], [observation.as_dict()]):
             self.assertAlmostEqual(calculate_flow_factor(value, symbol="BTC").normalized_flow, 0.005)
@@ -106,7 +99,7 @@ class ScoringV2Tests(unittest.TestCase):
 
     def test_unscored_typed_allocation_uses_canonical_score(self):
         from crypto_portfolio.engine.allocation import build_target_allocation
-        assessment = AssetAssessment("SOL", {"trend": 100}, confidence="HIGH", relative_strength_vs_btc="STRONG")
+        assessment = AssetAssessment("SOL", {"trend": 100}, confidence="HIGH", relative_strength_vs_btc="OUTPERFORM")
         scored, _ = score_assessment(assessment)
         self.assertEqual(build_target_allocation(assessments={"SOL": assessment}),
                          build_target_allocation(assessments={"SOL": scored}))
@@ -140,12 +133,12 @@ class ScoringV2Tests(unittest.TestCase):
         assessment, _ = score_assessment(AssetAssessment("BTC", {"relative_strength_btc": None}))
         self.assertEqual(assessment.factor_scores["relative_strength_btc"].availability, "NOT_APPLICABLE")
 
-    def test_legacy_severe_flag_cannot_be_overridden(self):
+    def test_severe_event_risk_blocks_new_exposure(self):
         from crypto_portfolio.engine.allocation import satellite_eligibility
 
-        value = {"score": 100, "relative_strength_vs_btc": "STRONG", "severe_event": True, "event_risk": {"state": "NORMAL"}}
+        value = {"weighted_score": 100, "relative_strength_vs_btc": "OUTPERFORM", "event_risk": {"state": "SEVERE"}}
         self.assertEqual(satellite_eligibility(value), "INELIGIBLE")
-        typed = AssetAssessment("SOL", {}, severe_event=True, event_risk={"state": "NORMAL"})
+        typed = AssetAssessment("SOL", {}, event_risk={"state": "SEVERE"})
         self.assertEqual(typed.event_risk.state, "SEVERE")
         gate = run_risk_gate({"BTC": 0.5, "ETH": 0.2, "SOL": 0.2, "USDT": 0.1}, assessments={"SOL": {**value, "confidence": "HIGH"}})
         self.assertEqual(gate.deployment_caps["SOL"], 0.0)
@@ -154,7 +147,7 @@ class ScoringV2Tests(unittest.TestCase):
         from crypto_portfolio.engine.allocation import satellite_eligibility
 
         for score in range(60, 67):
-            self.assertEqual(satellite_eligibility({"score": score, "relative_strength_vs_btc": "UNDERPERFORM"}, current_weight=0.05), "INELIGIBLE")
+            self.assertEqual(satellite_eligibility({"weighted_score": score, "relative_strength_vs_btc": "UNDERPERFORM"}, current_weight=0.05), "INELIGIBLE")
 
     def test_reliability_metadata_mapping(self):
         self.assertEqual(calculate_factor_reliability(1, "CURRENT", "HIGH"), 1.0)
@@ -180,9 +173,9 @@ class ScoringV2Tests(unittest.TestCase):
 
     def test_flow_observation_metadata_supplies_normalization_denominator(self):
         observation = MetricObservation(
-            stable_observation_id("BTC", "flows.etf_net_30d", "2026-09-01", "test", 10),
+            stable_observation_id("BTC", "flows.etf_net_30d", "2026-09-01T00:00:00Z", "test", 10),
             "BTC", "flows.etf_net_30d", "capital_flows", 10, "USD", "30d",
-            "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH",
+            "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH",
             metadata={"aum": 1000},
         )
         result = calculate_flow_factor(observations=(observation,))

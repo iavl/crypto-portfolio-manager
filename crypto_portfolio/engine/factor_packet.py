@@ -41,9 +41,8 @@ def build_asset_factor_packet(
     """Build a packet without forwarding raw source payloads."""
     values = dict(facts or {})
     allowed = {
-        "trend", "valuation", "fundamentals", "fundamental", "onchain",
-        "capital_flows", "flows", "relative_strength_btc", "relative_strength",
-        "btc_valuation", "macro_liquidity", "event_risk", "events",
+        "trend", "valuation", "fundamentals", "onchain", "capital_flows",
+        "relative_strength_btc", "btc_valuation", "macro_liquidity", "event_risk",
     }
     for key in factor_facts:
         if key.removesuffix("_facts") not in allowed:
@@ -67,11 +66,11 @@ def build_asset_factor_packet(
         valuation_facts=values.get("valuation"),
         btc_valuation_facts=values.get("btc_valuation"),
         macro_liquidity_facts=values.get("macro_liquidity"),
-        fundamental_facts=values.get("fundamentals", values.get("fundamental")),
+        fundamental_facts=values.get("fundamentals"),
         onchain_facts=values.get("onchain"),
-        flow_facts=values.get("capital_flows", values.get("flows")),
-        relative_strength_facts=values.get("relative_strength_btc", values.get("relative_strength")),
-        event_facts=values.get("event_risk", values.get("events")),
+        flow_facts=values.get("capital_flows"),
+        relative_strength_facts=values.get("relative_strength_btc"),
+        event_facts=values.get("event_risk"),
         coverage=coverage,
         previous_assessment=previous_assessment,
         evidence_ids=tuple(dict.fromkeys(ids)),
@@ -96,12 +95,9 @@ def build_factor_packets(
     )
 
 
-build_factor_packet = build_asset_factor_packet
-
-
 def validate_asset_factor_packet(value: AssetFactorPacket | Mapping[str, Any]) -> bool:
     AssetFactorPacket.from_mapping(value) if not isinstance(value, AssetFactorPacket) else value
     return True
 
 
-__all__ = ["build_asset_factor_packet", "build_factor_packet", "build_factor_packets", "validate_asset_factor_packet"]
+__all__ = ["build_asset_factor_packet", "build_factor_packets", "validate_asset_factor_packet"]

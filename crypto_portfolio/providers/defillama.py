@@ -33,9 +33,6 @@ def identifier_for_asset(asset: str) -> str:
         raise ProviderUnsupportedMetric(f"DeFiLlama has no explicit identifier for {asset}") from exc
 
 
-protocol_identifier = identifier_for_asset
-
-
 def _now(clock: Any | None = None) -> str:
     value = clock() if callable(clock) else datetime.now(timezone.utc)
     if isinstance(value, datetime):
@@ -290,15 +287,10 @@ class DeFiLlamaProvider:
         return ProviderResponse(tuple(values), diagnostics=diagnostics)
 
 
-DefiLlamaProvider = DeFiLlamaProvider
-
-
 __all__ = [
     "ASSET_IDENTIFIERS",
     "BASE_URL",
     "DeFiLlamaProvider",
-    "DefiLlamaProvider",
     "identifier_for_asset",
     "parse_protocol_payload",
-    "protocol_identifier",
 ]

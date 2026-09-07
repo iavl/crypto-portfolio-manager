@@ -33,7 +33,7 @@ class StateContextTests(unittest.TestCase):
                 Decision(
                     "2026-01-01T00:00:00Z",
                     "NORMAL",
-                    1,
+                    3,
                     {"BTC": 0.5, "USDT": 0.5},
                     {"BTC": 0.6, "USDT": 0.4},
                     review_type="FULL_REVIEW",
@@ -54,7 +54,7 @@ class StateContextTests(unittest.TestCase):
             self.assertEqual(latest_decision(decision_path)["review_type"], "FULL_REVIEW")
             self.assertEqual(len(portfolio_nav_history(snapshot_path)), 2)
             self.assertIsNotNone(last_full_review(decision_path))
-            context = build_history_context(snapshot_path, decision_path, as_of="2026-01-16T00:00:00Z")
+            context = build_history_context(snapshot_path, decision_path, metrics_path=Path(directory) / "metrics.jsonl", as_of="2026-01-16T00:00:00Z")
             self.assertAlmostEqual(context["current_drawdown"], 0.0)
             self.assertEqual(context["previous_target_weights"]["BTC"], 0.6)
             self.assertTrue(context["full_review_due"])

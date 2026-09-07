@@ -6,7 +6,6 @@ import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from ..models.execution import ExecutionPlan
 from ..models.policy import Policy, resolve_policy
 
 
@@ -352,43 +351,6 @@ def rebalance(
     )
 
 
-def validate_execution_plan(plan: ExecutionPlan | Mapping[str, Any] | Iterable[Mapping[str, Any]]) -> bool:
-    """Validate staged execution zones without generating price zones."""
-    if isinstance(plan, ExecutionPlan) or (isinstance(plan, Mapping) and ({"tranches", "execution_plan_version"} & set(plan))):
-        from .execution import validate_execution_plan as validate_typed_execution_plan
-
-        return validate_typed_execution_plan(plan)
-    zones = plan.get("execution_zones") if isinstance(plan, Mapping) else plan
-    if not isinstance(zones, (list, tuple)) or not zones:
-        raise ValueError("execution plan must contain a non-empty execution_zones list")
-    total = 0.0
-    for index, zone in enumerate(zones):
-        if not isinstance(zone, Mapping):
-            raise ValueError(f"execution zone {index} must be an object")
-        fraction = zone.get("allocation_fraction")
-        if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
-            raise ValueError(f"execution zone {index}.allocation_fraction must be a number")
-        fraction = float(fraction)
-        if not math.isfinite(fraction) or not 0 < fraction <= 1:
-            raise ValueError(f"execution zone {index}.allocation_fraction must be in (0, 1]")
-        total += fraction
-        description = zone.get("description")
-        if not isinstance(description, str) or not description.strip():
-            raise ValueError(f"execution zone {index}.description must be non-empty")
-        low = zone.get("price_low")
-        high = zone.get("price_high")
-        for name, value in (("price_low", low), ("price_high", high)):
-            if value is not None:
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError(f"execution zone {index}.{name} must be a number or null")
-                value = float(value)
-                if not math.isfinite(value) or value < 0:
-                    raise ValueError(f"execution zone {index}.{name} must be finite and >= 0")
-        if low is not None and high is not None and float(low) > float(high):
-            raise ValueError(f"execution zone {index} has price_low above price_high")
-    if not math.isclose(total, 1.0, abs_tol=1e-9):
-        raise ValueError("execution allocation fractions must sum to 1")
-    return True
 
 
 __all__ = [
@@ -397,5 +359,4 @@ __all__ = [
     "rebalance",
     "reconcile_trade_dollars",
     "recommend_rebalance",
-    "validate_execution_plan",
 ]

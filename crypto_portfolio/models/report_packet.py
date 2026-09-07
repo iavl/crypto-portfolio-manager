@@ -345,22 +345,6 @@ class ReportPacket:
             review = SolReview(**dict(review))
         object.__setattr__(self, "sol_review", review)
 
-    @property
-    def finalized(self) -> bool:
-        return True
-
-    @property
-    def positioning_summary(self) -> Mapping[str, Any]:
-        return self.positioning_summaries
-
-    @property
-    def btc_cycle(self) -> Mapping[str, Any] | None:
-        return self.btc_cycle_summary
-
-    @property
-    def prompt_rule(self) -> str:
-        return "DO NOT recompute or alter numeric conclusions. Use the supplied structured outputs as authoritative."
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "review_type": self.review_type,
@@ -391,10 +375,9 @@ class ReportPacket:
     def from_mapping(cls, value: Mapping[str, Any]) -> "ReportPacket":
         if not isinstance(value, Mapping):
             raise ValueError("report packet must be an object")
+        if "failed_data_fetches" not in value:
+            raise ValueError("report packet is missing failed_data_fetches")
         return cls(**dict(value))
 
 
-ReportPacketModel = ReportPacket
-
-
-__all__ = ["ReportPacket", "ReportPacketModel"]
+__all__ = ["ReportPacket"]

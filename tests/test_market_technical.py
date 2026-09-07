@@ -28,7 +28,7 @@ def make_series(count=365, *, last_volume=100, source="synthetic"):
             close -= 20
         candles.append(
             Candle(
-                (start + timedelta(days=index)).isoformat(),
+                (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
                 close - 0.5,
                 close + 2,
                 close - 2,
@@ -37,6 +37,12 @@ def make_series(count=365, *, last_volume=100, source="synthetic"):
             )
         )
     return OHLCVSeries("ETH", "1D", tuple(candles), source=source)
+
+
+def test_spot(candles, price):
+    from datetime import datetime
+    observed = (datetime.fromisoformat(candles.candles[-1].timestamp.replace("Z", "+00:00")) + timedelta(days=1)).isoformat()
+    return SpotPrice(candles.symbol, price, observed, candles.source, observed)
 
 
 class MarketModelTests(unittest.TestCase):
@@ -76,14 +82,14 @@ class MarketModelTests(unittest.TestCase):
                 values = {"open": 100, "high": 110, "low": 90, "close": 105, "volume": 20}
                 values.update(kwargs)
                 with self.assertRaises(ValueError):
-                    Candle("2026-01-01", **values)
+                    Candle("2026-01-01T00:00:00Z", **values)
         with self.assertRaises(ValueError):
             Candle("2026-01-01T00:00:00", 100, 110, 90, 105, 20)
 
     def test_series_rejects_duplicate_and_unordered_timestamps(self):
-        first = Candle("2026-01-01", 100, 110, 90, 105, 20)
+        first = Candle("2026-01-01T00:00:00Z", 100, 110, 90, 105, 20)
         duplicate = Candle("2026-01-01T00:00:00Z", 100, 110, 90, 105, 20)
-        earlier = Candle("2025-12-31", 100, 110, 90, 105, 20)
+        earlier = Candle("2025-12-31T00:00:00Z", 100, 110, 90, 105, 20)
         with self.assertRaises(ValueError):
             OHLCVSeries("ETH", "1D", (first, duplicate))
         with self.assertRaises(ValueError):
@@ -98,7 +104,7 @@ class MarketModelTests(unittest.TestCase):
     def test_completed_candle_filter_excludes_current_and_explicit_incomplete(self):
         candles = tuple(
             Candle(
-                f"2026-01-0{index}",
+                f"2026-01-0{index}T00:00:00Z",
                 100,
                 110,
                 90,
@@ -126,7 +132,7 @@ class TechnicalMetricTests(unittest.TestCase):
         def series(symbol, count, multiplier):
             candles = tuple(
                 Candle(
-                    (start + timedelta(days=index)).isoformat(),
+                    (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
                     100 + index * multiplier,
                     101 + index * multiplier,
                     99 + index * multiplier,
@@ -164,7 +170,7 @@ class TechnicalMetricTests(unittest.TestCase):
                 "1D",
                 tuple(
                     Candle(
-                        (start + timedelta(days=index)).isoformat(),
+                        (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
                         100 + index,
                         101 + index,
                         99 + index,
@@ -188,9 +194,9 @@ class TechnicalMetricTests(unittest.TestCase):
 
     def test_hand_checkable_metrics(self):
         candles = (
-            Candle("2026-01-01", 100, 110, 90, 100, 1),
-            Candle("2026-01-02", 100, 120, 95, 115, 2),
-            Candle("2026-01-03", 115, 130, 110, 125, 3),
+            Candle("2026-01-01T00:00:00Z", 100, 110, 90, 100, 1),
+            Candle("2026-01-02T00:00:00Z", 100, 120, 95, 115, 2),
+            Candle("2026-01-03T00:00:00Z", 115, 130, 110, 125, 3),
         )
         self.assertEqual(true_ranges(candles), [20.0, 25.0, 20.0])
         self.assertAlmostEqual(average_true_range(candles, 2), 22.5)
@@ -207,7 +213,7 @@ class TechnicalMetricTests(unittest.TestCase):
     def test_atr_requires_fourteen_fully_defined_true_ranges(self):
         candles = tuple(
             Candle(
-                (date(2026, 1, 1) + timedelta(days=index)).isoformat(),
+                (date(2026, 1, 1) + timedelta(days=index)).isoformat() + "T00:00:00Z",
                 100,
                 105,
                 95,
@@ -220,18 +226,18 @@ class TechnicalMetricTests(unittest.TestCase):
         self.assertEqual(average_true_range(candles, 14), 10.0)
 
     def test_ma_coverage_and_missing_volume(self):
-        full = build_technical_snapshot(make_series(430), 314.5)
+        full = build_technical_snapshot(make_series(430), test_spot(make_series(430), 314.5))
         self.assertIsNotNone(full.ma20)
         self.assertIsNotNone(full.ma50)
         self.assertIsNotNone(full.ma100)
         self.assertIsNotNone(full.ma200)
         self.assertEqual(full.data_quality, "FULL")
         self.assertEqual(full.technical_confidence, "HIGH")
-        missing_volume = build_technical_snapshot(make_series(430, last_volume=100), 314.5, volume_reliable=False)
+        missing_volume = build_technical_snapshot(make_series(430, last_volume=100), test_spot(make_series(430, last_volume=100), 314.5), volume_reliable=False)
         self.assertIsNone(missing_volume.relative_volume)
         self.assertEqual(missing_volume.volume_state, "UNKNOWN")
         self.assertEqual(missing_volume.technical_confidence, "MEDIUM")
-        short = build_technical_snapshot(make_series(119), 160)
+        short = build_technical_snapshot(make_series(119), test_spot(make_series(119), 160))
         self.assertIsNone(short.ma200)
         self.assertEqual(short.data_quality, "INSUFFICIENT_HISTORY")
         self.assertEqual(short.technical_confidence, "LOW")
@@ -257,7 +263,7 @@ class TechnicalMetricTests(unittest.TestCase):
         lows = [100, 99, 98, 110, 90, 110, 98, 99, 100]
         candles = tuple(
             Candle(
-                (start + timedelta(days=index)).isoformat(),
+                (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
                 low + 2,
                 low + 5,
                 low,
@@ -290,7 +296,7 @@ class TechnicalMetricTests(unittest.TestCase):
 
     def test_stale_metadata_is_explicit(self):
         stale = build_technical_snapshot(
-            OHLCVSeries("ETH", "1D", make_series().candles, source="synthetic", fetched_at="2026-09-02"),
+            OHLCVSeries("ETH", "1D", make_series().candles, source="synthetic", fetched_at="2026-09-02T00:00:00Z"),
             SpotPrice("ETH", 282, "2026-09-02T12:00:00Z", "synthetic", "2026-09-02T12:00:00Z"),
         )
         self.assertEqual(stale.data_quality, "STALE_MARKET_DATA")
@@ -326,7 +332,7 @@ class TechnicalMetricTests(unittest.TestCase):
         start = date(2025, 1, 1)
         for index in range(365):
             day = start + timedelta(days=index * 2)
-            candles.append(Candle(day.isoformat(), 100, 102, 98, 100, 100))
+            candles.append(Candle(day.isoformat() + "T00:00:00Z", 100, 102, 98, 100, 100))
         snapshot = build_technical_snapshot(
             OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic"),
             SpotPrice("ETH", 100, "2026-12-31T00:00:00Z", "synthetic"),
@@ -344,7 +350,7 @@ class TechnicalMetricTests(unittest.TestCase):
             if index == 100:
                 continue
             day = start + timedelta(days=index)
-            candles.append(Candle(day.isoformat(), 100, 102, 98, 100, 100))
+            candles.append(Candle(day.isoformat() + "T00:00:00Z", 100, 102, 98, 100, 100))
         snapshot = build_technical_snapshot(
             OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic"),
             SpotPrice("ETH", 100, "2026-01-01T00:00:00Z", "synthetic"),
@@ -363,7 +369,7 @@ class TechnicalMetricTests(unittest.TestCase):
                 continue
             day = start + timedelta(days=index)
             close = 100 + index
-            candles.append(Candle(day.isoformat(), close, close + 2, close - 2, close, 100))
+            candles.append(Candle(day.isoformat() + "T00:00:00Z", close, close + 2, close - 2, close, 100))
         snapshot = build_technical_snapshot(
             OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic"),
             SpotPrice("ETH", 464, "2026-01-01T00:00:00Z", "synthetic"),
@@ -378,7 +384,7 @@ class TechnicalMetricTests(unittest.TestCase):
             if 100 <= index < 150:
                 continue
             day = start + timedelta(days=index)
-            candles.append(Candle(day.isoformat(), 100, 102, 98, 100, 100))
+            candles.append(Candle(day.isoformat() + "T00:00:00Z", 100, 102, 98, 100, 100))
         snapshot = build_technical_snapshot(
             OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic"),
             SpotPrice("ETH", 100, "2026-01-01T00:00:00Z", "synthetic"),

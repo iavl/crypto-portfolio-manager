@@ -19,7 +19,7 @@
     "ohlcv_hash"
   ],
   "properties": {
-    "execution_plan_version": {"type": "integer", "minimum": 1},
+    "execution_plan_version": {"const": 2},
     "symbol": {"type": "string", "minLength": 1},
     "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
     "approved_amount_usd": {"type": "number", "minimum": 0},
@@ -29,11 +29,10 @@
     "entry_mode": {"type": "string", "enum": ["PULLBACK", "BREAKOUT", "WAIT"]},
     "technical_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
     "tranches": {"type": "array", "items": {"$ref": "#/$defs/tranche"}},
-    "invalidation": {"$ref": "#/$defs/invalidationOrLegacy"},
+    "invalidation": {"oneOf": [{"$ref": "#/$defs/invalidation"}, {"type": "null"}]},
     "rationale": {"type": "string"},
     "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
     "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
     "volume_profile_metadata": {"type": ["object", "null"]},
     "ohlcv_metadata": {"$ref": "#/$defs/ohlcvMetadata"},
     "technical_summary": {"$ref": "#/$defs/technicalSummary"}
@@ -89,13 +88,6 @@
         "automatic_order": {"const": false}
       },
       "additionalProperties": false
-    },
-    "invalidationOrLegacy": {
-      "oneOf": [
-        {"$ref": "#/$defs/invalidation"},
-        {"type": "string", "minLength": 1},
-        {"type": "null"}
-      ]
     },
     "ohlcvMetadata": {
       "type": ["object", "null"],

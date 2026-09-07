@@ -134,15 +134,13 @@ class Candle:
         if not isinstance(value, Mapping):
             raise ValueError("candle must be an object")
         required = ("timestamp", "open", "high", "low", "close", "volume")
-        unknown = set(value) - set(required) - {"completed", "is_complete"}
+        unknown = set(value) - set(required) - {"completed"}
         if unknown:
             raise ValueError(f"candle contains unknown fields: {', '.join(sorted(unknown))}")
         missing = [field for field in required if field not in value]
         if missing:
             raise ValueError(f"candle is missing fields: {', '.join(missing)}")
-        completed = value.get("completed", value.get("is_complete", True))
-        if "completed" in value and "is_complete" in value and value["completed"] != value["is_complete"]:
-            raise ValueError("candle completed and is_complete disagree")
+        completed = value.get("completed", True)
         return cls(completed=completed, **{field: value[field] for field in required})
 
     def as_dict(self) -> dict[str, Any]:
@@ -157,11 +155,6 @@ class Candle:
         if not self.completed:
             result["completed"] = False
         return result
-
-    @property
-    def is_complete(self) -> bool:
-        return self.completed
-
 
 @dataclass(frozen=True)
 class OHLCVSeries:
@@ -213,11 +206,15 @@ class OHLCVSeries:
         candles = value.get("candles")
         if not isinstance(candles, (list, tuple)):
             raise ValueError("series.candles must be a list")
+        required = ("symbol", "timeframe", "candles", "source")
+        missing = [field for field in required if field not in value]
+        if missing:
+            raise ValueError(f"OHLCV series is missing fields: {', '.join(missing)}")
         return cls(
-            symbol=value.get("symbol"),
-            timeframe=value.get("timeframe", "1D"),
+            symbol=value["symbol"],
+            timeframe=value["timeframe"],
             candles=tuple(Candle.from_mapping(item) for item in candles),
-            source=value.get("source", "unknown"),
+            source=value["source"],
             fetched_at=value.get("fetched_at"),
             venue=value.get("venue"),
             market=value.get("market"),
@@ -536,14 +533,6 @@ class TechnicalSnapshot:
         if timeframe != "1D":
             raise ValueError("snapshot.timeframe must be 1D")
         object.__setattr__(self, "timeframe", timeframe)
-
-    @property
-    def spot_price(self) -> float:
-        return self.current_spot_price
-
-    @property
-    def latest_completed_close(self) -> float:
-        return self.last_completed_close
 
     def technical_summary(self, selected_zones: Iterable[PriceZone] = ()) -> dict[str, Any]:
         return {

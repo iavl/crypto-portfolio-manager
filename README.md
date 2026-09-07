@@ -1,5 +1,7 @@
 [English (default)](README.md) · [简体中文](README.zh-CN.md)
 
+Only current contracts are supported: policy v3, scoring v2, routing v2, and execution plans v2. Old versions are rejected; no legacy replay or automatic migration is provided. Local data must be upgraded from verifiable facts or removed. Timestamps require a timezone; execution requires a timestamped SpotPrice.
+
 # crypto-portfolio-manager
 
 `crypto-portfolio-manager` is a Codex Skill for conservative-balanced,

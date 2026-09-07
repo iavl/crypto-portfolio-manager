@@ -153,7 +153,7 @@ class ModelRoutingTests(unittest.TestCase):
             self.assertEqual(route.effective_model, "custom-model-id")
             self.assertFalse(route.fallback_used)
 
-    def test_v1_is_read_without_writeback(self):
+    def test_noncurrent_routing_version_is_rejected(self):
         value = {
             "routing_policy_version": 1,
             "mode": "AUTO",
@@ -168,15 +168,14 @@ class ModelRoutingTests(unittest.TestCase):
             path = Path(directory) / "v1.json"
             original = json.dumps(value, indent=2)
             path.write_text(original, encoding="utf-8")
-            routing = load_model_routing(path)
-            self.assertEqual(routing.routing_policy_version, 1)
-            self.assertEqual(routing.preset_for_stage("factor_semantic_analysis"), "terra_medium")
+            with self.assertRaises(RoutingError):
+                load_model_routing(path)
             self.assertEqual(path.read_text(encoding="utf-8"), original)
             schema = json.loads(
                 (ROOT / "schemas" / "model-routing.schema.json").read_text(encoding="utf-8")
             )
             errors = list(Draft202012Validator(schema).iter_errors(value))
-            self.assertEqual(errors, [])
+            self.assertTrue(errors)
 
     def test_capability_resolution_never_fakes_switching(self):
         routing = load_model_routing()
@@ -250,7 +249,7 @@ class ModelRoutingTests(unittest.TestCase):
         decision = Decision(
             "2026-09-02T00:00:00Z",
             "NORMAL",
-            1,
+            3,
             {"BTC": 1.0},
             {"BTC": 1.0},
             routing_metadata=metadata,

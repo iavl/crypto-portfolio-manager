@@ -103,13 +103,13 @@ rebalance action.
 Avoid arbitrary “-5%, -10%, -15%” ladders without structural justification.
 The engine may deploy less than the approved amount or return `WAIT` when
 history, structure, volatility, or freshness is inadequate.
-The v1 `ATR14` is the simple mean of 14 fully defined true ranges (15 candles
+`ATR14` is the simple mean of 14 fully defined true ranges (15 candles
 including the preceding close); it is not silently substituted with Wilder
 smoothing.
 
 Execution setup quality is separate from data confidence. A support zone must
 meet the canonical `execution.zone_quality.minimum_for_entry` threshold;
-clean long history alone cannot turn a weak zone into an entry. v1 generates
+clean long history alone cannot turn a weak zone into an entry. The planner generates
 pullback plans only. `BREAKOUT` returns `WAIT` until a real breakout/retest
 planner exists, and `MIXED` is rejected.
 
@@ -121,7 +121,7 @@ capacity, not an executed fill.
 
 ## Rule 7 — Breakout/chase entries
 
-The v1 planner does not generate `BREAKOUT` plans and returns `WAIT` for that
+The planner does not generate `BREAKOUT` plans and returns `WAIT` for that
 mode. If a future breakout/retest planner is added, it must require evidence
 that is unusually strong, such as:
 

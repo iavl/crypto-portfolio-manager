@@ -614,9 +614,6 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     ),
 }
 
-METRICS = METRIC_REGISTRY
-
-
 def normalize_metric_key(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("metric_key must be a non-empty string")
@@ -629,10 +626,6 @@ def metric_definition(metric_key: str) -> MetricDefinition:
         return METRIC_REGISTRY[key]
     except KeyError as exc:
         raise ValueError(f"unknown metric key: {key}") from exc
-
-
-get_metric_definition = metric_definition
-get_metric = metric_definition
 
 
 def validate_metric_value(metric_key: str, value: Any) -> Any:
@@ -787,24 +780,17 @@ def validate_metric_ownership(
     return True
 
 
-validate_metric_key = metric_definition
-
-
 __all__ = [
     "CHAIN_NATIVE_ASSETS",
     "METRIC_REGISTRY",
-    "METRICS",
     "DECISION_ROLES",
     "REVIEW_TYPES",
     "MetricDefinition",
-    "get_metric_definition",
-    "get_metric",
     "known_metric_keys",
     "metrics_for_factor",
     "metrics_for_role",
     "metric_definition",
     "normalize_metric_key",
-    "validate_metric_key",
     "validate_metric_ownership",
     "validate_metric_value",
 ]

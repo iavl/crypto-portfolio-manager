@@ -145,9 +145,6 @@ def catalog_metrics(payload: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(item for item in result if item)
 
 
-available_metrics = catalog_metrics
-
-
 def catalog_metrics_by_asset(payload: Mapping[str, Any]) -> dict[str, frozenset[str]]:
     """Parse the official catalog's per-asset frequency declarations."""
     by_asset: dict[str, set[str]] = {}
@@ -812,7 +809,6 @@ __all__ = [
     "CoinMetricsProvider",
     "catalog_metrics",
     "catalog_metrics_by_asset",
-    "available_metrics",
     "parse_exchange_netflow",
     "parse_eth_metrics",
     "parse_tokenomics",

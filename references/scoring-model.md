@@ -55,7 +55,6 @@ two factor totals.
 
 In v2, technical drawdown remains visible in trend facts for context but adds
 no trend points or trend coverage requirement; valuation owns its score.
-The v1 trend contribution remains available for historical replay.
 
 Event-risk metrics use the `EVENT_RISK` role. Positioning and BTC-cycle metrics
 remain overlays and are not scoring factors.
@@ -95,8 +94,8 @@ Deterministic factor results retain their coverage and fact freshness when
 converted to `FactorScore`, both directly and through `AssetAssessment`.
 Result confidence is not multiplied again because it already includes coverage.
 An explicit source-confidence field supplies the source-quality multiplier;
-legacy inputs without it retain the existing unit source-quality convention.
-Explicit reliability cannot raise the metadata-derived value. Numeric legacy
+Inputs without source confidence use unit source quality.
+Explicit reliability cannot raise the metadata-derived value. Numeric
 factor inputs retain their documented reliability of 1.
 
 The v2 score and coverage are:
@@ -130,7 +129,7 @@ are used. Positional zipping is reserved for equal-length plain price
 sequences. Missing horizons lower reliability/coverage; available horizons do
 not silently claim full certainty. The configured neutral band is `0.10` and
 saturation is `1.00`; the signal is neutral inside the band and continuously
-clamped to 0–100 outside it. v1 replay retains its raw ±5% threshold behavior.
+clamped to 0–100 outside it.
 
 For non-BTC satellites, missing BTC-relative evidence is `HOLD_ONLY`, while a
 materially negative comparison is ineligible for new risk.
@@ -165,8 +164,7 @@ The initial dead zone is `abs(normalized_flow) <= 0.001` and saturation is
 `0.01`. The dead zone scores neutral at 50; values between the dead zone and
 saturation map continuously and monotonically to 0–100, then clamp. 7D/30D
 evidence receives more authority than 1D noise. The state remains
-`POSITIVE`, `NEUTRAL`, `NEGATIVE`, or `UNKNOWN`. v1 replay retains exact-zero
-ternary behavior.
+`POSITIVE`, `NEUTRAL`, `NEGATIVE`, or `UNKNOWN`.
 
 Intraday OHLCV is sampled at common 24-hour intervals for the daily-return
 volatility calculation. Flow observation objects and serialized observations
@@ -205,21 +203,15 @@ below 60 it becomes an ineligible/reduction candidate. Score strength is
 monotonic from 67 to 85 and is still multiplied by confidence, risk, event and
 relative-strength gates.
 
-Materially negative BTC-relative evidence overrides the hold band. A legacy
-`severe_event=True` sets at least SEVERE even if a newer field says NORMAL;
-CRITICAL is never downgraded by compatibility handling.
+Materially negative BTC-relative evidence overrides the hold band.
+`event_risk.state` is the sole event-risk input; SEVERE and CRITICAL block new risk.
 
 Scores do not directly imply `BUY`, `SELL`, or a full deployment. `HOLD`,
 `WAIT`, and `NO_TRADE` remain valid outcomes.
 
-## v1 replay
+## Supported version
 
-Policy version 1 is parsed explicitly and dispatched to legacy arithmetic:
-legacy `scoring_weights`, missing-factor renormalization, legacy event-risk
-weighting where present, raw relative-strength thresholds, and binary flow
-classification. Historical JSONL is not rewritten. New live decisions use the
-version-3 profiles, typed availability, reliability-aware score, and separate
-event-risk gate; policy version 2 retains its original core allocation and
-three-horizon behavior; policy version 3 uses the ETH-specific metrics, 365D
-relative horizon, core gate, and anchored core allocation. The resolved policy
-and hash remain the replay authority.
+Only policy version 3 is supported. Scoring algorithm version 2 keeps fixed
+profile weights, reliability shrinkage, and the separate event-risk gate.
+Old policy versions and incomplete embedded policies are rejected. Resolved
+policy and hash remain authoritative for current-format records.

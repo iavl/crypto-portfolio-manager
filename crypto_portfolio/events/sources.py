@@ -183,24 +183,9 @@ def source_catalog(category: str | None = None, asset: str | None = None, *, req
     )
 
 
-event_sources = source_catalog
-
-
-def event_sources_for(asset: str, category: str) -> tuple[EventSource, ...]:
-    return source_catalog(category, asset)
-
-
-EVENT_SOURCES = EVENT_SOURCE_CATALOG
-get_event_sources = source_catalog
-
-
 __all__ = [
     "EVENT_CATEGORIES",
     "EVENT_SOURCE_CATALOG",
-    "EVENT_SOURCES",
     "EventSource",
-    "event_sources",
-    "event_sources_for",
-    "get_event_sources",
     "source_catalog",
 ]

@@ -171,8 +171,8 @@ _RELATIVE_METRICS = (
     "relative.return_vs_btc_30d",
     "relative.return_vs_btc_90d",
     "relative.return_vs_btc_180d",
+    "relative.return_vs_btc_365d",
 )
-_RELATIVE_METRICS_V3 = (*_RELATIVE_METRICS, "relative.return_vs_btc_365d")
 _POSITIONING_METRICS = (
     "derivatives.funding_rate",
     "derivatives.funding_rate_24h_avg",
@@ -324,13 +324,20 @@ class MetricRequest:
         data = dict(value)
         allowed = {
             "asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness",
-            "trend_enabled", "can_reuse", "cached_observation_id", "reason", "definition",
+            "trend_enabled", "can_reuse", "cached_observation_id", "reason",
             "decision_role", "context_group",
             "review_type",
         }
         unknown = set(data) - allowed
         if unknown:
             raise ValueError(f"metric request contains unknown fields: {', '.join(sorted(unknown))}")
+        required = {
+            "asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness",
+            "trend_enabled", "can_reuse", "cached_observation_id", "reason",
+        }
+        missing = required - set(data)
+        if missing:
+            raise ValueError(f"metric request is missing fields: {', '.join(sorted(missing))}")
         definition = metric_definition(data["metric_key"])
         if "value_type" in data and data["value_type"] != definition.value_type:
             raise ValueError("metric request value_type does not match the registry")
@@ -342,7 +349,6 @@ class MetricRequest:
             raise ValueError("metric request context_group does not match the registry")
         data.pop("value_type", None)
         data.pop("unit", None)
-        data.pop("definition", None)
         data.pop("decision_role", None)
         data.pop("context_group", None)
         return cls(**data)
@@ -430,14 +436,6 @@ class MetricCollectionPlan:
         object.__setattr__(self, "collector_model", "LUNA_MAX")
 
     @property
-    def collection_requests(self) -> tuple[MetricRequest, ...]:
-        return self.requests
-
-    @property
-    def metrics(self) -> tuple[MetricRequest, ...]:
-        return self.requests
-
-    @property
     def critical_requests(self) -> tuple[MetricRequest, ...]:
         return tuple(item for item in self.requests if item.critical)
 
@@ -448,8 +446,6 @@ class MetricCollectionPlan:
     def for_asset(self, asset: str) -> tuple[MetricRequest, ...]:
         symbol = _text(asset, "asset").upper()
         return tuple(item for item in self.requests if item.asset == symbol)
-
-    requests_for_asset = for_asset
 
     @property
     def metric_keys(self) -> tuple[str, ...]:
@@ -480,14 +476,17 @@ class MetricCollectionPlan:
         unknown = set(data) - allowed
         if unknown:
             raise ValueError(f"metric collection plan contains unknown fields: {', '.join(sorted(unknown))}")
+        missing = [field for field in allowed if field not in data]
+        if missing:
+            raise ValueError(f"metric collection plan is missing fields: {', '.join(sorted(missing))}")
         model = cls(
             review_type=data["review_type"],
-            requests=data.get("requests", ()),
-            assets=data.get("assets", ()),
-            discovery_required_assets=data.get("discovery_required_assets", ()),
-            collector_model=data.get("collector_model", "LUNA_MAX"),
+            requests=data["requests"],
+            assets=data["assets"],
+            discovery_required_assets=data["discovery_required_assets"],
+            collector_model=data["collector_model"],
         )
-        if "critical_metric_keys" in data and tuple(data["critical_metric_keys"]) != model.critical_metric_keys:
+        if tuple(data["critical_metric_keys"]) != model.critical_metric_keys:
             raise ValueError("critical_metric_keys does not match the collection requests")
         return model
 
@@ -518,30 +517,17 @@ def _portfolio_symbols(portfolio: Any, policy: Policy) -> tuple[str, ...]:
 def _watchlist_symbols(watchlist: Any) -> tuple[str, ...]:
     if watchlist is None:
         return ()
-    if isinstance(watchlist, Mapping):
-        watchlist = watchlist.get("symbols", watchlist.get("assets", tuple(watchlist)))
-    if isinstance(watchlist, str):
-        return (_text(watchlist, "watchlist symbol").upper(),)
+    if isinstance(watchlist, (str, bytes)):
+        raise ValueError("watchlist must be a sequence of symbols")
     try:
         return _unique_symbols(watchlist, "watchlist symbol")
     except TypeError as exc:
-        raise ValueError("watchlist must be a symbol sequence or mapping") from exc
+        raise ValueError("watchlist must be a sequence of symbols") from exc
 
 
 def _cached_values(value: Any) -> tuple[MetricObservation, ...]:
     if value is None:
         return ()
-    if isinstance(value, Mapping):
-        if "observations" in value:
-            value = value["observations"]
-        else:
-            flattened: list[Any] = []
-            for item in value.values():
-                if isinstance(item, Mapping) and "observation_id" not in item:
-                    flattened.extend(item.values())
-                else:
-                    flattened.append(item)
-            value = flattened
     if isinstance(value, MetricObservation):
         value = (value,)
     if isinstance(value, str) or not isinstance(value, Iterable):
@@ -590,8 +576,7 @@ def build_metric_collection_plan(
     policy: Policy | None = None,
     metric_registry: Mapping[str, MetricDefinition] | None = None,
     *,
-    cached_observations: Iterable[MetricObservation | Mapping[str, Any]] | Mapping[str, Any] | None = None,
-    history: Iterable[MetricObservation | Mapping[str, Any]] | Mapping[str, Any] | None = None,
+    cached_observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
     as_of: str | datetime | None = None,
 ) -> MetricCollectionPlan:
     """Build all applicable requests without asking a model to choose metrics."""
@@ -608,9 +593,7 @@ def build_metric_collection_plan(
             raise ValueError(f"metric registry key {raw_key!r} does not match definition {definition.key!r}")
         definitions[key] = definition
     review = _review_type(review_type)
-    if history is not None and cached_observations is not None:
-        raise ValueError("provide only one of cached_observations or history")
-    cached = _cached_values(cached_observations if cached_observations is not None else history)
+    cached = _cached_values(cached_observations)
     symbols = list(_portfolio_symbols(portfolio, resolved))
     for symbol in _watchlist_symbols(watchlist):
         if symbol not in symbols:
@@ -664,7 +647,7 @@ def build_metric_collection_plan(
             for key in _BTC_CONTEXT_METRICS:
                 add(symbol, key, "BTC cycle and on-chain context")
         if symbol != "BTC":
-            relative_metrics = _RELATIVE_METRICS_V3 if resolved.policy_version >= 3 else _RELATIVE_METRICS
+            relative_metrics = _RELATIVE_METRICS
             for key in relative_metrics:
                 add(symbol, key, "BTC-relative performance")
 
@@ -674,10 +657,6 @@ def build_metric_collection_plan(
         assets=tuple(["MARKET", *symbols]),
         discovery_required_assets=tuple(discovery),
     )
-
-
-build_collection_plan = build_metric_collection_plan
-MetricCollectionRequest = MetricRequest
 
 
 def build_metric_collection_request(plan: MetricCollectionPlan | Mapping[str, Any]) -> dict[str, Any]:
@@ -690,9 +669,7 @@ def build_metric_collection_request(plan: MetricCollectionPlan | Mapping[str, An
 
 __all__ = [
     "MetricCollectionPlan",
-    "MetricCollectionRequest",
     "MetricRequest",
-    "build_collection_plan",
     "build_metric_collection_request",
     "build_metric_collection_plan",
 ]

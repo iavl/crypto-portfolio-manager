@@ -49,7 +49,7 @@ class Decision:
     target_weights: Mapping[str, float]
     actions: tuple[Any, ...] = ()
     risk_checks: tuple[Any, ...] = ()
-    evidence: tuple[Evidence | str, ...] = ()
+    evidence: tuple[Evidence, ...] = ()
     factor_scores: Mapping[str, Any] = None
     status: str = "PENDING"
     constraints_applied: tuple[str, ...] = ()
@@ -70,8 +70,8 @@ class Decision:
         object.__setattr__(self, "market_regime", self.market_regime.upper())
         if self.market_regime not in _REGIMES:
             raise ValueError(f"market_regime must be one of {sorted(_REGIMES)}")
-        if isinstance(self.policy_version, bool) or not isinstance(self.policy_version, int) or self.policy_version < 1:
-            raise ValueError("policy_version must be a positive integer")
+        if isinstance(self.policy_version, bool) or not isinstance(self.policy_version, int) or self.policy_version != 3:
+            raise ValueError("policy_version must be 3")
         object.__setattr__(self, "current_weights", _weights(self.current_weights, "current_weights"))
         object.__setattr__(self, "target_weights", _weights(self.target_weights, "target_weights"))
         if not self.current_weights or not self.target_weights:
@@ -96,12 +96,9 @@ class Decision:
         object.__setattr__(self, "evidence", tuple(self.evidence))
         evidence_ids = []
         for item in self.evidence:
-            if isinstance(item, Evidence):
-                evidence_ids.append(item.id)
-            elif isinstance(item, str) and item.strip():
-                evidence_ids.append(item.strip())
-            else:
-                raise ValueError("evidence must contain Evidence objects or IDs")
+            if not isinstance(item, Evidence):
+                raise ValueError("evidence must contain Evidence objects")
+            evidence_ids.append(item.id)
         if len(evidence_ids) != len(set(evidence_ids)):
             raise ValueError("decision evidence IDs must be unique")
         parsed_factor_scores: dict[str, AssetAssessment] = {}
@@ -242,24 +239,14 @@ class Decision:
             metadata = dict(self.routing_metadata)
             if contains_private_reasoning(metadata):
                 raise ValueError("routing_metadata must not contain private reasoning")
-            routing_version = metadata.get("routing_policy_version", 1)
-            if isinstance(routing_version, bool) or not isinstance(routing_version, int) or routing_version < 1:
-                raise ValueError("routing_metadata.routing_policy_version must be a positive integer")
+            routing_version = metadata.get("routing_policy_version")
+            if isinstance(routing_version, bool) or not isinstance(routing_version, int) or routing_version != 2:
+                raise ValueError("routing_metadata.routing_policy_version must be 2")
             stages_used = metadata.get("stages_used")
             if stages_used is not None:
                 if not isinstance(stages_used, Mapping):
                     raise ValueError("routing_metadata.stages_used must be an object")
-                # Historical records are append-only and were validated against the
-                # routing policy current when they were written. Re-validating them
-                # against the *current* config (validate_stage_model) would make old
-                # records unreadable after any routing change, so historical records
-                # receive legacy-name validation only.
-                if routing_version < 2:
-                    from ..model_routing import validate_historical_stage_model
-
-                    for stage, model in stages_used.items():
-                        validate_historical_stage_model(stage, model)
-                elif any(
+                if any(
                     not isinstance(stage, str)
                     or not stage.strip()
                     or not isinstance(model, str)
@@ -321,24 +308,7 @@ class Decision:
 
         def _evidence_item(item: Any) -> Any:
             if not isinstance(item, Mapping):
-                return item
-            if "id" in item:
-                # Canonical Evidence record, possibly carrying legacy
-                # observation keys alongside the Evidence-level id; keep only
-                # the Evidence fields.
-                allowed = {
-                    "id", "asset", "factor", "source", "observed_at",
-                    "fetched_at", "freshness", "confidence", "value",
-                    "summary", "metadata",
-                }
-                return Evidence(**{key: item[key] for key in allowed if key in item})
-            if set(item) & {"metric_key", "observation_id"}:
-                # Historical records may embed MetricObservation-shaped
-                # dictionaries directly (older writer paths). Project them
-                # through the canonical observation model.
-                from .metrics_history import MetricObservation
-
-                return MetricObservation.from_mapping(item).to_evidence()
+                raise ValueError("decision evidence must be an object")
             return Evidence(**item)
 
         evidence = tuple(_evidence_item(item) for item in data.get("evidence", ()))
@@ -368,7 +338,7 @@ class Decision:
         )
 
     def as_dict(self) -> dict[str, Any]:
-        evidence = [item.as_dict() if isinstance(item, Evidence) else item for item in self.evidence]
+        evidence = [item.as_dict() for item in self.evidence]
         result = {
             "timestamp": self.timestamp,
             "policy_version": self.policy_version,
@@ -379,7 +349,7 @@ class Decision:
             "risk_checks": [item.as_dict() if hasattr(item, "as_dict") else item for item in self.risk_checks],
             "constraints_applied": list(self.constraints_applied),
             "evidence": evidence,
-            "evidence_ids": [item.id if isinstance(item, Evidence) else item for item in self.evidence],
+            "evidence_ids": [item.id for item in self.evidence],
             "factor_scores": {
                 symbol: value.as_dict() if isinstance(value, AssetAssessment) else value
                 for symbol, value in self.factor_scores.items()

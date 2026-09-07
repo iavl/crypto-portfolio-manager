@@ -46,12 +46,9 @@ def flow_state(value: Any, *, policy: Policy | None = None) -> str:
         return classify_flow_state(values[-1] if values else None, policy=policy)
     if isinstance(value, Mapping) and "state" in value:
         state = str(value["state"]).strip().upper()
-        return {
-            "OUTFLOW": "NEGATIVE",
-            "INFLOW": "POSITIVE",
-            "OUTFLOWS": "NEGATIVE",
-            "INFLOWS": "POSITIVE",
-        }.get(state, state if state in {"POSITIVE", "NEUTRAL", "NEGATIVE", "UNKNOWN"} else "UNKNOWN")
+        if state not in {"POSITIVE", "NEUTRAL", "NEGATIVE", "UNKNOWN"}:
+            raise ValueError("flow state is unsupported")
+        return state
     return classify_flow_state(value, policy=policy)
 
 
@@ -59,19 +56,21 @@ def breadth_state(value: Any) -> str:
     if value is None:
         return "UNKNOWN"
     if isinstance(value, Mapping):
-        value = value.get("state", value.get("value", value.get("breadth")))
+        value = value.get("state")
     elif hasattr(value, "current") and isinstance(value.current, Mapping):
         values = tuple(value.current.values())
         value = values[-1] if values else None
     if isinstance(value, str):
         state = value.strip().upper()
-        if state in {"HEALTHY", "BULLISH", "POSITIVE", "STRONG"}:
+        if state == "HEALTHY":
             return "HEALTHY"
-        if state in {"WEAK", "BEARISH", "NEGATIVE", "NARROW"}:
+        if state == "WEAK":
             return "WEAK"
-        if state in {"NEUTRAL", "RANGE", "MIXED"}:
+        if state == "NEUTRAL":
             return "NEUTRAL"
-        return "UNKNOWN"
+        if state == "UNKNOWN":
+            return state
+        raise ValueError("breadth state is unsupported")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("breadth must be a state or numeric fraction")
     value = float(value)
@@ -92,16 +91,11 @@ def build_regime_inputs(
     systemic_event_risk: bool | str = False,
     *,
     policy: Policy | None = None,
-    current_drawdown: float | str | None = None,
 ) -> RegimeInputs:
     """Build inputs for the existing deterministic regime authority."""
-    if current_drawdown is not None:
-        if portfolio_drawdown not in {"UNKNOWN", None}:
-            raise ValueError("provide only one of portfolio_drawdown or current_drawdown")
-        portfolio_drawdown = current_drawdown
     resolved = policy or resolve_policy()
     if isinstance(portfolio_drawdown, Mapping):
-        portfolio_drawdown = portfolio_drawdown.get("current_drawdown", portfolio_drawdown.get("portfolio_drawdown", "UNKNOWN"))
+        portfolio_drawdown = portfolio_drawdown.get("portfolio_drawdown", "UNKNOWN")
     elif hasattr(portfolio_drawdown, "current_drawdown"):
         portfolio_drawdown = portfolio_drawdown.current_drawdown
     return RegimeInputs(
@@ -114,19 +108,11 @@ def build_regime_inputs(
     )
 
 
-regime_inputs = build_regime_inputs
-build_regime_input = build_regime_inputs
-regime_inputs_from_facts = build_regime_inputs
-
-
 __all__ = [
     "RegimeInputs",
     "breadth_state",
     "btc_trend_state",
     "build_regime_inputs",
-    "build_regime_input",
-    "regime_inputs_from_facts",
     "flow_state",
-    "regime_inputs",
     "volatility_state",
 ]

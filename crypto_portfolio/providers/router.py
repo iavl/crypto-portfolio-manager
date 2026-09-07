@@ -238,8 +238,6 @@ class ProviderRouter:
 
         return provider_runtime_status(self.config, adapters=self.providers)
 
-    runtime_status = provider_runtime_status
-
     def probe(self, provider: str = "all", *, asset: str | None = None) -> tuple[dict[str, Any], ...]:
         """Run an explicit network probe; normal collection remains unchanged."""
         from .probe import probe_providers
@@ -270,18 +268,15 @@ class ProviderRouter:
             ttl_seconds=dict(ttl) if isinstance(ttl, Mapping) else None,
         )
 
-    resolve_provider_chain = staticmethod(provider_chain)
-
     def collect(
         self,
         requests: Iterable[ProviderRequest],
         *,
         mode: FetchMode | str = FetchMode.AUTO,
-        fetch_mode: FetchMode | str | None = None,
         as_of: str | datetime | None = None,
         now: str | datetime | None = None,
     ) -> RouterResult:
-        selected_mode = FetchMode.parse(fetch_mode if fetch_mode is not None else mode)
+        selected_mode = FetchMode.parse(mode)
         current = _now(now)
         supplied = tuple(requests)
         if any(not isinstance(item, ProviderRequest) for item in supplied):
@@ -492,10 +487,6 @@ class ProviderRouter:
             provider_fallbacks=fallbacks,
             unresolved_details=unresolved_details,
         )
-
-    route = collect
-    fetch = collect
-    resolve = collect
 
     def _enabled(self, name: str) -> bool:
         if name not in self.config.get("providers", {}):

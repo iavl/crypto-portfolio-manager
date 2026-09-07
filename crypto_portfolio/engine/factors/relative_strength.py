@@ -10,12 +10,11 @@ from typing import Any, Mapping, Sequence
 from ...facts.models import RelativeStrengthFacts
 from ...models.market import OHLCVSeries
 from ...models.policy import Policy, resolve_policy
-from ..metrics import annualized_volatility, simple_return
+from ..metrics import simple_return
 from ..technical import completed_candles, expected_latest_completed_date
 
 
-_LEGACY_HORIZONS = (30, 90, 180)
-_V3_HORIZONS = (30, 90, 180, 365)
+_HORIZONS = (30, 90, 180, 365)
 
 
 @dataclass(frozen=True)
@@ -63,7 +62,7 @@ class RelativeStrengthFactorResult:
         if pair_trend not in {"BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"}:
             raise ValueError("pair_trend is unsupported")
         adjusted = dict(self.risk_adjusted_excess_returns or {})
-        if set(adjusted) - {f"{days}d" for days in _V3_HORIZONS}:
+        if set(adjusted) - {f"{days}d" for days in _HORIZONS}:
             raise ValueError("risk_adjusted_excess_returns contains an unknown horizon")
         for key, value in adjusted.items():
             if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(float(value))):
@@ -207,29 +206,12 @@ def _risk_adjusted(excess: float | None, asset: Sequence[float], btc: Sequence[f
     return excess / max(expected_horizon_vol, 1e-12)
 
 
-def _legacy_volatility_adjusted(
-    excess: float | None,
-    asset: tuple[float, ...] | OHLCVSeries,
-    btc: tuple[float, ...] | OHLCVSeries,
-) -> float | None:
-    if excess is None or not isinstance(asset, tuple) or not isinstance(btc, tuple):
-        return None
-    if len(asset) < 3 or len(btc) < 3:
-        return None
-    return excess / max(annualized_volatility(asset), annualized_volatility(btc), 1e-12)
 
 
 def _rules(policy: Policy) -> Mapping[str, Any]:
     return policy.factor_rules["relative_strength"]
 
 
-def _legacy_horizon_score(value: float, positive: float, negative: float) -> float:
-    if value >= positive:
-        return 100.0
-    if value <= negative:
-        return 0.0
-    span = positive - negative
-    return 100.0 * (value - negative) / span if span else 50.0
 
 
 def _v2_horizon_score(value: float | None, neutral: float, saturation: float) -> float | None:
@@ -243,14 +225,6 @@ def _v2_horizon_score(value: float | None, neutral: float, saturation: float) ->
     return 50.0 + 50.0 * (max(value, -saturation) + neutral) / span
 
 
-def _state(value: float | None, positive: float, negative: float) -> str:
-    if value is None:
-        return "UNKNOWN"
-    if value >= positive:
-        return "OUTPERFORM"
-    if value <= negative:
-        return "UNDERPERFORM"
-    return "NEUTRAL"
 
 
 def calculate_relative_strength(
@@ -269,7 +243,7 @@ def calculate_relative_strength(
     if btc_prices is not None and btc_history is not None:
         raise ValueError("provide only one of btc_prices or btc_history")
     resolved = policy or resolve_policy()
-    horizons = _V3_HORIZONS if resolved.policy_version >= 3 else _LEGACY_HORIZONS
+    horizons = _HORIZONS
     normalized_symbol = str(symbol).strip().upper()
     if normalized_symbol == "BTC":
         facts = RelativeStrengthFacts(
@@ -309,7 +283,7 @@ def calculate_relative_strength(
     elif isinstance(asset, tuple) and isinstance(btc, tuple) and len(asset) != len(btc):
         raise ValueError("asset and BTC histories must have equal lengths")
 
-    aligned_by_horizon = {days: _aligned_prices(asset, btc, days, daily=resolved.policy_version >= 2) for days in horizons}
+    aligned_by_horizon = {days: _aligned_prices(asset, btc, days, daily=True) for days in horizons}
     asset_returns: dict[int, float | None] = {}
     btc_returns: dict[int, float | None] = {}
     relative: dict[int, float | None] = {}
@@ -328,45 +302,31 @@ def calculate_relative_strength(
     rules = _rules(resolved)
     weights = rules["horizon_weights"]
     signal = None
-    if resolved.policy_version == 1:
-        available = [days for days in horizons if relative[days] is not None]
-        if available:
-            positive = float(rules["positive_threshold"])
-            negative = float(rules["negative_threshold"])
-            total_weight = sum(float(weights[f"{days}d"]) for days in available)
-            weighted_score = sum(
-                _legacy_horizon_score(relative[days], positive, negative) * float(weights[f"{days}d"])
-                for days in available
-            ) / total_weight
-        else:
-            weighted_score = 50.0
-        states = [_state(relative[days], float(rules["positive_threshold"]), float(rules["negative_threshold"])) for days in horizons]
+    available = [days for days in horizons if adjusted[days] is not None and weights[f"{days}d"] > 0]
+    neutral = float(rules["risk_adjusted_neutral_band"])
+    saturation = float(rules["risk_adjusted_saturation"])
+    if available:
+        total_weight = sum(float(weights[f"{days}d"]) for days in available)
+        scores = {
+            days: _v2_horizon_score(adjusted[days], neutral, saturation) for days in available
+        }
+        weighted_score = sum(scores[days] * float(weights[f"{days}d"]) for days in available) / total_weight
+        signal = sum(adjusted[days] * float(weights[f"{days}d"]) for days in available) / total_weight
+        states = [
+            "UNKNOWN" if adjusted[days] is None else
+            "OUTPERFORM" if adjusted[days] > neutral else
+            "UNDERPERFORM" if adjusted[days] < -neutral else "NEUTRAL"
+            for days in horizons
+        ]
     else:
-        available = [days for days in horizons if adjusted[days] is not None and weights[f"{days}d"] > 0]
-        neutral = float(rules["risk_adjusted_neutral_band"])
-        saturation = float(rules["risk_adjusted_saturation"])
-        if available:
-            total_weight = sum(float(weights[f"{days}d"]) for days in available)
-            scores = {
-                days: _v2_horizon_score(adjusted[days], neutral, saturation) for days in available
-            }
-            weighted_score = sum(scores[days] * float(weights[f"{days}d"]) for days in available) / total_weight
-            signal = sum(adjusted[days] * float(weights[f"{days}d"]) for days in available) / total_weight
-            states = [
-                "UNKNOWN" if adjusted[days] is None else
-                "OUTPERFORM" if adjusted[days] > neutral else
-                "UNDERPERFORM" if adjusted[days] < -neutral else "NEUTRAL"
-                for days in horizons
-            ]
-        else:
-            weighted_score = 50.0
-            signal = None
-            states = ["UNKNOWN"] * len(horizons)
+        weighted_score = 50.0
+        signal = None
+        states = ["UNKNOWN"] * len(horizons)
 
     non_unknown = [state for state in states if state != "UNKNOWN"]
     if not non_unknown:
         state = "UNKNOWN"
-    elif resolved.policy_version >= 2 and signal is not None:
+    elif signal is not None:
         state = "OUTPERFORM" if signal > float(rules["risk_adjusted_neutral_band"]) else (
             "UNDERPERFORM" if signal < -float(rules["risk_adjusted_neutral_band"]) else "NEUTRAL"
         )
@@ -376,9 +336,7 @@ def calculate_relative_strength(
         state = "UNDERPERFORM"
     else:
         state = "NEUTRAL"
-    coverage = len(available) / len(horizons) if resolved.policy_version == 1 else (
-        sum(weights[f"{days}d"] for days in available) / sum(weights.values())
-    )
+    coverage = (sum(weights[f"{days}d"] for days in available) / sum(weights.values()))
     confidence = "HIGH" if coverage == 1 else "MEDIUM" if coverage >= 2 / 3 else "LOW"
     reasons = tuple(
         [
@@ -403,26 +361,24 @@ def calculate_relative_strength(
     for series in (asset_prices, btc_prices):
         if isinstance(series, OHLCVSeries):
             ids.append(series.ohlcv_hash)
-    legacy_adjusted = _legacy_volatility_adjusted(relative[90], asset, btc) if resolved.policy_version == 1 else None
     freshness = "CURRENT"
-    if resolved.policy_version >= 2:
-        for series in (asset, btc):
-            if isinstance(series, OHLCVSeries):
-                candles = completed_candles(series)
-                if not series.fetched_at or not candles:
-                    freshness = "UNKNOWN"
-                elif freshness != "UNKNOWN" and (
-                    datetime.fromisoformat(candles[-1].timestamp.replace("Z", "+00:00")).date()
-                    < expected_latest_completed_date(series.fetched_at)
-                ):
-                    freshness = "STALE"
+    for series in (asset, btc):
+        if isinstance(series, OHLCVSeries):
+            candles = completed_candles(series)
+            if not series.fetched_at or not candles:
+                freshness = "UNKNOWN"
+            elif freshness != "UNKNOWN" and (
+                datetime.fromisoformat(candles[-1].timestamp.replace("Z", "+00:00")).date()
+                < expected_latest_completed_date(series.fetched_at)
+            ):
+                freshness = "STALE"
     facts = RelativeStrengthFacts(
         symbol=normalized_symbol,
         current={
             **{f"relative_{days}d": relative[days] for days in horizons},
             **{f"risk_adjusted_relative_{days}d": adjusted[days] for days in horizons},
             "relative_drawdown": relative_drawdown,
-            "volatility_adjusted_excess_return": legacy_adjusted if resolved.policy_version == 1 else adjusted[90],
+            "volatility_adjusted_excess_return": (adjusted[90]),
             "pair_trend": pair_trend,
         },
         previous={},
@@ -446,23 +402,13 @@ def calculate_relative_strength(
         reasons=reasons,
         evidence_ids=facts.source_ids,
         relative_drawdown=relative_drawdown,
-        volatility_adjusted_excess_return=legacy_adjusted if resolved.policy_version == 1 else adjusted[90],
+        volatility_adjusted_excess_return=(adjusted[90]),
         pair_trend=pair_trend,
         risk_adjusted_excess_returns={f"{days}d": adjusted[days] for days in horizons},
     )
 
 
-calculate_relative_strength_factor = calculate_relative_strength
-relative_strength_factor = calculate_relative_strength
-build_relative_strength_factor = calculate_relative_strength
-relative_strength_vs_btc = calculate_relative_strength
-
-
 __all__ = [
     "RelativeStrengthFactorResult",
-    "build_relative_strength_factor",
     "calculate_relative_strength",
-    "calculate_relative_strength_factor",
-    "relative_strength_factor",
-    "relative_strength_vs_btc",
 ]

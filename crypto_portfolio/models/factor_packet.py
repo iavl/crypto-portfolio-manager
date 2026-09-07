@@ -133,8 +133,8 @@ class FactorJudgment:
         if not isinstance(value, Mapping):
             raise ValueError("factor judgment must be an object")
         allowed = {
-            "factor", "score", "confidence", "supporting_evidence_ids", "supporting_evidence",
-            "contrary_evidence_ids", "contrary_evidence", "trend", "summary",
+            "factor", "score", "confidence", "supporting_evidence_ids",
+            "contrary_evidence_ids", "trend", "summary",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -143,8 +143,8 @@ class FactorJudgment:
             factor=value.get("factor"),
             score=value.get("score"),
             confidence=value.get("confidence"),
-            supporting_evidence_ids=tuple(value.get("supporting_evidence_ids", value.get("supporting_evidence", ()))),
-            contrary_evidence_ids=tuple(value.get("contrary_evidence_ids", value.get("contrary_evidence", ()))),
+            supporting_evidence_ids=tuple(value.get("supporting_evidence_ids", ())),
+            contrary_evidence_ids=tuple(value.get("contrary_evidence_ids", ())),
             trend=value.get("trend", "UNKNOWN"),
             summary=value.get("summary", ""),
         )
@@ -220,14 +220,6 @@ class AssetFactorPacket:
         object.__setattr__(self, "evidence_ids", _ids(tuple(dict.fromkeys(ids)), "evidence_ids"))
 
     @property
-    def fundamentals_facts(self):
-        return self.fundamental_facts
-
-    @property
-    def relative_facts(self):
-        return self.relative_strength_facts
-
-    @property
     def facts(self) -> Mapping[str, FactBase | Mapping[str, Any] | None]:
         return MappingProxyType({
             "trend": self.trend_facts,
@@ -268,9 +260,6 @@ class AssetFactorPacket:
         if not isinstance(value, Mapping):
             raise ValueError("factor packet must be an object")
         return cls(**dict(value))
-
-    semantic_input = as_dict
-
 
 __all__ = [
     "AssetFactorPacket",

@@ -47,7 +47,6 @@ _TOP_LEVEL_FIELDS = {
     "chain_liveness",
     "benchmarks",
     "rebalance",
-    "scoring_weights",
     "scoring_profiles",
     "asset_scoring_profiles",
     "scoring",
@@ -80,11 +79,9 @@ _CHAIN_FINALIZED_FIELDS = {
 _HORIZON_FIELDS = {"min", "max"}
 _REBALANCE_FIELDS = {"hold_below_pp", "watch_below_pp", "high_priority_above_pp"}
 _ALLOCATION_FIELDS = {
-    "satellite_min_score",
     "satellite_entry_score",
     "satellite_exit_score",
     "satellite_full_score",
-    "core_min_score",
     "low_confidence_satellite_weight",
     "confidence_multipliers",
     "risk_multipliers",
@@ -111,20 +108,16 @@ _TREND_RULE_FIELDS = {
     "price_ma_points",
     "alignment_points",
     "return_points",
-    "drawdown_points",
     "support_points",
     "volume_points",
-    "drawdown_tolerance",
     "extension_threshold_atr",
     "extension_penalty",
 }
-_RELATIVE_RULE_FIELDS_V1 = {"positive_threshold", "negative_threshold", "horizon_weights"}
 _RELATIVE_RULE_FIELDS_V2 = {
     "horizon_weights",
     "risk_adjusted_neutral_band",
     "risk_adjusted_saturation",
 }
-_FLOW_RULE_FIELDS_V1 = {"positive_threshold", "negative_threshold"}
 _FLOW_RULE_FIELDS_V2 = {"neutral_abs_max", "strong_abs"}
 _EXECUTION_FIELDS = {
     "timeframe",
@@ -242,14 +235,6 @@ _BTC_CYCLE_REQUIRED_FIELDS = {
     "allow_cycle_context_to_change_base_score",
     "allow_cycle_context_to_increase_exposure",
 }
-_EXECUTION_COMPAT_DEFAULTS = {
-    "maximum_daily_candle_lag_days": 1,
-    "minimum_daily_coverage_ratio": 0.90,
-    "maximum_daily_gap_days": 3,
-    "maximum_zone_span_atr": 1.0,
-    "maximum_spot_close_gap_atr": 4.0,
-    "zone_quality": {"minimum_for_entry": 55.0, "high_quality": 75.0},
-}
 _OVERRIDE_FIELDS = {
     "core_symbols",
     "satellite_symbols",
@@ -321,22 +306,6 @@ def _weighted_map(value: Any, name: str) -> dict[str, float]:
     return result
 
 
-def _parse_scoring_weights(value: Any, name: str) -> dict[str, float]:
-    if not isinstance(value, dict) or not value:
-        raise PolicyError(f"{name} must be a non-empty object")
-    result: dict[str, float] = {}
-    for raw_factor, raw_weight in value.items():
-        if not isinstance(raw_factor, str) or not raw_factor.strip():
-            raise PolicyError(f"{name} keys must be non-empty strings")
-        factor = raw_factor.strip().lower()
-        if factor in result:
-            raise PolicyError(f"{name} contains duplicate key {factor}")
-        result[factor] = _fraction(raw_weight, f"{name}.{raw_factor}")
-    if not math.isclose(sum(result.values()), 1.0, abs_tol=1e-9):
-        raise PolicyError(f"{name} must sum to 1")
-    return result
-
-
 def _parse_scoring_profiles(value: Any) -> dict[str, dict[str, float]]:
     if not isinstance(value, dict) or not value:
         raise PolicyError("scoring_profiles must be a non-empty object")
@@ -399,9 +368,7 @@ def _parse_asset_scoring_profiles(value: Any, profiles: Mapping[str, Mapping[str
     return result
 
 
-def _parse_event_risk_multipliers(value: Any, *, allow_missing: bool = False) -> dict[str, float]:
-    if value is None and allow_missing:
-        return dict(_DEFAULT_EVENT_RISK_MULTIPLIERS)
+def _parse_event_risk_multipliers(value: Any) -> dict[str, float]:
     if not isinstance(value, dict):
         raise PolicyError("event_risk_multipliers must be an object")
     if set(value) != set(_EVENT_RISK_STATES):
@@ -417,13 +384,9 @@ def _parse_event_risk_multipliers(value: Any, *, allow_missing: bool = False) ->
     return result
 
 
-def _parse_core_allocation(value: Any, *, policy_version: int) -> dict[str, Any]:
+def _parse_core_allocation(value: Any) -> dict[str, Any]:
     if value is None:
-        if policy_version < 3:
-            return {}
-        raise PolicyError("core_allocation is required for policy v3+")
-    if policy_version < 3:
-        raise PolicyError("core_allocation is only supported by policy v3+")
+        raise PolicyError("core_allocation is required for policy v3")
     if not isinstance(value, dict):
         raise PolicyError("core_allocation must be an object")
     _unknown_fields(value, _CORE_ALLOCATION_FIELDS, "core_allocation")
@@ -517,9 +480,6 @@ class Policy:
     event_risk_multipliers: Mapping[str, float]
     core_allocation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
-    _execution_omitted_fields: frozenset[str] = dataclass_field(
-        default_factory=frozenset, repr=False, compare=False
-    )
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
     factor_rules: Mapping[str, Any] = dataclass_field(default_factory=dict)
     positioning: Mapping[str, Any] = dataclass_field(default_factory=dict)
@@ -527,22 +487,10 @@ class Policy:
     execution_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     events: Mapping[str, Any] = dataclass_field(default_factory=dict)
     chain_liveness: Mapping[str, Any] = dataclass_field(default_factory=dict)
-    legacy_scoring_weights: Mapping[str, float] | None = dataclass_field(
-        default=None, repr=False, compare=False
-    )
-
-    @property
-    def scoring_weights(self) -> Mapping[str, float]:
-        """Compatibility view; v2 storage is owned by scoring_profiles."""
-        if self.policy_version == 1:
-            return self.legacy_scoring_weights or self.scoring_profiles.get("legacy", {})
-        return self.scoring_profiles["default"]
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
             raise PolicyError("symbol must be a non-empty string")
-        if self.policy_version == 1:
-            return "legacy"
         return self.asset_scoring_profiles.get(symbol.strip().upper(), "default")
 
     def scoring_profile(self, symbol: str) -> Mapping[str, float]:
@@ -551,18 +499,6 @@ class Policy:
             return self.scoring_profiles[name]
         except KeyError as exc:
             raise PolicyError(f"unknown scoring profile: {name}") from exc
-
-    @property
-    def core(self) -> tuple[str, ...]:
-        return self.core_symbols
-
-    @property
-    def satellites(self) -> tuple[str, ...]:
-        return self.satellite_symbols
-
-    @property
-    def stable(self) -> tuple[str, ...]:
-        return self.stable_symbols
 
     @property
     def canonical_hash(self) -> str:
@@ -617,14 +553,11 @@ class Policy:
             },
             "allocation": dict(self.allocation),
         }
-        if self.policy_version == 1:
-            result["scoring_weights"] = dict(self.scoring_weights)
-        else:
-            result["scoring_profiles"] = {
-                name: dict(weights) for name, weights in self.scoring_profiles.items()
-            }
-            result["asset_scoring_profiles"] = dict(self.asset_scoring_profiles)
-            result["event_risk_multipliers"] = dict(self.event_risk_multipliers)
+        result["scoring_profiles"] = {
+            name: dict(weights) for name, weights in self.scoring_profiles.items()
+        }
+        result["asset_scoring_profiles"] = dict(self.asset_scoring_profiles)
+        result["event_risk_multipliers"] = dict(self.event_risk_multipliers)
         if self.volume_profile:
             result["volume_profile"] = dict(self.volume_profile)
         if self.factor_rules:
@@ -634,8 +567,6 @@ class Policy:
             }
         if self.execution:
             execution = dict(self.execution)
-            for field in self._execution_omitted_fields:
-                execution.pop(field, None)
             result["execution"] = execution
         if self.positioning:
             result["positioning"] = _copy_mapping(self.positioning)
@@ -651,25 +582,19 @@ class Policy:
             result["core_allocation"] = _copy_mapping(self.core_allocation)
         return result
 
-    def legacy_config(self) -> dict[str, Any]:
-        """Return the old snapshot config shape for compatibility output."""
-        return {
-            "core_symbols": list(self.core_symbols),
-            "satellite_symbols": list(self.satellite_symbols),
-            "stable_symbols": list(self.stable_symbols),
-            "min_stablecoin_weight": self.min_stablecoin_weight,
-            "max_portfolio_drawdown": self.max_portfolio_drawdown,
-        }
-
-    as_config = legacy_config
-
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
         if overrides is None:
             return self
         if not isinstance(overrides, Mapping):
             raise PolicyError("config must be an object")
         _unknown_fields(overrides, _OVERRIDE_FIELDS, "config")
-        values = self.legacy_config()
+        values = {
+            "core_symbols": list(self.core_symbols),
+            "satellite_symbols": list(self.satellite_symbols),
+            "stable_symbols": list(self.stable_symbols),
+            "min_stablecoin_weight": self.min_stablecoin_weight,
+            "max_portfolio_drawdown": self.max_portfolio_drawdown,
+        }
         for field in _OVERRIDE_FIELDS:
             if field in overrides:
                 values[field] = overrides[field]
@@ -722,9 +647,7 @@ def _integer_list(value: Any, name: str, *, exact: tuple[int, ...] | None = None
     return result
 
 
-def _parse_volume_profile(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_volume_profile(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("volume_profile must be an object")
     _unknown_fields(value, _VOLUME_PROFILE_FIELDS, "volume_profile")
@@ -784,17 +707,13 @@ def _parse_volume_profile(value: Any, *, allow_missing: bool = False) -> dict[st
     }
 
 
-def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_execution(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("execution must be an object")
     _unknown_fields(value, _EXECUTION_FIELDS, "execution")
     missing = _EXECUTION_FIELDS - set(value)
-    unsupported_missing = missing - set(_EXECUTION_COMPAT_DEFAULTS)
-    if unsupported_missing:
-        raise PolicyError(f"execution fields are incomplete: {', '.join(sorted(unsupported_missing))}")
-    value = {**_EXECUTION_COMPAT_DEFAULTS, **value}
+    if missing:
+        raise PolicyError(f"execution fields are incomplete: {', '.join(sorted(missing))}")
     timeframe = value["timeframe"]
     if not isinstance(timeframe, str) or timeframe.strip().upper() != "1D":
         raise PolicyError("execution.timeframe must be 1D")
@@ -979,10 +898,8 @@ def _parse_execution(value: Any, *, allow_missing: bool = False) -> dict[str, An
 
 
 def _parse_factor_rules(
-    value: Any, *, policy_version: int, allow_missing: bool = False
+    value: Any
 ) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
     if not isinstance(value, dict):
         raise PolicyError("factor_rules must be an object")
     _unknown_fields(value, _FACTOR_RULE_FIELDS, "factor_rules")
@@ -1002,84 +919,56 @@ def _parse_factor_rules(
     parsed_trend["base_score"] = _number(
         trend["base_score"], "factor_rules.trend.base_score", minimum=0.0, maximum=100.0
     )
-    parsed_trend["drawdown_tolerance"] = _number(
-        trend["drawdown_tolerance"],
-        "factor_rules.trend.drawdown_tolerance",
-        minimum=0.0,
-        maximum=1.0,
-    )
     if parsed_trend["extension_threshold_atr"] <= 0:
         raise PolicyError("factor_rules.trend.extension_threshold_atr must be > 0")
 
     relative = value["relative_strength"]
     if not isinstance(relative, dict):
         raise PolicyError("factor_rules.relative_strength must be an object")
-    relative_fields = _RELATIVE_RULE_FIELDS_V1 if policy_version == 1 else _RELATIVE_RULE_FIELDS_V2
+    relative_fields = _RELATIVE_RULE_FIELDS_V2
     _unknown_fields(relative, relative_fields, "factor_rules.relative_strength")
     if set(relative) != relative_fields:
         raise PolicyError("factor_rules.relative_strength fields are incomplete")
     horizon_weights = _weighted_map(relative["horizon_weights"], "factor_rules.relative_strength.horizon_weights")
     expected_horizons = {"30d", "90d", "180d"}
-    if policy_version >= 3:
-        expected_horizons.add("365d")
+    expected_horizons.add("365d")
     if set(horizon_weights) != expected_horizons:
         names = ", ".join(sorted(expected_horizons))
         raise PolicyError(f"factor_rules.relative_strength.horizon_weights must contain {names}")
-    if policy_version == 1:
-        positive = _number(relative["positive_threshold"], "factor_rules.relative_strength.positive_threshold")
-        negative = _number(relative["negative_threshold"], "factor_rules.relative_strength.negative_threshold")
-        if negative > positive or negative > 0 or positive < 0:
-            raise PolicyError("relative-strength thresholds must satisfy negative <= 0 <= positive")
-        parsed_relative = {
-            "positive_threshold": positive,
-            "negative_threshold": negative,
-            "horizon_weights": horizon_weights,
-        }
-    else:
-        neutral_band = _number(
-            relative["risk_adjusted_neutral_band"],
-            "factor_rules.relative_strength.risk_adjusted_neutral_band",
-            minimum=0.0,
+    neutral_band = _number(
+        relative["risk_adjusted_neutral_band"],
+        "factor_rules.relative_strength.risk_adjusted_neutral_band",
+        minimum=0.0,
+    )
+    saturation = _number(
+        relative["risk_adjusted_saturation"],
+        "factor_rules.relative_strength.risk_adjusted_saturation",
+        minimum=neutral_band,
+    )
+    if saturation <= neutral_band:
+        raise PolicyError(
+            "factor_rules.relative_strength.risk_adjusted_saturation must exceed neutral_band"
         )
-        saturation = _number(
-            relative["risk_adjusted_saturation"],
-            "factor_rules.relative_strength.risk_adjusted_saturation",
-            minimum=neutral_band,
-        )
-        if saturation <= neutral_band:
-            raise PolicyError(
-                "factor_rules.relative_strength.risk_adjusted_saturation must exceed neutral_band"
-            )
-        parsed_relative = {
-            "horizon_weights": horizon_weights,
-            "risk_adjusted_neutral_band": neutral_band,
-            "risk_adjusted_saturation": saturation,
-        }
+    parsed_relative = {
+        "horizon_weights": horizon_weights,
+        "risk_adjusted_neutral_band": neutral_band,
+        "risk_adjusted_saturation": saturation,
+    }
 
     flows = value["flows"]
     if not isinstance(flows, dict):
         raise PolicyError("factor_rules.flows must be an object")
-    flow_fields = _FLOW_RULE_FIELDS_V1 if policy_version == 1 else _FLOW_RULE_FIELDS_V2
+    flow_fields = _FLOW_RULE_FIELDS_V2
     _unknown_fields(flows, flow_fields, "factor_rules.flows")
     if set(flows) != flow_fields:
         raise PolicyError("factor_rules.flows fields are incomplete")
-    if policy_version == 1:
-        flow_positive = _number(flows["positive_threshold"], "factor_rules.flows.positive_threshold")
-        flow_negative = _number(flows["negative_threshold"], "factor_rules.flows.negative_threshold")
-        if flow_negative > flow_positive or flow_negative > 0 or flow_positive < 0:
-            raise PolicyError("flow thresholds must satisfy negative <= 0 <= positive")
-        parsed_flows = {
-            "positive_threshold": flow_positive,
-            "negative_threshold": flow_negative,
-        }
-    else:
-        neutral_abs_max = _number(
-            flows["neutral_abs_max"], "factor_rules.flows.neutral_abs_max", minimum=0.0
-        )
-        strong_abs = _number(flows["strong_abs"], "factor_rules.flows.strong_abs", minimum=neutral_abs_max)
-        if strong_abs <= neutral_abs_max:
-            raise PolicyError("factor_rules.flows.strong_abs must exceed neutral_abs_max")
-        parsed_flows = {"neutral_abs_max": neutral_abs_max, "strong_abs": strong_abs}
+    neutral_abs_max = _number(
+        flows["neutral_abs_max"], "factor_rules.flows.neutral_abs_max", minimum=0.0
+    )
+    strong_abs = _number(flows["strong_abs"], "factor_rules.flows.strong_abs", minimum=neutral_abs_max)
+    if strong_abs <= neutral_abs_max:
+        raise PolicyError("factor_rules.flows.strong_abs must exceed neutral_abs_max")
+    parsed_flows = {"neutral_abs_max": neutral_abs_max, "strong_abs": strong_abs}
     return {
         "trend": parsed_trend,
         "relative_strength": parsed_relative,
@@ -1094,9 +983,7 @@ def _positive_integer(value: Any, name: str) -> int:
     return int(number)
 
 
-def _parse_positioning(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_positioning(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("positioning must be an object")
     _unknown_fields(value, _POSITIONING_FIELDS, "positioning")
@@ -1240,9 +1127,7 @@ def _parse_positioning(value: Any, *, allow_missing: bool = False) -> dict[str, 
     }
 
 
-def _parse_btc_cycle(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_btc_cycle(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("btc_cycle must be an object")
     _unknown_fields(value, _BTC_CYCLE_FIELDS, "btc_cycle")
@@ -1346,9 +1231,7 @@ def _parse_btc_cycle(value: Any, *, allow_missing: bool = False) -> dict[str, An
     }
 
 
-def _parse_execution_overlay(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_execution_overlay(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("execution_overlay must be an object")
     _unknown_fields(value, _EXECUTION_OVERLAY_FIELDS, "execution_overlay")
@@ -1381,9 +1264,7 @@ def _parse_execution_overlay(value: Any, *, allow_missing: bool = False) -> dict
     return {"positioning": positioning, "btc_cycle": cycle, "wait": {"enabled": wait["enabled"], "minimum_extension_atr": extension}}
 
 
-def _parse_events(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_events(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("events must be an object")
     _unknown_fields(value, _EVENTS_FIELDS, "events")
@@ -1417,9 +1298,7 @@ def _parse_events(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
     }
 
 
-def _parse_chain_liveness(value: Any, *, allow_missing: bool = False) -> dict[str, Any]:
-    if value is None and allow_missing:
-        return {}
+def _parse_chain_liveness(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("chain_liveness must be an object")
     _unknown_fields(value, _CHAIN_LIVENESS_FIELDS, "chain_liveness")
@@ -1482,38 +1361,14 @@ def _parse_chain_liveness(value: Any, *, allow_missing: bool = False) -> dict[st
 
 def _parse_policy(
     data: Any,
-    *,
-    allow_missing_execution: bool = False,
-    allow_missing_volume_profile: bool = False,
-    allow_missing_factor_rules: bool = False,
-    allow_missing_overlays: bool = False,
-    allow_missing_events: bool = False,
-    allow_missing_chain_liveness: bool = False,
 ) -> Policy:
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
     _unknown_fields(data, _TOP_LEVEL_FIELDS, "policy")
     version = data.get("policy_version")
-    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-        raise PolicyError("policy_version must be a positive integer")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 3:
+        raise PolicyError("policy_version must be 3")
     missing = set(_TOP_LEVEL_FIELDS - set(data))
-    missing.difference_update({"scoring_weights", "scoring_profiles", "asset_scoring_profiles"})
-    if version == 1:
-        missing.discard("event_risk_multipliers")
-    if version < 3:
-        missing.discard("core_allocation")
-    if allow_missing_execution:
-        missing.discard("execution")
-    if allow_missing_volume_profile:
-        missing.discard("volume_profile")
-    if allow_missing_factor_rules:
-        missing.discard("factor_rules")
-    if allow_missing_overlays:
-        missing.difference_update({"positioning", "btc_cycle", "execution_overlay"})
-    if allow_missing_events:
-        missing.discard("events")
-    if allow_missing_chain_liveness:
-        missing.discard("chain_liveness")
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -1571,20 +1426,10 @@ def _parse_policy(
     ):
         raise PolicyError("rebalance thresholds must be strictly ordered")
 
-    if version == 1:
-        if "scoring_profiles" in data or "asset_scoring_profiles" in data:
-            raise PolicyError("v1 policies must use scoring_weights")
-        parsed_legacy_scores = _parse_scoring_weights(data.get("scoring_weights"), "scoring_weights")
-        parsed_profiles = {"legacy": parsed_legacy_scores}
-        parsed_asset_profiles: dict[str, str] = {}
-    else:
-        if "scoring_weights" in data:
-            raise PolicyError("v2 policies must use scoring_profiles")
-        parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
-        parsed_asset_profiles = _parse_asset_scoring_profiles(
-            data.get("asset_scoring_profiles"), parsed_profiles
-        )
-        parsed_legacy_scores = None
+    parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
+    parsed_asset_profiles = _parse_asset_scoring_profiles(
+        data.get("asset_scoring_profiles"), parsed_profiles
+    )
 
     scoring = data["scoring"]
     if not isinstance(scoring, dict):
@@ -1604,17 +1449,15 @@ def _parse_policy(
 
     parsed_factor_rules = _parse_factor_rules(
         data.get("factor_rules"),
-        policy_version=version,
-        allow_missing=allow_missing_factor_rules,
     )
-    parsed_positioning = _parse_positioning(data.get("positioning"), allow_missing=allow_missing_overlays)
-    parsed_btc_cycle = _parse_btc_cycle(data.get("btc_cycle"), allow_missing=allow_missing_overlays)
+    parsed_positioning = _parse_positioning(data.get("positioning"))
+    parsed_btc_cycle = _parse_btc_cycle(data.get("btc_cycle"))
     parsed_execution_overlay = _parse_execution_overlay(
-        data.get("execution_overlay"), allow_missing=allow_missing_overlays
+        data.get("execution_overlay")
     )
-    parsed_events = _parse_events(data.get("events"), allow_missing=allow_missing_events)
+    parsed_events = _parse_events(data.get("events"))
     parsed_chain_liveness = _parse_chain_liveness(
-        data.get("chain_liveness"), allow_missing=allow_missing_chain_liveness
+        data.get("chain_liveness")
     )
 
     regimes = data["regimes"]
@@ -1643,14 +1486,11 @@ def _parse_policy(
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
     common_allocation_fields = {
         "satellite_full_score",
-        "core_min_score",
         "low_confidence_satellite_weight",
         "confidence_multipliers",
         "risk_multipliers",
     }
-    score_fields = {"satellite_min_score"} if version == 1 else {
-        "satellite_entry_score", "satellite_exit_score"
-    }
+    score_fields = {"satellite_entry_score", "satellite_exit_score"}
     expected_allocation_fields = common_allocation_fields | score_fields
     if set(allocation) != expected_allocation_fields:
         raise PolicyError("allocation fields are incomplete")
@@ -1676,9 +1516,6 @@ def _parse_policy(
         "satellite_full_score": _number(
             allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100
         ),
-        "core_min_score": _number(
-            allocation["core_min_score"], "allocation.core_min_score", minimum=0, maximum=100
-        ),
         "low_confidence_satellite_weight": _fraction(
             allocation["low_confidence_satellite_weight"],
             "allocation.low_confidence_satellite_weight",
@@ -1686,47 +1523,37 @@ def _parse_policy(
         "confidence_multipliers": parsed_confidence_multipliers,
         "risk_multipliers": parsed_risk_multipliers,
     }
-    if version == 1:
-        parsed_allocation["satellite_min_score"] = _number(
-            allocation["satellite_min_score"],
-            "allocation.satellite_min_score",
-            minimum=0,
-            maximum=100,
+    parsed_allocation["satellite_entry_score"] = _number(
+        allocation["satellite_entry_score"],
+        "allocation.satellite_entry_score",
+        minimum=0,
+        maximum=100,
+    )
+    parsed_allocation["satellite_exit_score"] = _number(
+        allocation["satellite_exit_score"],
+        "allocation.satellite_exit_score",
+        minimum=0,
+        maximum=100,
+    )
+    if not (
+        parsed_allocation["satellite_exit_score"]
+        < parsed_allocation["satellite_entry_score"]
+        < parsed_allocation["satellite_full_score"]
+    ):
+        raise PolicyError(
+            "allocation satellite scores must satisfy exit < entry < full"
         )
-        if parsed_allocation["satellite_full_score"] <= parsed_allocation["satellite_min_score"]:
-            raise PolicyError("allocation.satellite_full_score must exceed satellite_min_score")
-    else:
-        parsed_allocation["satellite_entry_score"] = _number(
-            allocation["satellite_entry_score"],
-            "allocation.satellite_entry_score",
-            minimum=0,
-            maximum=100,
-        )
-        parsed_allocation["satellite_exit_score"] = _number(
-            allocation["satellite_exit_score"],
-            "allocation.satellite_exit_score",
-            minimum=0,
-            maximum=100,
-        )
-        if not (
-            parsed_allocation["satellite_exit_score"]
-            < parsed_allocation["satellite_entry_score"]
-            < parsed_allocation["satellite_full_score"]
-        ):
-            raise PolicyError(
-                "allocation satellite scores must satisfy exit < entry < full"
-            )
 
     parsed_event_risk_multipliers = _parse_event_risk_multipliers(
-        data.get("event_risk_multipliers"), allow_missing=version == 1
+        data.get("event_risk_multipliers")
     )
     parsed_core_allocation = _parse_core_allocation(
-        data.get("core_allocation"), policy_version=version
+        data.get("core_allocation")
     )
 
-    parsed_execution = _parse_execution(data.get("execution"), allow_missing=allow_missing_execution)
+    parsed_execution = _parse_execution(data.get("execution"))
     parsed_volume_profile = _parse_volume_profile(
-        data.get("volume_profile"), allow_missing=allow_missing_volume_profile
+        data.get("volume_profile")
     )
     policy = Policy(
         policy_version=version,
@@ -1759,29 +1586,7 @@ def _parse_policy(
         execution_overlay=parsed_execution_overlay,
         events=parsed_events,
         chain_liveness=parsed_chain_liveness,
-        legacy_scoring_weights=parsed_legacy_scores,
     )
-    raw_execution = data.get("execution")
-    omitted = (
-        frozenset(_EXECUTION_FIELDS - set(raw_execution))
-        if isinstance(raw_execution, dict)
-        else frozenset(_EXECUTION_FIELDS)
-    )
-    object.__setattr__(policy, "_execution_omitted_fields", omitted)
-    if "volume_profile" not in data:
-        object.__setattr__(policy, "volume_profile", {})
-    if "factor_rules" not in data:
-        object.__setattr__(policy, "factor_rules", {})
-    if "positioning" not in data:
-        object.__setattr__(policy, "positioning", {})
-    if "btc_cycle" not in data:
-        object.__setattr__(policy, "btc_cycle", {})
-    if "execution_overlay" not in data:
-        object.__setattr__(policy, "execution_overlay", {})
-    if "events" not in data:
-        object.__setattr__(policy, "events", {})
-    if "chain_liveness" not in data:
-        object.__setattr__(policy, "chain_liveness", {})
     return policy
 
 
@@ -1798,16 +1603,8 @@ def load_policy(
 
 
 def policy_from_mapping(data: Mapping[str, Any]) -> Policy:
-    """Parse an embedded resolved policy for historical-state replay."""
-    return _parse_policy(
-        dict(data),
-        allow_missing_execution=True,
-        allow_missing_volume_profile=True,
-        allow_missing_factor_rules=True,
-        allow_missing_overlays=True,
-        allow_missing_events=True,
-        allow_missing_chain_liveness=True,
-    )
+    """Parse an embedded resolved policy record."""
+    return _parse_policy(dict(data))
 
 
 def resolve_policy(
@@ -1816,34 +1613,6 @@ def resolve_policy(
     return load_policy(path, overrides)
 
 
-def legacy_policy() -> Policy:
-    """Return the built-in v1 policy shape for records without a snapshot policy."""
-    data = load_policy().as_dict()
-    data["policy_version"] = 1
-    data["scoring_weights"] = {
-        "trend": 0.25,
-        "valuation": 0.20,
-        "fundamentals": 0.20,
-        "onchain": 0.10,
-        "capital_flows": 0.10,
-        "relative_strength_btc": 0.10,
-        "event_risk": 0.05,
-    }
-    data.pop("scoring_profiles", None)
-    data.pop("asset_scoring_profiles", None)
-    data.pop("event_risk_multipliers", None)
-    data.pop("core_allocation", None)
-    data["factor_rules"]["relative_strength"] = {
-        "positive_threshold": 0.05,
-        "negative_threshold": -0.05,
-        "horizon_weights": {"30d": 0.2, "90d": 0.4, "180d": 0.4},
-    }
-    data["factor_rules"]["flows"] = {"positive_threshold": 0.0, "negative_threshold": 0.0}
-    allocation = data["allocation"]
-    allocation["satellite_min_score"] = 65
-    allocation.pop("satellite_entry_score", None)
-    allocation.pop("satellite_exit_score", None)
-    return _parse_policy(data)
 
 
 def policy_hash(policy: Policy | Mapping[str, Any]) -> str:
@@ -1859,7 +1628,6 @@ __all__ = [
     "RegimeLimits",
     "SCORING_FACTORS",
     "load_policy",
-    "legacy_policy",
     "policy_hash",
     "policy_from_mapping",
     "resolve_policy",

@@ -149,11 +149,6 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     return ()
 
 
-resolve_provider_chain = provider_chain
-provider_priority = provider_chain
-get_provider_chain = provider_chain
-
-
 def dataset_for_metric(metric_key: str) -> str:
     key = normalize_metric_key(metric_key)
     if key == "market.spot_price":
@@ -361,7 +356,4 @@ __all__ = [
     "metric_is_mutable",
     "metric_reuse_ttl_seconds",
     "provider_chain",
-    "provider_priority",
-    "get_provider_chain",
-    "resolve_provider_chain",
 ]

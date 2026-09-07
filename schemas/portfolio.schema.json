@@ -1,20 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/crypto-portfolio-manager/portfolio.schema.json",
-  "title": "Crypto Portfolio Input (compatibility contract)",
+  "title": "Crypto Portfolio Input",
   "type": "object",
   "required": ["timestamp", "base_currency", "positions"],
   "properties": {
     "timestamp": {"type": "string", "format": "date-time"},
     "source": {"type": ["string", "null"]},
     "base_currency": {"type": "string"},
-    "policy_version": {"type": "integer", "minimum": 1},
+    "policy_version": {"const": 3},
     "external_cash_flow": {"type": "number"},
-    "external_cash_flow_usd": {"type": "number"},
     "external_cash_flow_type": {"enum": ["NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"]},
     "total_value": {"type": ["number", "null"], "minimum": 0},
-    "reported_total_value": {"type": ["number", "null"], "minimum": 0},
-    "portfolio_peak_value": {"type": ["number", "null"], "minimum": 0},
     "config": {
       "type": "object",
       "properties": {
@@ -71,7 +68,6 @@
             "enum": ["core", "satellite", "stablecoin", "cash", "other", null]
           },
           "asset_type": {
-            "description": "Legacy input alias treated as a validated classification hint.",
             "type": "string",
             "enum": ["core", "satellite", "stablecoin", "cash", "other"]
           }

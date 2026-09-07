@@ -29,7 +29,7 @@ def _bool(value: Any, field: str) -> bool:
 
 
 def _score(assessment: Any) -> float:
-    raw = _field(assessment, "weighted_score", _field(assessment, "score", 50.0))
+    raw = _field(assessment, "weighted_score", 50.0)
     if raw is None:
         raw = 50.0
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
@@ -56,8 +56,6 @@ def _event_state(assessment: Any) -> str:
     else:
         state = raw
     state = str(state or "NORMAL").strip().upper()
-    if _bool(_field(assessment, "severe_event", False), "severe_event") and state not in {"SEVERE", "CRITICAL"}:
-        state = "SEVERE"
     if state not in {"NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"}:
         raise ValueError("core assessment event_risk is unsupported")
     return state
@@ -65,9 +63,7 @@ def _event_state(assessment: Any) -> str:
 
 def relative_strength_score(assessment: Any) -> float | None:
     """Normalize the explicit ETH/BTC opportunity score to 0..100."""
-    raw = _field(assessment, "relative_strength_score", None)
-    if raw is None:
-        raw = _field(assessment, "relative_strength_vs_btc", _field(assessment, "relative_strength", None))
+    raw = _field(assessment, "relative_strength_vs_btc")
     if raw is None and isinstance(assessment, AssetAssessment):
         factor = assessment.factor_scores.get("relative_strength_btc")
         raw = factor.score if hasattr(factor, "score") else factor
@@ -80,24 +76,17 @@ def relative_strength_score(assessment: Any) -> float | None:
         return None
     if isinstance(raw, str):
         mapping = {
-            "STRONG": 70.0,
             "OUTPERFORM": 70.0,
-            "POSITIVE": 70.0,
             "NEUTRAL": 50.0,
-            "WEAK": 30.0,
             "UNDERPERFORM": 30.0,
-            "NEGATIVE": 30.0,
             "MATERIALLY_WEAK": 20.0,
-            "MATERIAL_WEAK": 20.0,
             "UNKNOWN": None,
-            "MISSING": None,
-            "UNAVAILABLE": None,
         }
         if raw.strip().upper() not in mapping:
             raise ValueError("relative_strength_vs_btc is unsupported")
         return mapping[raw.strip().upper()]
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        raise ValueError("relative_strength_vs_btc must be numeric or a known state")
+        raise ValueError("relative_strength_vs_btc must be numeric or a supported state")
     result = float(raw)
     if not math.isfinite(result):
         raise ValueError("relative_strength_vs_btc must be finite")
@@ -112,7 +101,7 @@ def _structural_state(value: Any) -> str:
     if value is None:
         return "UNKNOWN"
     if isinstance(value, Mapping):
-        value = value.get("state", value.get("status", value.get("value")))
+        value = value.get("state")
     elif hasattr(value, "state"):
         value = value.state
     state = str(value).strip().upper()
@@ -132,8 +121,8 @@ def eth_core_eligibility(
 ) -> str:
     """Return the v3 ETH core state without changing the base score."""
     resolved = policy or resolve_policy()
-    if resolved.policy_version < 3:
-        raise ValueError("ETH core eligibility requires policy v3+")
+    if resolved.policy_version != 3:
+        raise ValueError("ETH core eligibility requires policy v3")
     if isinstance(current_weight, bool) or not isinstance(current_weight, (int, float)) or not math.isfinite(float(current_weight)) or current_weight < 0:
         raise ValueError("current_weight must be finite and >= 0")
     assessment = assessment or {}
@@ -142,9 +131,9 @@ def eth_core_eligibility(
     event = _event_state(assessment)
     if event in {"SEVERE", "CRITICAL"}:
         return "INELIGIBLE"
-    liveness = chain_liveness or _field(assessment, "chain_liveness_status", _field(assessment, "chain_liveness"))
+    liveness = chain_liveness
     if isinstance(liveness, Mapping):
-        liveness = liveness.get("status", liveness.get("value", liveness.get("chain_liveness_status")))
+        liveness = liveness.get("status")
     if liveness is not None and str(liveness).strip().upper() == "HALTED":
         return "INELIGIBLE"
     if _structural_state(structural_risk or _field(assessment, "structural_risk")) in {"SEVERE", "CRITICAL", "HALTED", "CONFLICT"}:
@@ -176,8 +165,4 @@ def eth_core_eligibility(
     return "ELIGIBLE_INCREASE"
 
 
-def core_eligibility(*args: Any, **kwargs: Any) -> str:
-    return eth_core_eligibility(*args, **kwargs)
-
-
-__all__ = ["CORE_ELIGIBILITY_STATES", "core_eligibility", "eth_core_eligibility", "relative_strength_score"]
+__all__ = ["CORE_ELIGIBILITY_STATES", "eth_core_eligibility", "relative_strength_score"]

@@ -36,7 +36,7 @@ def _score(value: Any, symbol: str) -> float:
         raise ValueError("typed assessment must be scored before allocation")
     else:
         if isinstance(value, Mapping):
-            raw = value.get("weighted_score", value.get("score", 50.0))
+            raw = value.get("weighted_score", 50.0)
             if raw is None:
                 raw = 50.0
         else:
@@ -49,7 +49,7 @@ def _score(value: Any, symbol: str) -> float:
     return raw
 
 
-def _field(value: Any, name: str, default: Any) -> Any:
+def _field(value: Any, name: str, default: Any = None) -> Any:
     return value.get(name, default) if isinstance(value, Mapping) else getattr(value, name, default)
 
 
@@ -75,13 +75,17 @@ def _relative_eligibility(value: Any) -> str:
         return "HOLD_ONLY"
     if isinstance(value, str):
         state = value.strip().upper()
-        if state in {"", "UNKNOWN", "UNAVAILABLE", "MISSING", "N/A"}:
+        if state in {"", "UNKNOWN"}:
             return "HOLD_ONLY"
-        return "INELIGIBLE" if state in {"WEAK", "NEGATIVE", "BEARISH", "UNDERPERFORM"} else "ELIGIBLE"
+        if state in {"UNDERPERFORM", "MATERIALLY_WEAK"}:
+            return "INELIGIBLE"
+        if state in {"OUTPERFORM", "NEUTRAL"}:
+            return "ELIGIBLE"
+        raise ValueError("relative_strength_vs_btc is unsupported")
     try:
         value = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("relative_strength_vs_btc must be numeric or a known state") from exc
+        raise ValueError("relative_strength_vs_btc must be numeric or a supported state") from exc
     if not math.isfinite(value):
         raise ValueError("relative_strength_vs_btc must be finite")
     return "ELIGIBLE" if value >= 0 else "INELIGIBLE"
@@ -90,7 +94,10 @@ def _relative_eligibility(value: Any) -> str:
 def _relative_multiplier(value: Any) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return 0.5 + min(1.0, max(0.0, float(value))) * 0.5
-    return 1.0 if str(value).strip().upper() in {"STRONG", "OUTPERFORM", "POSITIVE", "HEALTHY"} else 0.75
+    state = str(value).strip().upper()
+    if state not in {"OUTPERFORM", "NEUTRAL", "UNDERPERFORM", "MATERIALLY_WEAK"}:
+        raise ValueError("relative_strength_vs_btc is unsupported")
+    return 1.0 if state == "OUTPERFORM" else 0.75
 
 
 def _core_quality_multiplier(score: float) -> float:
@@ -103,9 +110,9 @@ def _btc_core_state(assessment: Any) -> str:
     event = _event_risk_state(assessment)
     if event in {"SEVERE", "CRITICAL"}:
         return "INELIGIBLE"
-    liveness = _field(assessment, "chain_liveness_status", _field(assessment, "chain_liveness", None))
+    liveness = _field(assessment, "chain_liveness")
     if isinstance(liveness, Mapping):
-        liveness = liveness.get("status", liveness.get("value"))
+        liveness = liveness.get("status")
     if liveness is not None and str(liveness).strip().upper() in {"HALTED", "UNKNOWN", "FAILED", "CONFLICT"}:
         return "HOLD_ONLY"
     if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
@@ -122,9 +129,9 @@ def _core_relative_multiplier(value: Any, policy: Policy) -> float:
             raise ValueError("ETH relative score must be finite and in [0, 100]")
         return min(1.25, max(0.75, 1.0 + 0.25 * ((score - 50.0) / 50.0)))
     state = str(value or "neutral").strip().lower()
-    aliases = {"outperform": "strong", "positive": "strong", "underperform": "weak", "negative": "weak"}
-    state = aliases.get(state, state)
-    return float(policy.core_allocation["relative_multipliers"].get(state, policy.core_allocation["relative_multipliers"]["neutral"]))
+    if state not in policy.core_allocation["relative_multipliers"]:
+        raise ValueError(f"unknown ETH relative-strength state: {state}")
+    return float(policy.core_allocation["relative_multipliers"][state])
 
 
 def _allocate_core_v3(
@@ -158,11 +165,7 @@ def _allocate_core_v3(
                 chain_liveness=(chain_liveness or {}).get(symbol),
                 structural_risk=supplied_structural,
             )
-            raw_relative = _field(
-                assessment,
-                "relative_strength_score",
-                _field(assessment, "relative_strength_vs_btc", _field(assessment, "relative_strength", None)),
-            ) if assessment is not None else None
+            raw_relative = _field(assessment, "relative_strength_vs_btc") if assessment is not None else None
             relative = relative_strength_score(assessment) if assessment is not None else None
             relative_multiplier = _core_relative_multiplier(
                 raw_relative if isinstance(raw_relative, str) else relative,
@@ -209,6 +212,8 @@ def _allocate_core_v3(
 
 
 def _event_risk_state(value: Any) -> str:
+    if isinstance(value, Mapping) and "severe_event" in value:
+        raise ValueError("severe_event is unsupported; use event_risk.state")
     raw = _field(value, "event_risk", None)
     if isinstance(raw, EventRiskAssessment):
         raw = raw.state
@@ -218,10 +223,8 @@ def _event_risk_state(value: Any) -> str:
         state = str(raw).strip().upper()
         if state not in {"NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"}:
             raise ValueError("event_risk.state is unsupported")
-        if _flag(_field(value, "severe_event", False), "severe_event") and state not in {"SEVERE", "CRITICAL"}:
-            return "SEVERE"
         return state
-    return "SEVERE" if _flag(_field(value, "severe_event", False), "severe_event") else "NORMAL"
+    return "NORMAL"
 
 
 def _event_risk_multiplier(state: str, policy: Policy) -> float:
@@ -243,22 +246,12 @@ def satellite_eligibility(
     if isinstance(assessment, AssetAssessment) and assessment.weighted_score is None:
         assessment, _ = score_assessment(assessment, policy=resolved)
     score = _score(assessment, "satellite") if assessment is not None else 50.0
-    relative = (
-        _field(
-            assessment,
-            "relative_strength_vs_btc",
-            _field(assessment, "relative_strength", None),
-        )
-        if assessment is not None
-        else None
-    )
+    relative = _field(assessment, "relative_strength_vs_btc") if assessment is not None else None
     if isinstance(current_weight, bool) or not isinstance(current_weight, (int, float)):
         raise ValueError("current_weight must be numeric")
     if not math.isfinite(float(current_weight)) or current_weight < 0:
         raise ValueError("current_weight must be finite and >= 0")
-    entry_score = resolved.allocation.get(
-        "satellite_entry_score", resolved.allocation.get("satellite_min_score")
-    )
+    entry_score = resolved.allocation["satellite_entry_score"]
     exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
     if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
         _field(assessment, "thesis_broken", False), "thesis_broken"
@@ -382,7 +375,6 @@ def build_target_allocation(
 
     satellite_raw: dict[str, float] = {}
     satellite_hold: dict[str, float] = {}
-    core_raw: dict[str, float] = {}
     core_assessments: dict[str, Any] = {}
     for symbol in candidates:
         asset_type = resolved.classify(symbol)
@@ -402,19 +394,10 @@ def build_target_allocation(
             )
         score = _score(assessment, symbol) if assessment is not None else 50.0
         confidence = _confidence(_field(assessment, "confidence", "MEDIUM")) if assessment is not None else "MEDIUM"
-        thesis_broken = _flag(_field(assessment, "thesis_broken", False), "thesis_broken") if assessment is not None else False
         event_risk = _event_risk_state(assessment) if assessment is not None else "NORMAL"
         event_multiplier = _event_risk_multiplier(event_risk, resolved)
         risk_tier = str(_field(assessment, "risk_tier", "normal")).lower() if assessment is not None else "normal"
-        relative = (
-            _field(
-                assessment,
-                "relative_strength_vs_btc",
-                _field(assessment, "relative_strength", None),
-            )
-            if assessment is not None
-            else None
-        )
+        relative = _field(assessment, "relative_strength_vs_btc") if assessment is not None else None
         if asset_type == "satellite":
             relative_status = satellite_eligibility(
                 assessment,
@@ -426,16 +409,12 @@ def build_target_allocation(
                     satellite_hold[symbol] = current_weights[symbol]
                 reason = (
                     "score is inside the entry/exit hysteresis band"
-                    if score < resolved.allocation.get(
-                        "satellite_entry_score", resolved.allocation.get("satellite_min_score")
-                    )
+                    if score < resolved.allocation["satellite_entry_score"]
                     else "BTC-relative or critical evidence is incomplete"
                 )
                 reasons.append(f"{symbol} is HOLD_ONLY because {reason}")
             elif relative_status == "ELIGIBLE":
-                entry_score = resolved.allocation.get(
-                    "satellite_entry_score", resolved.allocation.get("satellite_min_score")
-                )
+                entry_score = resolved.allocation["satellite_entry_score"]
                 score_strength = min(
                     1.0,
                     max(0.0, (score - entry_score) / (
@@ -465,11 +444,7 @@ def build_target_allocation(
             else:
                 reasons.append(f"{symbol} receives 0% satellite target because eligibility failed")
         elif asset_type == "core":
-            if resolved.policy_version <= 2:
-                if event_risk not in {"SEVERE", "CRITICAL"} and not thesis_broken:
-                    core_raw[symbol] = max(score, resolved.allocation["core_min_score"]) * event_multiplier
-            else:
-                core_assessments[symbol] = assessment
+            core_assessments[symbol] = assessment
 
     held_satellite_weights, _ = _bounded_allocate(
         satellite_hold, satellite_cap, limits.single_asset_max
@@ -484,20 +459,17 @@ def build_target_allocation(
     }
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight
-    if resolved.policy_version >= 3:
-        core_weights, residual_core, core_reasons = _allocate_core_v3(
-            resolved,
-            core_budget,
-            core_assessments,
-            current_weights,
-            limits.single_asset_max,
-            chain_liveness,
-            structural_risk,
-        )
-        reasons.extend(core_reasons)
-        constraints.append("v3 core sleeve uses configurable BTC/ETH anchor and ETH gates")
-    else:
-        core_weights, residual_core = _bounded_allocate(core_raw, core_budget, limits.single_asset_max)
+    core_weights, residual_core, core_reasons = _allocate_core_v3(
+        resolved,
+        core_budget,
+        core_assessments,
+        current_weights,
+        limits.single_asset_max,
+        chain_liveness,
+        structural_risk,
+    )
+    reasons.extend(core_reasons)
+    constraints.append("v3 core sleeve uses configurable BTC/ETH anchor and ETH gates")
     stable_target += residual_core
 
     target: dict[str, float] = _stable_targets(

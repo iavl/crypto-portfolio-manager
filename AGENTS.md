@@ -99,7 +99,7 @@ not let one asset be core in one subsystem and satellite in another.
 
 Portfolio accounting is high-integrity logic. Never treat raw balance changes
 as investment performance. Deposits and withdrawals use a cash-flow-adjusted
-method such as unitized NAV. In this v1 convention, a flow attached to a
+method such as unitized NAV. In this convention, a flow attached to a
 snapshot occurs immediately before that snapshot valuation:
 
 ```text
@@ -154,7 +154,7 @@ deterministic structural-risk values; structural risk remains non-scoring.
 For v2, `MISSING` factors remain at their configured weight and shrink their
 raw score toward neutral 50 according to deterministic reliability; do not
 renormalize missing factors. `NOT_APPLICABLE` is defined by a zero-weight
-profile factor. Historical v1 replay may retain the old renormalization.
+profile factor. Only the latest policy and data contracts are supported.
 Never fabricate data. Critical missing price,
 trend history, portfolio valuation, or unresolved material security status
 blocks high-conviction entries. Unknown factor keys are errors. Confidence
@@ -246,8 +246,7 @@ reproducible after config files change. Do not trust a persisted state digest
 or policy version without validating it against the resolved policy.
 
 Persisted timestamps are timezone-aware RFC3339 normalized to UTC and compared
-as datetimes, never raw strings. Date-only compatibility input must be
-explicitly normalized or rejected; ambiguous timestamps must not be persisted.
+as datetimes, never raw strings. Date-only input must be rejected at domain boundaries; ambiguous timestamps must not be persisted.
 
 Runtime portfolio data belongs outside Git, by default
 `~/.local/share/crypto-portfolio-manager/` or an explicitly configured local
@@ -352,9 +351,10 @@ unambiguous, that portion may be implemented while the materially uncertain part
 is surfaced for confirmation. Never guess through uncertainty that could change
 financial behavior or persistent data semantics.
 
-Preserve formats and public behavior when practical. Breaking changes must
-identify affected schemas/history/CLI/Skill behavior and provide migration or
-version handling. Invalid financial inputs generally fail clearly: NaN,
+Keep only current contracts; do not add backward-compatibility branches or
+legacy replay. When explicitly asked to upgrade local data, preserve verifiable
+facts in the latest format and remove records that cannot be reliably upgraded.
+Breaking changes must identify affected schemas/history/CLI/Skill behavior. Invalid financial inputs generally fail clearly: NaN,
 Infinity, negative quantities/values, unknown policy fields, overlapping asset
 groups, invalid percentages, and duplicate symbols without explicit semantics.
 

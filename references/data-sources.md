@@ -79,7 +79,7 @@ Duplicate UTC dates are invalid. Small gaps lower confidence; large gaps or
 observation lag produce low confidence and `WAIT`. Calendar lookbacks never
 substitute an arbitrary number of candles when their date window is missing.
 `ATR14` uses a simple mean of 14 fully defined true ranges and therefore
-requires at least 15 candles in v1; it is not silently substituted with
+requires at least 15 candles in the current implementation; it is not silently substituted with
 Wilder smoothing.
 
 Normalized OHLCV used by a plan may be stored as public, immutable content at
@@ -280,7 +280,7 @@ If critical data is missing, do not provide a strong actionable entry.
 
 In v2, non-critical missing data keeps its configured factor weight, contributes
 neutral 50 through reliability shrinkage, and reduces weighted coverage and
-confidence. Historical v1 replay may use its persisted renormalized arithmetic.
+confidence.
 
 ## Conflict handling
 

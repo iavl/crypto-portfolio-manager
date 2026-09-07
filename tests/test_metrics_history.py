@@ -47,10 +47,10 @@ def observation(value, observed_at, *, freshness="CURRENT", source="test", super
 class MetricHistoryTests(unittest.TestCase):
     def test_collection_summary_reports_factor_weighted_coverage(self):
         events = [
-            CollectionEvent(f"trend-{index}", "2026-09-01", "ETH", "market.return_30d", "SUCCESS", source="test", observed_at="2026-09-01", fetched_at="2026-09-01")
+            CollectionEvent(f"trend-{index}", "2026-09-01T00:00:00Z", "ETH", "market.return_30d", "SUCCESS", source="test", observed_at="2026-09-01T00:00:00Z", fetched_at="2026-09-01T00:00:00Z")
             for index in range(10)
         ] + [
-            CollectionEvent(f"valuation-{index}", "2026-09-01", "ETH", "valuation.market_cap", "SUCCESS" if index == 0 else "FAILED", reason=None if index == 0 else "missing", source="test")
+            CollectionEvent(f"valuation-{index}", "2026-09-01T00:00:00Z", "ETH", "valuation.market_cap", "SUCCESS" if index == 0 else "FAILED", reason=None if index == 0 else "missing", source="test")
             for index in range(10)
         ]
         summary = collection_summary(events)
@@ -59,44 +59,44 @@ class MetricHistoryTests(unittest.TestCase):
         self.assertEqual(summary["per_request_coverage"], summary["policy_weighted_coverage"])
 
     def test_model_validation_and_stable_identity(self):
-        first_id = stable_observation_id("eth", "fundamentals.tvl", "2026-09-01", "test", 100)
+        first_id = stable_observation_id("eth", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100)
         self.assertEqual(first_id, stable_observation_id("ETH", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100.0))
         with self.assertRaises(ValueError):
-            MetricObservation(first_id, "ETH", "unknown.metric", "fundamentals", 100, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+            MetricObservation(first_id, "ETH", "unknown.metric", "fundamentals", 100, "USD", None, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH")
         for value in (math.nan, math.inf, -math.inf, True):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                MetricObservation(first_id, "ETH", "fundamentals.tvl", "fundamentals", value, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+                MetricObservation(first_id, "ETH", "fundamentals.tvl", "fundamentals", value, "USD", None, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH")
         # Non-negative scoring-factor values must be rejected at the model boundary.
-        spot_id = stable_observation_id("BTC", "market.spot_price", "2026-09-01", "test", -5.0)
+        spot_id = stable_observation_id("BTC", "market.spot_price", "2026-09-01T00:00:00Z", "test", -5.0)
         with self.assertRaises(ValueError):
-            MetricObservation(spot_id, "BTC", "market.spot_price", "trend", -5.0, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+            MetricObservation(spot_id, "BTC", "market.spot_price", "trend", -5.0, "USD", None, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH")
         with self.assertRaises(ValueError):
-            MetricObservation(first_id, "ETH", "fundamentals.tvl", "fundamentals", -1.0, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+            MetricObservation(first_id, "ETH", "fundamentals.tvl", "fundamentals", -1.0, "USD", None, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH")
         with self.assertRaises(ValueError):
-            MetricObservation(first_id, "ETH", "fundamentals.tvl", "onchain", 100, "USD", None, "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH")
+            MetricObservation(first_id, "ETH", "fundamentals.tvl", "onchain", 100, "USD", None, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH")
         evidence = MetricObservation(
             first_id, "ETH", "fundamentals.tvl", "fundamentals", 100, "USD", "30d",
-            "2026-09-01", "2026-09-01", "test", "CURRENT", "HIGH",
+            "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "test", "CURRENT", "HIGH",
         ).to_evidence()
         self.assertEqual(evidence.metadata["observation_id"], first_id)
 
     def test_append_query_dedup_revision_and_filters(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "observations.jsonl"
-            first = observation(100, "2026-09-01")
-            later = observation(110, "2026-09-02")
+            first = observation(100, "2026-09-01T00:00:00Z")
+            later = observation(110, "2026-09-02T00:00:00Z")
             append_metric_observation(first, path)
             append_metric_observation(first, path)
             append_metric_observation(later, path)
             self.assertEqual(len(read_metric_observations(path)), 2)
-            self.assertEqual(len(metric_series("ETH", "fundamentals.tvl", path=path, start="2026-09-02")), 1)
+            self.assertEqual(len(metric_series("ETH", "fundamentals.tvl", path=path, start="2026-09-02T00:00:00Z")), 1)
             self.assertEqual(latest_metric("ETH", "fundamentals.tvl", path=path).value, 110)
             self.assertEqual(previous_metric("ETH", "fundamentals.tvl", path=path).value, 100)
             comparison = compare_latest_metric("ETH", "fundamentals.tvl", path=path)
             self.assertEqual(comparison["absolute_change"], 10)
             self.assertAlmostEqual(comparison["percentage_change"], 0.1)
             self.assertEqual(comparison["trend"], "IMPROVING")
-            revised = observation(105, "2026-09-02", supersedes=later.observation_id, revision_reason="corrected source value")
+            revised = observation(105, "2026-09-02T00:00:00Z", supersedes=later.observation_id, revision_reason="corrected source value")
             append_metric_observation(revised, path)
             self.assertEqual(latest_metric("ETH", "fundamentals.tvl", path=path).value, 105)
             self.assertEqual(previous_metric("ETH", "fundamentals.tvl", path=path).value, 100)
@@ -105,7 +105,7 @@ class MetricHistoryTests(unittest.TestCase):
             same_value_revision = MetricObservation(
                 "rev-same-1",
                 "ETH", "fundamentals.tvl", "fundamentals", 105.0, "USD", "30d",
-                "2026-09-02", "2026-09-02", "test", "CURRENT", "HIGH",
+                "2026-09-02T00:00:00Z", "2026-09-02T00:00:00Z", "test", "CURRENT", "HIGH",
                 supersedes_observation_id=revised.observation_id,
                 revision_reason="same value, updated metadata",
             )
@@ -116,29 +116,29 @@ class MetricHistoryTests(unittest.TestCase):
                 "same value, updated metadata",
             )
             with self.assertRaises(ValueError):
-                append_metric_observation(observation(106, "2026-09-02"), path)
+                append_metric_observation(observation(106, "2026-09-02T00:00:00Z"), path)
 
     def test_trend_edge_cases_and_context(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "observations.jsonl"
-            append_metric_observation(observation(0, "2026-09-01"), path)
-            append_metric_observation(observation(10, "2026-09-02"), path)
+            append_metric_observation(observation(0, "2026-09-01T00:00:00Z"), path)
+            append_metric_observation(observation(10, "2026-09-02T00:00:00Z"), path)
             comparison = compare_latest_metric("ETH", "fundamentals.tvl", path=path)
             self.assertIsNone(comparison["percentage_change"])
             self.assertEqual(comparison["trend"], "IMPROVING")
             contextual = MetricObservation(
-                stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-03", "test", -5),
+                stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-03T00:00:00Z", "test", -5),
                 "MARKET", "flows.exchange_netflow", "capital_flows", -5, "USD", None,
-                "2026-09-03", "2026-09-03", "test", "CURRENT", "HIGH",
+                "2026-09-03T00:00:00Z", "2026-09-03T00:00:00Z", "test", "CURRENT", "HIGH",
             )
             append_metric_observation(contextual, path)
             append_metric_observation(MetricObservation(
-                stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-04", "test", 5),
+                stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-04T00:00:00Z", "test", 5),
                 "MARKET", "flows.exchange_netflow", "capital_flows", 5, "USD", None,
-                "2026-09-04", "2026-09-04", "test", "CURRENT", "HIGH",
+                "2026-09-04T00:00:00Z", "2026-09-04T00:00:00Z", "test", "CURRENT", "HIGH",
             ), path)
             self.assertEqual(compare_latest_metric("MARKET", "flows.exchange_netflow", path=path)["trend"], "CONFLICTING")
-            append_metric_observation(observation(120, "2026-09-04", freshness="STALE"), path)
+            append_metric_observation(observation(120, "2026-09-04T00:00:00Z", freshness="STALE"), path)
             self.assertEqual(compare_latest_metric("ETH", "fundamentals.tvl", path=path)["trend"], "CONFLICTING")
             context = build_history_context(
                 snapshot_path=Path(directory) / "missing-snapshots.jsonl",
@@ -208,12 +208,12 @@ class MetricHistoryTests(unittest.TestCase):
             event_path = Path(directory) / "events.jsonl"
             stream = io.StringIO()
             reporter = CollectionReporter(stream, str(observation_path), str(event_path))
-            current = observation(100, "2026-09-01")
-            reporter.record(CollectionEvent("e1", "2026-09-01", "ETH", "fundamentals.tvl", "SUCCESS", source="test", observed_at=current.observed_at, fetched_at=current.fetched_at), current)
-            reporter.record(CollectionEvent("e2", "2026-09-01", "ETH", "fundamentals.revenue_30d", "FAILED", reason="source unavailable", source="test"))
-            reporter.record(CollectionEvent("e3", "2026-09-01", "ETH", "fundamentals.fees_30d", "STALE", reason="last value is old", source="test"))
-            reporter.record(CollectionEvent("e4", "2026-09-01", "ETH", "fundamentals.active_users", "CONFLICT", reason="sources disagree", source="test"))
-            reporter.record(CollectionEvent("e5", "2026-09-01", "BTC", "fundamentals.tvl", "NOT_APPLICABLE", reason="not an application metric"))
+            current = observation(100, "2026-09-01T00:00:00Z")
+            reporter.record(CollectionEvent("e1", "2026-09-01T00:00:00Z", "ETH", "fundamentals.tvl", "SUCCESS", source="test", observed_at=current.observed_at, fetched_at=current.fetched_at), current)
+            reporter.record(CollectionEvent("e2", "2026-09-01T00:00:00Z", "ETH", "fundamentals.revenue_30d", "FAILED", reason="source unavailable", source="test"))
+            reporter.record(CollectionEvent("e3", "2026-09-01T00:00:00Z", "ETH", "fundamentals.fees_30d", "STALE", reason="last value is old", source="test"))
+            reporter.record(CollectionEvent("e4", "2026-09-01T00:00:00Z", "ETH", "fundamentals.active_users", "CONFLICT", reason="sources disagree", source="test"))
+            reporter.record(CollectionEvent("e5", "2026-09-01T00:00:00Z", "BTC", "fundamentals.tvl", "NOT_APPLICABLE", reason="not an application metric"))
             summary = reporter.print_summary()
             self.assertEqual(len(read_metric_observations(observation_path)), 1)
             self.assertEqual(len(read_collection_events(event_path)), 5)
@@ -225,11 +225,11 @@ class MetricHistoryTests(unittest.TestCase):
 
     def test_collection_criticality_is_review_specific(self):
         regulatory = CollectionEvent(
-            "regulatory", "2026-09-01", "ETH", "risk.regulatory_event_status", "FAILED",
+            "regulatory", "2026-09-01T00:00:00Z", "ETH", "risk.regulatory_event_status", "FAILED",
             reason="primary source unavailable", source="event-scan",
         )
         security = CollectionEvent(
-            "security", "2026-09-01", "ETH", "risk.security_event_status", "FAILED",
+            "security", "2026-09-01T00:00:00Z", "ETH", "risk.security_event_status", "FAILED",
             reason="primary source unavailable", source="event-scan",
         )
         snapshot = collection_summary((regulatory, security), review_type="SNAPSHOT_REVIEW")
@@ -245,8 +245,8 @@ class MetricHistoryTests(unittest.TestCase):
         self.assertEqual(event["critical_failures"], 1)
 
         success = CollectionEvent(
-            "price", "2026-09-01", "ETH", "market.spot_price", "SUCCESS",
-            source="test", observed_at="2026-09-01", fetched_at="2026-09-01",
+            "price", "2026-09-01T00:00:00Z", "ETH", "market.spot_price", "SUCCESS",
+            source="test", observed_at="2026-09-01T00:00:00Z", fetched_at="2026-09-01T00:00:00Z",
         )
         self.assertEqual(
             collection_summary((success, regulatory), review_type="SNAPSHOT_REVIEW")["critical_failures"],
@@ -255,8 +255,8 @@ class MetricHistoryTests(unittest.TestCase):
 
     def test_history_records_validate_against_schemas(self):
         root = Path(__file__).parents[1] / "schemas"
-        current = observation(100, "2026-09-01")
-        event = CollectionEvent("e1", "2026-09-01", "ETH", "fundamentals.tvl", "SUCCESS")
+        current = observation(100, "2026-09-01T00:00:00Z")
+        event = CollectionEvent("e1", "2026-09-01T00:00:00Z", "ETH", "fundamentals.tvl", "SUCCESS")
         for filename, record in (
             ("metric-observation.schema.json", current.as_dict()),
             ("collection-event.schema.json", event.as_dict()),

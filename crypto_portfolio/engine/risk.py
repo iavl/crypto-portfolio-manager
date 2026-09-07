@@ -90,29 +90,14 @@ def _event_risk_state(value: Any) -> str:
         state = str(raw).strip().upper()
         if state not in _EVENT_RISK_STATES:
             raise ValueError("assessment event_risk must be a recognized state")
-    if state is not None:
-        legacy = value.severe_event if isinstance(value, AssetAssessment) else (
-            value.get("severe_event", False) if isinstance(value, Mapping) else False
-        )
-        if not isinstance(legacy, bool):
-            raise ValueError("assessment severe_event must be boolean")
-        thesis = value.thesis_broken if isinstance(value, AssetAssessment) else (
-            value.get("thesis_broken", False) if isinstance(value, Mapping) else False
-        )
-        if not isinstance(thesis, bool):
-            raise ValueError("assessment thesis_broken must be boolean")
-        return "SEVERE" if (thesis or legacy) and state != "CRITICAL" else state
-    legacy = value.severe_event if isinstance(value, AssetAssessment) else (
-        value.get("severe_event", False) if isinstance(value, Mapping) else False
-    )
-    if not isinstance(legacy, bool):
-        raise ValueError("assessment severe_event must be boolean")
+    if isinstance(value, Mapping) and "severe_event" in value:
+        raise ValueError("severe_event is unsupported; use event_risk.state")
     thesis = value.thesis_broken if isinstance(value, AssetAssessment) else (
         value.get("thesis_broken", False) if isinstance(value, Mapping) else False
     )
     if not isinstance(thesis, bool):
         raise ValueError("assessment thesis_broken must be boolean")
-    return "SEVERE" if legacy or thesis else "NORMAL"
+    return "SEVERE" if thesis and state != "CRITICAL" else state or "NORMAL"
 
 
 def event_risk_deployment_factor(state: str, *, policy: Policy | None = None) -> float:
@@ -143,11 +128,9 @@ def _assessment(value: Any) -> tuple[str, str, str]:
 
 def _liveness_status(value: Any, field: str) -> str:
     if isinstance(value, Mapping):
-        value = value.get("status", value.get("value", value.get("chain_liveness_status")))
+        value = value.get("status")
     elif hasattr(value, "status"):
         value = value.status
-    elif hasattr(value, "value") and not isinstance(value, (str, bytes)):
-        value = value.value
     if not isinstance(value, str) or value.strip().upper() not in _CHAIN_LIVENESS_STATUSES:
         raise ValueError(f"{field} must be a recognized chain liveness status")
     return value.strip().upper()
@@ -161,12 +144,8 @@ def _liveness_values(
     if value is not None:
         if hasattr(value, "asset") and hasattr(value, "status"):
             items = ((value.asset, value),)
-        elif hasattr(value, "asset") and hasattr(value, "value"):
-            items = ((value.asset, value),)
         elif not isinstance(value, Mapping):
             raise ValueError("chain_liveness must be an object mapping assets to statuses")
-        elif "asset" in value and "value" in value:
-            items = ((value.get("asset"), value),)
         else:
             items = value.items()
         for raw_symbol, raw_status in items:
@@ -180,7 +159,7 @@ def _liveness_values(
         symbol = str(raw_symbol).strip().upper()
         if not isinstance(assessment, Mapping):
             continue
-        for key in ("chain_liveness_status", "chain_liveness", "liveness"):
+        for key in ("chain_liveness",):
             if key in assessment:
                 if symbol not in {"BTC", "ETH", "SOL", "BNB"}:
                     raise ValueError(f"chain liveness is not applicable to {symbol}")
@@ -216,7 +195,7 @@ def chain_liveness_deployment_factor(
         return 1.0
     if normalized == "DEGRADED":
         resolved = policy or resolve_policy()
-        configured = resolved.chain_liveness.get("degraded_deployment_factor", 0.25)
+        configured = resolved.chain_liveness["degraded_deployment_factor"]
         if isinstance(configured, bool) or not isinstance(configured, (int, float)):
             raise ValueError("chain_liveness.degraded_deployment_factor must be numeric")
         configured = float(configured)
@@ -249,7 +228,6 @@ def run_risk_gate(
     current_drawdown: float | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
     chain_liveness: Mapping[str, Any] | None = None,
-    liveness: Mapping[str, Any] | None = None,
     actions: Iterable[Any] | None = None,
     current_weights: Mapping[str, float] | None = None,
 ) -> RiskCheckResult:
@@ -445,9 +423,7 @@ def run_risk_gate(
                         "BTC cycle context has elevated non-clock risk confirmation; deployment may be reduced",
                         )
                     )
-    if chain_liveness is not None and liveness is not None:
-        raise ValueError("provide only one of chain_liveness or liveness")
-    liveness_values = _liveness_values(chain_liveness if chain_liveness is not None else liveness, assessments)
+    liveness_values = _liveness_values(chain_liveness, assessments)
     action_values = tuple(actions or ())
     increase_symbols = _increase_symbols(action_values)
     current = _weights(current_weights) if current_weights is not None else None
@@ -487,39 +463,11 @@ def run_risk_gate(
     return RiskCheckResult(tuple(violations), deployment_caps, tuple(dict.fromkeys(blocked_symbols)))
 
 
-def risk_gate(
-    target_weights: Mapping[str, float] | Any,
-    *,
-    policy: Policy | None = None,
-    regime: str = "NORMAL",
-    assessments: Mapping[str, AssetAssessment | Mapping[str, Any]] | None = None,
-    current_drawdown: float | None = None,
-    overlays: MarketOverlays | Mapping[str, Any] | None = None,
-    chain_liveness: Mapping[str, Any] | None = None,
-    liveness: Mapping[str, Any] | None = None,
-    actions: Iterable[Any] | None = None,
-    current_weights: Mapping[str, float] | None = None,
-) -> RiskCheckResult:
-    return run_risk_gate(
-        target_weights,
-        policy=policy,
-        regime=regime,
-        assessments=assessments,
-        current_drawdown=current_drawdown,
-        overlays=overlays,
-        chain_liveness=chain_liveness,
-        liveness=liveness,
-        actions=actions,
-        current_weights=current_weights,
-    )
-
-
 __all__ = [
     "RiskCheckResult",
     "RiskViolation",
     "apply_chain_liveness_deployment_cap",
     "chain_liveness_deployment_factor",
     "event_risk_deployment_factor",
-    "risk_gate",
     "run_risk_gate",
 ]

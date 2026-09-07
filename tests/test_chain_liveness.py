@@ -420,7 +420,7 @@ class ChainLivenessRiskTests(unittest.TestCase):
         )
         result = run_risk_gate(
             {"ETH": 0.5, "BTC": 0.4, "USDT": 0.1},
-            assessments={"ETH": {"chain_liveness_status": assessment}},
+            assessments={"ETH": {"chain_liveness": assessment}},
         )
         self.assertEqual(result.deployment_caps["ETH"], 0.25)
         with self.assertRaises(ValueError):

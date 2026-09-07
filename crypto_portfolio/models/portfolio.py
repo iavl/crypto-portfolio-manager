@@ -6,13 +6,12 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .policy import Policy, legacy_policy, policy_from_mapping, policy_hash, resolve_policy
+from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
 
 ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
 EXTERNAL_CASH_FLOW_TYPES = {"NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"}
-_LEGACY_TIMESTAMP = "UNSPECIFIED"
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
@@ -133,16 +132,12 @@ class PortfolioSnapshot:
     total_value: float | None = None
     policy_version: int | None = None
     source: str | None = None
-    portfolio_peak_value: float | None = None
     policy_hash: str | None = None
     resolved_policy: Mapping[str, Any] | None = None
     snapshot_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.timestamp == _LEGACY_TIMESTAMP:
-            object.__setattr__(self, "timestamp", _LEGACY_TIMESTAMP)
-        else:
-            object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
+        object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
         positions = tuple(self.positions)
         if not positions:
             raise ValueError("positions must be a non-empty sequence")
@@ -186,16 +181,11 @@ class PortfolioSnapshot:
         if self.policy_version is not None and (
             isinstance(self.policy_version, bool)
             or not isinstance(self.policy_version, int)
-            or self.policy_version < 1
+            or self.policy_version != 3
         ):
-            raise ValueError("policy_version must be a positive integer")
+            raise ValueError("policy_version must be 3")
         if self.source is not None and not isinstance(self.source, str):
             raise ValueError("source must be a string or null")
-        object.__setattr__(
-            self,
-            "portfolio_peak_value",
-            _optional_number(self.portfolio_peak_value, "portfolio_peak_value", minimum=0),
-        )
         if self.policy_hash is not None:
             if not isinstance(self.policy_hash, str) or len(self.policy_hash) != 64:
                 raise ValueError("policy_hash must be a SHA-256 hex digest")
@@ -246,6 +236,16 @@ class PortfolioSnapshot:
 def _position_from_mapping(raw: Mapping[str, Any], policy: Policy, index: int) -> Position:
     if not isinstance(raw, Mapping):
         raise ValueError(f"position {index} must be an object")
+    allowed = {
+        "symbol", "quantity", "value_usd", "cost_basis_usd", "asset_type_hint", "asset_type",
+        "current_price_usd", "average_cost_price_usd", "exchange_unrealized_pnl_usd", "displayed_weight",
+        "unrealized_pnl_usd", "unrealized_return_pct", "pnl_status", "validation_status",
+        "validation_notes", "computed_weight", "displayed_current_price_usd",
+        "displayed_average_cost_price_usd", "performance",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(f"position {index} contains unknown fields: {', '.join(sorted(unknown))}")
     raw_symbol = raw.get("symbol")
     if not isinstance(raw_symbol, str) or not raw_symbol.strip():
         raise ValueError(f"position {index} is missing symbol")
@@ -253,7 +253,7 @@ def _position_from_mapping(raw: Mapping[str, Any], policy: Policy, index: int) -
     if "value_usd" not in raw:
         raise ValueError(f"position {symbol} is missing value_usd")
 
-    hints = [raw.get(field) for field in ("asset_type_hint", "asset_type", "resolved_asset_type")]
+    hints = [raw.get(field) for field in ("asset_type_hint", "asset_type")]
     supplied_hints = [hint for hint in hints if hint is not None]
     if any(not isinstance(hint, str) or hint not in ASSET_TYPES for hint in supplied_hints):
         raise ValueError(f"position {symbol} contains an invalid asset type hint")
@@ -284,14 +284,22 @@ def snapshot_from_mapping(
 ) -> tuple[PortfolioSnapshot, Policy, list[str]]:
     if not isinstance(data, Mapping):
         raise ValueError("snapshot must be an object")
+    allowed = {
+        "timestamp", "source", "base_currency", "positions", "policy_version", "external_cash_flow",
+        "external_cash_flow_type", "total_value", "config", "policy_hash", "resolved_policy", "snapshot_id",
+        "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio",
+    }
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"snapshot contains unknown fields: {', '.join(sorted(unknown))}")
     if policy is not None:
         resolved_policy = policy
     elif data.get("resolved_policy") is not None:
         resolved_policy = policy_from_mapping(data["resolved_policy"])
-    elif data.get("policy_version") == 1:
-        resolved_policy = legacy_policy().with_overrides(data.get("config"))
     else:
         resolved_policy = resolve_policy(data.get("config"))
+    if "portfolio_peak_value" in data:
+        raise ValueError("portfolio_peak_value is unsupported; use cash-flow-aware NAV history")
     raw_positions = data.get("positions")
     if not isinstance(raw_positions, list) or not raw_positions:
         raise ValueError("positions must be a non-empty list")
@@ -300,7 +308,6 @@ def snapshot_from_mapping(
         for index, raw in enumerate(raw_positions)
     )
     timestamp = data.get("timestamp")
-    legacy_timestamp = timestamp is None
     expected_policy_version = resolved_policy.policy_version
     supplied_policy_version = data.get("policy_version", expected_policy_version)
     if supplied_policy_version != expected_policy_version:
@@ -313,16 +320,12 @@ def snapshot_from_mapping(
     if supplied_policy_hash != expected_policy_hash:
         raise ValueError("snapshot policy_hash does not match resolved policy")
     reported_total_value = data.get("total_value")
-    if reported_total_value is None:
-        reported_total_value = data.get("reported_total_value")
-    flow_value = data.get("external_cash_flow", data.get("external_cash_flow_usd", 0.0))
-    if "external_cash_flow" in data and "external_cash_flow_usd" in data and data["external_cash_flow"] != data["external_cash_flow_usd"]:
-        raise ValueError("external_cash_flow and external_cash_flow_usd disagree")
+    flow_value = data.get("external_cash_flow", 0.0)
     flow_type = data.get("external_cash_flow_type")
-    if flow_type is None and ("external_cash_flow" in data or "external_cash_flow_usd" in data) and isinstance(flow_value, (int, float)) and not isinstance(flow_value, bool):
+    if flow_type is None and "external_cash_flow" in data and isinstance(flow_value, (int, float)) and not isinstance(flow_value, bool):
         flow_type = "DEPOSIT" if flow_value > 0 else "WITHDRAWAL" if flow_value < 0 else "NONE"
     snapshot = PortfolioSnapshot(
-        timestamp=_LEGACY_TIMESTAMP if legacy_timestamp else timestamp,
+        timestamp=timestamp,
         positions=positions,
         base_currency=data.get("base_currency", "USD"),
         external_cash_flow=flow_value,
@@ -330,7 +333,6 @@ def snapshot_from_mapping(
         total_value=reported_total_value,
         policy_version=supplied_policy_version,
         source=data.get("source"),
-        portfolio_peak_value=data.get("portfolio_peak_value"),
         policy_hash=expected_policy_hash,
         resolved_policy=resolved_policy.as_dict(),
         snapshot_id=data.get("snapshot_id"),
@@ -340,11 +342,7 @@ def snapshot_from_mapping(
         raise ValueError("portfolio total must be > 0")
 
     warnings: list[str] = []
-    if legacy_timestamp:
-        warnings.append("timestamp is missing; legacy normalization cannot be used for ordered history")
-    reported_total = data.get("reported_total_value")
-    if reported_total is None:
-        reported_total = data.get("total_value")
+    reported_total = data.get("total_value")
     if reported_total is not None:
         reported_total = _number(reported_total, "reported_total_value", minimum=0)
         if reported_total > 0:
@@ -380,20 +378,6 @@ def snapshot_from_mapping(
             f"{resolved_policy.min_stablecoin_weight:.2%}"
         )
 
-    if snapshot.portfolio_peak_value is not None:
-        if snapshot.external_cash_flow != 0:
-            warnings.append("portfolio_peak_value ignored because external cash flow requires NAV history")
-        elif snapshot.portfolio_peak_value >= total and snapshot.portfolio_peak_value > 0:
-            drawdown = total / snapshot.portfolio_peak_value - 1.0
-            warnings.append("portfolio_peak_value is legacy; use cash-flow-aware NAV history for drawdown")
-            if drawdown < -resolved_policy.max_portfolio_drawdown:
-                warnings.append(
-                    f"portfolio drawdown {drawdown:.2%} exceeds configured maximum "
-                    f"{resolved_policy.max_portfolio_drawdown:.2%}"
-                )
-        elif snapshot.portfolio_peak_value > 0:
-            warnings.append("portfolio_peak_value is below current total; drawdown omitted")
-
     return snapshot, resolved_policy, warnings
 
 
@@ -426,12 +410,6 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
         for name, types in values.items()
     }
     drawdown = None
-    if (
-        snapshot.portfolio_peak_value
-        and snapshot.external_cash_flow == 0
-        and snapshot.portfolio_peak_value >= total
-    ):
-        drawdown = total / snapshot.portfolio_peak_value - 1.0
 
     reported_total = snapshot.total_value
     visible_coverage = None
@@ -447,9 +425,9 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
             )
 
     return {
-        "config": resolved_policy.legacy_config(),
+        "config": resolved_policy.as_dict(),
         "policy_version": resolved_policy.policy_version,
-        "timestamp": None if snapshot.timestamp == _LEGACY_TIMESTAMP else snapshot.timestamp,
+        "timestamp": snapshot.timestamp,
         "source": snapshot.source,
         "base_currency": snapshot.base_currency,
         "total_value_usd": total,

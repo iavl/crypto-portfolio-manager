@@ -264,7 +264,7 @@ class ExecutionPlan:
     entry_mode: str
     technical_confidence: str
     tranches: tuple[ExecutionTranche, ...] = ()
-    invalidation: Invalidation | Mapping[str, Any] | str | None = None
+    invalidation: Invalidation | Mapping[str, Any] | None = None
     rationale: str = ""
     ohlcv_hash: str | None = None
     ohlcv_metadata: Mapping[str, Any] | None = None
@@ -276,14 +276,9 @@ class ExecutionPlan:
     effective_deployment_factor: float | None = None
     overlay_warnings: tuple[str, ...] = ()
 
-    @property
-    def profile_hash(self) -> str | None:
-        """Compatibility alias used by the execution/reporting vocabulary."""
-        return self.volume_profile_hash
-
     def __post_init__(self) -> None:
-        if isinstance(self.execution_plan_version, bool) or not isinstance(self.execution_plan_version, int) or self.execution_plan_version < 1:
-            raise ValueError("execution_plan_version must be a positive integer")
+        if isinstance(self.execution_plan_version, bool) or not isinstance(self.execution_plan_version, int) or self.execution_plan_version != 2:
+            raise ValueError("execution_plan_version must be 2")
         object.__setattr__(self, "symbol", _text(self.symbol, "execution symbol").upper())
         action = _text(self.action, "execution action").upper()
         if action not in _ACTIONS:
@@ -413,12 +408,10 @@ class ExecutionPlan:
             if not isinstance(self.volume_profile_metadata, Mapping):
                 raise ValueError("volume_profile_metadata must be an object or null")
             object.__setattr__(self, "volume_profile_metadata", dict(self.volume_profile_metadata))
-        if self.invalidation is not None and not isinstance(self.invalidation, (str, Mapping)):
+        if self.invalidation is not None and not isinstance(self.invalidation, (Invalidation, Mapping)):
             if not isinstance(self.invalidation, Invalidation):
-                raise ValueError("invalidation must be a typed object, string, or null")
-        if isinstance(self.invalidation, str):
-            object.__setattr__(self, "invalidation", _text(self.invalidation, "invalidation"))
-        elif isinstance(self.invalidation, Mapping):
+                raise ValueError("invalidation must be an object or null")
+        if isinstance(self.invalidation, Mapping):
             object.__setattr__(self, "invalidation", Invalidation.from_mapping(self.invalidation))
         for field_name in ("positioning_summary", "btc_cycle_summary"):
             value = getattr(self, field_name)
@@ -437,7 +430,7 @@ class ExecutionPlan:
         if len(warnings) != len(set(warnings)):
             raise ValueError("overlay_warnings must contain unique values")
         object.__setattr__(self, "overlay_warnings", warnings)
-        if self.execution_plan_version >= 2 and self.technical_summary is None:
+        if self.technical_summary is None:
             raise ValueError("execution plan version 2 requires technical_summary")
         if self.technical_summary is not None:
             if not isinstance(self.technical_summary, Mapping):
@@ -580,7 +573,6 @@ class ExecutionPlan:
             "rationale": self.rationale,
             "ohlcv_hash": self.ohlcv_hash,
             "volume_profile_hash": self.volume_profile_hash,
-            "profile_hash": self.volume_profile_hash,
         }
         if self.ohlcv_metadata is not None:
             result["ohlcv_metadata"] = dict(self.ohlcv_metadata)
@@ -608,7 +600,7 @@ class ExecutionPlan:
             "execution_plan_version", "symbol", "action", "approved_amount_usd",
             "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
-            "volume_profile_hash", "profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
+            "volume_profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
             "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings",
         }
         unknown = set(value) - allowed
@@ -622,12 +614,6 @@ class ExecutionPlan:
         missing = [field for field in required if field not in value]
         if missing:
             raise ValueError(f"execution plan is missing fields: {', '.join(missing)}")
-        if (
-            value.get("volume_profile_hash") is not None
-            and value.get("profile_hash") is not None
-            and value["volume_profile_hash"] != value["profile_hash"]
-        ):
-            raise ValueError("volume_profile_hash and profile_hash disagree")
         raw_tranches = value.get("tranches", ())
         if not isinstance(raw_tranches, (list, tuple)):
             raise ValueError("execution plan tranches must be a list")
@@ -644,7 +630,7 @@ class ExecutionPlan:
             invalidation=value["invalidation"],
             rationale=value["rationale"],
             ohlcv_hash=value["ohlcv_hash"],
-            volume_profile_hash=value.get("volume_profile_hash", value.get("profile_hash")),
+            volume_profile_hash=value.get("volume_profile_hash"),
             volume_profile_metadata=value.get("volume_profile_metadata"),
             ohlcv_metadata=value.get("ohlcv_metadata"),
             technical_summary=value.get("technical_summary"),

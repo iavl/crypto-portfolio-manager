@@ -21,12 +21,9 @@ def assess_event_risk(
     )
 
 
-build_event_risk_assessment = assess_event_risk
-
 __all__ = [
     "EventFacts",
     "EventRiskAssessment",
     "assess_event_risk",
     "build_event_facts",
-    "build_event_risk_assessment",
 ]

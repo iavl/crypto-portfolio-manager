@@ -213,34 +213,23 @@ def provider_status(
     *,
     adapters: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    """Return runtime diagnostics, retaining legacy ``enabled`` fields."""
+    """Return runtime diagnostics."""
     loaded = config or load_provider_config()
     settings_by_name = loaded.get("providers", {})
     rows = []
     for status in provider_runtime_status(loaded, adapters=adapters, environ=environ):
         settings = settings_by_name.get(status.provider, {})
         row = status.as_dict()
-        row.update({
-            "enabled": status.config_enabled,
-            "api_key_env": settings.get("api_key_env") if isinstance(settings, Mapping) else None,
-        })
+        row["api_key_env"] = settings.get("api_key_env") if isinstance(settings, Mapping) else None
         rows.append(row)
     return tuple(rows)
 
 
-resolve_provider_config = load_provider_config
-load_data_provider_config = load_provider_config
-load_config = load_provider_config
-
-
 __all__ = [
     "load_provider_config",
-    "load_data_provider_config",
-    "load_config",
     "provider_api_key",
     "provider_enabled",
     "provider_runtime_status",
     "provider_settings",
     "provider_status",
-    "resolve_provider_config",
 ]

@@ -263,13 +263,9 @@ class PositioningFacts:
         return cls(**{key: value[key] for key in value if key in allowed})
 
 
-PositioningOverlay = PositioningFacts
-
-
 __all__ = [
     "PositioningBias",
     "PositioningFacts",
-    "PositioningOverlay",
     "PositioningLeverageState",
     "PositioningRisk",
     "SocialSentimentState",

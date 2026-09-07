@@ -232,7 +232,7 @@ class PositionPnlTests(unittest.TestCase):
                     path,
                 )
 
-    def test_legacy_cost_basis_remains_calculable(self):
+    def test_cost_basis_remains_calculable(self):
         summary = calculate_portfolio_position_performance(
             {
                 "timestamp": "2026-09-01T00:00:00Z",

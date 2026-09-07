@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from crypto_portfolio.engine.entry import build_entry_plan, build_execution_evidence
 from crypto_portfolio.engine.execution import validate_execution_plan
-from crypto_portfolio.engine.rebalance import RebalanceAction, validate_execution_plan as validate_rebalance_plan
+from crypto_portfolio.engine.rebalance import RebalanceAction
 from crypto_portfolio.engine.technical import build_technical_snapshot
 from crypto_portfolio.models.decision import Decision
 from crypto_portfolio.models.execution import ExecutionPlan, ExecutionTranche, Invalidation, PriceZone
@@ -27,7 +27,7 @@ def series(count=365, *, last_volume=200):
             close -= 20
         candles.append(
             Candle(
-                (start + timedelta(days=index)).isoformat(),
+                (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
                 close - 0.5,
                 close + 2,
                 close - 2,
@@ -36,6 +36,12 @@ def series(count=365, *, last_volume=200):
             )
         )
     return OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic", fetched_at="2026-01-01T00:00:00Z")
+
+
+def test_spot(candles, price):
+    from datetime import datetime
+    observed = (datetime.fromisoformat(candles.candles[-1].timestamp.replace("Z", "+00:00")) + timedelta(days=1)).isoformat()
+    return SpotPrice(candles.symbol, price, observed, candles.source, observed)
 
 
 class ExecutionEngineTests(unittest.TestCase):
@@ -58,13 +64,12 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertAlmostEqual(plan.planned_amount_usd + plan.unallocated_amount_usd, 2000)
         self.assertTrue(plan.invalidation["review_only"])
         self.assertTrue(validate_execution_plan(plan))
-        self.assertTrue(validate_rebalance_plan(plan))
         self.assertTrue(validate_execution_plan(plan.as_dict()))
 
     def test_wait_cases_do_not_manufacture_orders(self):
         extended = build_entry_plan("ETH", 2000, self.snapshot, "DEFENSIVE", "HIGH", entry_mode="PULLBACK")
         self.assertEqual(extended.action, "INCREASE")
-        far = build_technical_snapshot(series(), 500, policy=None)
+        far = build_technical_snapshot(series(), test_spot(series(), 500), policy=None)
         wait = build_entry_plan("ETH", 2000, far, "NORMAL", "HIGH")
         self.assertEqual(wait.action, "WAIT")
         self.assertEqual(wait.entry_mode, "WAIT")
@@ -73,7 +78,7 @@ class ExecutionEngineTests(unittest.TestCase):
         capital = build_entry_plan("ETH", 2000, self.snapshot, "CAPITAL_PRESERVATION", "HIGH")
         self.assertEqual(capital.action, "WAIT")
         self.assertEqual(capital.planned_amount_usd, 0)
-        short_snapshot = build_technical_snapshot(series(119), 160)
+        short_snapshot = build_technical_snapshot(series(119), test_spot(series(119), 160))
         short = build_entry_plan("ETH", 2000, short_snapshot, "NORMAL", "HIGH")
         self.assertEqual(short.action, "WAIT")
 
@@ -100,7 +105,7 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertLessEqual(medium.planned_amount_usd, normal.planned_amount_usd)
 
     def test_missing_volume_reduces_deployment(self):
-        missing = build_technical_snapshot(series(), 282, volume_reliable=False)
+        missing = build_technical_snapshot(series(), test_spot(series(), 282), volume_reliable=False)
         plan = build_entry_plan("ETH", 2000, missing, "NORMAL", "HIGH")
         regular = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
         self.assertLessEqual(plan.planned_amount_usd, regular.planned_amount_usd)
@@ -173,7 +178,7 @@ class ExecutionEngineTests(unittest.TestCase):
         decision = Decision(
             "2026-01-01T00:00:00Z",
             "NORMAL",
-            1,
+            3,
             {"BTC": 1.0},
             {"BTC": 0.9, "USDT": 0.1},
             actions=(action,),
@@ -192,29 +197,31 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_execution_plan_must_match_approved_increase_action(self):
         def wait_plan(symbol, amount):
-            return ExecutionPlan(1, symbol, "INCREASE", amount, 0, amount, 100, "WAIT", "HIGH")
+            return build_entry_plan(symbol, amount, replace(self.snapshot, symbol=symbol), "NORMAL", "HIGH")
 
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 1, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
                 execution_plans={"ETH": wait_plan("ETH", 500)},
             )
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 1, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
                 execution_plans={"ETH": wait_plan("ETH", 1000)},
             )
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 1, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
                 execution_plans={"SOL": wait_plan("SOL", 1000)},
             )
+        plan = wait_plan("ETH", 1000)
         accepted = Decision(
-            "2026-01-01T00:00:00Z", "NORMAL", 1, {"BTC": 1.0}, {"BTC": 1.0},
+            "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
             actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
-            execution_plans={"ETH": wait_plan("ETH", 1000)},
+            execution_plans={"ETH": plan},
+            evidence=(build_execution_evidence(self.snapshot, plan),),
         )
         self.assertEqual(accepted.actions[0].amount_usd, 1000)
 
@@ -263,14 +270,14 @@ class ExecutionEngineTests(unittest.TestCase):
         action = RebalanceAction("ETH", "INCREASE", 0, 0.5, 2000, "NORMAL")
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 1, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(action,), execution_plans={"ETH": plan},
             )
         evidence = build_execution_evidence(self.snapshot, plan)
         broken = replace(evidence, value={"ohlcv_hash": plan.ohlcv_hash, "technical_summary": {}})
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 1, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(action,), evidence=(broken,), execution_plans={"ETH": plan},
             )
 

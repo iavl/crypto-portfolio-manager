@@ -5,7 +5,7 @@ from crypto_portfolio.engine.risk import run_risk_gate
 from crypto_portfolio.engine.scoring import score_factors
 from crypto_portfolio.engine.scoring import score_assessment
 from crypto_portfolio.models.evidence import AssetAssessment, FactorScore
-from crypto_portfolio.models.policy import legacy_policy, resolve_policy
+from crypto_portfolio.models.policy import resolve_policy
 
 
 class ScoringAndRegimeTests(unittest.TestCase):
@@ -69,24 +69,6 @@ class ScoringAndRegimeTests(unittest.TestCase):
                 {"trend": 1.0},
             )
 
-    def test_v1_replay_keeps_legacy_event_factor_and_renormalization(self):
-        result = score_factors(
-            {
-                "trend": 80,
-                "valuation": 70,
-                "fundamentals": 60,
-                "onchain": 50,
-                "capital_flows": 40,
-                "relative_strength_btc": 30,
-                "event_risk": 20,
-            },
-            policy=legacy_policy(),
-        )
-        self.assertAlmostEqual(result.score, 59.0)
-        self.assertEqual(result.scoring_model_version, 1)
-        missing = score_factors({"trend": 80}, policy=legacy_policy())
-        self.assertAlmostEqual(missing.score, 80.0)
-        self.assertEqual(missing.effective_weights, {"trend": 1.0})
 
     def test_confidence_tracks_coverage_and_critical_completeness(self):
         low_coverage = score_factors(

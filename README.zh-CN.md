@@ -1,5 +1,7 @@
 [English](README.md) · [简体中文（当前）](README.zh-CN.md)
 
+仅支持当前契约：政策 v3、评分 v2、路由 v2、执行计划 v2。旧版本直接拒绝，不保留旧版回放或自动迁移。旧数据应基于可验证事实升级，无法可靠升级则清理。时间戳必须带时区，执行计划必须使用带时间戳的 SpotPrice。
+
 # crypto-portfolio-manager
 
 `crypto-portfolio-manager` 是一个 Codex Skill，用于在约 6–12 个月的周期内，以保守均衡、仅现货的方式研究加密货币投资组合。它将当前市场证据与确定性的记账、风险、配置、基准和再平衡计算结合起来。

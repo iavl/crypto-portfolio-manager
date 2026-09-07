@@ -224,7 +224,7 @@ relative_strength_btc
 
 event/security risk 使用独立的 typed gate；positioning 和 BTC cycle 是不计分的
 overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩，不能靠
-消失的数据抬高分数；v1 历史 replay 才保留旧的重新归一化。
+消失的数据抬高分数。
 关键 current price、trend、portfolio value 或材料安全事件缺失时，高置信新增
 仓位被阻止。
 

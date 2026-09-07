@@ -328,10 +328,6 @@ def _rate_limit_signal(headers: Any) -> bool:
     return _retry_after(headers) is not None
 
 
-classify_error = classify_transport_error
-classify_exception = classify_transport_error
-
-
 class HttpClient:
     """Small JSON client with bounded retries and response-size checks."""
 
@@ -556,8 +552,6 @@ class HttpClient:
             return self.opener(request, timeout=self.timeout)
         return urlopen(request, timeout=self.timeout, context=self.ssl_context)
 
-    get = get_json
-
     def _read(self, response: Any) -> bytes:
         headers = getattr(response, "headers", None)
         try:
@@ -587,8 +581,6 @@ __all__ = [
     "HttpClient",
     "TRANSPORT_ERROR_CODES",
     "build_ssl_context",
-    "classify_error",
-    "classify_exception",
     "classify_transport_error",
     "ProviderAuthenticationError",
     "ProviderRateLimited",

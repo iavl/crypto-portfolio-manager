@@ -25,7 +25,7 @@ from crypto_portfolio.models.metrics_history import MetricObservation, stable_ob
 from crypto_portfolio.models.execution import PriceZone
 
 
-def _observation(value, day="2026-09-01"):
+def _observation(value, day="2026-09-01T00:00:00Z"):
     return MetricObservation(
         stable_observation_id("ETH", "fundamentals.tvl", day, "test", value),
         "ETH",
@@ -43,7 +43,7 @@ def _observation(value, day="2026-09-01"):
 
 
 class PythonFirstArchitectureTests(unittest.TestCase):
-    def test_registry_aliases_and_collection_plan(self):
+    def test_registry_and_collection_plan(self):
         definition = MetricDefinition(
             key="fundamentals.tvl",
             factor="fundamentals",
@@ -99,8 +99,8 @@ class PythonFirstArchitectureTests(unittest.TestCase):
                 "metric_key": "relative.return_vs_btc_30d",
                 "value": 5,
                 "unit": "%",
-                "observed_at": "2026-09-02",
-                "fetched_at": "2026-09-02",
+                "observed_at": "2026-09-02T00:00:00Z",
+                "fetched_at": "2026-09-02T00:00:00Z",
                 "source": "test",
                 "confidence": "HIGH",
             }
@@ -113,7 +113,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             self.assertTrue(result_path.exists())
             self.assertTrue(event_path.exists())
         facts = build_factor_facts(
-            [_observation(100, "2026-09-01"), _observation(110, "2026-09-02")],
+            [_observation(100, "2026-09-01T00:00:00Z"), _observation(110, "2026-09-02T00:00:00Z")],
             symbol="ETH",
             factor="fundamentals",
         )
@@ -124,7 +124,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
     def test_deterministic_factors_and_regime_inputs(self):
         common = dict(
             symbol="ETH",
-            as_of="2026-09-02",
+            as_of="2026-09-02T00:00:00Z",
             current_spot_price=120,
             last_completed_close=118,
             history_days=365,
@@ -208,7 +208,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             factor_packets={"ETH": factor_packet},
         )
         report = build_report_packet(packet)
-        self.assertTrue(report.finalized)
+        self.assertEqual(report.as_dict()["review_type"], "SNAPSHOT_REVIEW")
         with self.assertRaises(TypeError):
             report.target_weights["ETH"] = 0.1
         with self.assertRaises(ValueError):

@@ -187,10 +187,6 @@ def benchmark_return_from_prices(
     )
 
 
-calculate_benchmark_return = benchmark_return
-benchmark_100_btc = primary_benchmark_return
-
-
 __all__ = [
     "benchmark_return",
     "benchmark_return_from_prices",
@@ -200,6 +196,4 @@ __all__ = [
     "require_aligned_period",
     "secondary_benchmark_return",
     "benchmark_70_30",
-    "benchmark_100_btc",
-    "calculate_benchmark_return",
 ]

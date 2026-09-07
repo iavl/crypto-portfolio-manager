@@ -204,10 +204,6 @@ def cash_flow_adjusted_return(
     return nav_return(build_nav_history(snapshots))
 
 
-calculate_nav = build_nav_history
-nav_history = build_nav_history
-
-
 __all__ = [
     "ExternalCashFlow",
     "NAVState",

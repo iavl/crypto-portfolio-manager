@@ -47,31 +47,6 @@ _METRIC_FIELDS = {
     "flows.etf_net_7d": "etf_flow_7d",
     "market.breadth": "breadth",
 }
-_ALIASES = {key.rsplit(".", 1)[-1]: key for key in _METRIC_FIELDS}
-_DEFAULT_CYCLE_POLICY = {
-    "enabled": True,
-    "halving_context_days": {
-        "early_post_halving_max": 180,
-        "mid_epoch_max": 730,
-        "late_epoch_min": 900,
-    },
-    "minimum_non_clock_confirmations_for_elevated_risk": 2,
-    "minimum_non_clock_confirmations_for_high_risk": 3,
-    "valuation": {
-        "mvrv_zscore_elevated": 3.5,
-        "mvrv_zscore_extreme": 7.0,
-        "market_to_realized_price_elevated": 1.5,
-        "market_to_realized_price_extreme": 2.0,
-    },
-    "price": {"extension_atr": 2.0, "drawdown_reset": 0.5},
-    "holder": {
-        "lth_distribution_threshold": -0.05,
-        "lth_accumulation_threshold": 0.05,
-        "sopr_distribution_threshold": 1.05,
-    },
-}
-
-
 @dataclass(frozen=True)
 class _Point:
     key: str
@@ -91,7 +66,7 @@ def _text(value: Any, field_name: str) -> str:
 def _canonical_key(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("cycle metric key must be a non-empty string")
-    key = _ALIASES.get(value.strip().lower(), value.strip().lower())
+    key = value.strip().lower()
     if key not in _METRIC_FIELDS:
         raise ValueError(f"unknown BTC cycle metric key: {key}")
     return key
@@ -149,20 +124,7 @@ def _points(value: Any, as_of: str | None) -> list[_Point]:
 
 
 def _cycle_policy(policy: Policy | None) -> dict[str, Any]:
-    result = {
-        key: {nested_key: nested_value for nested_key, nested_value in nested.items()}
-        if isinstance(nested, Mapping)
-        else nested
-        for key, nested in _DEFAULT_CYCLE_POLICY.items()
-    }
-    configured = getattr(policy or resolve_policy(), "btc_cycle", {})
-    if isinstance(configured, Mapping):
-        for key, value in configured.items():
-            if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
-                result[key].update(value)
-            else:
-                result[key] = value
-    return result
+    return dict((policy or resolve_policy()).btc_cycle)
 
 
 def _latest(points: Iterable[_Point], as_of: str) -> dict[str, _Point]:
@@ -190,10 +152,10 @@ def halving_context_for_days(days_since_halving: int | None, policy: Policy | No
         return HalvingContext.PRE_HALVING.value
     if isinstance(days_since_halving, bool) or not isinstance(days_since_halving, int) or days_since_halving < 0:
         raise ValueError("days_since_halving must be a non-negative integer or null")
-    ranges = (policy or resolve_policy()).btc_cycle.get("halving_context_days", {})
-    early = int(ranges.get("early_post_halving_max", 180))
-    mid = int(ranges.get("mid_epoch_max", 730))
-    late = int(ranges.get("late_epoch_min", 900))
+    ranges = (policy or resolve_policy()).btc_cycle["halving_context_days"]
+    early = int(ranges["early_post_halving_max"])
+    mid = int(ranges["mid_epoch_max"])
+    late = int(ranges["late_epoch_min"])
     if days_since_halving <= early:
         return HalvingContext.EARLY_POST_HALVING.value
     if days_since_halving <= mid:
@@ -282,8 +244,6 @@ def build_btc_cycle_context(
     **metric_values: Any,
 ) -> BTCCycleContext:
     """Build cycle context using only observations at or before ``as_of``."""
-    if isinstance(observations, str) and as_of is None:
-        as_of, observations = observations, None
     raw_as_of = as_of.isoformat() if isinstance(as_of, datetime) else as_of
     point_values = _points(observations, raw_as_of)
     if raw_as_of is None:
@@ -295,7 +255,7 @@ def build_btc_cycle_context(
     for key, value in metric_values.items():
         if not isinstance(key, str):
             raise ValueError("cycle metric keyword names must be strings")
-        canonical = _ALIASES.get(key.strip().lower(), key.strip().lower())
+        canonical = key.strip().lower()
         if canonical not in _METRIC_FIELDS:
             raise ValueError(f"unknown BTC cycle metric key: {key}")
         values[_METRIC_FIELDS[canonical]] = value
@@ -370,18 +330,18 @@ def build_btc_cycle_context(
 
     resolved = policy or resolve_policy()
     cycle_policy = _cycle_policy(resolved)
-    valuation_settings = cycle_policy.get("valuation", {})
-    holder_settings = cycle_policy.get("holder", {})
+    valuation_settings = cycle_policy["valuation"]
+    holder_settings = cycle_policy["holder"]
     valuation_state = _valuation(values, valuation_settings)
     holder_state = _holder(values, holder_settings)
     extension = _number(price_extension_atr)
     near_ath = distance_from_ath is not None and abs(distance_from_ath) <= 0.10
     price_signal = (
-        extension is not None and extension >= cycle_policy.get("price", {}).get("extension_atr", 2.0)
+        extension is not None and extension >= cycle_policy["price"]["extension_atr"]
     ) or near_ath
     trend = _state(trend_state)
     price_weak = trend in {"DOWNTREND", "STRONG_DOWNTREND", "BEARISH", "WEAK"} or (
-        drawdown is not None and drawdown <= -cycle_policy.get("price", {}).get("drawdown_reset", 0.5)
+        drawdown is not None and drawdown <= -cycle_policy["price"]["drawdown_reset"]
     )
     price_strong = trend in {"UPTREND", "STRONG_UPTREND", "BULLISH", "STRONG"}
     holder_distribution = holder_state == HolderBehaviorState.DISTRIBUTION.value
@@ -411,9 +371,8 @@ def build_btc_cycle_context(
     positioning_crowded = positioning_state in {"CROWDED", "EXTREME"} or positioning_risk in {"HIGH", "EXTREME"}
 
     confirmations: list[str] = []
-    # BTC-native valuation is a weighted base factor. Keep legacy cycle fields
-    # readable for replay, but never turn the same MVRV observation into a
-    # second deployment penalty.
+    # BTC-native valuation is a weighted base factor. Do not turn the same
+    # MVRV observation into a second deployment penalty.
     if price_signal:
         confirmations.append("price_extension")
     if holder_distribution:
@@ -422,8 +381,8 @@ def build_btc_cycle_context(
         confirmations.append("flows_or_liquidity")
     if positioning_crowded:
         confirmations.append("positioning")
-    elevated_count = int(cycle_policy.get("minimum_non_clock_confirmations_for_elevated_risk", 2))
-    high_count = int(cycle_policy.get("minimum_non_clock_confirmations_for_high_risk", 3))
+    elevated_count = int(cycle_policy["minimum_non_clock_confirmations_for_elevated_risk"])
+    high_count = int(cycle_policy["minimum_non_clock_confirmations_for_high_risk"])
     timing_available = last_time is not None
     price_available = price_signal or price_weak or price_strong or distance_from_ath is not None or drawdown is not None
     valuation_available = valuation_state != CycleValuationState.UNKNOWN.value
@@ -445,7 +404,7 @@ def build_btc_cycle_context(
         cycle_risk = CycleRisk.NORMAL.value
     elif (
         days_since is not None
-        and days_since >= cycle_policy.get("halving_context_days", {}).get("late_epoch_min", 900)
+        and days_since >= cycle_policy["halving_context_days"]["late_epoch_min"]
         and (confirmations or price_strong or price_weak or valuation_available or supporting_available)
     ):
         market_state = MarketCycleState.MATURE.value
@@ -522,15 +481,9 @@ def build_btc_cycle_context(
     )
 
 
-build_cycle_context = build_btc_cycle_context
-classify_btc_cycle = build_btc_cycle_context
-
-
 __all__ = [
     "HALVING_EVENTS",
     "HALVING_INTERVAL_DAYS",
     "build_btc_cycle_context",
-    "build_cycle_context",
-    "classify_btc_cycle",
     "halving_context_for_days",
 ]

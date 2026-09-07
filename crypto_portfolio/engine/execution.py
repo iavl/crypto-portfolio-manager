@@ -1,10 +1,9 @@
 """Public deterministic execution-planning façade and validation."""
 
-from .rebalance import validate_execution_plan as _legacy_validate_execution_plan
 from .entry import build_entry_plan, build_execution_evidence
 from ..models.execution import ExecutionPlan
 from ..models.market import TechnicalSnapshot
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 
 def validate_typed_execution_plan(plan: ExecutionPlan | Mapping[str, Any]) -> bool:
@@ -24,12 +23,8 @@ def validate_typed_execution_plan(plan: ExecutionPlan | Mapping[str, Any]) -> bo
     return True
 
 
-def validate_execution_plan(plan: ExecutionPlan | Mapping[str, Any] | Iterable[Mapping[str, Any]]) -> bool:
-    if isinstance(plan, ExecutionPlan) or (
-        isinstance(plan, Mapping) and {"tranches", "execution_plan_version"} & set(plan)
-    ):
-        return validate_typed_execution_plan(plan)
-    return _legacy_validate_execution_plan(plan)
+def validate_execution_plan(plan: ExecutionPlan | Mapping[str, Any]) -> bool:
+    return validate_typed_execution_plan(plan)
 
 
 def build_execution_plan(

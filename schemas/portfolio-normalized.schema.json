@@ -6,8 +6,8 @@
   "required": ["config", "policy_version", "timestamp", "base_currency", "total_value_usd", "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio", "stablecoin_weight", "core_weight", "satellite_weight", "portfolio_drawdown", "external_cash_flow", "cost_known_current_value_usd", "cost_known_cost_basis_usd", "total_unrealized_pnl_known_usd", "aggregate_unrealized_return_pct", "pnl_value_coverage_ratio", "position_performance", "positions", "warnings"],
   "properties": {
     "config": {"type": "object"},
-    "policy_version": {"type": "integer", "minimum": 1},
-    "timestamp": {"type": ["string", "null"], "format": "date-time"},
+    "policy_version": {"const": 3},
+    "timestamp": {"type": "string", "format": "date-time"},
     "source": {"type": ["string", "null"]},
     "base_currency": {"type": "string", "minLength": 1},
     "total_value_usd": {"type": "number", "exclusiveMinimum": 0},

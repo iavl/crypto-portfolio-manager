@@ -103,6 +103,8 @@ def _timestamp(row: Mapping[str, Any]) -> str:
         return normalize_timestamp(datetime.fromtimestamp(number, timezone.utc).isoformat(), "L2BEAT timestamp")
     if not isinstance(value, str) or not value.strip():
         raise ProviderDataError("L2BEAT row timestamp is missing")
+    if isinstance(value, str) and len(value) == 10:
+        value += "T00:00:00Z"
     return normalize_timestamp(value, "L2BEAT timestamp")
 
 
@@ -245,23 +247,13 @@ class L2BeatProvider:
         return ProviderResponse(tuple(values), network_requests=1 + len(values))
 
 
-L2beatProvider = L2BeatProvider
-L2BEATProvider = L2BeatProvider
-parse_tvs = parse_tvs_payload
-parse_activity = parse_activity_payload
-
-
 __all__ = [
     "ACTIVITY_PATH",
     "BASE_URL",
     "L2BeatProvider",
-    "L2beatProvider",
-    "L2BEATProvider",
     "PROJECTS_PATH",
     "TVS_PATH",
     "ethereum_project_ids",
     "parse_activity_payload",
-    "parse_activity",
     "parse_tvs_payload",
-    "parse_tvs",
 ]
