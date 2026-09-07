@@ -6,9 +6,10 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
+from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
+from .scoring import score_assessment
 
 
 @dataclass(frozen=True)
@@ -31,12 +32,7 @@ def _score(value: Any, symbol: str) -> float:
     if isinstance(value, AssetAssessment):
         if value.weighted_score is not None:
             return value.weighted_score
-        values = [
-            score.score if isinstance(score, FactorScore) else float(score)
-            for score in value.factor_scores.values()
-            if score is not None and (not isinstance(score, FactorScore) or score.score is not None)
-        ]
-        raw = sum(values) / len(values) if values else 50.0
+        raise ValueError("typed assessment must be scored before allocation")
     else:
         if isinstance(value, Mapping):
             raw = value.get("weighted_score", value.get("score", 50.0))
@@ -99,13 +95,15 @@ def _relative_multiplier(value: Any) -> float:
 def _event_risk_state(value: Any) -> str:
     raw = _field(value, "event_risk", None)
     if isinstance(raw, EventRiskAssessment):
-        return raw.state
+        raw = raw.state
     if isinstance(raw, Mapping):
         raw = raw.get("state")
     if raw is not None:
         state = str(raw).strip().upper()
         if state not in {"NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"}:
             raise ValueError("event_risk.state is unsupported")
+        if _flag(_field(value, "severe_event", False), "severe_event") and state not in {"SEVERE", "CRITICAL"}:
+            return "SEVERE"
         return state
     return "SEVERE" if _flag(_field(value, "severe_event", False), "severe_event") else "NORMAL"
 
@@ -126,6 +124,8 @@ def satellite_eligibility(
 ) -> str:
     """Return ELIGIBLE, HOLD_ONLY, or INELIGIBLE for a satellite assessment."""
     resolved = policy or resolve_policy()
+    if isinstance(assessment, AssetAssessment) and assessment.weighted_score is None:
+        assessment, _ = score_assessment(assessment, policy=resolved)
     score = _score(assessment, "satellite") if assessment is not None else 50.0
     relative = (
         _field(
@@ -149,6 +149,8 @@ def satellite_eligibility(
     ):
         return "INELIGIBLE"
     if score < entry_score:
+        if _relative_eligibility(relative) == "INELIGIBLE":
+            return "INELIGIBLE"
         return "HOLD_ONLY" if current_weight > 0 and score >= exit_score else "INELIGIBLE"
     if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
         return "HOLD_ONLY"
@@ -266,6 +268,8 @@ def build_target_allocation(
     for symbol in candidates:
         asset_type = resolved.classify(symbol)
         assessment = normalized_assessments.get(symbol)
+        if isinstance(assessment, AssetAssessment) and assessment.weighted_score is None:
+            assessment, _ = score_assessment(assessment, policy=resolved)
         supplied_type = _field(assessment, "asset_type", None) if assessment is not None else None
         if supplied_type is not None and not isinstance(assessment, AssetAssessment):
             supplied_type = str(supplied_type).lower()

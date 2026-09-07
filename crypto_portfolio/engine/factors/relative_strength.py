@@ -11,20 +11,10 @@ from ...facts.models import RelativeStrengthFacts
 from ...models.market import OHLCVSeries
 from ...models.policy import Policy, resolve_policy
 from ..metrics import annualized_volatility, simple_return
-from ..technical import completed_candles
+from ..technical import completed_candles, expected_latest_completed_date
 
 
 _HORIZONS = (30, 90, 180)
-_DEFAULT_V1_RULES = {
-    "positive_threshold": 0.05,
-    "negative_threshold": -0.05,
-    "horizon_weights": {"30d": 0.2, "90d": 0.4, "180d": 0.4},
-}
-_DEFAULT_V2_RULES = {
-    "horizon_weights": {"30d": 0.2, "90d": 0.4, "180d": 0.4},
-    "risk_adjusted_neutral_band": 0.1,
-    "risk_adjusted_saturation": 1.0,
-}
 
 
 @dataclass(frozen=True)
@@ -137,6 +127,8 @@ def _aligned_prices(
     asset: tuple[float, ...] | OHLCVSeries,
     btc: tuple[float, ...] | OHLCVSeries,
     days: int,
+    *,
+    daily: bool = True,
 ) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
     if isinstance(asset, tuple) and isinstance(btc, tuple):
         if len(asset) != len(btc) or len(asset) <= days:
@@ -157,7 +149,15 @@ def _aligned_prices(
     )
     if start not in asset_by_time or start not in btc_by_time:
         return None
-    selected = [timestamp for timestamp in common if start <= timestamp <= end]
+    # Sample a common 24-hour cadence even when the input is intraday.
+    end_time = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    selected = [
+        timestamp for timestamp in common
+        if start <= timestamp <= end and (
+            not daily
+            or (end_time - datetime.fromisoformat(timestamp.replace("Z", "+00:00"))).total_seconds() % 86400 == 0
+        )
+    ]
     if len(selected) < days + 1:
         return None
     return tuple(asset_by_time[timestamp] for timestamp in selected), tuple(
@@ -217,8 +217,7 @@ def _legacy_volatility_adjusted(
 
 
 def _rules(policy: Policy) -> Mapping[str, Any]:
-    defaults = _DEFAULT_V1_RULES if policy.policy_version == 1 else _DEFAULT_V2_RULES
-    return {**defaults, **policy.factor_rules.get("relative_strength", {})}
+    return policy.factor_rules["relative_strength"]
 
 
 def _legacy_horizon_score(value: float, positive: float, negative: float) -> float:
@@ -305,7 +304,7 @@ def calculate_relative_strength(
     elif isinstance(asset, tuple) and isinstance(btc, tuple) and len(asset) != len(btc):
         raise ValueError("asset and BTC histories must have equal lengths")
 
-    aligned_by_horizon = {days: _aligned_prices(asset, btc, days) for days in _HORIZONS}
+    aligned_by_horizon = {days: _aligned_prices(asset, btc, days, daily=resolved.policy_version >= 2) for days in _HORIZONS}
     asset_returns: dict[int, float | None] = {}
     btc_returns: dict[int, float | None] = {}
     relative: dict[int, float | None] = {}
@@ -338,7 +337,7 @@ def calculate_relative_strength(
             weighted_score = 50.0
         states = [_state(relative[days], float(rules["positive_threshold"]), float(rules["negative_threshold"])) for days in _HORIZONS]
     else:
-        available = [days for days in _HORIZONS if adjusted[days] is not None]
+        available = [days for days in _HORIZONS if adjusted[days] is not None and weights[f"{days}d"] > 0]
         neutral = float(rules["risk_adjusted_neutral_band"])
         saturation = float(rules["risk_adjusted_saturation"])
         if available:
@@ -372,7 +371,9 @@ def calculate_relative_strength(
         state = "UNDERPERFORM"
     else:
         state = "NEUTRAL"
-    coverage = len(available) / len(_HORIZONS)
+    coverage = len(available) / len(_HORIZONS) if resolved.policy_version == 1 else (
+        sum(weights[f"{days}d"] for days in available) / sum(weights.values())
+    )
     confidence = "HIGH" if coverage == 1 else "MEDIUM" if coverage >= 2 / 3 else "LOW"
     reasons = tuple(
         [
@@ -398,6 +399,18 @@ def calculate_relative_strength(
         if isinstance(series, OHLCVSeries):
             ids.append(series.ohlcv_hash)
     legacy_adjusted = _legacy_volatility_adjusted(relative[90], asset, btc) if resolved.policy_version == 1 else None
+    freshness = "CURRENT"
+    if resolved.policy_version >= 2:
+        for series in (asset, btc):
+            if isinstance(series, OHLCVSeries):
+                candles = completed_candles(series)
+                if not series.fetched_at or not candles:
+                    freshness = "UNKNOWN"
+                elif freshness != "UNKNOWN" and (
+                    datetime.fromisoformat(candles[-1].timestamp.replace("Z", "+00:00")).date()
+                    < expected_latest_completed_date(series.fetched_at)
+                ):
+                    freshness = "STALE"
     facts = RelativeStrengthFacts(
         symbol=normalized_symbol,
         current={
@@ -411,7 +424,7 @@ def calculate_relative_strength(
         changes={},
         trends={f"relative_{days}d": states[index] for index, days in enumerate(_HORIZONS)},
         coverage=coverage,
-        freshness="CURRENT",
+        freshness=freshness,
         source_ids=tuple(dict.fromkeys(ids)),
         data_quality_flags=() if coverage == 1 else ("INSUFFICIENT_HORIZON_HISTORY",),
     )

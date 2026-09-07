@@ -51,6 +51,10 @@ Active usage, settlement activity and blockspace demand belong to `onchain`.
 The same economic observation may be cited as context, but it must not add to
 two factor totals.
 
+In v2, technical drawdown remains visible in trend facts for context but adds
+no trend points or trend coverage requirement; valuation owns its score.
+The v1 trend contribution remains available for historical replay.
+
 Event-risk metrics use the `EVENT_RISK` role. Positioning and BTC-cycle metrics
 remain overlays and are not scoring factors.
 
@@ -79,6 +83,14 @@ The initial mappings are `CURRENT=1.00`, `STALE=0.50`, `UNKNOWN=0.00`, and
 `HIGH=1.00`, `MEDIUM=0.75`, `LOW=0.50` for source confidence. Do not multiply
 the same missing-data penalty twice.
 
+Deterministic factor results retain their coverage and fact freshness when
+converted to `FactorScore`, both directly and through `AssetAssessment`.
+Result confidence is not multiplied again because it already includes coverage.
+An explicit source-confidence field supplies the source-quality multiplier;
+legacy inputs without it retain the existing unit source-quality convention.
+Explicit reliability cannot raise the metadata-derived value. Numeric legacy
+factor inputs retain their documented reliability of 1.
+
 The v2 score and coverage are:
 
 ```text
@@ -87,6 +99,7 @@ coverage   = sum(profile_weight[f] * reliability[f])
 ```
 
 The profile weights are fixed resolved weights, not renormalized weights.
+Explicit custom v2 weights must also sum to 1; invalid sums are rejected.
 Coverage can permit at most `HIGH` at 90%, `MEDIUM` at 70%, and investability
 at 60%. Critical incompleteness forces `LOW`; a user-supplied confidence cannot
 raise a coverage cap.
@@ -126,6 +139,14 @@ evidence receives more authority than 1D noise. The state remains
 `POSITIVE`, `NEUTRAL`, `NEGATIVE`, or `UNKNOWN`. v1 replay retains exact-zero
 ternary behavior.
 
+Intraday OHLCV is sampled at common 24-hour intervals for the daily-return
+volatility calculation. Flow observation objects and serialized observations
+use the same normalization path. Multiple observations for one flow horizon
+must be resolved upstream; input order must not select the scoring source.
+Flow observations retain their weakest source confidence. Relative-strength
+OHLCV freshness is evaluated against persisted fetch timestamps, never the
+current wall clock; absent fetch timestamps give UNKNOWN freshness.
+
 ## Event-risk gate and overlays
 
 Event risk is a typed state: `NORMAL`, `ELEVATED`, `HIGH`, `SEVERE`, or
@@ -154,6 +175,10 @@ no new risk. A held satellite from 60 through 66 is held without adding risk;
 below 60 it becomes an ineligible/reduction candidate. Score strength is
 monotonic from 67 to 85 and is still multiplied by confidence, risk, event and
 relative-strength gates.
+
+Materially negative BTC-relative evidence overrides the hold band. A legacy
+`severe_event=True` sets at least SEVERE even if a newer field says NORMAL;
+CRITICAL is never downgraded by compatibility handling.
 
 Scores do not directly imply `BUY`, `SELL`, or a full deployment. `HOLD`,
 `WAIT`, and `NO_TRADE` remain valid outcomes.

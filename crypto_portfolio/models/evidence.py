@@ -179,6 +179,34 @@ class FactorScore:
     availability: str = "AVAILABLE"
     reliability: float | None = None
 
+    @classmethod
+    def from_result(cls, factor: str, value: Mapping[str, Any]) -> "FactorScore":
+        """Preserve deterministic facts quality when materializing a result."""
+        if str(value.get("factor", factor)).strip().lower() != factor:
+            raise ValueError("factor result does not match its factor key")
+        facts = value["facts"]
+        availability = value.get("availability", "AVAILABLE" if value.get("score") is not None else "MISSING")
+        if value.get("state") in {"UNKNOWN", "NOT_APPLICABLE"}:
+            availability = "MISSING" if value["state"] == "UNKNOWN" else "NOT_APPLICABLE"
+        coverage = value.get("coverage", facts.get("coverage", 0.0))
+        # Confidence in a result already includes coverage; do not count it twice.
+        freshness = {"CURRENT": 1.0, "STALE": 0.5, "UNKNOWN": 0.0}.get(facts.get("freshness", "UNKNOWN"))
+        source = {"HIGH": 1.0, "MEDIUM": 0.75, "LOW": 0.5}.get(value.get("source_confidence", "HIGH"))
+        if freshness is None or source is None:
+            raise ValueError("factor result has invalid freshness or source confidence")
+        validated = cls(
+            factor,
+            value.get("score") if availability == "AVAILABLE" else None,
+            tuple(value.get("evidence_ids", facts.get("source_ids", ()))),
+            availability,
+            coverage if availability == "AVAILABLE" else 0.0,
+        )
+        reliability = validated.reliability * freshness * source
+        if "reliability" in value:
+            claimed = cls(factor, validated.score, availability=availability, reliability=value["reliability"])
+            reliability = min(reliability, claimed.reliability)
+        return cls(factor, validated.score, validated.evidence_ids, availability, reliability)
+
     def __post_init__(self) -> None:
         factor = _text(self.factor, "factor").lower()
         availability = _text(self.availability, f"factor {factor}.availability").upper()
@@ -249,6 +277,8 @@ class AssetAssessment:
         parsed: dict[str, FactorScore | None] = {}
         for raw_factor, value in self.factor_scores.items():
             factor = _text(raw_factor, "factor").lower()
+            if hasattr(value, "as_dict") and hasattr(value, "facts"):
+                value = value.as_dict()
             if factor in parsed:
                 raise ValueError(f"factor_scores contains duplicate key {factor}")
             if value is None:
@@ -257,6 +287,8 @@ class AssetAssessment:
                 if value.factor != factor:
                     raise ValueError(f"factor score key {factor!r} does not match {value.factor!r}")
                 parsed[factor] = value
+            elif isinstance(value, Mapping) and isinstance(value.get("facts"), Mapping):
+                parsed[factor] = FactorScore.from_result(factor, value)
             elif isinstance(value, Mapping):
                 factor_name = str(value.get("factor", factor)).strip().lower()
                 availability = str(
@@ -326,9 +358,12 @@ class AssetAssessment:
         event_risk = self.event_risk
         if event_risk is not None and not isinstance(event_risk, EventRiskAssessment):
             event_risk = EventRiskAssessment.from_mapping(event_risk)
-        if event_risk is None and self.severe_event:
+        if self.severe_event and (event_risk is None or not event_risk.blocks_new_risk):
             event_risk = EventRiskAssessment(
-                "SEVERE", reasons=("legacy severe_event flag",)
+                "SEVERE",
+                reasons=tuple(dict.fromkeys((*event_risk.reasons, "legacy severe_event flag"))) if event_risk else ("legacy severe_event flag",),
+                evidence_ids=event_risk.evidence_ids if event_risk else (),
+                unresolved=event_risk.unresolved if event_risk else False,
             )
         if event_risk is not None and event_risk.blocks_new_risk:
             object.__setattr__(self, "severe_event", True)

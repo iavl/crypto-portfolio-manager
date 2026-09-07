@@ -13,7 +13,6 @@ from ..metric_history import build_factor_facts
 
 
 _DEFAULT_V1_RULES = {"positive_threshold": 0.0, "negative_threshold": 0.0}
-_DEFAULT_V2_RULES = {"neutral_abs_max": 0.001, "strong_abs": 0.01}
 _HORIZON_WEIGHTS = {"1d": 0.1, "7d": 0.3, "30d": 0.6}
 
 
@@ -28,6 +27,7 @@ class FlowFactorResult:
     evidence_ids: tuple[str, ...] = ()
     normalized_flow: float | None = None
     horizon_ratios: Mapping[str, float | None] | None = None
+    source_confidence: str = "HIGH"
 
     def __post_init__(self) -> None:
         if self.score is not None:
@@ -41,6 +41,8 @@ class FlowFactorResult:
         confidence = str(self.confidence).strip().upper()
         if confidence not in {"HIGH", "MEDIUM", "LOW"}:
             raise ValueError("flow confidence is unsupported")
+        if self.source_confidence not in {"HIGH", "MEDIUM", "LOW"}:
+            raise ValueError("flow source confidence is unsupported")
         coverage = float(self.coverage)
         if not math.isfinite(coverage) or not 0 <= coverage <= 1:
             raise ValueError("flow coverage must be in [0, 1]")
@@ -78,6 +80,7 @@ class FlowFactorResult:
             "evidence_ids": list(self.evidence_ids),
             "normalized_flow": self.normalized_flow,
             "horizon_ratios": dict(self.horizon_ratios),
+            "source_confidence": self.source_confidence,
         }
 
 
@@ -150,6 +153,10 @@ def _ratio(flow: Any, denominator: Any) -> float | None:
 
 
 def _normalized_ratios(value: Any) -> dict[str, float | None]:
+    if isinstance(value, Mapping) and "metric_key" in value:
+        value = MetricObservation.from_mapping(value)
+    if isinstance(value, (list, tuple)) and value and all(isinstance(item, Mapping) for item in value):
+        value = tuple(MetricObservation.from_mapping(item) for item in value)
     if isinstance(value, MetricObservation):
         metadata = value.metadata or {}
         horizon = next(
@@ -163,6 +170,8 @@ def _normalized_ratios(value: Any) -> dict[str, float | None]:
         ratios: dict[str, float | None] = {}
         for item in value:
             ratio = _normalized_ratios(item)
+            if set(ratios) & set(ratio):
+                raise ValueError("multiple flow observations for one horizon require explicit source selection")
             ratios.update(ratio)
         return ratios or {"30d": None}
     if isinstance(value, Mapping) and isinstance(value.get("observations"), (list, tuple)):
@@ -193,7 +202,9 @@ def _normalized_ratios(value: Any) -> dict[str, float | None]:
     ratios: dict[str, float | None] = {}
     for horizon in _HORIZON_WEIGHTS:
         flow = next(
-            (current[key] for key in current if str(key).lower().endswith(f"_{horizon}") or str(key).lower() == horizon),
+            (current[key] for key in current if
+             (str(key).lower().endswith(f"_{horizon}") or str(key).lower() == horizon)
+             and not any(prefix in str(key).lower() for prefix in ("denominator", "aum", "market_cap"))),
             None,
         )
         denominator = next(
@@ -241,6 +252,15 @@ def calculate_flow_factor(
         raise ValueError("provide only one of value or observations")
     if observations is not None:
         value = tuple(observations)
+    if isinstance(value, Mapping) and "metric_key" in value:
+        value = MetricObservation.from_mapping(value)
+    if isinstance(value, (list, tuple)) and value and all(isinstance(item, Mapping) for item in value):
+        value = tuple(MetricObservation.from_mapping(item) for item in value)
+    source_observations = (value,) if isinstance(value, MetricObservation) else (
+        tuple(value) if isinstance(value, (list, tuple)) and all(isinstance(item, MetricObservation) for item in value) else ()
+    )
+    source_confidence = min((item.confidence for item in source_observations),
+                            key=("LOW", "MEDIUM", "HIGH").index, default="HIGH")
     if isinstance(value, FlowFacts):
         facts = value
     elif isinstance(value, MetricObservation) or (isinstance(value, Mapping) and "metric_key" in value):
@@ -325,7 +345,7 @@ def calculate_flow_factor(
 
     ratios = _normalized_ratios(value if value is not None else facts)
     available = {key: ratio for key, ratio in ratios.items() if ratio is not None}
-    rules = {**_DEFAULT_V2_RULES, **resolved.factor_rules.get("flows", {})}
+    rules = resolved.factor_rules["flows"]
     neutral = float(rules["neutral_abs_max"])
     strong = float(rules["strong_abs"])
     if available:
@@ -353,6 +373,7 @@ def calculate_flow_factor(
         evidence_ids=facts.source_ids,
         normalized_flow=normalized,
         horizon_ratios=ratios,
+        source_confidence=source_confidence,
     )
 
 

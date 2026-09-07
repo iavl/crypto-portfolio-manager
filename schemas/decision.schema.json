@@ -102,6 +102,16 @@
         "availability": {"enum": ["AVAILABLE", "MISSING", "NOT_APPLICABLE"]},
         "reliability": {"type": "number", "minimum": 0, "maximum": 1}
       },
+      "allOf": [
+        {
+          "if": {"properties": {"availability": {"const": "AVAILABLE"}}, "required": ["availability"]},
+          "then": {"properties": {"score": {"type": "number"}}}
+        },
+        {
+          "if": {"properties": {"availability": {"enum": ["MISSING", "NOT_APPLICABLE"]}}, "required": ["availability"]},
+          "then": {"properties": {"score": {"type": "null"}, "reliability": {"const": 0}}}
+        }
+      ],
       "additionalProperties": true
     },
     "rebalanceAction": {

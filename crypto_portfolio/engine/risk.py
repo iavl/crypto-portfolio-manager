@@ -91,12 +91,17 @@ def _event_risk_state(value: Any) -> str:
         if state not in _EVENT_RISK_STATES:
             raise ValueError("assessment event_risk must be a recognized state")
     if state is not None:
+        legacy = value.severe_event if isinstance(value, AssetAssessment) else (
+            value.get("severe_event", False) if isinstance(value, Mapping) else False
+        )
+        if not isinstance(legacy, bool):
+            raise ValueError("assessment severe_event must be boolean")
         thesis = value.thesis_broken if isinstance(value, AssetAssessment) else (
             value.get("thesis_broken", False) if isinstance(value, Mapping) else False
         )
         if not isinstance(thesis, bool):
             raise ValueError("assessment thesis_broken must be boolean")
-        return "SEVERE" if thesis else state
+        return "SEVERE" if (thesis or legacy) and state != "CRITICAL" else state
     legacy = value.severe_event if isinstance(value, AssetAssessment) else (
         value.get("severe_event", False) if isinstance(value, Mapping) else False
     )

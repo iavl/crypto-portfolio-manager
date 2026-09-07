@@ -170,15 +170,17 @@ def calculate_trend_factor(
             score -= rules["return_points"]
             reasons.append(f"{name} return is negative")
 
-    total += 1
-    if snapshot.current_drawdown is not None:
-        available += 1
-        if snapshot.current_drawdown >= -rules["drawdown_tolerance"]:
-            score += rules["drawdown_points"]
-            reasons.append("drawdown is within the trend tolerance")
-        elif snapshot.current_drawdown <= -0.60:
-            score -= rules["drawdown_points"]
-            reasons.append("drawdown is materially elevated")
+    # Drawdown belongs to valuation in v2; retain it only as trend context.
+    if resolved.policy_version == 1:
+        total += 1
+        if snapshot.current_drawdown is not None:
+            available += 1
+            if snapshot.current_drawdown >= -rules["drawdown_tolerance"]:
+                score += rules["drawdown_points"]
+                reasons.append("drawdown is within the trend tolerance")
+            elif snapshot.current_drawdown <= -0.60:
+                score -= rules["drawdown_points"]
+                reasons.append("drawdown is materially elevated")
 
     total += 1
     if snapshot.support_zones:

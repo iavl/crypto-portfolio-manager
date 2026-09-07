@@ -112,6 +112,10 @@ def _extract(value: Any, factor: str) -> tuple[float | None, str, float]:
         return value.score, value.availability, value.reliability
     if value is None:
         return None, "MISSING", 0.0
+    if not isinstance(value, Mapping) and hasattr(value, "as_dict") and hasattr(value, "facts"):
+        value = value.as_dict()
+    if isinstance(value, Mapping) and isinstance(value.get("facts"), Mapping):
+        return _extract(FactorScore.from_result(factor, value), factor)
     if isinstance(value, Mapping):
         if "score" not in value and "availability" not in value:
             raise ValueError(f"factor {factor} must contain score or availability")
@@ -120,6 +124,9 @@ def _extract(value: Any, factor: str) -> tuple[float | None, str, float]:
         if availability not in AVAILABILITY_STATES:
             raise ValueError(f"factor {factor}.availability is unsupported")
         raw_score = value.get("score")
+        if value.get("state") in {"UNKNOWN", "NOT_APPLICABLE"}:
+            availability = "MISSING" if value["state"] == "UNKNOWN" else "NOT_APPLICABLE"
+            raw_score = None
         score = None if raw_score is None else _score(raw_score, f"factor {factor}.score")
         reliability = _reliability(
             value.get("reliability", 1.0 if availability == "AVAILABLE" else 0.0), factor
@@ -278,11 +285,9 @@ def _score_factors_v2(
     profile_name: str,
     symbol: str,
 ) -> ScoreResult:
-    raw_weights = _weight_mapping(weights, legacy=False)
-    total_weight = sum(raw_weights.values())
-    resolved_weights = {
-        factor: weight / total_weight for factor, weight in raw_weights.items()
-    }
+    resolved_weights = _weight_mapping(weights, legacy=False)
+    if not math.isclose(sum(resolved_weights.values()), 1.0, rel_tol=0, abs_tol=1e-9):
+        raise ValueError("v2 scoring weights must sum to 1")
     unknown = sorted(set(factor_scores) - set(resolved_weights))
     if unknown:
         raise ValueError(f"unknown scoring factor(s): {', '.join(unknown)}")
@@ -401,7 +406,7 @@ def score_assessment(
     for factor, state in (result.factor_availability or {}).items():
         if factor not in scored_factors and state == "MISSING":
             scored_factors[factor] = FactorScore(factor, None, availability="MISSING")
-        elif factor not in scored_factors and state == "NOT_APPLICABLE":
+        elif state == "NOT_APPLICABLE":
             scored_factors[factor] = FactorScore(factor, None, availability="NOT_APPLICABLE")
     updated = AssetAssessment(
         symbol=assessment.symbol,
