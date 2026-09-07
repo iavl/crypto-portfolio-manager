@@ -200,7 +200,13 @@ def _normalized_ratios(value: Any) -> dict[str, float | None]:
     if ("flow" in current or "net_flow" in current) and common_denominator is not None:
         return {"30d": _ratio(current.get("flow", current.get("net_flow")), common_denominator)}
     ratios: dict[str, float | None] = {}
+    for horizon in ("7d", "30d"):
+        normalized_key = f"flows.btc_etf_net_to_aum_{horizon}"
+        if normalized_key in current:
+            ratios[horizon] = _number(current[normalized_key])
     for horizon in _HORIZON_WEIGHTS:
+        if horizon in ratios:
+            continue
         flow = next(
             (current[key] for key in current if
              (str(key).lower().endswith(f"_{horizon}") or str(key).lower() == horizon)

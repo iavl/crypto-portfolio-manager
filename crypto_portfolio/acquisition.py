@@ -48,6 +48,7 @@ _PROVIDER_SKIP_ERROR_CODES = {
 _DERIVED_DEPENDENCIES = {
     "valuation.fdv_market_cap_ratio": ("valuation.fdv", "valuation.market_cap"),
     "derivatives.open_interest_to_market_cap": ("derivatives.open_interest_usd", "valuation.market_cap"),
+    "btc_valuation.price_to_realized_price": ("market.spot_price", "btc_valuation.realized_price"),
 }
 
 
@@ -589,6 +590,7 @@ class AcquisitionManager:
                 or not self.router.allow_web
                 or event_metric_category(request.metric_key) is not None
                 or request.metric_key == "risk.chain_liveness_status"
+                or request.metric_key.startswith(("macro.", "btc_valuation."))
             ):
                 return
             chain = provider_chain(request.metric_key, request.asset)

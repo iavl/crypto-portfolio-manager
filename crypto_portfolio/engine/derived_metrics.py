@@ -142,6 +142,46 @@ def derive_fdv_market_cap_ratio(
     }
 
 
+def derive_btc_price_to_realized_price(
+    asset: str,
+    spot_price: MetricObservation | Mapping[str, Any],
+    realized_price: MetricObservation | Mapping[str, Any],
+    *,
+    fetched_at: str,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    """Derive BTC spot price divided by realized price from fresh primitives."""
+    asset = asset.strip().upper()
+    spot = _fresh_input(spot_price, asset=asset, metric_key="market.spot_price", as_of=as_of)
+    realized = _fresh_input(
+        realized_price,
+        asset=asset,
+        metric_key="btc_valuation.realized_price",
+        as_of=as_of,
+    )
+    if spot is None or realized is None or spot[0] <= 0 or realized[0] <= 0:
+        return None
+    observed_at = min(spot[1], realized[1], key=parse_timestamp)
+    input_ids = [item for item in (spot[2], realized[2]) if item]
+    return {
+        "asset": asset,
+        "metric_key": "btc_valuation.price_to_realized_price",
+        "value": spot[0] / realized[0],
+        "unit": "ratio",
+        "period": "current",
+        "observed_at": observed_at,
+        "fetched_at": fetched_at,
+        "source": "python-derived",
+        "confidence": "HIGH",
+        "summary": "Derived from BTC spot price divided by realized price.",
+        "metadata": {
+            "source_mode": "DERIVED",
+            "calculation": "market.spot_price / btc_valuation.realized_price",
+            "input_observation_ids": input_ids,
+        },
+    }
+
+
 def derive_metric_observations(
     requests: Iterable[MetricRequest],
     reusable: Mapping[tuple[str, str], MetricObservation],
@@ -157,12 +197,26 @@ def derive_metric_observations(
         if request.metric_key not in {
             "derivatives.open_interest_to_market_cap",
             "valuation.fdv_market_cap_ratio",
+            "btc_valuation.price_to_realized_price",
         }:
             continue
         identity = (request.asset, request.metric_key)
         cap_identity = (request.asset, "valuation.market_cap")
         cap = reusable.get(cap_identity) or routed.get(cap_identity)
-        if request.metric_key == "derivatives.open_interest_to_market_cap":
+        if request.metric_key == "btc_valuation.price_to_realized_price":
+            spot_identity = (request.asset, "market.spot_price")
+            realized_identity = (request.asset, "btc_valuation.realized_price")
+            spot = reusable.get(spot_identity) or routed.get(spot_identity)
+            realized = reusable.get(realized_identity) or routed.get(realized_identity)
+            derived = derive_btc_price_to_realized_price(
+                request.asset,
+                spot,
+                realized,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ) if spot is not None and realized is not None else None
+            dependencies = (("market.spot_price", spot), ("btc_valuation.realized_price", realized))
+        elif request.metric_key == "derivatives.open_interest_to_market_cap":
             oi_identity = (request.asset, "derivatives.open_interest_usd")
             oi = reusable.get(oi_identity) or routed.get(oi_identity)
             derived = derive_open_interest_to_market_cap(
@@ -195,6 +249,7 @@ def derive_metric_observations(
 
 __all__ = [
     "derive_metric_observations",
+    "derive_btc_price_to_realized_price",
     "derive_fdv_market_cap_ratio",
     "derive_open_interest_to_market_cap",
 ]

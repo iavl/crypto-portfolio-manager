@@ -166,6 +166,8 @@ class AssetFactorPacket:
     symbol: str
     trend_facts: FactBase | Mapping[str, Any] | None = None
     valuation_facts: FactBase | Mapping[str, Any] | None = None
+    btc_valuation_facts: FactBase | Mapping[str, Any] | None = None
+    macro_liquidity_facts: FactBase | Mapping[str, Any] | None = None
     fundamental_facts: FactBase | Mapping[str, Any] | None = None
     onchain_facts: FactBase | Mapping[str, Any] | None = None
     flow_facts: FactBase | Mapping[str, Any] | None = None
@@ -180,7 +182,7 @@ class AssetFactorPacket:
             raise ValueError("factor packet symbol must be non-empty")
         object.__setattr__(self, "symbol", self.symbol.strip().upper())
         fact_fields = (
-            "trend_facts", "valuation_facts", "fundamental_facts", "onchain_facts",
+            "trend_facts", "valuation_facts", "btc_valuation_facts", "macro_liquidity_facts", "fundamental_facts", "onchain_facts",
             "flow_facts", "relative_strength_facts", "event_facts",
         )
         for field_name in fact_fields:
@@ -230,6 +232,8 @@ class AssetFactorPacket:
         return MappingProxyType({
             "trend": self.trend_facts,
             "valuation": self.valuation_facts,
+            "btc_valuation": self.btc_valuation_facts,
+            "macro_liquidity": self.macro_liquidity_facts,
             "fundamentals": self.fundamental_facts,
             "onchain": self.onchain_facts,
             "capital_flows": self.flow_facts,
@@ -242,6 +246,8 @@ class AssetFactorPacket:
         names = (
             ("trend_facts", self.trend_facts),
             ("valuation_facts", self.valuation_facts),
+            ("btc_valuation_facts", self.btc_valuation_facts),
+            ("macro_liquidity_facts", self.macro_liquidity_facts),
             ("fundamental_facts", self.fundamental_facts),
             ("onchain_facts", self.onchain_facts),
             ("flow_facts", self.flow_facts),

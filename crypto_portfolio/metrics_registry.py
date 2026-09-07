@@ -259,6 +259,22 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "flows.etf_net_1d": _definition("flows.etf_net_1d", "capital_flows", "number", "USD", "HIGHER_IS_BETTER", freshness="2d"),
     "flows.etf_net_7d": _definition("flows.etf_net_7d", "capital_flows", "number", "USD", "HIGHER_IS_BETTER", freshness="7d"),
     "flows.etf_net_30d": _definition("flows.etf_net_30d", "capital_flows", "number", "USD", "HIGHER_IS_BETTER", freshness="14d"),
+    "flows.btc_etf_net_to_aum_7d": _definition(
+        "flows.btc_etf_net_to_aum_7d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "flows.btc_etf_net_to_aum_30d": _definition(
+        "flows.btc_etf_net_to_aum_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="14d", asset_scope=("BTC",),
+    ),
+    "flows.btc_etf_net_1d": _definition(
+        "flows.btc_etf_net_1d", "capital_flows", "number", "USD", "HIGHER_IS_BETTER",
+        freshness="2d", asset_scope=("BTC",),
+    ),
+    "flows.btc_etf_aum_usd": _definition(
+        "flows.btc_etf_aum_usd", "capital_flows", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="btc_etf",
+    ),
     "flows.exchange_netflow": _definition("flows.exchange_netflow", "capital_flows", "number", "USD", "CONTEXTUAL", freshness="2d"),
     "fundamentals.tvl": _definition("fundamentals.tvl", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.fees_30d": _definition("fundamentals.fees_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
@@ -274,6 +290,70 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fdv_market_cap_ratio": _definition("valuation.fdv_market_cap_ratio", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="7d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fee_revenue_multiple": _definition("valuation.fee_revenue_multiple", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="14d", asset_scope=_APPLICATION_ASSETS),
+    "btc_valuation.mvrv": _definition(
+        "btc_valuation.mvrv", "btc_valuation", "number", "ratio", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "btc_valuation.mvrv_zscore": _definition(
+        "btc_valuation.mvrv_zscore", "btc_valuation", "number", "zscore", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "btc_valuation.realized_price": _definition(
+        "btc_valuation.realized_price", "btc_valuation", "number", "USD", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "btc_valuation.price_to_realized_price": _definition(
+        "btc_valuation.price_to_realized_price", "btc_valuation", "number", "ratio", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "btc_valuation.realized_cap_usd": _definition(
+        "btc_valuation.realized_cap_usd", "btc_valuation", "number", "USD", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="btc_valuation",
+    ),
+    "macro.dff": _definition(
+        "macro.dff", "macro_liquidity", "number", "percent", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+    ),
+    "macro.dfii10": _definition(
+        "macro.dfii10", "macro_liquidity", "number", "percent", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+    ),
+    "macro.dtwexbgs": _definition(
+        "macro.dtwexbgs", "macro_liquidity", "number", "index", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+    ),
+    "macro.walcl": _definition(
+        "macro.walcl", "macro_liquidity", "number", "USD_millions", "CONTEXTUAL",
+        freshness="14d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+    ),
+    "macro.m2sl": _definition(
+        "macro.m2sl", "macro_liquidity", "number", "USD_billions", "CONTEXTUAL",
+        freshness="45d", asset_scope=("BTC",), decision_role="EXECUTION_CONTEXT", context_group="macro_liquidity",
+    ),
+    "macro.fed_funds_change_90d": _definition(
+        "macro.fed_funds_change_90d", "macro_liquidity", "number", "percentage_points", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "macro.real_yield_change_90d": _definition(
+        "macro.real_yield_change_90d", "macro_liquidity", "number", "percentage_points", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "macro.broad_dollar_change_90d": _definition(
+        "macro.broad_dollar_change_90d", "macro_liquidity", "number", "fraction", "LOWER_IS_BETTER",
+        freshness="7d", asset_scope=("BTC",),
+    ),
+    "macro.fed_balance_sheet_change_13w": _definition(
+        "macro.fed_balance_sheet_change_13w", "macro_liquidity", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="14d", asset_scope=("BTC",),
+    ),
+    "macro.m2_change_6m": _definition(
+        "macro.m2_change_6m", "macro_liquidity", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="45d", asset_scope=("BTC",),
+    ),
+    "macro.m2_change_12m": _definition(
+        "macro.m2_change_12m", "macro_liquidity", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="45d", asset_scope=("BTC",),
+    ),
     "relative.return_vs_btc_30d": _definition("relative.return_vs_btc_30d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_90d": _definition("relative.return_vs_btc_90d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "relative.return_vs_btc_180d": _definition("relative.return_vs_btc_180d", "relative_strength_btc", "number", "fraction", "HIGHER_IS_BETTER", freshness="14d", asset_scope=_APPLICATION_ASSETS),
@@ -454,6 +534,14 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         freshness="7d", asset_scope=("BTC",),
         decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
     ),
+    "btc_network.hashrate": _definition(
+        "btc_network.hashrate", "network", "number", "hashes", "CONTEXTUAL",
+        freshness="7d", asset_scope=("BTC",), decision_role="CYCLE_CONTEXT", context_group="btc_network",
+    ),
+    "btc_network.difficulty": _definition(
+        "btc_network.difficulty", "network", "number", "difficulty", "CONTEXTUAL",
+        freshness="14d", asset_scope=("BTC",), decision_role="CYCLE_CONTEXT", context_group="btc_network",
+    ),
 }
 
 METRICS = METRIC_REGISTRY
@@ -494,7 +582,12 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         or definition.key.startswith("derivatives.open_interest_change_")
         or definition.key == "derivatives.futures_basis_annualized"
         or definition.key == "sentiment.social_mentions_change_7d"
-        or definition.key in {"onchain.btc.mvrv_zscore", "onchain.btc.lth_net_position_change", "onchain.btc.nupl"}
+        or definition.key in {
+            "onchain.btc.mvrv_zscore", "onchain.btc.lth_net_position_change", "onchain.btc.nupl",
+            "btc_valuation.mvrv_zscore", "macro.fed_funds_change_90d", "macro.real_yield_change_90d",
+            "macro.broad_dollar_change_90d", "macro.fed_balance_sheet_change_13w",
+            "macro.m2_change_6m", "macro.m2_change_12m",
+        }
     )
     if not signed and number < 0:
         raise ValueError(f"metric {definition.key} value must be non-negative")
@@ -587,7 +680,8 @@ def validate_metric_ownership(
         if not isinstance(definition, MetricDefinition) or definition.key != normalize_metric_key(key):
             raise ValueError("metric registry keys must match MetricDefinition.key")
         if definition.is_scoring_factor and definition.factor not in {
-            "trend", "valuation", "fundamentals", "onchain", "capital_flows", "relative_strength_btc"
+            "trend", "valuation", "fundamentals", "onchain", "capital_flows", "relative_strength_btc",
+            "btc_valuation", "macro_liquidity",
         }:
             raise ValueError(f"scoring metric {definition.key} has no canonical factor owner")
         if definition.is_event_risk and definition.factor != "event_risk":

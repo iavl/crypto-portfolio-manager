@@ -9,12 +9,13 @@ from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
 from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
-from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, catalog_metrics
+from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, CoinMetricsProvider, catalog_metrics
 from .coingecko import BASE_URL as COINGECKO_BASE_URL, COINGECKO_IDS, CoinGeckoProvider
 from .chain_liveness import CHAIN_NATIVE_ASSETS, ChainLivenessProvider
 from .defillama import BASE_URL as DEFILLAMA_BASE_URL
 from .github_activity import BASE_URL as GITHUB_BASE_URL, GitHubActivityProvider, REPOSITORY_ALLOWLIST
 from .http import classify_transport_error, redact_secrets, redact_url
+from .fred import FREDProvider, FRED_SERIES, BASE_URL as FRED_BASE_URL, OBSERVATIONS_PATH
 from .router import ProviderRouter
 from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_HISTORICAL_INFLOW_PATH, SoSoValueProvider
 
@@ -130,7 +131,12 @@ def _sosovalue_probe(provider: SoSoValueProvider, asset: str = "BTC") -> dict[st
             "etf",
             asset,
             {"as_of": _now()},
-            ("flows.etf_net_1d",),
+            (
+                "flows.etf_net_1d",
+                "flows.btc_etf_net_to_aum_7d",
+                "flows.btc_etf_net_to_aum_30d",
+                "flows.btc_etf_aum_usd",
+            ) if asset.strip().upper() == "BTC" else ("flows.etf_net_1d",),
         ))
         captured["value"] = value
         return value
@@ -150,6 +156,13 @@ def _sosovalue_probe(provider: SoSoValueProvider, asset: str = "BTC") -> dict[st
         metadata = observations[0].get("metadata", {}) if observations else {}
         result["history_rows"] = metadata.get("history_rows", len(observations))
         result["latest_source_date"] = metadata.get("source_end_date")
+        result["normalized_7d"] = any(
+            item.get("metric_key") == "flows.btc_etf_net_to_aum_7d" for item in observations
+        )
+        result["normalized_30d"] = any(
+            item.get("metric_key") == "flows.btc_etf_net_to_aum_30d" for item in observations
+        )
+        result["aum"] = any(item.get("metric_key") == "flows.btc_etf_aum_usd" for item in observations)
     transport = getattr(provider.client, "transport_metadata", lambda: {})()
     result.update({
         "python_ssl": transport.get("python_ssl"),
@@ -223,6 +236,29 @@ def probe_provider(
         return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
         return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
+    if name == "fred" and isinstance(provider, FREDProvider):
+        endpoint = FRED_BASE_URL + OBSERVATIONS_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "fred", "macro", "BTC", {"as_of": _now()},
+                tuple(FRED_SERIES),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call(
+            "fred", endpoint, call, authenticated=True, validate=_require_observations,
+        )
+        result["series"] = list(FRED_SERIES)
+        if "error_code" not in result:
+            result["available_series"] = sorted({
+                str(item.get("metadata", {}).get("series_id"))
+                for item in getattr(captured["value"], "observations", ())
+                if item.get("metadata", {}).get("series_id")
+            })
+        return (_with_config(result, client),)
     if name == "coingecko" and isinstance(provider, CoinGeckoProvider):
         endpoint = COINGECKO_BASE_URL + "/coins/markets"
         target = (asset or "BTC").strip().upper()
@@ -301,7 +337,19 @@ def probe_provider(
     if name in {"coinmetrics_community", "coinmetrics_pro"}:
         base_url = AUTHENTICATED_BASE_URL if name == "coinmetrics_pro" else COMMUNITY_BASE_URL
         endpoint = base_url + "/v4/catalog/asset-metrics"
-        return (_with_config(_probe_call(name, endpoint, lambda: client.get_json(endpoint), validate=lambda value: catalog_metrics(value), authenticated=name == "coinmetrics_pro"), client),)
+        def call() -> Any:
+            return client.get_json(endpoint)
+
+        result = _probe_call(name, endpoint, call, validate=lambda value: catalog_metrics(value), authenticated=name == "coinmetrics_pro")
+        if "error_code" not in result and isinstance(provider, CoinMetricsProvider):
+            available = provider.available_metrics_for_asset("BTC")
+            result["btc_1d_available"] = sorted(
+                item for item in (
+                    "CapMVRVCur", "CapMVRVZ", "CapRealUSD", "CapMrktCurUSD", "SplyCur",
+                    "PriceRealizedUSD", "SOPR", "NUPL", "HashRate", "DiffMean",
+                ) if item.lower() in available
+            )
+        return (_with_config(result, client),)
     return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
 
 

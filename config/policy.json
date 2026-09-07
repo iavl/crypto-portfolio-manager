@@ -59,15 +59,19 @@
       "fundamentals": 0.25,
       "onchain": 0.15,
       "capital_flows": 0.1,
-      "relative_strength_btc": 0.1
+      "relative_strength_btc": 0.1,
+      "btc_valuation": 0.0,
+      "macro_liquidity": 0.0
     },
     "btc": {
-      "trend": 0.2222222222222222,
-      "valuation": 0.2222222222222222,
-      "fundamentals": 0.2777777777777778,
-      "onchain": 0.16666666666666666,
-      "capital_flows": 0.11111111111111112,
-      "relative_strength_btc": 0.0
+      "trend": 0.3,
+      "valuation": 0.0,
+      "fundamentals": 0.0,
+      "onchain": 0.0,
+      "capital_flows": 0.2,
+      "relative_strength_btc": 0.0,
+      "btc_valuation": 0.3,
+      "macro_liquidity": 0.2
     }
   },
   "asset_scoring_profiles": {

@@ -26,7 +26,7 @@ def build_asset_factor_packet(
     allowed = {
         "trend", "valuation", "fundamentals", "fundamental", "onchain",
         "capital_flows", "flows", "relative_strength_btc", "relative_strength",
-        "event_risk", "events",
+        "btc_valuation", "macro_liquidity", "event_risk", "events",
     }
     for key in factor_facts:
         if key.removesuffix("_facts") not in allowed:
@@ -46,6 +46,8 @@ def build_asset_factor_packet(
         symbol=symbol,
         trend_facts=values.get("trend"),
         valuation_facts=values.get("valuation"),
+        btc_valuation_facts=values.get("btc_valuation"),
+        macro_liquidity_facts=values.get("macro_liquidity"),
         fundamental_facts=values.get("fundamentals", values.get("fundamental")),
         onchain_facts=values.get("onchain"),
         flow_facts=values.get("capital_flows", values.get("flows")),

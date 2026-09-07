@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 from zoneinfo import ZoneInfo
 
 from ..metrics_registry import metric_definition
+from ..metrics_registry import normalize_metric_key
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import (
     ProviderAuthenticationError,
@@ -32,10 +33,21 @@ API_KEY_HEADER = "x-soso-api-key"
 ETF_HISTORICAL_INFLOW_PATH = "/openapi/v2/etf/historicalInflowChart"
 ETF_FLOW_PATH = ETF_HISTORICAL_INFLOW_PATH
 ETF_FLOW_PATHS = {"BTC": ETF_HISTORICAL_INFLOW_PATH, "ETH": ETF_HISTORICAL_INFLOW_PATH, "MARKET": ETF_HISTORICAL_INFLOW_PATH}
-_ETF_KEYS = ("flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d")
+_ETF_KEYS = (
+    "flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d",
+    "flows.btc_etf_net_1d", "flows.btc_etf_net_to_aum_7d", "flows.btc_etf_net_to_aum_30d",
+    "flows.btc_etf_aum_usd",
+)
 _ETF_TYPES = {"BTC": "us-btc-spot", "ETH": "us-eth-spot"}
 _DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _MARKET_TIMEZONE = ZoneInfo("America/New_York")
+
+
+class _SoSoValueCapabilities(ProviderCapabilities):
+    """Keep the historical public tuple while accepting new BTC metrics."""
+
+    def supports(self, metric_key: str) -> bool:
+        return super().supports(metric_key) or normalize_metric_key(metric_key) in _ETF_KEYS
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,7 @@ class _ETFPoint:
     source_date: date
     observed_at: str
     flow: float
+    aum: float | None = None
 
 
 def _now(clock: Any | None = None) -> str:
@@ -112,6 +125,21 @@ def _flow_value(row: Mapping[str, Any], index: int) -> float | None:
     return parsed[0]
 
 
+def _aum_value(row: Mapping[str, Any], index: int) -> float | None:
+    fields = tuple(field for field in ("total_net_assets", "totalNetAssets") if field in row)
+    if not fields:
+        return None
+    values = [row[field] for field in fields]
+    if any(value is None for value in values):
+        return None
+    parsed = [_signed_number(value, f"SoSoValue ETF row {index} total net assets") for value in values]
+    if len(parsed) == 2 and parsed[0] != parsed[1]:
+        raise ProviderDataError(f"SoSoValue ETF row {index} has conflicting AUM fields")
+    if parsed[0] <= 0:
+        raise ProviderDataError(f"SoSoValue ETF row {index} total net assets must be positive")
+    return parsed[0]
+
+
 def _history_points(payload: Any, *, as_of: str | datetime | None = None) -> list[_ETFPoint]:
     cutoff = parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of) if as_of is not None else None
     by_date: dict[date, _ETFPoint] = {}
@@ -128,9 +156,9 @@ def _history_points(payload: Any, *, as_of: str | datetime | None = None) -> lis
             # The current official per-ETF history docs allow the newest T+1 row
             # to expose null settled flow fields; it is not a zero-flow session.
             continue
-        point = _ETFPoint(source_date, _observation_timestamp(source_date), flow)
+        point = _ETFPoint(source_date, _observation_timestamp(source_date), flow, _aum_value(row, index))
         previous = by_date.get(source_date)
-        if previous is not None and previous.flow != point.flow:
+        if previous is not None and (previous.flow != point.flow or previous.aum != point.aum):
             raise ProviderDataError(f"SoSoValue has conflicting duplicate row for {raw_date}")
         by_date[source_date] = point
     points = sorted(by_date.values(), key=lambda item: item.source_date)
@@ -208,6 +236,8 @@ def _parse_points(
     requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
     if not requested or any(key not in _ETF_KEYS for key in requested):
         raise ProviderUnsupportedMetric("SoSoValue ETF flow metric is not supported")
+    if any(key.startswith("flows.btc_") for key in requested) and asset.strip().upper() != "BTC":
+        raise ProviderUnsupportedMetric("BTC ETF normalized flow metrics require BTC scope")
     points = _history_points(payload, as_of=as_of)
     result: list[Mapping[str, Any]] = []
     for key, days, period in (
@@ -228,6 +258,50 @@ def _parse_points(
             period=period,
             endpoint=endpoint,
         ))
+    if asset.strip().upper() == "BTC":
+        latest = points[-1]
+        if "flows.btc_etf_aum_usd" in requested:
+            if latest.aum is None:
+                raise ProviderDataError("SoSoValue BTC ETF latest settled row has no AUM")
+            result.append(_observation(
+                asset, "flows.btc_etf_aum_usd", latest.aum,
+                points=points, selected=[latest], fetched_at=fetched_at,
+                period="current", endpoint=endpoint,
+            ))
+        if "flows.btc_etf_net_1d" in requested:
+            result.append(_observation(
+                asset, "flows.btc_etf_net_1d", latest.flow,
+                points=points, selected=[latest], fetched_at=fetched_at,
+                period="1d", endpoint=endpoint,
+            ))
+        for key, days, period in (
+            ("flows.btc_etf_net_to_aum_7d", 7, "7d"),
+            ("flows.btc_etf_net_to_aum_30d", 30, "30d"),
+        ):
+            if key not in requested:
+                continue
+            selected, anchor = _window(points, days)
+            if anchor.aum is None:
+                raise ProviderDataError(
+                    f"SoSoValue BTC ETF AUM is missing on the {period} flow anchor date"
+                )
+            normalized = _observation(
+                asset,
+                key,
+                sum(item.flow for item in selected) / anchor.aum,
+                points=points,
+                selected=selected,
+                fetched_at=fetched_at,
+                period=period,
+                endpoint=endpoint,
+            )
+            normalized["metadata"].update({
+                "normalization": "sum_completed_net_inflow / aligned_ending_aum",
+                "normalized_flow_ratio": normalized["value"],
+                "aum_anchor_date": anchor.source_date.isoformat(),
+                "aum_anchor_usd": anchor.aum,
+            })
+            result.append(normalized)
     return tuple(result)
 
 
@@ -355,10 +429,10 @@ class SoSoValueProvider:
         self.client = client or HttpClient()
         self.api_key = api_key
         self.clock = clock
-        self.capabilities = ProviderCapabilities(
+        self.capabilities = _SoSoValueCapabilities(
             provider=self.name,
-            metric_keys=_ETF_KEYS,
-            historical_series=_ETF_KEYS,
+            metric_keys=_ETF_KEYS[:3],
+            historical_series=_ETF_KEYS[:3],
             supports_batching=True,
             requires_api_key=True,
         )

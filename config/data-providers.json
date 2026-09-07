@@ -26,6 +26,10 @@
     "coinmetrics_pro": {
       "enabled": "AUTO",
       "api_key_env": "COINMETRICS_API_KEY"
+    },
+    "fred": {
+      "enabled": "AUTO",
+      "api_key_env": "FRED_API_KEY"
     }
   },
   "cache_ttl_seconds": {
@@ -40,6 +44,7 @@
     "protocol": 21600,
     "valuation": 3600,
     "onchain": 86400,
+    "macro": 86400,
     "default": 3600
   },
   "network": {

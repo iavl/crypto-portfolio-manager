@@ -34,12 +34,28 @@ COINMETRICS_BTC_CYCLE_METRICS = {
     "onchain.btc.mvrv_zscore": "CapMVRVZ",
     "onchain.btc.realized_price": "PriceRealizedUSD",
     "onchain.btc.market_to_realized_price": "CapMVRVCur",
-    "onchain.btc.sopr": "Sopr",
+    "onchain.btc.sopr": "SOPR",
     "onchain.btc.lth_supply_pct": "SplyLTHPct",
     "onchain.btc.lth_net_position_change": "SplyLTHNetChange",
     "onchain.btc.sth_realized_price": "PriceRealizedSthUSD",
     "onchain.btc.lth_realized_price": "PriceRealizedLthUSD",
-    "onchain.btc.nupl": "CapNUPL",
+    "onchain.btc.nupl": "NUPL",
+}
+COINMETRICS_BTC_VALUATION_METRICS = {
+    "btc_valuation.mvrv": "CapMVRVCur",
+    "btc_valuation.mvrv_zscore": "CapMVRVZ",
+    "btc_valuation.realized_price": "PriceRealizedUSD",
+    "btc_valuation.realized_cap_usd": "CapRealUSD",
+}
+COINMETRICS_BTC_NETWORK_METRICS = {
+    "btc_network.hashrate": "HashRate",
+    "btc_network.difficulty": "DiffMean",
+}
+COINMETRICS_BTC_VALUATION_INPUTS = {
+    "btc_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
+    "btc_valuation.mvrv_zscore": ("CapMVRVZ",),
+    "btc_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur"),
+    "btc_valuation.realized_cap_usd": ("CapRealUSD",),
 }
 COINMETRICS_TOKENOMICS_INPUTS = {
     "tokenomics.annualized_emissions": ("IssTotNtv", "SplyCur"),
@@ -50,6 +66,8 @@ COINMETRICS_METRIC_MAP = {
     **COINMETRICS_GENERIC_NETWORK_METRICS,
     **COINMETRICS_MARKET_VALUATION_METRICS,
     **COINMETRICS_BTC_CYCLE_METRICS,
+    **COINMETRICS_BTC_VALUATION_METRICS,
+    **COINMETRICS_BTC_NETWORK_METRICS,
 }
 COINMETRICS_SUPPORTED_METRICS = tuple(dict.fromkeys((
     *COINMETRICS_METRIC_MAP,
@@ -220,6 +238,85 @@ def parse_timeseries(
                     {"methodology": "coinmetrics_estimated_circulating_supply_market_cap"}
                     if key == "valuation.market_cap" else {}
                 ),
+            },
+        })
+    return tuple(result)
+
+
+def _parse_btc_valuation(
+    payload: Mapping[str, Any],
+    asset: str,
+    requested: Iterable[str],
+    input_plan: Mapping[str, tuple[str, ...]],
+    *,
+    fetched_at: str,
+    as_of: str | None,
+    source: str,
+) -> tuple[Mapping[str, Any], ...]:
+    """Parse direct BTC valuation metrics or derive them from catalog primitives."""
+    rows = _rows(payload)
+    cutoff = parse_timestamp(as_of) if as_of else None
+    selected: tuple[str, Mapping[str, Any]] | None = None
+    for row in rows:
+        observed = _timestamp(row.get("time", row.get("timestamp")), "Coin Metrics observation time")
+        if cutoff is not None and parse_timestamp(observed) > cutoff:
+            continue
+        if selected is None or parse_timestamp(observed) > parse_timestamp(selected[0]):
+            selected = (observed, row)
+    if selected is None:
+        raise ProviderUnsupportedMetric("Coin Metrics returned no BTC valuation row at or before as_of")
+    observed, row = selected
+    result: list[Mapping[str, Any]] = []
+    for key in tuple(dict.fromkeys(str(item).strip().lower() for item in requested)):
+        inputs = input_plan.get(key)
+        if not inputs:
+            raise ProviderUnsupportedMetric(f"Coin Metrics has no plan for {key}")
+        value: float | None = None
+        mode = "DIRECT"
+        methodology = None
+        if key == "btc_valuation.mvrv":
+            if "CapMVRVCur" in inputs and row.get("CapMVRVCur") is not None:
+                value = float(row["CapMVRVCur"])
+            else:
+                market_cap = row.get("CapMrktCurUSD")
+                realized_cap = row.get("CapRealUSD")
+                if market_cap is not None and realized_cap is not None and float(realized_cap) > 0:
+                    value = float(market_cap) / float(realized_cap)
+                    mode = "DERIVED"
+                    methodology = "CapMrktCurUSD / CapRealUSD"
+        elif key == "btc_valuation.realized_price":
+            if "PriceRealizedUSD" in inputs and row.get("PriceRealizedUSD") is not None:
+                value = float(row["PriceRealizedUSD"])
+            else:
+                realized_cap = row.get("CapRealUSD")
+                supply = row.get("SplyCur")
+                if realized_cap is not None and supply is not None and float(supply) > 0:
+                    value = float(realized_cap) / float(supply)
+                    mode = "DERIVED"
+                    methodology = "CapRealUSD / SplyCur"
+        else:
+            metric = inputs[0]
+            if row.get(metric) is not None:
+                value = float(row[metric])
+        if value is None or not math.isfinite(value):
+            raise ProviderUnsupportedMetric(f"Coin Metrics returned no usable value for {key}")
+        if key != "btc_valuation.mvrv_zscore" and value <= 0:
+            raise ProviderDataError(f"Coin Metrics BTC valuation denominator/value is not positive for {key}")
+        result.append({
+            "asset": asset,
+            "metric_key": key,
+            "value": value,
+            "unit": metric_definition(key).unit,
+            "period": "1d",
+            "observed_at": observed,
+            "fetched_at": fetched_at,
+            "source": source if mode == "DIRECT" else "python-derived",
+            "confidence": "MEDIUM",
+            "metadata": {
+                "source_dataset": "timeseries/asset-metrics",
+                "coinmetrics_metrics": list(inputs),
+                "source_mode": mode,
+                **({"methodology": methodology} if methodology else {}),
             },
         })
     return tuple(result)
@@ -412,19 +509,34 @@ class CoinMetricsProvider:
         if any(key not in self.capabilities.metric_keys for key in requested):
             raise ProviderUnsupportedMetric("Coin Metrics does not support one or more requested metrics")
         available = self.available_metrics_for_asset(asset)
-        required_inputs = {
-            key: (
-                (COINMETRICS_METRIC_MAP[key],)
-                if key in COINMETRICS_METRIC_MAP else
-                COINMETRICS_TOKENOMICS_INPUTS[key]
-                if key in COINMETRICS_TOKENOMICS_INPUTS else
-                COINMETRICS_EXCHANGE_FLOW_INPUTS
-            )
-            for key in requested
-        }
+        required_inputs: dict[str, tuple[str, ...]] = {}
+        input_plans: dict[str, tuple[str, ...]] = {}
+        for key in requested:
+            if key in COINMETRICS_BTC_VALUATION_INPUTS:
+                candidates = COINMETRICS_BTC_VALUATION_INPUTS[key]
+                if key == "btc_valuation.mvrv" and candidates[0].lower() in available:
+                    selected_inputs = (candidates[0],)
+                elif key == "btc_valuation.realized_price" and candidates[0].lower() in available:
+                    selected_inputs = (candidates[0],)
+                elif key == "btc_valuation.mvrv" and all(item.lower() in available for item in candidates[1:]):
+                    selected_inputs = candidates[1:]
+                elif key == "btc_valuation.realized_price" and all(item.lower() in available for item in candidates[1:]):
+                    selected_inputs = candidates[1:]
+                elif all(item.lower() in available for item in candidates[:1]):
+                    selected_inputs = candidates[:1]
+                else:
+                    selected_inputs = ()
+                input_plans[key] = selected_inputs
+                required_inputs[key] = selected_inputs
+            elif key in COINMETRICS_METRIC_MAP:
+                required_inputs[key] = (COINMETRICS_METRIC_MAP[key],)
+            elif key in COINMETRICS_TOKENOMICS_INPUTS:
+                required_inputs[key] = COINMETRICS_TOKENOMICS_INPUTS[key]
+            else:
+                required_inputs[key] = COINMETRICS_EXCHANGE_FLOW_INPUTS
         available_requested = tuple(
             key for key in requested
-            if all(input_metric.lower() in available for input_metric in required_inputs[key])
+            if required_inputs[key] and all(input_metric.lower() in available for input_metric in required_inputs[key])
         )
         if not available_requested:
             raise ProviderUnsupportedMetric("Coin Metrics catalog does not include requested metrics for this asset")
@@ -449,7 +561,10 @@ class CoinMetricsProvider:
             headers=self._headers(),
         )
         fetched_at = _now(self.clock)
-        direct = tuple(key for key in available_requested if key in COINMETRICS_METRIC_MAP)
+        direct = tuple(
+            key for key in available_requested
+            if key in COINMETRICS_METRIC_MAP and key not in COINMETRICS_BTC_VALUATION_INPUTS
+        )
         result: list[Mapping[str, Any]] = []
         if direct:
             result.extend(parse_timeseries(
@@ -459,6 +574,17 @@ class CoinMetricsProvider:
                 source=self.name,
                 fetched_at=fetched_at,
                 as_of=request.parameters.get("as_of"),
+            ))
+        btc_valuation = tuple(key for key in available_requested if key in COINMETRICS_BTC_VALUATION_INPUTS)
+        if btc_valuation:
+            result.extend(_parse_btc_valuation(
+                payload,
+                asset,
+                btc_valuation,
+                input_plans,
+                fetched_at=fetched_at,
+                as_of=request.parameters.get("as_of"),
+                source=self.name,
             ))
         tokenomics = tuple(key for key in available_requested if key in COINMETRICS_TOKENOMICS_INPUTS)
         if tokenomics:
@@ -492,6 +618,9 @@ __all__ = [
     "AUTHENTICATED_BASE_URL",
     "COINMETRICS_ASSETS",
     "COINMETRICS_BTC_CYCLE_METRICS",
+    "COINMETRICS_BTC_NETWORK_METRICS",
+    "COINMETRICS_BTC_VALUATION_INPUTS",
+    "COINMETRICS_BTC_VALUATION_METRICS",
     "COINMETRICS_GENERIC_NETWORK_METRICS",
     "COINMETRICS_MARKET_VALUATION_METRICS",
     "COINMETRICS_METRIC_MAP",

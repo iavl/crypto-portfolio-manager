@@ -64,6 +64,55 @@ _ASSET_METRICS = (
     "risk.regulatory_event_status",
     "risk.governance_event_status",
 )
+_BTC_SCORING_METRICS = (
+    "market.spot_price",
+    "market.return_30d",
+    "market.return_90d",
+    "market.return_180d",
+    "market.ma20",
+    "market.ma50",
+    "market.ma100",
+    "market.ma200",
+    "market.atr14",
+    "market.realized_vol_30d",
+    "market.realized_vol_90d",
+    "market.relative_volume",
+    "market.drawdown",
+    "btc_valuation.mvrv",
+    "btc_valuation.mvrv_zscore",
+    "btc_valuation.realized_price",
+    "btc_valuation.price_to_realized_price",
+    "btc_valuation.realized_cap_usd",
+    "flows.btc_etf_net_to_aum_7d",
+    "flows.btc_etf_net_to_aum_30d",
+    "flows.btc_etf_net_1d",
+    "flows.btc_etf_aum_usd",
+    "macro.dff",
+    "macro.dfii10",
+    "macro.dtwexbgs",
+    "macro.walcl",
+    "macro.m2sl",
+    "macro.fed_funds_change_90d",
+    "macro.real_yield_change_90d",
+    "macro.broad_dollar_change_90d",
+    "macro.fed_balance_sheet_change_13w",
+    "macro.m2_change_6m",
+    "macro.m2_change_12m",
+    "risk.security_event_status",
+    "risk.chain_liveness_status",
+    "risk.regulatory_event_status",
+    "risk.governance_event_status",
+)
+_BTC_CONTEXT_METRICS = (
+    "onchain.btc.sopr",
+    "onchain.btc.lth_supply_pct",
+    "onchain.btc.lth_net_position_change",
+    "onchain.btc.sth_realized_price",
+    "onchain.btc.lth_realized_price",
+    "onchain.btc.nupl",
+    "btc_network.hashrate",
+    "btc_network.difficulty",
+)
 _RELATIVE_METRICS = (
     "relative.return_vs_btc_30d",
     "relative.return_vs_btc_90d",
@@ -548,12 +597,13 @@ def build_metric_collection_plan(
             continue
         if asset_type == "other":
             discovery.append(symbol)
-        for key in _ASSET_METRICS:
+        asset_metrics = _BTC_SCORING_METRICS if symbol == "BTC" else _ASSET_METRICS
+        for key in asset_metrics:
             add(symbol, key, "asset market, risk, and decision factors")
         for key in _POSITIONING_METRICS:
             add(symbol, key, "derivatives positioning and social context")
         if symbol == "BTC":
-            for key in _BTC_CYCLE_METRICS:
+            for key in _BTC_CONTEXT_METRICS:
                 add(symbol, key, "BTC cycle and on-chain context")
         if symbol != "BTC":
             for key in _RELATIVE_METRICS:

@@ -9,6 +9,8 @@
     "coverage": {"type": "number", "minimum": 0, "maximum": 1},
     "trend_facts": {"$ref": "#/$defs/facts"},
     "valuation_facts": {"$ref": "#/$defs/facts"},
+    "btc_valuation_facts": {"$ref": "#/$defs/facts"},
+    "macro_liquidity_facts": {"$ref": "#/$defs/facts"},
     "fundamental_facts": {"$ref": "#/$defs/facts"},
     "onchain_facts": {"$ref": "#/$defs/facts"},
     "flow_facts": {"$ref": "#/$defs/facts"},

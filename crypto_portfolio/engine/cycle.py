@@ -411,8 +411,9 @@ def build_btc_cycle_context(
     positioning_crowded = positioning_state in {"CROWDED", "EXTREME"} or positioning_risk in {"HIGH", "EXTREME"}
 
     confirmations: list[str] = []
-    if valuation_state in {CycleValuationState.ELEVATED.value, CycleValuationState.EXTREME.value}:
-        confirmations.append("valuation")
+    # BTC-native valuation is a weighted base factor. Keep legacy cycle fields
+    # readable for replay, but never turn the same MVRV observation into a
+    # second deployment penalty.
     if price_signal:
         confirmations.append("price_extension")
     if holder_distribution:

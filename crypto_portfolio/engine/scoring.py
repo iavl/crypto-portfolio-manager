@@ -244,7 +244,8 @@ def _score_factors_v1(
         availability[factor] = state
         reliability[factor] = 1.0 if state == "AVAILABLE" else 0.0
         if state == "NOT_APPLICABLE":
-            not_applicable.append(factor)
+            if factor == "relative_strength_btc":
+                not_applicable.append(factor)
         if state == "AVAILABLE" and resolved_weights[factor] > 0:
             available[factor] = score  # type: ignore[assignment]
         elif state != "NOT_APPLICABLE":
@@ -316,7 +317,8 @@ def _score_factors_v2(
                 raise ValueError(
                     f"factor {factor} is NOT_APPLICABLE but has positive profile weight"
                 )
-            not_applicable.append(factor)
+            if factor == "relative_strength_btc":
+                not_applicable.append(factor)
         elif state == "MISSING":
             if weight > 0:
                 missing.append(factor)
@@ -334,7 +336,7 @@ def _score_factors_v2(
     )
     return ScoreResult(
         score=result_score,
-        effective_weights=resolved_weights,
+        effective_weights={factor: weight for factor, weight in resolved_weights.items() if weight > 0},
         effective_factor_scores=effective_scores,
         factor_reliability=reliabilities,
         factor_availability=availability,

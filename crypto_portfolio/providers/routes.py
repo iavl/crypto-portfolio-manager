@@ -36,6 +36,7 @@ DEFAULT_TTL_SECONDS = {
     "sentiment": 43200,
     "protocol": 21600,
     "onchain": 86400,
+    "macro": 86400,
     "github": 86400,
     "chain_liveness": 300,
     "default": 3600,
@@ -51,6 +52,7 @@ PROVIDER_ROUTES = {
     "sentiment.social": ("lunarcrush",),
     "btc_cycle": ("coinmetrics_community", "coinmetrics_pro"),
     "chain_liveness": ("chain_liveness",),
+    "fred": ("fred",),
 }
 
 
@@ -78,9 +80,13 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("coingecko",)
     if key == "valuation.fdv_market_cap_ratio":
         return ()
+    if key == "btc_valuation.price_to_realized_price":
+        return ()
+    if key.startswith("btc_valuation."):
+        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
     if key == "valuation.fee_revenue_multiple":
         return ("defillama",)
-    if key.startswith("flows.etf_"):
+    if key.startswith(("flows.etf_", "flows.btc_etf_")):
         return ("sosovalue",)
     if "liquidations" in key:
         return ()
@@ -109,6 +115,10 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("defillama",)
     if key.startswith("onchain.btc."):
         return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
+    if key.startswith("btc_network."):
+        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
+    if key.startswith("macro."):
+        return PROVIDER_ROUTES["fred"] if symbol in {None, "BTC"} else ()
     # Exchange netflow requires on-chain attribution and event metrics require
     # current source scans; neither is fabricated from market endpoints.
     return ()
@@ -145,9 +155,9 @@ def dataset_for_metric(metric_key: str) -> str:
         return "basis"
     if key.startswith("derivatives.") and "liquidations" in key:
         return "liquidations"
-    if key.startswith("flows.etf_"):
+    if key.startswith(("flows.etf_", "flows.btc_etf_")):
         return "etf"
-    if key == "flows.exchange_netflow" or key.startswith("onchain.") or key in {
+    if key == "flows.exchange_netflow" or key.startswith(("onchain.", "btc_valuation.", "btc_network.")) or key in {
         "tokenomics.annualized_emissions", "tokenomics.supply_growth",
     }:
         return "onchain"
@@ -159,6 +169,10 @@ def dataset_for_metric(metric_key: str) -> str:
         return "protocol"
     if key.startswith("onchain.btc."):
         return "onchain"
+    if key.startswith("btc_network."):
+        return "onchain"
+    if key.startswith("macro."):
+        return "macro"
     return "web"
 
 
@@ -205,7 +219,7 @@ def _as_of(value: str | datetime | None, now: datetime) -> datetime:
 
 def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: datetime, history_days: int) -> dict[str, Any]:
     end = _as_of(as_of, now)
-    start_days = 365 if dataset in {"ohlcv", "onchain"} else max(7, min(history_days, 90))
+    start_days = 450 if dataset == "macro" else 365 if dataset in {"ohlcv", "onchain"} else max(7, min(history_days, 90))
     start = end - timedelta(days=start_days)
     result: dict[str, Any] = {
         "symbol": asset,
@@ -219,7 +233,7 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
-    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain", "github"} or (
+    if dataset in {"ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain", "github", "macro"} or (
         dataset == "valuation" and as_of is not None
     ):
         result.update({

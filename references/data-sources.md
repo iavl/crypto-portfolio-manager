@@ -16,8 +16,9 @@ Current portfolio recommendations require current data. Prefer authoritative pri
 
 For acquisition, use structured public exchange APIs for market and
 derivatives data, CoinGecko for broad market valuation, DeFiLlama for protocol
-fundamentals, a catalog-checked Coin Metrics API for on-chain context and a
-market-cap fallback, and current official/Web
+fundamentals, Coin Metrics Community first for BTC realized-cap/holder-cost-basis
+valuation and catalog-checked on-chain context, FRED for official U.S.
+macro/liquidity data, and current official/Web
 scans for security, governance, and regulatory events. Optional API-key
 providers may fill advanced ETF, liquidation, social, or exchange-attribution
 gaps; they are never required for a normal review. See
@@ -141,7 +142,7 @@ Primarily relevant to BTC and ETH where spot products exist.
 Use daily and multi-week context; avoid overreacting to one day of flow unless exceptional.
 
 The optional SoSoValue adapter provides U.S. BTC and ETH ETF products. Python
-derives 1D, 7D, and 30D values from completed trading-date rows after local
+derives absolute 1D/7D/30D values and BTC 7D/30D net-flow-to-AUM ratios from completed trading-date rows after local
 `as_of` filtering; `MARKET` is the complete-date BTC+ETH sum, not BTC-only
 flow. A short response is `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported
 capability. The current official SoSoValue API does not document liquidation

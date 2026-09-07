@@ -372,6 +372,7 @@ def collection_summary(
     weights: Mapping[str, float] | None = None,
     review_type: str | None = None,
     policy: Policy | None = None,
+    asset: str | None = None,
 ) -> dict[str, Any]:
     values = tuple(events)
     if any(not isinstance(event, CollectionEvent) for event in values):
@@ -398,7 +399,11 @@ def collection_summary(
             policy_weights = dict(resolved_policy.get("scoring_weights", {}))
         scoring_policy = resolved_policy.get("scoring", {})
     else:
-        policy_weights = dict(resolved_policy.scoring_weights)
+        policy_weights = dict(
+            resolved_policy.scoring_profile(asset)
+            if asset is not None and resolved_policy.policy_version >= 2
+            else resolved_policy.scoring_weights
+        )
         scoring_policy = resolved_policy.scoring
     supplied_weights = policy_weights if weights is None else weights
     if not isinstance(supplied_weights, Mapping):

@@ -22,6 +22,7 @@ those contracts; it is not a second schema or routing implementation.
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
 | Coin Metrics Pro | authenticated Coin Metrics fallback | `COINMETRICS_API_KEY` | same catalog-aware datasets at the authenticated tier | optional, credential-gated |
+| FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
 | GitHub | bounded developer activity | optional `GITHUB_TOKEN` | fixed ETH/AAVE repository commit counts | optional and allowlisted |
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
 | EventScanner | current security/governance/regulatory scans | None | event status and source coverage | fixed source catalog; no generic fallback |
@@ -42,8 +43,9 @@ can be redirected with `CRYPTO_PORTFOLIO_DATA_DIR`.
 
 Provider priority is deterministic: Binance then Bybit for spot/OHLCV and
 derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
-Metrics for market cap; DeFiLlama for protocol fundamentals; SoSoValue for ETF
-flows; Coin Metrics for supported exchange attribution and network data; and
+Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
+DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Coin Metrics for
+supported exchange attribution and network data; and
 the fixed EventScanner catalog for events. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
 market flow state, and BTC-relative returns are computed by Python and have no
@@ -184,6 +186,27 @@ support, not this document, decides whether a particular asset/metric is usable.
 CoinGecko. `CapMrktCurUSD` and future-supply values are not silently substituted
 for it, and unsupported catalog combinations remain unavailable.
 
+For BTC-native valuation, the provider checks the Community catalog for
+`CapMVRVCur`, `CapMVRVZ`, `CapRealUSD`, `CapMrktCurUSD`, `SplyCur`, and
+`PriceRealizedUSD` at `btc`/`1d`. MVRV and realized price are derived in Python
+from free primitives when the exact metric is unavailable. `SOPR` and `NUPL`
+are context-only holder/cycle inputs, not BTC base-score factors.
+
+## FRED
+
+The active endpoint is:
+
+```text
+GET https://api.stlouisfed.org/fred/series/observations
+query: series_id, api_key, file_type=json, observation_end
+```
+
+`FRED_API_KEY` is read at runtime only and never stored or logged. The provider
+fetches each raw series once per request, treats `.` as missing, enforces the
+`as_of` cutoff, and derives macro changes in Python. Current reviews use the
+latest revision; historical replay is explicitly `LATEST_REVISION`, not
+point-in-time ALFRED fidelity.
+
 ## GitHub developer activity
 
 GitHub uses the public
@@ -213,6 +236,8 @@ body: {"type":"us-btc-spot"} or {"type":"us-eth-spot"}
 The provider derives:
 
 - BTC: `flows.etf_net_1d`, `flows.etf_net_7d`, `flows.etf_net_30d`;
+- BTC normalized: `flows.btc_etf_net_to_aum_7d` and
+  `flows.btc_etf_net_to_aum_30d`;
 - ETH: the same three metrics;
 - MARKET: complete-date BTC + ETH aggregation.
 
@@ -222,6 +247,8 @@ history is too short, 1D/7D can still succeed while 30D reports
 `PROVIDER_INSUFFICIENT_HISTORY`; this is not unsupported capability. Negative
 flows are valid. The active contract does not provide liquidation history, so
 liquidation metrics remain optional/skipped and are never routed here.
+The normalized BTC metrics divide completed net inflows by AUM on the same
+ending ETF date; missing AUM is unavailable and never zero-filled.
 
 ## EventScanner
 

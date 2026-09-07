@@ -22,6 +22,8 @@ SCORING_FACTORS = (
     "onchain",
     "capital_flows",
     "relative_strength_btc",
+    "btc_valuation",
+    "macro_liquidity",
 )
 _EVENT_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL")
 _DEFAULT_EVENT_RISK_MULTIPLIERS = {

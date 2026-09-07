@@ -173,6 +173,7 @@ class ProviderRouter:
         from .coingecko import CoinGeckoProvider
         from .chain_liveness import ChainLivenessProvider
         from .defillama import DeFiLlamaProvider
+        from .fred import FREDProvider
         from .github_activity import GitHubActivityProvider
         from .sosovalue import SoSoValueProvider
 
@@ -186,6 +187,11 @@ class ProviderRouter:
             "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
             "chain_liveness": ChainLivenessProvider(client=client),
         }
+        if provider_enabled("fred", self.config):
+            providers["fred"] = FREDProvider(
+                client=client,
+                api_key=provider_api_key("fred", self.config),
+            )
         if provider_enabled("github", self.config):
             providers["github"] = GitHubActivityProvider(
                 client=client,

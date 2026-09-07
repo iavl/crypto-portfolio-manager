@@ -7,6 +7,8 @@ from .trend import TrendFactorResult, calculate_trend_factor
 from .fundamentals import build_fundamental_facts
 from .onchain import build_onchain_facts
 from .valuation import build_valuation_facts
+from .valuation import build_btc_valuation_facts
+from .macro_liquidity import build_macro_liquidity_facts
 
 __all__ = [
     "FlowFactorResult",
@@ -22,4 +24,6 @@ __all__ = [
     "build_fundamental_facts",
     "build_onchain_facts",
     "build_valuation_facts",
+    "build_btc_valuation_facts",
+    "build_macro_liquidity_facts",
 ]

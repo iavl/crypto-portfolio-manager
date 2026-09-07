@@ -46,6 +46,13 @@ may only provide bounded semantic judgment or explanation. They must not
 recompute or alter Python outputs. Deterministic financial calculations belong
 to Python, and LLM must never silently override deterministic engine outputs.
 
+BTC must use its BTC-specific scoring profile. Judge BTC as a monetary asset,
+not as a DeFi/application protocol: generic protocol revenue, TVL, developer
+activity, and generic on-chain activity do not dominate or add positive BTC
+base-score weight. BTC-native realized-cap valuation, normalized ETF flows, and
+official macro/liquidity evidence are separate from security, liveness, and
+holder/cycle overlays.
+
 Every Luna-assigned stage uses `LUNA_MAX` only. The current balanced profile
 also routes bounded semantic interpretation and report prose through the
 configured `LUNA_MAX` preset. Sol is conditional and reserved for major

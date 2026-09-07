@@ -139,6 +139,16 @@ class ValuationFacts(FactBase):
 
 
 @dataclass(frozen=True)
+class BTCValuationFacts(FactBase):
+    pass
+
+
+@dataclass(frozen=True)
+class MacroLiquidityFacts(FactBase):
+    pass
+
+
+@dataclass(frozen=True)
 class FundamentalFacts(FactBase):
     pass
 
@@ -166,6 +176,8 @@ class EventFacts(FactBase):
 FACT_TYPES = {
     "trend": TrendFacts,
     "valuation": ValuationFacts,
+    "btc_valuation": BTCValuationFacts,
+    "macro_liquidity": MacroLiquidityFacts,
     "fundamentals": FundamentalFacts,
     "onchain": OnchainFacts,
     "capital_flows": FlowFacts,
@@ -177,11 +189,13 @@ FACT_TYPES = {
 
 __all__ = [
     "EventFacts",
+    "BTCValuationFacts",
     "FACT_TYPES",
     "FactBase",
     "FlowFacts",
     "FundamentalFacts",
     "OnchainFacts",
+    "MacroLiquidityFacts",
     "RelativeStrengthFacts",
     "TrendFacts",
     "ValuationFacts",

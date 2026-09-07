@@ -16,7 +16,7 @@ the v2 base score.
 
 ## v2 scoring profiles
 
-The default profile has exactly six factors:
+The default v2 profiles share eight canonical factor keys:
 
 | Factor | Weight | Ownership |
 |---|---:|---|
@@ -26,16 +26,18 @@ The default profile has exactly six factors:
 | `onchain` | 15% | active usage, settlement, blockspace demand and network activity |
 | `capital_flows` | 10% | ETF, exchange and liquidity migration flows |
 | `relative_strength_btc` | 10% | asset-versus-BTC risk-adjusted performance |
+| `btc_valuation` | 0% for non-BTC assets | BTC-native realized-cap and holder-cost-basis valuation |
+| `macro_liquidity` | 0% for non-BTC assets | BTC-relevant official macro/liquidity changes |
 
 `config/policy.json` stores profiles under `scoring_profiles`; their weights
-must contain these six keys and sum to 1. Assets use `default` unless mapped in
+must contain these eight keys and sum to 1. Assets use `default` unless mapped in
 `asset_scoring_profiles`.
 
 BTC uses an explicit profile with weights:
 
 ```text
-trend 22.2222%, valuation 22.2222%, fundamentals 27.7778%,
-onchain 16.6667%, capital_flows 11.1111%, relative_strength_btc 0%.
+trend 30%, btc_valuation 30%, capital_flows 20%, macro_liquidity 20%.
+Generic valuation, fundamentals, onchain, and relative_strength_btc are 0%.
 ```
 
 BTC relative strength is `NOT_APPLICABLE`; no BTC-versus-BTC request or
@@ -43,7 +45,7 @@ calculation is made. A zero-weight factor is excluded from score and coverage.
 
 ## Metric ownership
 
-Each registered `SCORING_FACTOR` metric has one owner among the six factors.
+Each registered `SCORING_FACTOR` metric has one owner among the eight factors.
 Price returns belong to `trend`; asset/BTC returns belong only to
 `relative_strength_btc`; flow amounts belong to `capital_flows`; and fees,
 revenue, token economics and competitive durability belong to `fundamentals`.
@@ -57,6 +59,12 @@ The v1 trend contribution remains available for historical replay.
 
 Event-risk metrics use the `EVENT_RISK` role. Positioning and BTC-cycle metrics
 remain overlays and are not scoring factors.
+
+BTC is evaluated as a monetary asset, not as a DeFi or application protocol.
+Its base valuation uses MVRV, MVRV Z-score, realized price, and
+price-to-realized-price. Generic market-cap/FDV, protocol revenue, TVL,
+developer activity, and generic on-chain activity do not add BTC base-score
+points. Network health remains a separate risk/context overlay.
 
 ## Availability and reliability
 
