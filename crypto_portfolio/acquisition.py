@@ -14,7 +14,12 @@ from .engine.factors.flows import classify_flow_state
 from .metric_availability import metric_availability, skip_reason
 from .engine.derived_metrics import derive_metric_observations
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
-from .engine.metric_plan import MetricCollectionPlan, MetricRequest
+from .engine.metric_plan import (
+    DERIVED_METRIC_DEPENDENCIES,
+    RELATIVE_RETURN_DEPENDENCIES,
+    MetricCollectionPlan,
+    MetricRequest,
+)
 from .engine.technical import derive_aligned_relative_return
 from .events import EventScanner, EventSourceScanRequest, EventSourceScanResponse, event_metric_category
 from .metrics_registry import metric_definition
@@ -45,13 +50,6 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "CACHE_CORRUPT",
     "PROVIDER_INSUFFICIENT_HISTORY",
 }
-_DERIVED_DEPENDENCIES = {
-    "valuation.fdv_market_cap_ratio": ("valuation.fdv", "valuation.market_cap"),
-    "derivatives.open_interest_to_market_cap": ("derivatives.open_interest_usd", "valuation.market_cap"),
-    "btc_valuation.price_to_realized_price": ("market.spot_price", "btc_valuation.realized_price"),
-}
-
-
 class AcquisitionResolutionRequired(RuntimeError):
     """Control-flow signal that hard-critical external evidence is pending."""
 
@@ -254,19 +252,24 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
     ))
 
 
+def _derived_dependency_identities(request: MetricRequest) -> tuple[tuple[str, str], ...]:
+    dependency = RELATIVE_RETURN_DEPENDENCIES.get(request.metric_key)
+    if dependency is not None:
+        if request.asset == "BTC":
+            return ()
+        return ((request.asset, dependency), ("BTC", dependency))
+    return tuple(
+        (request.asset, dependency)
+        for dependency in DERIVED_METRIC_DEPENDENCIES.get(request.metric_key, ())
+    )
+
+
 def _expand_derived_dependencies(plan: MetricCollectionPlan) -> MetricCollectionPlan:
     """Fetch dependencies for a direct derived-metric request without exposing them as results."""
     identities = {(request.asset, request.metric_key) for request in plan.requests}
     additions: list[MetricRequest] = []
     for request in plan.requests:
-        if request.metric_key.startswith("relative.return_vs_btc_") and request.asset != "BTC":
-            horizon = request.metric_key.rsplit("_", 1)[-1]
-            dependency_identities = ((request.asset, f"market.return_{horizon}"), ("BTC", f"market.return_{horizon}"))
-        else:
-            dependency_identities = tuple(
-                (request.asset, dependency)
-                for dependency in _DERIVED_DEPENDENCIES.get(request.metric_key, ())
-            )
+        dependency_identities = _derived_dependency_identities(request)
         for identity in dependency_identities:
             dependency = identity[1]
             if identity in identities or not metric_definition(dependency).applies_to(request.asset):
@@ -840,13 +843,9 @@ class AcquisitionManager:
         pending_identities = {(request.asset, request.metric_key) for request in pending}
         requests_by_identity = {(request.asset, request.metric_key): request for request in plan.requests}
         for request in plan.requests:
-            if not request.metric_key.startswith("relative.return_vs_btc_") or request.asset == "BTC":
+            if request.metric_key not in RELATIVE_RETURN_DEPENDENCIES or request.asset == "BTC":
                 continue
-            horizon = request.metric_key.rsplit("_", 1)[-1]
-            dependencies = (
-                (request.asset, f"market.return_{horizon}"),
-                ("BTC", f"market.return_{horizon}"),
-            )
+            dependencies = _derived_dependency_identities(request)
             asset_value = reusable.get(dependencies[0])
             btc_value = reusable.get(dependencies[1])
             if cls._relative_scalar_compatible(asset_value, btc_value):
@@ -866,9 +865,9 @@ class AcquisitionManager:
     ) -> dict[tuple[str, str], Any]:
         """Load cached normalized OHLCV for routed relative-return inputs."""
         identities = {
-            (request.asset, f"market.return_{request.metric_key.rsplit('_', 1)[-1]}")
+            (request.asset, RELATIVE_RETURN_DEPENDENCIES[request.metric_key])
             for request in requests
-            if request.metric_key.startswith("relative.return_vs_btc_") and request.asset != "BTC"
+            if request.metric_key in RELATIVE_RETURN_DEPENDENCIES and request.asset != "BTC"
         }
         identities.update(("BTC", identity[1]) for identity in tuple(identities))
         result: dict[tuple[str, str], Any] = {}
@@ -1084,11 +1083,13 @@ class AcquisitionManager:
 
         for request in requests:
             key = request.metric_key
-            if not key.startswith("relative.return_vs_btc_") or request.asset == "BTC":
+            dependency = RELATIVE_RETURN_DEPENDENCIES.get(key)
+            if dependency is None or request.asset == "BTC":
                 continue
-            horizon = key.rsplit("_", 1)[-1]
-            asset_identity = (request.asset, f"market.return_{horizon}")
-            btc_identity = ("BTC", f"market.return_{horizon}")
+            horizon = dependency.removeprefix("market.return_")
+            horizon_days = int(horizon.removesuffix("d"))
+            asset_identity = (request.asset, dependency)
+            btc_identity = ("BTC", dependency)
             asset_value, asset_observed, asset_id, asset_source, asset_metadata = value_for(asset_identity)
             btc_value, btc_observed, btc_id, btc_source, btc_metadata = value_for(btc_identity)
             output_identity = (request.asset, key)
@@ -1102,7 +1103,7 @@ class AcquisitionManager:
                     aligned = derive_aligned_relative_return(
                         asset_series,
                         btc_series,
-                        horizon_days=int(horizon[:-1]),
+                        horizon_days=horizon_days,
                         as_of=as_of,
                     )
                 except ValueError as exc:

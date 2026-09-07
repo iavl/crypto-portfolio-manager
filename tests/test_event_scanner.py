@@ -235,6 +235,34 @@ class EventScannerTests(unittest.TestCase):
         self.assertTrue(second.ready_for_scoring)
         self.assertTrue(second.results[0].status == "SUCCESS")
 
+    def test_two_pass_contract_resolves_every_pending_source_request(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("ETH", "risk.security_event_status"),
+            MetricRequest("AAVE", "risk.security_event_status"),
+        ))
+        manager = AcquisitionManager(persist=False)
+        first = manager.run(plan, mode="AUTO", as_of=AS_OF, now=AS_OF)
+        requests = first.pending_event_scans
+        self.assertTrue(requests)
+        self.assertEqual(requests, first.event_scan_requests)
+        self.assertFalse(first.ready_for_scoring)
+
+        responses = tuple(
+            EventSourceScanResponse(request.source_id, True, AS_OF, (), None)
+            for request in requests
+        )
+        second = manager.run(
+            plan,
+            mode="AUTO",
+            as_of=AS_OF,
+            now=AS_OF,
+            event_source_scan_responses=responses,
+        )
+        self.assertEqual(second.pending_event_scans, ())
+        self.assertEqual(len(second.event_scans), 2)
+        second.require_scoring_ready()
+        self.assertTrue(all(item.status == "SUCCESS" for item in second.results))
+
     def test_incomplete_event_scan_remains_a_critical_failure(self):
         plan = MetricCollectionPlan("EVENT_REVIEW", (
             MetricRequest("ETH", "risk.security_event_status"),

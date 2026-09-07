@@ -167,12 +167,26 @@ _BTC_CONTEXT_METRICS = (
     "btc_network.hashrate",
     "btc_network.difficulty",
 )
-_RELATIVE_METRICS = (
-    "relative.return_vs_btc_30d",
-    "relative.return_vs_btc_90d",
-    "relative.return_vs_btc_180d",
-    "relative.return_vs_btc_365d",
-)
+# One source of truth for relative-return inputs. The dependency key is
+# deliberately registered rather than reconstructed from a suffix at runtime.
+RELATIVE_RETURN_DEPENDENCIES: Mapping[str, str] = {
+    "relative.return_vs_btc_30d": "market.return_30d",
+    "relative.return_vs_btc_90d": "market.return_90d",
+    "relative.return_vs_btc_180d": "market.return_180d",
+    "relative.return_vs_btc_365d": "market.return_365d",
+}
+
+# The complete derived graph is kept beside the collection plan so CI can
+# validate every declared edge against the registry.
+DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
+    "valuation.fdv_market_cap_ratio": ("valuation.fdv", "valuation.market_cap"),
+    "derivatives.open_interest_to_market_cap": ("derivatives.open_interest_usd", "valuation.market_cap"),
+    "btc_valuation.price_to_realized_price": ("market.spot_price", "btc_valuation.realized_price"),
+    **{
+        metric: (dependency,)
+        for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()
+    },
+}
 _POSITIONING_METRICS = (
     "derivatives.funding_rate",
     "derivatives.funding_rate_24h_avg",
@@ -647,8 +661,7 @@ def build_metric_collection_plan(
             for key in _BTC_CONTEXT_METRICS:
                 add(symbol, key, "BTC cycle and on-chain context")
         if symbol != "BTC":
-            relative_metrics = _RELATIVE_METRICS
-            for key in relative_metrics:
+            for key in RELATIVE_RETURN_DEPENDENCIES:
                 add(symbol, key, "BTC-relative performance")
 
     return MetricCollectionPlan(
@@ -670,6 +683,8 @@ def build_metric_collection_request(plan: MetricCollectionPlan | Mapping[str, An
 __all__ = [
     "MetricCollectionPlan",
     "MetricRequest",
+    "DERIVED_METRIC_DEPENDENCIES",
+    "RELATIVE_RETURN_DEPENDENCIES",
     "build_metric_collection_request",
     "build_metric_collection_plan",
 ]

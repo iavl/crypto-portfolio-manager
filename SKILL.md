@@ -127,8 +127,10 @@ display data, so the engine uses value ÷ quantity and records a note.
     status and scoring effect.
    If a hard-critical event group is unresolved, stop before scoring and
    return the structured resolution state. This is pass 1 only. The external
-   stage must fetch every serialized `EventSourceScanRequest` and return
-   exactly one matching `EventSourceScanResponse` per request, including
+   stage consumes `result.pending_event_scans` to obtain the unresolved
+   `EventSourceScanRequest` objects; do not access an undocumented
+   `event_source_scan_requests` field. Resolve every request externally and
+   return exactly one matching `EventSourceScanResponse` per request, including
    `reachable=false` with a bounded error when a source cannot be fetched.
    Rerun acquisition as pass 2 with those responses, then call
    `result.require_scoring_ready()` immediately before scoring. Never score

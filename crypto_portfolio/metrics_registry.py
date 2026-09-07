@@ -244,6 +244,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "market.return_30d": _definition("market.return_30d", "trend", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d"),
     "market.return_90d": _definition("market.return_90d", "trend", "number", "fraction", "HIGHER_IS_BETTER", freshness="7d"),
     "market.return_180d": _definition("market.return_180d", "trend", "number", "fraction", "HIGHER_IS_BETTER", freshness="14d"),
+    "market.return_365d": _definition("market.return_365d", "trend", "number", "fraction", "HIGHER_IS_BETTER", freshness="14d"),
     "market.ma20": _definition("market.ma20", "trend", "number", "USD", "CONTEXTUAL", freshness="7d"),
     "market.ma50": _definition("market.ma50", "trend", "number", "USD", "CONTEXTUAL", freshness="7d"),
     "market.ma100": _definition("market.ma100", "trend", "number", "USD", "CONTEXTUAL", freshness="7d"),

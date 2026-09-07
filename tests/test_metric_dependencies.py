@@ -1,0 +1,205 @@
+import unittest
+from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from crypto_portfolio.acquisition import AcquisitionManager, _expand_derived_dependencies
+from crypto_portfolio.engine.metric_plan import (
+    DERIVED_METRIC_DEPENDENCIES,
+    RELATIVE_RETURN_DEPENDENCIES,
+    MetricCollectionPlan,
+    MetricRequest,
+    build_metric_collection_plan,
+)
+from crypto_portfolio.metrics_registry import metric_definition
+from crypto_portfolio.models.portfolio import normalize_snapshot
+from crypto_portfolio.providers.binance import BinanceProvider
+from crypto_portfolio.providers.bybit import BybitProvider
+from crypto_portfolio.providers.cache import ProviderCache
+from crypto_portfolio.providers.router import ProviderRouter
+from crypto_portfolio.providers.routes import build_provider_requests
+
+
+NOW = "2026-09-06T00:00:00Z"
+
+
+def _config():
+    return {
+        "version": 1,
+        "providers": {"binance": {"enabled": True}},
+        "cache_ttl_seconds": {"default": 3600, "spot": 600},
+        "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
+        "fallback": {"allow_web": False},
+    }
+
+
+class _MarketHistoryProvider:
+    def __init__(self):
+        self.calls = 0
+
+    def collect(self, request):
+        self.calls += 1
+        rows = []
+        for key in request.metric_keys:
+            rows.append({
+                "asset": request.asset,
+                "metric_key": key,
+                "value": 0.1,
+                "unit": "fraction",
+                "period": key.rsplit("_", 1)[-1],
+                "observed_at": NOW,
+                "fetched_at": NOW,
+                "source": "binance",
+                "confidence": "HIGH",
+                "metadata": {
+                    "venue": "BINANCE",
+                    "market": "spot",
+                    "quote_currency": "USDT",
+                    "ohlcv_hash": "a" * 64,
+                },
+            })
+        return rows
+
+
+class _EmptyMarketHistoryProvider(_MarketHistoryProvider):
+    def collect(self, _request):
+        self.calls += 1
+        return []
+
+
+class MetricDependencyTests(unittest.TestCase):
+    def test_every_declared_derived_edge_is_registered(self):
+        scope_examples = {
+            "valuation.fdv_market_cap_ratio": "AAVE",
+            "derivatives.open_interest_to_market_cap": "BTC",
+            "btc_valuation.price_to_realized_price": "BTC",
+        }
+        for derived, dependencies in DERIVED_METRIC_DEPENDENCIES.items():
+            with self.subTest(derived=derived):
+                metric_definition(derived)
+                for dependency in dependencies:
+                    definition = metric_definition(dependency)
+                    asset = scope_examples.get(derived, "ETH")
+                    self.assertTrue(definition.applies_to(asset))
+
+    def test_relative_mapping_is_the_plan_source_of_truth(self):
+        plan = build_metric_collection_plan(["ETH", "AAVE"])
+        relative = {
+            request.metric_key
+            for request in plan.requests
+            if request.metric_key.startswith("relative.return_vs_btc_")
+        }
+        self.assertEqual(relative, set(RELATIVE_RETURN_DEPENDENCIES))
+        self.assertEqual(
+            {metric: (dependency,) for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()},
+            {metric: DERIVED_METRIC_DEPENDENCIES[metric] for metric in RELATIVE_RETURN_DEPENDENCIES},
+        )
+
+    def test_realistic_portfolio_expands_365d_dependencies(self):
+        portfolio = {
+            "timestamp": NOW,
+            "total_value": 1000,
+            "positions": [
+                {"symbol": symbol, "quantity": 1, "value_usd": 1}
+                for symbol in ("BTC", "USDT", "ETH", "AAVE", "U", "USD1", "USDC", "LUNC")
+            ],
+        }
+        normalized = normalize_snapshot(portfolio)
+        positions = {item["symbol"]: item["asset_type"] for item in normalized["positions"]}
+        self.assertEqual(positions["USDT"], "stablecoin")
+        self.assertEqual(positions["U"], "stablecoin")
+        self.assertEqual(positions["USD1"], "stablecoin")
+        self.assertEqual(positions["USDC"], "stablecoin")
+
+        plan = build_metric_collection_plan(portfolio)
+        self.assertEqual(plan.discovery_required_assets, ("LUNC",))
+        expanded = _expand_derived_dependencies(plan)
+        identities = {(request.asset, request.metric_key) for request in expanded.requests}
+        for asset in ("ETH", "AAVE"):
+            self.assertIn((asset, "relative.return_vs_btc_365d"), identities)
+            self.assertIn((asset, "market.return_365d"), identities)
+        self.assertIn(("BTC", "market.return_365d"), identities)
+
+        provider_plan = MetricCollectionPlan(
+            expanded.review_type,
+            tuple(
+                request
+                for request in expanded.requests
+                if request.metric_key in {"market.return_365d", "relative.return_vs_btc_365d"}
+            ),
+            assets=expanded.assets,
+        )
+        provider = _MarketHistoryProvider()
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"binance": provider},
+                    config=_config(),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(provider_plan, mode="REFRESH", as_of=NOW, now=NOW, cached_observations=())
+        self.assertGreater(provider.calls, 0)
+        self.assertTrue(all(item.status == "SUCCESS" for item in result.results))
+
+    def test_365d_dependency_reaches_provider_without_registry_error(self):
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("BTC", "market.return_365d"),
+            MetricRequest("ETH", "market.return_365d"),
+            MetricRequest("ETH", "relative.return_vs_btc_365d"),
+        ))
+        provider = _MarketHistoryProvider()
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"binance": provider},
+                    config=_config(),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(plan, mode="REFRESH", as_of=NOW, now=NOW, cached_observations=())
+        self.assertGreater(provider.calls, 0)
+        self.assertEqual(result.results[-1].status, "SUCCESS")
+        self.assertEqual(result.observations[-1].metric_key, "relative.return_vs_btc_365d")
+        self.assertEqual(result.observations[-1].value, 0.0)
+
+    def test_365d_provider_history_uses_existing_buffered_window(self):
+        requests = build_provider_requests(
+            (MetricRequest("ETH", "market.return_365d"),),
+            as_of=NOW,
+            now=NOW,
+            history_days=430,
+        )
+        self.assertEqual(len(requests), 1)
+        request = requests[0]
+        self.assertEqual(request.dataset, "ohlcv")
+        start = datetime.fromisoformat(request.parameters["start"].replace("Z", "+00:00"))
+        end = datetime.fromisoformat(request.parameters["end"].replace("Z", "+00:00"))
+        self.assertEqual((end - start).days, 430)
+
+    def test_insufficient_365d_history_is_structured_unavailability(self):
+        provider = _EmptyMarketHistoryProvider()
+        plan = MetricCollectionPlan(
+            "SNAPSHOT_REVIEW",
+            (MetricRequest("ETH", "market.return_365d"),),
+        )
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"binance": provider},
+                    config=_config(),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(plan, mode="REFRESH", as_of=NOW, now=NOW, cached_observations=())
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertNotIn("unknown metric key", result.results[0].event.reason.lower())
+
+    def test_binance_and_bybit_advertise_365d_history_metric(self):
+        self.assertIn("market.return_365d", BinanceProvider().capabilities.metric_keys)
+        self.assertIn("market.return_365d", BybitProvider().capabilities.metric_keys)
+
+
+if __name__ == "__main__":
+    unittest.main()

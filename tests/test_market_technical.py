@@ -6,6 +6,7 @@ from crypto_portfolio.engine.technical import (
     average_true_range,
     build_structural_zones,
     build_technical_snapshot,
+    calendar_lookback_return,
     completed_candles,
     derive_aligned_relative_return,
     detect_swings,
@@ -191,6 +192,51 @@ class TechnicalMetricTests(unittest.TestCase):
             as_of="2026-02-10T00:00:00Z",
         )
         self.assertEqual(aligned["common_anchor"], "2026-02-09")
+
+    def test_365d_calendar_return_requires_complete_calendar_window(self):
+        full = make_series(366).candles
+        self.assertAlmostEqual(
+            calendar_lookback_return(full, 365),
+            full[-1].close / full[0].close - 1,
+        )
+        self.assertIsNone(calendar_lookback_return(make_series(365).candles, 365))
+        missing = tuple(candle for index, candle in enumerate(full) if index != 100)
+        self.assertIsNone(calendar_lookback_return(missing, 365))
+
+    def test_aligned_relative_365d_return_uses_common_completed_anchor(self):
+        start = date(2025, 1, 1)
+
+        def series(symbol, count, multiplier):
+            candles = tuple(
+                Candle(
+                    (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
+                    100 + index * multiplier,
+                    101 + index * multiplier,
+                    99 + index * multiplier,
+                    100 + index * multiplier,
+                    100,
+                )
+                for index in range(count)
+            )
+            return OHLCVSeries(
+                symbol,
+                "1D",
+                candles,
+                source="binance",
+                venue="BINANCE",
+                market="spot",
+                quote_currency="USDT",
+            )
+
+        aligned = derive_aligned_relative_return(
+            series("ETH", 367, 1.0),
+            series("BTC", 366, 0.5),
+            horizon_days=365,
+            as_of="2026-01-03T00:00:00Z",
+        )
+        self.assertIsNotNone(aligned)
+        self.assertEqual(aligned["common_anchor"], "2026-01-01")
+        self.assertEqual(aligned["observed_at"], "2026-01-01T00:00:00Z")
 
     def test_hand_checkable_metrics(self):
         candles = (

@@ -147,6 +147,8 @@ class DocumentationTests(unittest.TestCase):
             template.index("## 2. 组合诊断"),
         )
         self.assertIn("MATERIAL_EVENT_FOUND` means a relevant proposal or announcement", skill)
+        self.assertIn("result.pending_event_scans", skill)
+        self.assertNotIn("result.event_source_scan_requests", skill)
         self.assertIn("not proof of an exploit, approval, or execution", template)
 
     def test_install_script_copies_payload_and_refuses_existing_destination(self):
