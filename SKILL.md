@@ -159,8 +159,16 @@ display data, so the engine uses value ÷ quantity and records a note.
 21. Bind the plan to exactly one matching approved `RebalanceAction`, create
     `execution_technical` evidence, and cache normalized OHLCV and Volume
     Profile artifacts by hash before persistence.
-22. Build a finalized immutable ReportPacket and produce the Chinese
-    user-facing report using `references/output-template.md`. Every normal review shows Position P&L
+22. Build a finalized immutable ReportPacket with the current
+    `AcquisitionResult`; do not discard final failed metric events or provider
+    attempts. Python determines `failed_data_fetches` (final status, failure
+    stage, provider, error code, structured reason, and decision effect), and
+    the report writer only formats those finalized values. Produce the Chinese
+    user-facing report using `references/output-template.md`. At the end of
+    section 1, render every `ReportPacket.failed_data_fetches` item, including
+    the no-failure message when empty; never invent a cause, change an error
+    code, turn `SKIPPED` into `FAILED`, omit a failed metric, or report a
+    provider failure when a fallback succeeded. Every normal review shows Position P&L
     when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
     `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
     return. `FULL_REVIEW` also compares the prior/current return by asset in

@@ -58,6 +58,24 @@ class PortfolioSnapshotTests(unittest.TestCase):
         self.assertEqual(result["config"]["min_stablecoin_weight"], 0.10)
         self.assertEqual(result["config"]["max_portfolio_drawdown"], 0.20)
 
+    def test_u_and_usd1_are_stablecoins_in_the_stable_sleeve(self):
+        result = normalize(
+            {
+                "timestamp": "2026-09-01T00:00:00Z",
+                "positions": [
+                    {"symbol": "BTC", "value_usd": 90},
+                    {"symbol": "U", "value_usd": 5},
+                    {"symbol": "USD1", "value_usd": 5},
+                ],
+            }
+        )
+        types = {position["symbol"]: position["asset_type"] for position in result["positions"]}
+        self.assertEqual(types, {"BTC": "core", "U": "stablecoin", "USD1": "stablecoin"})
+        self.assertEqual(result["stablecoin_weight"], 0.1)
+        self.assertEqual(result["core_weight"], 0.9)
+        self.assertEqual(result["satellite_weight"], 0.0)
+        self.assertEqual(classify("CUP"), "other")
+
     def test_custom_config_replaces_defaults_and_classifies_deterministically(self):
         result = normalize(
             {

@@ -30,6 +30,25 @@ target deviation, active threshold, stablecoin floor, concentration and
 turnover constraints. If evidence is missing, say `无法确认` and state the
 decision effect; never replace missing evidence with a neutral assumption.
 
+### 本轮数据抓取失败明细
+
+Render every item from `ReportPacket.failed_data_fetches` using this table. The
+list is metric-centric: one row per final `(asset/scope, metric)` result, with
+matching provider attempts shown as one compact ordered path under the failure
+reason when needed.
+
+| 资产/范围 | Metric | 最终状态 | 阶段 / Provider | 错误码 | 失败原因 | 最近可用数据 | 决策影响 |
+|---|---|---|---|---|---|---|---|
+
+If the list is empty, write `本轮没有最终抓取失败的数据。` For a `STALE`
+refresh failure, write `当前刷新失败；最近可用数据为 <timestamp>，因此本轮按 STALE 处理。`
+Use the structured reason, error code, stage/provider, timestamp, and decision
+effect exactly as supplied by the packet. `SKIPPED` and `NOT_APPLICABLE` are not failed fetches
+and must not appear in this subsection; keep them in section 9.
+
+When multiple attempts belong to one final metric, keep them under the same
+row, for example: `尝试路径：CoinGecko HTTP_429 → Coin Metrics Community PROVIDER_UNSUPPORTED`.
+
 ## 2. 组合诊断
 
 Include:
@@ -284,6 +303,8 @@ its scoring/decision effect; do not silently omit collection failures. Explain
 which missing evidence lowered confidence, blocked an increase, forced
 `HOLD_ONLY`, or left the decision `NO_TRADE`. Optional and premium `SKIPPED`
 items must state that they were excluded from applicable coverage.
+Detailed final fetch failures are shown in `本轮数据抓取失败明细`; keep this
+section as the aggregate data-quality report rather than duplicating that table.
 
 For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
 show the change in percentage points when both cost bases are usable. For

@@ -17,7 +17,45 @@
     "risk_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "sol_review": {"type": ["object", "null"]},
     "critical_missing_data": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "data_quality": {"type": "object"}
+    "data_quality": {"type": "object"},
+    "failed_data_fetches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset", "metric_key", "status", "failure_stage", "reason", "critical", "decision_role", "decision_effect", "attempts"],
+        "properties": {
+          "asset": {"type": "string", "minLength": 1},
+          "metric_key": {"type": "string", "minLength": 1},
+          "status": {"enum": ["FAILED", "STALE"]},
+          "failure_stage": {"enum": ["PROVIDER", "WEB_FALLBACK", "EVENT_SCAN", "DERIVED", "VALIDATION", "UNKNOWN"]},
+          "reason": {"type": "string", "minLength": 1},
+          "error_code": {"type": ["string", "null"], "minLength": 1},
+          "provider": {"type": ["string", "null"], "minLength": 1},
+          "endpoint": {"type": ["string", "null"], "minLength": 1},
+          "last_observation_at": {"type": ["string", "null"], "format": "date-time"},
+          "critical": {"type": "boolean"},
+          "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT"]},
+          "decision_effect": {"type": "string", "minLength": 1},
+          "attempts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["provider", "status"],
+              "properties": {
+                "provider": {"type": "string", "minLength": 1},
+                "status": {"type": "string", "minLength": 1},
+                "error_code": {"type": ["string", "null"], "minLength": 1},
+                "reason": {"type": ["string", "null"], "minLength": 1},
+                "endpoint": {"type": ["string", "null"], "minLength": 1},
+                "status_code": {"type": ["integer", "null"], "minimum": 100, "maximum": 599}
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
     ,"positioning_summaries": {"type": "object", "additionalProperties": {"type": "object"}}
     ,"btc_cycle_summary": {"type": ["object", "null"]}
     ,"overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]}

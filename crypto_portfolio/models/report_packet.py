@@ -7,13 +7,22 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from ..metrics_registry import metric_definition
 from .decision_packet import SolReview
 from .factor_packet import freeze_packet_value, thaw_packet_value
+from .time import normalize_timestamp
 
 
 _REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
+_FAILURE_STATUSES = {"FAILED", "STALE"}
+_FAILURE_STAGES = {"PROVIDER", "WEB_FALLBACK", "EVENT_SCAN", "DERIVED", "VALIDATION", "UNKNOWN"}
+_FAILURE_FIELDS = {
+    "asset", "metric_key", "status", "failure_stage", "reason", "error_code", "provider",
+    "endpoint", "last_observation_at", "critical", "decision_role", "decision_effect", "attempts",
+}
+_ATTEMPT_FIELDS = {"provider", "status", "error_code", "reason", "endpoint", "status_code"}
 
 
 def _text(value: Any, field: str) -> str:
@@ -84,6 +93,145 @@ def _sequence(value: Any, field: str) -> tuple[Any, ...]:
     )
 
 
+def _failure_text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    from ..providers.http import redact_secrets
+
+    text = str(redact_secrets(value)).strip()
+    lowered = text.lstrip().lower()
+    if (
+        lowered.startswith(("{", "["))
+        or "<html" in lowered
+        or "<!doctype" in lowered
+        or "authorization:" in lowered
+        or "cookie:" in lowered
+        or "response body" in lowered
+        or "raw response" in lowered
+        or "content-type:" in lowered
+        or '"headers"' in lowered
+        or '"body"' in lowered
+    ):
+        return "[REDACTED]"
+    return text
+
+
+def _failure_endpoint(value: Any, field: str) -> str:
+    text = _failure_text(value, field)
+    if text == "[REDACTED]":
+        return text
+    from ..providers.http import redact_url
+
+    try:
+        return redact_url(text)
+    except ValueError:
+        return text
+
+
+def _failed_data_fetches(value: Any, *, review_type: str) -> tuple[Mapping[str, Any], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("failed_data_fetches must be a sequence")
+    records: list[Mapping[str, Any]] = []
+    identities: set[tuple[str, str]] = set()
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"failed_data_fetches[{index}] must be an object")
+        unknown = set(raw) - _FAILURE_FIELDS
+        if unknown:
+            raise ValueError(
+                f"failed_data_fetches[{index}] contains unknown fields: {', '.join(sorted(unknown))}"
+            )
+        missing = {"asset", "metric_key", "status", "failure_stage", "reason", "critical", "decision_role", "decision_effect", "attempts"} - set(raw)
+        if missing:
+            raise ValueError(
+                f"failed_data_fetches[{index}] is missing fields: {', '.join(sorted(missing))}"
+            )
+        asset = _text(raw["asset"], f"failed_data_fetches[{index}].asset").upper()
+        definition = metric_definition(raw["metric_key"])
+        if not definition.applies_to(asset):
+            raise ValueError(f"metric {definition.key} is not applicable to {asset}")
+        identity = (asset, definition.key)
+        if identity in identities:
+            raise ValueError(f"failed_data_fetches contains duplicate metric {asset}:{definition.key}")
+        identities.add(identity)
+        status = _text(raw["status"], f"failed_data_fetches[{index}].status").upper()
+        if status not in _FAILURE_STATUSES:
+            raise ValueError("failed_data_fetches status must be FAILED or STALE")
+        stage = _text(raw["failure_stage"], f"failed_data_fetches[{index}].failure_stage").upper()
+        if stage not in _FAILURE_STAGES:
+            raise ValueError("failed_data_fetches failure_stage is unsupported")
+        critical = raw["critical"]
+        if not isinstance(critical, bool):
+            raise ValueError("failed_data_fetches critical must be boolean")
+        if critical != definition.is_critical_for(review_type):
+            raise ValueError(f"failed_data_fetches criticality does not match {review_type}")
+        decision_role = _text(raw["decision_role"], f"failed_data_fetches[{index}].decision_role").upper()
+        if decision_role != definition.decision_role:
+            raise ValueError(f"failed_data_fetches decision_role does not match {definition.key}")
+        attempts = raw["attempts"]
+        if isinstance(attempts, (str, bytes)) or not isinstance(attempts, (list, tuple)):
+            raise ValueError(f"failed_data_fetches[{index}].attempts must be a sequence")
+        safe_attempts = []
+        for attempt_index, raw_attempt in enumerate(attempts):
+            if not isinstance(raw_attempt, Mapping):
+                raise ValueError(f"failed_data_fetches[{index}].attempts[{attempt_index}] must be an object")
+            unknown_attempt = set(raw_attempt) - _ATTEMPT_FIELDS
+            if unknown_attempt:
+                raise ValueError(
+                    f"failed_data_fetches[{index}].attempts[{attempt_index}] contains unknown fields: "
+                    + ", ".join(sorted(unknown_attempt))
+                )
+            if "provider" not in raw_attempt or "status" not in raw_attempt:
+                raise ValueError(f"failed_data_fetches[{index}].attempts[{attempt_index}] requires provider and status")
+            attempt = {
+                "provider": _failure_text(raw_attempt["provider"], "attempt provider"),
+                "status": _failure_text(raw_attempt["status"], "attempt status").upper(),
+            }
+            for field_name in ("error_code", "reason"):
+                if raw_attempt.get(field_name) is not None:
+                    attempt[field_name] = _failure_text(raw_attempt[field_name], f"attempt {field_name}")
+                    if field_name == "error_code":
+                        attempt[field_name] = attempt[field_name].upper()
+            if raw_attempt.get("endpoint") is not None:
+                attempt["endpoint"] = _failure_endpoint(raw_attempt["endpoint"], "attempt endpoint")
+            if "status_code" in raw_attempt and raw_attempt["status_code"] is not None:
+                status_code = raw_attempt["status_code"]
+                if (
+                    isinstance(status_code, bool)
+                    or not isinstance(status_code, int)
+                    or not 100 <= status_code <= 599
+                ):
+                    raise ValueError("attempt status_code must be an HTTP status or null")
+                attempt["status_code"] = status_code
+            safe_attempts.append(attempt)
+        record: dict[str, Any] = {
+            "asset": asset,
+            "metric_key": definition.key,
+            "status": status,
+            "failure_stage": stage,
+            "reason": _failure_text(raw["reason"], f"failed_data_fetches[{index}].reason"),
+            "critical": critical,
+            "decision_role": decision_role,
+            "decision_effect": _failure_text(raw["decision_effect"], f"failed_data_fetches[{index}].decision_effect"),
+            "attempts": safe_attempts,
+        }
+        if raw.get("error_code") is not None:
+            record["error_code"] = _failure_text(raw["error_code"], "failure error_code").upper()
+        if raw.get("provider") is not None:
+            record["provider"] = _failure_text(raw["provider"], "failure provider")
+        if raw.get("endpoint") is not None:
+            record["endpoint"] = _failure_endpoint(raw["endpoint"], "failure endpoint")
+        if raw.get("last_observation_at") is not None:
+            record["last_observation_at"] = normalize_timestamp(
+                raw["last_observation_at"], "last_observation_at"
+            )
+        records.append(freeze_packet_value(record, path=f"failed_data_fetches[{index}]"))
+    records.sort(key=lambda item: (not item["critical"], item["asset"], item["metric_key"]))
+    return tuple(records)
+
+
 @dataclass(frozen=True)
 class ReportPacket:
     review_type: str
@@ -104,6 +252,7 @@ class ReportPacket:
     overlay_confidence: str = "LOW"
     overlay_warnings: tuple[str, ...] = ()
     effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
+    failed_data_fetches: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -144,6 +293,7 @@ class ReportPacket:
             if not isinstance(getattr(self, field_name), Mapping):
                 raise ValueError(f"{field_name} must be an object")
             object.__setattr__(self, field_name, freeze_packet_value(getattr(self, field_name), path=field_name))
+        object.__setattr__(self, "failed_data_fetches", _failed_data_fetches(self.failed_data_fetches, review_type=review))
         if not isinstance(self.positioning_summaries, Mapping):
             raise ValueError("positioning_summaries must be an object")
         summaries = {}
@@ -226,6 +376,7 @@ class ReportPacket:
             "sol_review": self.sol_review.as_dict() if self.sol_review else None,
             "critical_missing_data": list(self.critical_missing_data),
             "data_quality": thaw_packet_value(self.data_quality),
+            "failed_data_fetches": thaw_packet_value(self.failed_data_fetches),
             "positioning_summaries": {
                 symbol: thaw_packet_value(summary)
                 for symbol, summary in self.positioning_summaries.items()

@@ -649,6 +649,8 @@ class AcquisitionManager:
                         (request.asset, category),
                         f"{category} event scan requires the returned authoritative source plan",
                     )
+                    if diagnostic is None:
+                        diagnostic = {"detail": reason}
                 elif not provider_chain(request.metric_key, request.asset):
                     reason = "no configured structured provider route for this metric"
                     diagnostic = {"error_code": "NO_PROVIDER_ROUTE", "detail": reason}

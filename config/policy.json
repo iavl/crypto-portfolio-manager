@@ -7,7 +7,7 @@
   "universe": {
     "core": ["BTC", "ETH"],
     "satellites": ["SOL", "BNB", "LINK", "AAVE"],
-    "stable": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"]
+    "stable": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH", "U", "USD1"]
   },
   "risk": {
     "min_stablecoin_weight": 0.1,

@@ -46,6 +46,19 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         self.assertGreaterEqual(stable, 0.4)
         self.assertTrue(run_risk_gate(result, policy=policy).ok)
 
+    def test_u_and_usd1_count_toward_stablecoin_floor(self):
+        policy = resolve_policy()
+        weights = {"BTC": 0.9, "U": 0.05, "USD1": 0.05}
+        risk = run_risk_gate(weights, policy=policy)
+        self.assertNotIn("STABLECOIN_FLOOR", {item.code for item in risk.violations})
+        allocation = build_target_allocation(policy=policy, current_weights=weights)
+        self.assertGreaterEqual(
+            sum(allocation.target_weights.get(symbol, 0) for symbol in policy.stable_symbols),
+            policy.min_stablecoin_weight,
+        )
+        self.assertGreater(allocation.target_weights.get("U", 0), 0)
+        self.assertGreater(allocation.target_weights.get("USD1", 0), 0)
+
     def test_risk_gate_reports_constraints(self):
         result = run_risk_gate(
             {"BTC": 0.6, "SOL": 0.3, "USDT": 0.1},

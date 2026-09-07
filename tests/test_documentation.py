@@ -120,6 +120,12 @@ class DocumentationTests(unittest.TestCase):
                 self.assertTrue(text in skill or text in template)
         for text in (
             "### 结论依据",
+            "### 本轮数据抓取失败明细",
+            "failed_data_fetches",
+            "失败原因",
+            "错误码",
+            "最近可用数据",
+            "决策影响",
             "### 术语解释与决策影响",
             "事实",
             "判断",
@@ -131,6 +137,15 @@ class DocumentationTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertIn(text, template)
+        self.assertIn("`SKIPPED` and `NOT_APPLICABLE` are not failed fetches", template)
+        self.assertLess(
+            template.index("### 结论依据"),
+            template.index("### 本轮数据抓取失败明细"),
+        )
+        self.assertLess(
+            template.index("### 本轮数据抓取失败明细"),
+            template.index("## 2. 组合诊断"),
+        )
         self.assertIn("MATERIAL_EVENT_FOUND` means a relevant proposal or announcement", skill)
         self.assertIn("not proof of an exploit, approval, or execution", template)
 

@@ -20,6 +20,37 @@ from .state.metrics import (
 
 
 _STATUS_ORDER = ("SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED")
+_FETCH_FAILURE_STATUSES = {"FAILED", "STALE"}
+_DERIVED_METRICS = {
+    "derivatives.open_interest_to_market_cap",
+    "market.flow_state",
+    "relative.return_vs_btc_180d",
+    "relative.return_vs_btc_30d",
+    "relative.return_vs_btc_90d",
+    "valuation.fdv_market_cap_ratio",
+}
+_ERROR_CODE_DESCRIPTIONS = {
+    "CACHE_CORRUPT": "provider cache was corrupt",
+    "CACHE_EXPIRED": "provider cache entry expired",
+    "CACHE_MISS": "provider cache has no usable value",
+    "DERIVED_INPUT_UNAVAILABLE": "derived input was unavailable",
+    "DNS_RESOLUTION_FAILED": "provider hostname could not be resolved",
+    "HTTP_400": "provider rejected the request",
+    "HTTP_401": "provider authentication failed",
+    "HTTP_403": "provider rejected the request",
+    "HTTP_403_RATE_LIMIT": "provider rate limit was exceeded",
+    "HTTP_404": "provider endpoint was not found",
+    "HTTP_429": "provider rate limit was exceeded",
+    "HTTP_5XX": "provider returned a server error",
+    "INSUFFICIENT_SOURCE_COVERAGE": "required event sources were not all reachable",
+    "NO_PROVIDER_ROUTE": "no structured provider route was configured",
+    "PROVIDER_DISABLED": "provider is disabled or unavailable",
+    "PROVIDER_INSUFFICIENT_HISTORY": "provider returned insufficient history",
+    "PROVIDER_NOT_APPLICABLE": "provider does not apply to this metric",
+    "PROVIDER_PLAN_RESTRICTED": "provider plan does not permit this metric",
+    "PROVIDER_UNSUPPORTED": "provider does not support this metric",
+    "TLS_CERTIFICATE_VERIFY_FAILED": "provider TLS certificate verification failed",
+}
 
 
 def _display(value: Any) -> str:
@@ -28,6 +59,311 @@ def _display(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.6g}"
     return str(value)
+
+
+def collection_decision_effect(event: CollectionEvent, *, review_type: str | None = None) -> str:
+    """Return the deterministic scoring/decision effect used by collection telemetry."""
+    definition = metric_definition(event.metric_key)
+    if definition.decision_role == "EVENT_RISK":
+        effect = "event-risk gate input; excluded from base scoring coverage"
+        if event.status != "SUCCESS":
+            hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
+            if hard_critical:
+                effect += "; CRITICAL DATA FAILURE; high-conviction trade blocked"
+            elif review_type is not None and definition.critical:
+                effect += "; not hard-critical for this review"
+    elif definition.decision_role != "SCORING_FACTOR":
+        effect = "context only; excluded from base scoring coverage"
+    elif event.status == "SUCCESS":
+        effect = "available for scoring/history"
+    elif event.status == "NOT_APPLICABLE":
+        effect = "excluded from applicable coverage"
+    elif event.status == "SKIPPED":
+        requirement = metric_availability(event.asset, event.metric_key).requirement
+        effect = f"excluded from applicable coverage ({requirement.lower()} metric)"
+    else:
+        effect = "coverage/confidence reduced"
+        hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
+        if hard_critical:
+            effect += "; CRITICAL DATA FAILURE; high-conviction trade blocked"
+        elif review_type is not None and definition.critical:
+            effect += "; not hard-critical for this review"
+    return effect
+
+
+def _safe_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    from .providers.http import redact_secrets
+
+    text = str(redact_secrets(value)).strip()
+    if not text:
+        return None
+    lowered = text.lstrip().lower()
+    if (
+        lowered.startswith(("{", "["))
+        or "<html" in lowered
+        or "<!doctype" in lowered
+        or "authorization:" in lowered
+        or "cookie:" in lowered
+        or "response body" in lowered
+        or "raw response" in lowered
+        or "content-type:" in lowered
+        or '"headers"' in lowered
+        or '"body"' in lowered
+    ):
+        return None
+    return text
+
+
+def _safe_endpoint(value: Any) -> str | None:
+    text = _safe_text(value)
+    if text is None:
+        return None
+    from .providers.http import redact_url
+
+    try:
+        return redact_url(text)
+    except ValueError:
+        return text
+
+
+def _mapping(value: Any, field: str) -> Mapping[str, Any]:
+    if hasattr(value, "as_dict"):
+        value = value.as_dict()
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field} must contain mappings")
+    return value
+
+
+def _sequence(value: Any, field: str) -> tuple[Any, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field} must be a sequence")
+    return tuple(value)
+
+
+def _acquisition_field(acquisition: Any, field: str) -> Any:
+    if isinstance(acquisition, Mapping):
+        return acquisition.get(field, ())
+    return getattr(acquisition, field, ())
+
+
+def _result_event(result: Any) -> CollectionEvent:
+    if isinstance(result, CollectionEvent):
+        return result
+    if isinstance(result, Mapping):
+        event = result.get("event", result if "metric_key" in result else None)
+    else:
+        event = getattr(result, "event", None)
+    if isinstance(event, CollectionEvent):
+        return event
+    return CollectionEvent.from_mapping(_mapping(event, "results.event"))
+
+
+def _attempt_matches(attempt: Mapping[str, Any], event: CollectionEvent) -> bool:
+    asset = str(attempt.get("asset", "")).strip().upper()
+    metric_keys = attempt.get("metric_keys", ())
+    if isinstance(metric_keys, str):
+        metric_keys = (metric_keys,)
+    return (
+        asset == event.asset
+        and isinstance(metric_keys, (list, tuple))
+        and event.metric_key in {str(key).strip().lower() for key in metric_keys}
+    )
+
+
+def _event_category(metric_key: str) -> str | None:
+    from .events import event_metric_category
+
+    return event_metric_category(metric_key)
+
+
+def _attempt_entry(attempt: Mapping[str, Any]) -> dict[str, Any]:
+    provider = _safe_text(attempt.get("provider"))
+    status = _safe_text(attempt.get("status"))
+    if provider is None or status is None:
+        raise ValueError("provider attempts require provider and status")
+    result: dict[str, Any] = {"provider": provider, "status": status.upper()}
+    error_code = _safe_text(attempt.get("error_code"))
+    if error_code is not None:
+        result["error_code"] = error_code.upper()
+    reason = _safe_text(attempt.get("reason")) or _safe_text(attempt.get("detail"))
+    if reason is not None:
+        result["reason"] = reason
+    endpoint = _safe_endpoint(attempt.get("endpoint"))
+    if endpoint is not None:
+        result["endpoint"] = endpoint
+    status_code = attempt.get("status_code")
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        result["status_code"] = status_code
+    return result
+
+
+def _failed_current_attempt(attempt: Mapping[str, Any]) -> bool:
+    status = str(attempt.get("status", "")).strip().upper()
+    return bool(status and status != "SUCCESS")
+
+
+def _event_scan_status(event_scans: tuple[Mapping[str, Any], ...], event: CollectionEvent) -> str | None:
+    category = _event_category(event.metric_key)
+    if category is None:
+        return None
+    for scan in event_scans:
+        if (
+            str(scan.get("asset", "")).strip().upper() == event.asset
+            and str(scan.get("category", "")).strip().lower() == category
+        ):
+            status = _safe_text(scan.get("status"))
+            if status == "INSUFFICIENT_SOURCE_COVERAGE":
+                return status
+    return None
+
+
+def _failure_stage(
+    event: CollectionEvent,
+    attempts: tuple[Mapping[str, Any], ...],
+    web_fallbacks: tuple[Mapping[str, Any], ...],
+) -> str:
+    details = tuple(
+        text.lower()
+        for text in (
+            _safe_text(event.reason),
+            _safe_text(event.refresh_error_detail),
+        )
+        if text is not None
+    )
+    if any("provider value rejected" in text or "event scan result rejected" in text for text in details):
+        return "VALIDATION"
+    if any(
+        marker in text
+        for text in details
+        for marker in ("derived_input_unavailable", "insufficient_aligned_history")
+    ) or event.metric_key in _DERIVED_METRICS and not attempts:
+        return "DERIVED"
+    if _event_category(event.metric_key) is not None:
+        return "EVENT_SCAN"
+    if event.refresh_provider or event.refresh_error_code or attempts:
+        return "PROVIDER"
+    if any(
+        str(item.get("asset", "")).strip().upper() == event.asset
+        and str(item.get("metric_key", "")).strip().lower() == event.metric_key
+        for item in web_fallbacks
+    ):
+        return "WEB_FALLBACK"
+    return "UNKNOWN"
+
+
+def _failure_reason(event: CollectionEvent, attempt: Mapping[str, Any] | None, error_code: str | None) -> str:
+    values = (
+        event.reason,
+        event.refresh_error_detail,
+        attempt.get("reason") if attempt else None,
+        attempt.get("detail") if attempt else None,
+    )
+    for value in values:
+        text = _safe_text(value)
+        if text is not None:
+            return text
+    if error_code is not None:
+        return _ERROR_CODE_DESCRIPTIONS.get(error_code, "原因未提供")
+    return "原因未提供"
+
+
+def _failure_error_code(
+    event: CollectionEvent,
+    attempt: Mapping[str, Any] | None,
+    event_scan_code: str | None,
+) -> str | None:
+    for value in (
+        event.refresh_error_code,
+        attempt.get("error_code") if attempt else None,
+        event_scan_code,
+    ):
+        text = _safe_text(value)
+        if text is not None:
+            return text.upper()
+    return None
+
+
+def build_failed_data_fetches(
+    acquisition: Any,
+    *,
+    review_type: str | None = None,
+) -> tuple[Mapping[str, Any], ...]:
+    """Project final unresolved acquisition results into safe metric-level records."""
+    if acquisition is None:
+        return ()
+    if review_type is None:
+        plan = _acquisition_field(acquisition, "plan")
+        if hasattr(plan, "review_type"):
+            review_type = plan.review_type
+        elif isinstance(plan, Mapping):
+            review_type = plan.get("review_type")
+    if review_type is not None:
+        normalized_review = review_type.strip().upper() if isinstance(review_type, str) else review_type
+        if normalized_review not in REVIEW_TYPES:
+            raise ValueError(f"review_type must be one of {list(REVIEW_TYPES)}")
+        review_type = normalized_review
+    results = _sequence(_acquisition_field(acquisition, "results"), "acquisition.results")
+    raw_attempts = _sequence(_acquisition_field(acquisition, "attempts"), "acquisition.attempts")
+    attempts = tuple(_mapping(item, "acquisition.attempts") for item in raw_attempts)
+    raw_event_scans = _sequence(_acquisition_field(acquisition, "event_scans"), "acquisition.event_scans")
+    event_scans = tuple(_mapping(item, "acquisition.event_scans") for item in raw_event_scans)
+    raw_web_fallbacks = _sequence(_acquisition_field(acquisition, "web_fallbacks"), "acquisition.web_fallbacks")
+    web_fallbacks = tuple(_mapping(item, "acquisition.web_fallbacks") for item in raw_web_fallbacks)
+    rows: list[dict[str, Any]] = []
+    for raw_result in results:
+        event = _result_event(raw_result)
+        relevant_attempts = tuple(item for item in attempts if _attempt_matches(item, event))
+        include = event.status == "FAILED" or (
+            event.status == "STALE"
+            and (
+                event.refresh_provider is not None
+                or event.refresh_error_code is not None
+                or event.refresh_error_detail is not None
+                or any(_failed_current_attempt(item) for item in relevant_attempts)
+                or _event_scan_status(event_scans, event) is not None
+            )
+        )
+        if not include or event.status not in _FETCH_FAILURE_STATUSES:
+            continue
+        safe_attempts = tuple(_attempt_entry(item) for item in relevant_attempts)
+        final_attempt = relevant_attempts[-1] if relevant_attempts else None
+        error_code = _failure_error_code(
+            event,
+            final_attempt,
+            _event_scan_status(event_scans, event),
+        )
+        provider = _safe_text(event.refresh_provider)
+        if provider is None and final_attempt is not None:
+            provider = _safe_text(final_attempt.get("provider"))
+        endpoint = _safe_endpoint(event.refresh_endpoint)
+        if endpoint is None and final_attempt is not None:
+            endpoint = _safe_endpoint(final_attempt.get("endpoint"))
+        row: dict[str, Any] = {
+            "asset": event.asset,
+            "metric_key": metric_definition(event.metric_key).key,
+            "status": event.status,
+            "failure_stage": _failure_stage(event, relevant_attempts, web_fallbacks),
+            "reason": _failure_reason(event, final_attempt, error_code),
+            "critical": metric_definition(event.metric_key).is_critical_for(review_type) if review_type else metric_definition(event.metric_key).critical,
+            "decision_role": metric_definition(event.metric_key).decision_role,
+            "decision_effect": collection_decision_effect(event, review_type=review_type),
+            "attempts": list(safe_attempts),
+        }
+        if error_code is not None:
+            row["error_code"] = error_code
+        if provider is not None:
+            row["provider"] = provider
+        if endpoint is not None:
+            row["endpoint"] = endpoint
+        if event.last_observation_at is not None:
+            row["last_observation_at"] = event.last_observation_at
+        rows.append(row)
+    rows.sort(key=lambda item: (not item["critical"], item["asset"], item["metric_key"]))
+    return tuple(rows)
 
 
 def collection_summary(
@@ -199,33 +535,7 @@ def format_collection_event(
         )
     if event.reason:
         lines.append(f"       reason: {event.reason}")
-    definition = metric_definition(event.metric_key)
-    if definition.decision_role == "EVENT_RISK":
-        effect = "event-risk gate input; excluded from base scoring coverage"
-        if event.status != "SUCCESS":
-            hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
-            if hard_critical:
-                effect += "; CRITICAL DATA FAILURE; high-conviction trade blocked"
-            elif review_type is not None and definition.critical:
-                effect += "; not hard-critical for this review"
-    elif definition.decision_role != "SCORING_FACTOR":
-        effect = "context only; excluded from base scoring coverage"
-    elif event.status == "SUCCESS":
-        effect = "available for scoring/history"
-    elif event.status == "NOT_APPLICABLE":
-        effect = "excluded from applicable coverage"
-    elif event.status == "SKIPPED":
-        requirement = metric_availability(event.asset, event.metric_key).requirement
-        effect = f"excluded from applicable coverage ({requirement.lower()} metric)"
-    else:
-        effect = "coverage/confidence reduced"
-        definition = metric_definition(event.metric_key)
-        hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
-        if hard_critical:
-            effect += "; CRITICAL DATA FAILURE; high-conviction trade blocked"
-        elif review_type is not None and definition.critical:
-            effect += "; not hard-critical for this review"
-    lines.append(f"       scoring_effect: {effect}")
+    lines.append(f"       scoring_effect: {collection_decision_effect(event, review_type=review_type)}")
     return "\n".join(lines)
 
 
@@ -340,6 +650,8 @@ __all__ = [
     "CollectionReporter",
     "DataCollectionLog",
     "collection_summary",
+    "build_failed_data_fetches",
+    "collection_decision_effect",
     "format_collection_event",
     "format_collection_summary",
     "format_overlay_summary",

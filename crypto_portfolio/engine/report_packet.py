@@ -21,6 +21,7 @@ def build_report_packet(
     data_quality: Mapping[str, Any] | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
     market_overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    acquisition: Any | None = None,
 ) -> ReportPacket:
     if overlays is not None and market_overlays is not None:
         raise ValueError("provide only one of overlays or market_overlays")
@@ -68,6 +69,8 @@ def build_report_packet(
         overlay_confidence = compact["overlay_confidence"]
         overlay_warnings = tuple(compact["warnings"])
         deployment_caps = compact["effective_deployment_caps"]
+    from ..data_collection import build_failed_data_fetches
+
     return ReportPacket(
         review_type=packet.review_type,
         market_regime=packet.market_regime,
@@ -82,6 +85,7 @@ def build_report_packet(
         sol_review=sol_review,
         critical_missing_data=packet.critical_missing_data,
         data_quality=data_quality or {},
+        failed_data_fetches=build_failed_data_fetches(acquisition, review_type=packet.review_type),
         positioning_summaries=positioning_summaries,
         btc_cycle_summary=btc_cycle_summary,
         overlay_confidence=overlay_confidence,
@@ -121,13 +125,15 @@ def build_final_review_output(
         from .position_pnl import calculate_portfolio_position_performance
 
         pnl = calculate_portfolio_position_performance(snapshot).as_dict()
+    collection = dict(acquisition_value.get("summary", {}))
+    collection["failed_data_fetches"] = packet_value["failed_data_fetches"]
     result = {
         "portfolio": {
             "current_weights": packet_value["current_weights"],
             "target_weights": packet_value["target_weights"],
         },
         "pnl": pnl,
-        "collection": acquisition_value.get("summary", {}),
+        "collection": collection,
         "scores": packet_value["scores"],
         "regime": packet.market_regime,
         "allocation": dict(packet.target_weights),
