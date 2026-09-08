@@ -1,13 +1,12 @@
-# Development and Provider Debugging
+# 开发与 Provider 排查
 
-## Purpose
+## 目的
 
-Provider diagnostics are deterministic Python infrastructure. They explain
-configuration, transport, upstream contracts, normalization, fallback, and
-cache state without changing portfolio policy, scoring, allocation, or risk
-authority.
+Provider 诊断是由 Python 执行的确定性基础设施。它解释配置、传输、上游
+契约、规范化、fallback 和缓存状态，但不会改变投资组合策略、评分、配置、
+风险或执行权限。
 
-## Fast diagnostic workflow
+## 快速排查流程
 
 ```bash
 python3 scripts/providers.py --status
@@ -18,22 +17,21 @@ python3 scripts/providers.py --contract <provider>
 python3 scripts/providers.py --smoke ETH --metric market.spot_price
 ```
 
-| Command | Answers | Network |
+| 命令 | 回答的问题 | 是否联网 |
 |---|---|---|
-| `--status` | Is config, adapter, and credential readiness correct? | No |
-| `--doctor` | Which readiness/transport/schema layer failed? | Yes for ready providers |
-| `--probe` | Can the provider's minimal adapter request work? | Yes |
-| `--metric` | Which deterministic provider chain is configured? | No |
-| `--contract` | Does a minimal upstream contract still normalize? | Yes |
-| `--smoke` | Does the real metric route work end to end? | Yes; uses `REFRESH` |
+| `--status` | 配置、adapter 和 credential 是否已准备好？ | 否 |
+| `--doctor` | 哪个 readiness/transport/schema 层失败？ | ready provider 会联网 |
+| `--probe` | Provider 的最小 adapter 请求是否可用？ | 是 |
+| `--metric` | 当前 metric 配置了哪条确定性 provider 链？ | 否 |
+| `--contract` | 最小上游契约是否仍能完成规范化？ | 是 |
+| `--smoke` | 真实 metric 路由是否能端到端工作？ | 是；使用 `REFRESH` |
 
-`--status` is an offline readiness check. `--probe`, `--doctor`, `--contract`,
-and `--smoke` are explicit network operations. A tested failure exits `2`;
-an unconfigured provider skipped by an `all` operation does not fail the
-command. `scripts/run_with_debug.py` preserves its report-friendly exit `0`
-while recording a child exit `2` as `FAILED`.
+`--status` 是离线 readiness 检查。`--probe`、`--doctor`、`--contract` 和
+`--smoke` 是显式联网操作。已实际测试的失败返回 `2`；`all` 操作中跳过的
+未配置 Provider 不会导致命令失败。`scripts/run_with_debug.py` 保持适合报告
+流程的退出码 `0`，同时把子进程退出码 `2` 记录为 `FAILED`。
 
-## Provider architecture
+## Provider 架构
 
 ```text
 metric request
@@ -46,68 +44,66 @@ metric request
     -> unresolved evidence when all providers fail
 ```
 
-`HttpClient` owns verified TLS, bounded retries, response-size limits, safe
-redaction, and transport classification. The router owns request budgets,
-cache behavior, fallback, and the in-process provider circuit breaker.
+`HttpClient` 负责已验证的 TLS、有限重试、响应大小限制、安全脱敏和传输分类。
+Router 负责请求预算、缓存行为、fallback 以及进程内 Provider 断路器。
 
-## Decision tree
+## 决策树
 
 ```text
 NOT_READY
-  -> config / adapter / credential
+  -> 配置 / adapter / credential
 
 DNS / CONNECT_TIMEOUT / READ_TIMEOUT / TLS / PROXY
-  -> local transport environment or transient network
+  -> 本地传输环境或临时网络故障
 
 HTTP_401 / HTTP_403_AUTH
-  -> credential or authentication contract
+  -> credential 或认证契约
 
 HTTP_403_ACCESS_DENIED / HTTP_403_REGION_RESTRICTED / HTTP_403_WAF
-  -> endpoint or provider access policy
+  -> endpoint 或 Provider 访问策略
 
 HTTP_403_RATE_LIMIT / HTTP_429
-  -> rate limit; bounded retry may apply
+  -> rate limit；可能进行有限重试
 
 HTTP_5XX / CONNECTION_RESET
-  -> transient upstream/network failure
+  -> 临时上游/网络故障
 
 PROVIDER_PLAN_RESTRICTED
-  -> subscription or provider entitlement
+  -> 订阅或 Provider 权限不足
 
 INVALID_JSON / PROVIDER_SCHEMA_ERROR / PROVIDER_SCHEMA_CHANGED
-  -> upstream contract or normalization regression
+  -> 上游契约或规范化回归
 
 CACHE_MISS / CACHE_EXPIRED / CACHE_CORRUPT
-  -> local cache state
+  -> 本地缓存状态
 
 CIRCUIT_OPEN / REQUEST_BUDGET_EXHAUSTED
-  -> local safety gate; inspect the earlier root attempt
+  -> 本地安全门；检查更早的根因尝试
 ```
 
-A plain 403 is `HTTP_403_UNKNOWN` unless safe response metadata identifies
-authentication, rate limiting, region restriction, access denial, or WAF.
-Raw HTML challenge pages and response bodies are never printed into reports.
+普通 403 只有在安全响应元数据明确指出认证、rate limit、区域限制、访问拒绝
+或 WAF 时，才会分类为对应代码；否则是 `HTTP_403_UNKNOWN`。原始 HTML challenge
+页面和响应正文不会写入报告。
 
-## Error-code reference
+## 错误码参考
 
-Transport codes include `DNS_RESOLUTION_FAILED`, `CONNECT_TIMEOUT`,
-`READ_TIMEOUT`, `CONNECTION_REFUSED`, `CONNECTION_RESET`, `TLS_*`, and
-`PROXY_ERROR`. HTTP codes include `HTTP_400`, `HTTP_401`, the classified
-`HTTP_403_*` family, `HTTP_404`, `HTTP_429`, and `HTTP_5XX`.
+传输错误码包括 `DNS_RESOLUTION_FAILED`、`CONNECT_TIMEOUT`、`READ_TIMEOUT`、
+`CONNECTION_REFUSED`、`CONNECTION_RESET`、`TLS_*` 和 `PROXY_ERROR`。HTTP 错误码
+包括 `HTTP_400`、`HTTP_401`、分类后的 `HTTP_403_*` 系列、`HTTP_404`、
+`HTTP_429` 和 `HTTP_5XX`。
 
-Provider codes include `PROVIDER_PLAN_RESTRICTED`,
-`PROVIDER_INSUFFICIENT_HISTORY`, `PROVIDER_UNSUPPORTED`,
-`PROVIDER_NOT_APPLICABLE`, `PROVIDER_SCHEMA_ERROR`, and
-`PROVIDER_SCHEMA_CHANGED`. Cache and local safety codes are
-`CACHE_MISS`, `CACHE_EXPIRED`, `CACHE_CORRUPT`, `CIRCUIT_OPEN`, and
-`REQUEST_BUDGET_EXHAUSTED`.
+Provider 错误码包括 `PROVIDER_PLAN_RESTRICTED`、
+`PROVIDER_INSUFFICIENT_HISTORY`、`PROVIDER_UNSUPPORTED`、
+`PROVIDER_NOT_APPLICABLE`、`PROVIDER_SCHEMA_ERROR` 和
+`PROVIDER_SCHEMA_CHANGED`。缓存及本地安全错误码包括 `CACHE_MISS`、
+`CACHE_EXPIRED`、`CACHE_CORRUPT`、`CIRCUIT_OPEN` 和
+`REQUEST_BUDGET_EXHAUSTED`。
 
-## Configuration and credentials
+## 配置与凭证
 
-`--status` separates configuration, adapter registration, credential
-presence, and runtime readiness. Credentials are environment-only. Do not put
-API keys in `config/data-providers.json`, request recordings, cache files, or
-logs.
+`--status` 会分别显示配置、adapter 注册、credential 是否存在以及 runtime
+readiness。凭证只通过环境变量提供。不要把 API key 写入
+`config/data-providers.json`、请求 recording、缓存文件或日志。
 
 ```bash
 export COINGECKO_API_KEY='...'
@@ -115,91 +111,83 @@ python3 scripts/providers.py --status
 python3 scripts/providers.py --doctor coingecko
 ```
 
-Presence is not health: a provider can be configured and credentialed while
-DNS, TLS, plan access, or upstream normalization is unavailable.
+凭证存在不代表 Provider 健康：DNS、TLS、plan 权限或上游规范化仍可能不可用。
 
-## Proxy and TLS troubleshooting
+## Proxy 与 TLS 排查
 
-The client requires certificate and hostname verification. If the local trust
-store is incomplete, provide a trusted bundle:
+客户端要求证书和主机名校验。如果本地信任库不完整，请提供可信 CA bundle：
 
 ```bash
 export CRYPTO_PORTFOLIO_CA_BUNDLE=/path/to/trusted-ca-bundle.pem
 python3 scripts/providers.py --doctor binance
 ```
 
-Do not use `verify=False`, an unverified SSL context, or `curl -k`. A TLS
-failure is unavailable evidence, not proof that a chain or provider is down.
+不要使用 `verify=False`、未验证的 SSL context 或 `curl -k`。TLS 失败代表证据
+不可用，不代表链或 Provider 已停止。
 
-## Rate limits and retries
+## Rate limit 与重试
 
-`HTTP_429` and bounded `HTTP_403_RATE_LIMIT` responses may retry only for
-idempotent requests. Retry delays honor `Retry-After`; otherwise exponential
-full jitter is used and capped. Permanent 4xx, plan, unsupported, and schema
-errors fail quickly.
+`HTTP_429` 和有限的 `HTTP_403_RATE_LIMIT` 只会对幂等请求进行重试。重试延迟
+遵循 `Retry-After`；否则使用有上限的指数 full jitter。永久性 4xx、plan、
+unsupported 和 schema 错误会快速失败。
 
-The router opens a per-provider in-process circuit after three retryable
-failures for 60 seconds. An open circuit emits `CIRCUIT_OPEN` and allows the
-configured fallback to run; it does not erase the original failure.
+Router 在同一 Provider 出现三次可重试失败后，会打开该 Provider 的进程内断路器
+60 秒。断路器打开时发出 `CIRCUIT_OPEN` 并继续执行配置的 fallback，不会抹掉原始
+失败原因。
 
-## Cache and fallback troubleshooting
+## 缓存与 fallback 排查
 
-Use `CACHE_ONLY` when proving that a workflow is offline. `REFRESH` bypasses
-mutable response caches. Missing, stale, corrupt, or unsupported data remains
-unavailable; it is never converted to zero. Provider attempts retain the
-provider, dataset, asset, metric keys, request hash, network count, endpoint,
-method, error code, retryability, status, and safe detail.
+需要证明流程离线时使用 `CACHE_ONLY`。`REFRESH` 会绕过可变响应缓存。缺失、
+过期、损坏或 unsupported 数据仍保持不可用，绝不会被转换成零。Provider attempt
+会保留 provider、dataset、asset、metric keys、request hash、网络请求数、endpoint、
+method、错误码、retryability、status 和安全 detail。
 
-## Record / replay
+## 记录 / 回放
 
-Temporary public response recordings may be staged under the ignored path:
+临时的公共响应 recording 可以放在已被 Git 忽略的路径中：
 
 ```bash
 python3 scripts/providers.py --probe binance --record
 python3 scripts/providers.py --replay .data/provider-recordings/<file>.json
 ```
 
-Recordings contain only a version, provider, method, redacted endpoint,
-timestamp, status, and redacted JSON response. Request headers, cookies,
-authorization values, query credentials, and raw response bodies are not
-serialized. Credential-bearing requests are skipped by the default recorder.
-Curate sanitized public fixtures under `tests/fixtures/providers/` only when
-they are safe and useful for parser regression.
+Recording 只包含版本、Provider、method、脱敏 endpoint、时间戳、status 和脱敏后的
+JSON 响应。请求头、cookie、authorization 值、query credential 和原始响应正文都
+不会被序列化。默认 recorder 会跳过带凭证的请求。只有在安全且确实有助于 parser
+回归时，才将脱敏后的公共 fixture 放入 `tests/fixtures/providers/`。
 
-Offline replay tests use `ReplayTransport` with the existing `HttpClient` and
-provider adapter. A replay request must match the recorded method and redacted
-endpoint; mismatches fail rather than silently returning the wrong payload.
+离线回放测试使用现有 `HttpClient` 和 Provider adapter 配合 `ReplayTransport`。
+回放请求必须匹配 recording 的 method 和脱敏 endpoint；不匹配时会失败，不会静默
+返回错误 payload。
 
-## Offline, contract, and smoke tests
+## 离线、contract 与 smoke 测试
 
-Normal unit tests must not access the internet:
+普通单元测试不得访问互联网：
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-Live contract checks are explicit and minimal:
+Live contract 检查必须显式执行且请求保持最小化：
 
 ```bash
 python3 scripts/providers.py --contract coingecko
 python3 scripts/providers.py --contract all
 ```
 
-Missing optional credentials are `SKIPPED`/`NOT_READY`; a supplied but
-rejected credential, schema change, or normalization failure is a failure.
-Smoke checks use the production router and `REFRESH`:
+缺少可选 credential 时标记为 `SKIPPED`/`NOT_READY`；已提供但被拒绝的 credential、
+schema 变更或规范化失败则属于失败。Smoke 检查使用生产 Router 和 `REFRESH`：
 
 ```bash
 python3 scripts/providers.py --smoke ETH --metric market.spot_price
 ```
 
-The result reports chain, attempts, selected provider, network count, cache
-hits, fallback count, final status, and unresolved diagnostics without raw
-market payloads.
+结果会报告 chain、attempts、选中的 Provider、网络请求数、缓存命中数、fallback 数、
+最终 status 和 unresolved diagnostics，不输出原始市场 payload。
 
-## Debug report integration
+## Debug 报告集成
 
-Wrap a live or contract command when its result must enter a report:
+需要把 live 或 contract 命令结果纳入报告时，使用包装器：
 
 ```bash
 python3 scripts/run_with_debug.py \
@@ -207,38 +195,36 @@ python3 scripts/run_with_debug.py \
   python3 scripts/providers.py --probe coingecko --asset ETH
 ```
 
-The wrapper returns a report-ready JSON record. A non-zero child exit is
-`FAILED`; timeout and launch errors are `TIMEOUT` and `LAUNCH_FAILED`. Logs
-are bounded and redacted. The wrapper itself may return `0` so report
-collection continues.
+包装器返回可写入报告的 JSON 记录。子进程非零退出会记录为 `FAILED`；超时和启动
+异常分别记录为 `TIMEOUT` 和 `LAUNCH_FAILED`。日志会限长并脱敏。包装器自身可以
+返回 `0`，保证报告收集继续进行。
 
-## CI provider checks
+## CI Provider 检查
 
-`.github/workflows/provider-contracts.yml` is separate from deterministic unit
-CI and runs on a schedule or manually. Public checks run without secrets.
-Credentialed checks run only when the corresponding GitHub secret is present;
-missing credentials are reported as skipped. CI distinguishes transient
-network, rate-limit, authentication, plan, schema, and normalization failures.
+`.github/workflows/provider-contracts.yml` 与确定性的单元测试 CI 分离，并按计划或
+手动触发。公共检查不需要 secret。只有对应 GitHub secret 存在时才运行 credentialed
+检查；缺少 credential 会报告为 skipped。CI 会区分临时网络、rate limit、认证、plan、
+schema 和 normalization 失败。
 
-## Adding a provider
+## 新增 Provider
 
-An addition is incomplete until it has:
+Provider addition 只有同时包含以下内容才算完成：
 
 ```text
-adapter, config, capabilities, route, readiness/doctor behavior,
-offline fixture tests, minimal contract check, deterministic error mapping,
-secret redaction, and documentation.
+adapter、config、capabilities、route、readiness/doctor 行为、
+离线 fixture 测试、最小 contract 检查、确定性错误映射、
+secret 脱敏以及文档。
 ```
 
-Do not add trading keys, order placement, leverage, or autonomous execution.
+不得加入交易 key、下单、杠杆或 autonomous execution 能力。
 
-## Merge checklist
+## 合并前检查清单
 
-- [ ] deterministic unit tests remain offline;
-- [ ] provider failure preserves a safe root diagnostic;
-- [ ] 403 and timeout phases are classified correctly;
-- [ ] TLS verification remains enabled;
-- [ ] credentials are absent from fixtures, cache, logs, and reports;
-- [ ] fallback and circuit behavior are covered;
-- [ ] contract/smoke commands are explicit and documented;
-- [ ] full tests, Ruff, and compile checks pass.
+- [ ] 确定性单元测试保持离线；
+- [ ] Provider failure 保留安全的根因诊断；
+- [ ] 403 和 timeout 阶段分类正确；
+- [ ] TLS 校验保持启用；
+- [ ] fixture、cache、log 和 report 中不存在 credential；
+- [ ] fallback 和 circuit 行为有测试覆盖；
+- [ ] contract/smoke 命令是显式的并且有文档；
+- [ ] 完整测试、Ruff 和 compile 检查通过。

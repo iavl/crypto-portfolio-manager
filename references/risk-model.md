@@ -1,5 +1,8 @@
 # Portfolio Risk Model
 
+See [Investment Strategy](investment-strategy.md) for the overview; this file
+owns regimes, drawdown, event/liveness, and portfolio risk authority.
+
 Python builds the structured `RegimeInputs` (BTC trend, volatility, flow,
 breadth, and cash-flow-aware drawdown) before the deterministic regime engine.
 Semantic event risk may override the normal confirmation path, but no model

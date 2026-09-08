@@ -17,6 +17,7 @@ reject invalid or conflicting values. Use these references for qualitative
 judgment and user-facing decisions:
 
 - `references/investment-policy.md`
+- `references/investment-strategy.md`
 - `references/scoring-model.md`
 - `references/risk-model.md`
 - `references/decision-rules.md`
@@ -158,7 +159,8 @@ display data, so the engine uses value ÷ quantity and records a note.
     deterministic scoring and missing-factor coverage checks; publish the
     collection summary with weighted coverage and resulting confidence.
     Build `PositioningFacts` and `BTCCycleContext` separately; their metrics
-    are context overlays and never base scoring factors.
+    are context overlays and never replace the profile-specific base scoring
+    factors.
 11. Run the regime engine.
 12. Run the allocation engine.
 13. Run the risk gate and stop on `ERROR` violations.
@@ -235,7 +237,8 @@ social metrics, halving timing, and optional BTC on-chain metrics retain their
 source, scope/methodology, observed time, and evidence IDs.
 
 These are overlays, not new weighted factors. They do not enter `FactorScore`,
-the six-factor base weights, or base evidence coverage. Positioning needs
+the profile-specific positive-weight base factors, or base evidence coverage.
+Positioning needs
 multiple compatible derivatives confirmations for
 `CROWDED`/`EXTREME`; social-only euphoria never creates an extreme state. The
 halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
@@ -298,7 +301,8 @@ At minimum, request and log these applicable metrics:
 - Market context: BTC spot price, MA50/MA100/MA200, 30D/90D trend,
   drawdown, volatility, dominance/breadth, stablecoin liquidity trend,
   relevant ETF or other capital flows, and major current events.
-- Each held or considered risk asset: current price, 30D/90D/180D return,
+- Each held or considered risk asset: current price, 30D/90D/180D/365D
+  relative-return evidence,
   MA50/MA100/MA200, drawdown/historical position, asset-appropriate
   fundamentals, on-chain activity, capital flow, 1M/3M/6M performance versus
   BTC, token unlock/supply events, and security/governance/regulatory events.

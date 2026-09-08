@@ -2,6 +2,7 @@
 
 本文档说明 `crypto-portfolio-manager` 当前的架构、Python 与模型的边界、
 数据流、历史记录和可复现性。它描述当前代码，不把未来扩展写成已实现功能。
+策略概念和决策原则见[投资策略](../references/investment-strategy.md)。
 
 ## 1. 系统总览
 
@@ -207,7 +208,7 @@ reachable=false 和有界错误），pass 2 重新运行 acquisition，随后调
 require_scoring_ready()，最后才进入 scoring。BNB 使用固定的官方
 security/governance source catalog，监管仍复用共享 MARKET source。
 
-BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d
+BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d/365d
 作为一个依赖 cohort 处理。缓存日期不一致时两侧一起刷新/重建；Python
 只在同一 venue、quote、completed daily candle 和共同 calendar anchor 上
 相减，不接受错位标量。
@@ -233,7 +234,8 @@ Python 从 MetricObservation 构建 compact Facts 和 metric history。趋势、
 解释、BTC-relative strength 等已有确定性实现；其他需要上下文的 fundamentals、
 valuation、event risk 可由模型在 bounded packet 中判断。
 
-v4 policy 的六个 base scoring factors 来自 canonical policy：
+v4 policy 的 canonical factor namespace 有八个 key；其中正权重因子由资产
+profile 决定：默认非 BTC profile 有六个正权重因子，BTC profile 有四个。
 
 ```text
 trend
@@ -242,7 +244,14 @@ fundamentals
 onchain
 capital_flows
 relative_strength_btc
+btc_valuation
+macro_liquidity
 ```
+
+默认非 BTC profile 将 `btc_valuation` 和 `macro_liquidity` 设为零权重；BTC
+profile 使用 `trend`、`btc_valuation`、`capital_flows` 和 `macro_liquidity`
+的正权重。完整的策略解释见[投资策略](../references/investment-strategy.md)，
+权重和评分语义见[评分模型](../references/scoring-model.md)。
 
 event/security risk 使用独立的 typed gate；positioning 和 BTC cycle 是不计分的
 overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩，不能靠
@@ -282,7 +291,8 @@ single-asset cap、chain liveness 和 overlays。Rebalance 使用 post-new-cash
 `SpotPrice` 和 completed `1D` OHLCV，优先至少 120 根日线、最好 430 天，
 并检查 freshness、cadence、calendar coverage 和 provenance。
 
-技术 snapshot 计算 MA20/50/100/200、calendar 30D/90D/180D return、ATR14、
+技术 snapshot 计算 MA20/50/100/200、execution-specific calendar
+30D/90D/180D return、ATR14、
 realized volatility、relative volume、drawdown 和 confirmed swings。
 
 Volume Profile 优先使用同一流动 spot venue 的 completed `1H`/`4H` bars，按

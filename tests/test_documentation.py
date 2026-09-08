@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import subprocess
 import tomllib
 import tempfile
@@ -32,6 +34,7 @@ class DocumentationTests(unittest.TestCase):
             "README.zh-CN.md",
             "config/policy.json",
             "references/investment-policy.md",
+            "references/investment-strategy.md",
             "references/scoring-model.md",
             "references/risk-model.md",
             "references/decision-rules.md",
@@ -177,14 +180,53 @@ class DocumentationTests(unittest.TestCase):
         for text in (
             "--status", "--doctor", "--probe", "--contract", "--smoke",
             "HTTP_403_UNKNOWN", "CONNECT_TIMEOUT", "READ_TIMEOUT",
-            "PROVIDER_SCHEMA_CHANGED", "CIRCUIT_OPEN", "Record / replay",
-            "run_with_debug.py", "credential", "TLS verification",
+            "PROVIDER_SCHEMA_CHANGED", "CIRCUIT_OPEN", "记录 / 回放",
+            "run_with_debug.py", "凭证", "TLS 校验",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, guide)
         self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"))
         self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8"))
+
+    def test_installation_docs_are_concise_and_link_to_usage_guide(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8")
+
+        for content in (readme, readme_zh):
+            for text in (
+                "git clone https://github.com/iavl/crypto-portfolio-manager.git",
+                "cd crypto-portfolio-manager",
+                "./install.sh",
+                "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/",
+                "docs/USAGE.md#安装管理",
+            ):
+                with self.subTest(text=text):
+                    self.assertIn(text, content)
+            for text in (
+                "$skill-installer",
+                "## Verify Installation",
+                "## Updating",
+                "## Uninstalling",
+                "## 验证安装",
+                "## 更新",
+                "## 卸载",
+            ):
+                with self.subTest(text=text):
+                    self.assertNotIn(text, content)
+
+        for text in (
+            "## 安装管理",
+            "test -d \"${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager\"",
+            "$crypto-portfolio-manager explain what portfolio reviews you support.",
+            "git -C /path/to/crypto-portfolio-manager pull --ff-only",
+            "rm -rf \"${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager\"",
+            "/path/to/crypto-portfolio-manager/install.sh",
+            "rm -rf ~/.local/share/crypto-portfolio-manager",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, guide)
 
     def test_install_script_copies_payload_and_refuses_existing_destination(self):
         script = ROOT / "install.sh"
@@ -221,6 +263,7 @@ class DocumentationTests(unittest.TestCase):
                 "docs/HOW_IT_WORKS.md",
                 "docs/GLOSSARY.zh-CN.md",
                 "config/policy.json",
+                "references/investment-strategy.md",
                 "references/risk-model.md",
                 "references/data-sources.md",
                 "references/data-providers.md",
@@ -331,6 +374,145 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Policy weight / effective weight", template)
         self.assertIn("NO_TRADE", template)
         self.assertIn("Data Collection Summary", template)
+
+    def test_investment_strategy_documentation_contract(self):
+        strategy_path = ROOT / "references" / "investment-strategy.md"
+        self.assertTrue(strategy_path.is_file())
+        strategy = strategy_path.read_text(encoding="utf-8")
+        for heading in (
+            "# Investment Strategy",
+            "## 1. Strategy in One Paragraph",
+            "## 3. BTC as Benchmark and Opportunity Cost",
+            "## 4. Core–Satellite Portfolio Structure",
+            "## 6. Asset Attractiveness Is Not a Trade Signal",
+            "## 7. BTC-Specific Strategy",
+            "## 8. Default Non-BTC Multi-Factor Strategy",
+            "## 9. Satellite Burden of Proof and Hysteresis",
+            "## 10. BTC / ETH Core Allocation",
+            "## 11. Market Regimes and Stablecoin Sleeve",
+            "## 13. Data Confidence and Fail-Closed Behavior",
+            "## 14. Event Risk and Chain Liveness",
+            "## 15. Positioning and BTC Cycle Overlays",
+            "## 16. Rebalancing",
+            "## 17. Technical Execution and Staging",
+            "## 18. NO_TRADE / WAIT as Valid Decisions",
+            "## 19. Illustrative Strategy Examples",
+            "## 20. What the Strategy Does Not Do",
+            "## 21. Source of Truth and Related References",
+        ):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, strategy)
+        for marker in (
+            "6–12 month",
+            "BTC-benchmarked",
+            "BTC",
+            "ETH",
+            "LUNC",
+            "U",
+            "USD1",
+            "67",
+            "60",
+            "85",
+            "70% BTC / 30% ETH",
+            "3pp",
+            "5pp",
+            "10pp",
+            "NORMAL",
+            "DEFENSIVE",
+            "CAPITAL_PRESERVATION",
+            "SEVERE",
+            "CRITICAL",
+            "PULLBACK",
+            "BREAKOUT",
+            "MIXED",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, strategy)
+        self.assertIn("config/policy.json", strategy)
+
+    def test_strategy_navigation_and_local_markdown_links(self):
+        strategy_link = "references/investment-strategy.md"
+        self.assertIn(strategy_link, (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn(strategy_link, (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"))
+
+        paths = (
+            ROOT / "README.md",
+            ROOT / "README.zh-CN.md",
+            ROOT / "references" / "investment-strategy.md",
+            ROOT / "references" / "investment-policy.md",
+            ROOT / "references" / "scoring-model.md",
+            ROOT / "references" / "risk-model.md",
+            ROOT / "references" / "decision-rules.md",
+            ROOT / "docs" / "HOW_IT_WORKS.md",
+        )
+        link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+        for path in paths:
+            content = path.read_text(encoding="utf-8")
+            for raw_target in link_pattern.findall(content):
+                target = raw_target.strip().strip("<>").split("#", 1)[0]
+                if not target or target.startswith(("http:", "https:", "mailto:", "codex:")):
+                    continue
+                with self.subTest(path=path.relative_to(ROOT), target=target):
+                    self.assertTrue((path.parent / target).is_file())
+
+    def test_active_policy_version_and_canonical_factor_contracts(self):
+        policy = json.loads((ROOT / "config" / "policy.json").read_text(encoding="utf-8"))
+        active_version = int(policy["policy_version"])
+        primary_paths = (
+            ROOT / "README.md",
+            ROOT / "README.zh-CN.md",
+            ROOT / "SKILL.md",
+            ROOT / "references" / "investment-strategy.md",
+            ROOT / "references" / "scoring-model.md",
+            ROOT / "references" / "risk-model.md",
+            ROOT / "references" / "decision-rules.md",
+            ROOT / "docs" / "HOW_IT_WORKS.md",
+        )
+        version_patterns = (
+            re.compile(r"\bactive contracts use policy v(\d+)\b", re.IGNORECASE),
+            re.compile(r"\b(?:the )?active contract is policy v(\d+)\b", re.IGNORECASE),
+            re.compile(r"\bactive policy version\s+v?(\d+)\b", re.IGNORECASE),
+            re.compile(r"当前写入契约使用政策\s*v?(\d+)", re.IGNORECASE),
+        )
+        for path in primary_paths:
+            content = path.read_text(encoding="utf-8")
+            for pattern in version_patterns:
+                for match in pattern.finditer(content):
+                    with self.subTest(path=path.relative_to(ROOT), version=match.group(1)):
+                        self.assertEqual(int(match.group(1)), active_version)
+
+        factors = (
+            "trend",
+            "valuation",
+            "fundamentals",
+            "onchain",
+            "capital_flows",
+            "relative_strength_btc",
+            "btc_valuation",
+            "macro_liquidity",
+        )
+        for relative_path in (
+            "references/investment-strategy.md",
+            "references/scoring-model.md",
+            "docs/HOW_IT_WORKS.md",
+        ):
+            content = (ROOT / relative_path).read_text(encoding="utf-8")
+            for factor in factors:
+                with self.subTest(path=relative_path, factor=factor):
+                    self.assertRegex(content, rf"\b{re.escape(factor)}\b")
+
+    def test_configured_relative_horizons_are_not_omitted(self):
+        policy = json.loads((ROOT / "config" / "policy.json").read_text(encoding="utf-8"))
+        horizons = tuple(policy["factor_rules"]["relative_strength"]["horizon_weights"])
+        for relative_path in (
+            "references/investment-strategy.md",
+            "references/scoring-model.md",
+            "docs/HOW_IT_WORKS.md",
+        ):
+            content = (ROOT / relative_path).read_text(encoding="utf-8").upper()
+            for horizon in horizons:
+                with self.subTest(path=relative_path, horizon=horizon):
+                    self.assertIn(horizon.upper(), content)
 
 
 if __name__ == "__main__":

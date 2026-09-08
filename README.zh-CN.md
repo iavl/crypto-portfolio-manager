@@ -8,6 +8,8 @@
 
 详细的复盘流程、输入示例、历史数据行为和故障排查请参阅[使用指南](docs/USAGE.md)。
 
+投资理念和组合策略请参阅[投资策略](references/investment-strategy.md)。
+
 架构与实现细节请参阅[工作原理](docs/HOW_IT_WORKS.md)。
 
 术语不熟悉？请先查看[中文术语表](docs/GLOSSARY.zh-CN.md)。
@@ -58,57 +60,19 @@
 
 ## 安装
 
-### 使用 `install.sh` 安装本地检出版本
-
-将仓库克隆到 Codex Skill 目录之外，然后从检出目录运行安装器：
-
 ```bash
 git clone https://github.com/iavl/crypto-portfolio-manager.git
 cd crypto-portfolio-manager
 ./install.sh
 ```
 
-脚本使用自身所在目录作为源目录，遵循 `${CODEX_HOME:-$HOME/.codex}`，并将完整的运行时 Skill 内容复制到：
+安装到：
 
 ```text
 ${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/
 ```
 
-它会排除 Git 元数据、测试、开发环境、缓存和仓库中的 `data/`；投资组合历史数据会保存在单独的运行时数据目录中。安装器拒绝覆盖已有目录或符号链接。如果 Skill 没有立即可用，请重新加载或重启 Codex。
-
-### Codex skill-installer
-
-如果不需要本地检出版本，可以在 Codex 会话中调用 `$skill-installer`，并提供：
-
-```text
-Install https://github.com/iavl/crypto-portfolio-manager as
-crypto-portfolio-manager. The Skill is at the repository root; use path `.`
-and name it `crypto-portfolio-manager`.
-```
-
-当前安装器辅助脚本会使用对应的 `--url`、`--path .` 和 `--name crypto-portfolio-manager` 参数。安装后的文件应为：
-
-```text
-${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/SKILL.md
-```
-
-该辅助脚本同样拒绝覆盖已有目标目录。如果它不可用，请使用上面的本地检出方式。
-
-## 验证安装
-
-```bash
-test -d "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
-  && test -f "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/SKILL.md" \
-  && echo "crypto-portfolio-manager installed"
-```
-
-然后在 Codex 中验证发现：
-
-```text
-$crypto-portfolio-manager explain what portfolio reviews you support.
-```
-
-当请求匹配 Skill 描述时，Codex 也可能自动选择该 Skill。需要确保发现 Skill 时，请使用显式调用。
+安装器拒绝覆盖已有目录或符号链接。验证、更新和卸载请参阅[使用指南](docs/USAGE.md#安装管理)。如果 Skill 没有立即可用，请重新加载或重启 Codex。
 
 ## 使用
 
@@ -151,31 +115,4 @@ python3 -m compileall crypto_portfolio scripts
 
 ```bash
 python3 scripts/portfolio_snapshot.py path/to/snapshot.json
-```
-
-## 更新
-
-`install.sh` 有意设计为只安装，不覆盖已安装的副本。拉取源代码检出版本，删除准确的旧 Skill 目录，然后重新运行安装器：
-
-```bash
-git -C /path/to/crypto-portfolio-manager \
-  pull --ff-only
-rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
-/path/to/crypto-portfolio-manager/install.sh
-```
-
-运行前请检查删除路径。这只会删除已安装的 Skill 副本，不会删除投资组合历史数据。
-
-## 卸载
-
-只移除 Skill 安装目录：
-
-```bash
-rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
-```
-
-这不会删除投资组合历史数据。删除单独的默认历史目录是可选的，并且具有破坏性：
-
-```bash
-rm -rf ~/.local/share/crypto-portfolio-manager
 ```

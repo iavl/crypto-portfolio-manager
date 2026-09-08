@@ -5,9 +5,48 @@
 本指南说明 `crypto-portfolio-manager` 的实际使用方式、输入格式、复盘
 流程、数据采集、历史记录和故障处理。
 
-安装、更新和卸载请参阅根目录的 [README](../README.md)。架构与内部实现
-请参阅[工作原理](HOW_IT_WORKS.md)。Skill 专属策略和参考资料位于根目录
-的 `references/` 与 `SKILL.md`。
+安装、验证、更新和卸载请参阅下方的[安装管理](#安装管理)。组合策略请参阅
+[投资策略](../references/investment-strategy.md)；架构与内部实现请参阅
+[工作原理](HOW_IT_WORKS.md)。Skill 专属参考资料位于根目录的 `references/`
+与 `SKILL.md`。
+
+## 安装管理
+
+验证安装：
+
+```bash
+test -d "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
+  && test -f "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/SKILL.md" \
+  && echo "crypto-portfolio-manager installed"
+```
+
+然后在 Codex 中调用：
+
+```text
+$crypto-portfolio-manager explain what portfolio reviews you support.
+```
+
+更新安装：
+
+```bash
+git -C /path/to/crypto-portfolio-manager pull --ff-only
+rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
+/path/to/crypto-portfolio-manager/install.sh
+```
+
+运行前确认删除路径；这不会删除投资组合历史数据。
+
+卸载 Skill：
+
+```bash
+rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
+```
+
+删除默认历史目录是独立且具有破坏性的操作：
+
+```bash
+rm -rf ~/.local/share/crypto-portfolio-manager
+```
 
 ## 1. Skill 能做什么
 
@@ -237,7 +276,7 @@ Position P&L 是剩余仓位的未实现表现，不是已实现收益或组合�
 减少立即部署金额或返回 `WAIT`，不能增加组合层批准金额，也不能下单。
 
 执行层使用带时间戳的现货价格和 completed OHLCV，优先至少 120 根日线，
-并计算 MA20/50/100/200、日历 30D/90D/180D 收益、ATR14、波动率、相对成交量、
+并计算 MA20/50/100/200、执行层日历 30D/90D/180D 收益、ATR14、波动率、相对成交量、
 回撤和确认的 swing zones。
 
 Volume Profile 使用 completed `1H`/`4H` 数据优先，按
@@ -268,7 +307,7 @@ v1 只生成 `PULLBACK` 计划。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。
 ## 13. Provider 状态与 TLS 排查
 
 完整的开发者决策树、错误码、record/replay、contract 和 smoke 流程见
-[Development and Provider Debugging](DEVELOPMENT_DEBUGGING.md)。快速判断可用：
+[开发与 Provider 排查](DEVELOPMENT_DEBUGGING.md)。快速判断可用：
 
 ```bash
 python3 scripts/providers.py --status

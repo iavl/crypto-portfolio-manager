@@ -1,5 +1,8 @@
 # Asset Scoring Model
 
+See [Investment Strategy](investment-strategy.md) for the overview; this file
+owns scoring, reliability, and coverage semantics.
+
 ## Purpose and ownership
 
 The base score is a deterministic 0–100 measure of medium-term asset

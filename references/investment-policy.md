@@ -1,5 +1,8 @@
 # Investment Policy
 
+See [Investment Strategy](investment-strategy.md) for the overview; this file
+owns eligibility, universe, and portfolio constraints.
+
 ## Objective
 
 Manage a crypto portfolio over approximately 6–12 months with three simultaneous objectives:

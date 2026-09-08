@@ -1,5 +1,8 @@
 # Decision and Rebalancing Rules
 
+See [Investment Strategy](investment-strategy.md) for the overview; this file
+owns how evidence becomes an Action after constraints.
+
 All arithmetic in the decision chain is Python-owned. The registry and Facts
 layer provide structured evidence to bounded semantic judgment; resulting
 scores do not bypass Python regime, portfolio-level risk, stablecoin, target,

@@ -12,6 +12,9 @@ allocation, benchmark, and rebalance calculations.
 Detailed review workflows, input examples, history behavior, and
 troubleshooting are in the [Usage Guide](docs/USAGE.md).
 
+For investment philosophy and portfolio strategy, see
+[Investment Strategy](references/investment-strategy.md).
+
 For architecture and implementation details, see [How It Works](docs/HOW_IT_WORKS.md).
 
 Model/reasoning profiles use safe defaults and runtime-aware fallback; see the
@@ -86,67 +89,22 @@ dependencies only. Logical stage routing is configured in
 
 ## Install
 
-### Local checkout with `install.sh`
-
-Clone the repository outside the Codex skills directory, then run the
-installer from the checkout:
-
 ```bash
 git clone https://github.com/iavl/crypto-portfolio-manager.git
 cd crypto-portfolio-manager
 ./install.sh
 ```
 
-The script uses its own directory as the source, honors
-`${CODEX_HOME:-$HOME/.codex}`, and copies the complete runtime Skill payload
-to:
+Installed to:
 
 ```text
 ${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/
 ```
 
-It excludes Git metadata, tests, development environments, caches, and
-repository `data/`; portfolio history remains under the separate runtime data
-directory. The installer refuses to overwrite an existing directory or
-symlink. Reload or restart Codex if the Skill is not immediately available.
-
-### Codex skill-installer
-
-If no local checkout is needed, invoke `$skill-installer` in a Codex session
-and provide:
-
-```text
-Install https://github.com/iavl/crypto-portfolio-manager as
-crypto-portfolio-manager. The Skill is at the repository root; use path `.`
-and name it `crypto-portfolio-manager`.
-```
-
-The current installer helper uses the corresponding `--url`, `--path .`, and
-`--name crypto-portfolio-manager` arguments. The installed file should be:
-
-```text
-${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/SKILL.md
-```
-
-The helper also refuses to overwrite an existing destination. If it is
-unavailable, use the local checkout method above.
-
-## Verify Installation
-
-```bash
-test -d "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
-  && test -f "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/SKILL.md" \
-  && echo "crypto-portfolio-manager installed"
-```
-
-Then verify discovery in Codex:
-
-```text
-$crypto-portfolio-manager explain what portfolio reviews you support.
-```
-
-Codex may also select the Skill automatically when a request matches its
-description. Use the explicit invocation when discovery must be guaranteed.
+The installer refuses to overwrite an existing directory or symlink. See the
+[Usage Guide](docs/USAGE.md#安装管理) for verification, updates, and
+uninstallation. Reload or restart Codex if the Skill is not immediately
+available.
 
 ## Usage
 
@@ -203,35 +161,4 @@ Normalize a structured snapshot:
 
 ```bash
 python3 scripts/portfolio_snapshot.py path/to/snapshot.json
-```
-
-## Updating
-
-`install.sh` is intentionally install-only and does not overwrite the
-installed copy. Pull the source checkout, remove the exact old Skill
-directory, and run the installer again:
-
-```bash
-git -C /path/to/crypto-portfolio-manager \
-  pull --ff-only
-rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
-/path/to/crypto-portfolio-manager/install.sh
-```
-
-Check the removal path before running it. This only removes the installed
-Skill copy; it does not remove portfolio history.
-
-## Uninstalling
-
-Remove the Skill installation only:
-
-```bash
-rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
-```
-
-This does not delete portfolio history. Removing the separate default history
-directory is optional and destructive:
-
-```bash
-rm -rf ~/.local/share/crypto-portfolio-manager
 ```
