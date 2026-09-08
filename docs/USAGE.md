@@ -1,5 +1,7 @@
 # 使用指南
 
+首次使用时，可先查阅[中文术语表](GLOSSARY.zh-CN.md)。
+
 本指南说明 `crypto-portfolio-manager` 的实际使用方式、输入格式、复盘
 流程、数据采集、历史记录和故障处理。
 
@@ -99,7 +101,7 @@ $crypto-portfolio-manager
 ```bash
 python3 scripts/run_with_debug.py \
   --script scripts/providers.py -- \
-  python3 scripts/providers.py --probe coingecko
+  python3 scripts/providers.py --probe sosovalue
 ```
 
 包装器捕获非零退出、超时和启动异常，并输出可传给
@@ -109,6 +111,18 @@ python3 scripts/run_with_debug.py \
 因 `set -e` 在收集日志前中断。
 日志会脱敏并限制长度；不会保存凭证、请求头、原始响应 body 或私有 reasoning。
 成功脚本和仅包含普通 warning 的脚本不会列入异常列表。
+
+可作为 --probe 参数的有：
+- coingecko
+- fred
+- coinmetrics_community
+- sosovalue
+- l2beat
+- growthepie
+- blobscan
+- defillama
+- github
+- chain_liveness
 
 ## 6. 模型与 Python 边界
 

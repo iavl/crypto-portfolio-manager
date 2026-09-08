@@ -15,10 +15,19 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(skill.is_file())
         self.assertIn("name: crypto-portfolio-manager", skill.read_text(encoding="utf-8"))
         self.assertIn("[Usage Guide](docs/USAGE.md)", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn(
+            "[中文术语表](docs/GLOSSARY.zh-CN.md)",
+            (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "[中文术语表](GLOSSARY.zh-CN.md)",
+            (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8"),
+        )
 
         required_paths = (
             "docs/USAGE.md",
             "docs/HOW_IT_WORKS.md",
+            "docs/GLOSSARY.zh-CN.md",
             "README.zh-CN.md",
             "config/policy.json",
             "references/investment-policy.md",
@@ -195,6 +204,7 @@ class DocumentationTests(unittest.TestCase):
                 "README.zh-CN.md",
                 "docs/USAGE.md",
                 "docs/HOW_IT_WORKS.md",
+                "docs/GLOSSARY.zh-CN.md",
                 "config/policy.json",
                 "references/risk-model.md",
                 "references/data-sources.md",
@@ -255,6 +265,43 @@ class DocumentationTests(unittest.TestCase):
             self.assertNotEqual(broken.returncode, 0)
             self.assertIn("already exists", broken.stderr)
             self.assertTrue(broken_destination.is_symlink())
+
+    def test_glossary_covers_current_terms_and_boundaries(self):
+        glossary = (ROOT / "docs" / "GLOSSARY.zh-CN.md").read_text(encoding="utf-8")
+        for text in (
+            "# 术语表（新手版）",
+            "## 1. 复盘类型、结论与动作",
+            "## 2. 组合与风险",
+            "## 3. 记账与表现",
+            "## 4. 市场数据与指标",
+            "## 5. 证据、评分与系统",
+            "SNAPSHOT_REVIEW",
+            "NO_TRADE",
+            "HOLD_ONLY",
+            "NAV",
+            "unitized NAV",
+            "OHLCV",
+            "ATR14",
+            "Volume Profile",
+            "MVRV / SOPR / NUPL",
+            "trend、valuation、fundamentals、onchain、capital_flows 和 relative_strength_btc",
+            "NOT_APPLICABLE",
+            "SKIPPED",
+            "MetricObservation",
+            "CollectionEvent",
+            "AUTO / CACHE_ONLY / REFRESH",
+            "DecisionReviewPacket",
+            "ReportPacket",
+            "score > 某值就买",
+            "不是持仓者的精确成本基础",
+            "链数据传输失败不等于链已 HALTED",
+            "不是系统错误",
+            "observed_at",
+            "fetched_at",
+            "as_of",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, glossary)
 
     def test_evidence_collection_and_decision_chain_are_documented(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

@@ -10,6 +10,8 @@
 
 架构与实现细节请参阅[工作原理](docs/HOW_IT_WORKS.md)。
 
+术语不熟悉？请先查看[中文术语表](docs/GLOSSARY.zh-CN.md)。
+
 模型与推理配置使用安全默认值，并会根据运行时进行回退；请参阅[路由参考](references/model-routing.md)。
 
 ## 概览
