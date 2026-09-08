@@ -295,7 +295,6 @@ class AssetAssessment:
     critical_data_complete: bool = True
     event_risk: EventRiskAssessment | Mapping[str, Any] | None = None
     scoring_profile_name: str | None = None
-    scoring_model_version: int | None = None
     score_coverage: float | None = None
     confidence_score: float | None = None
     confidence_explanation: Mapping[str, Any] | None = None
@@ -412,12 +411,6 @@ class AssetAssessment:
                 "scoring_profile_name",
                 _text(self.scoring_profile_name, "scoring_profile_name").lower(),
             )
-        if self.scoring_model_version is not None and (
-            isinstance(self.scoring_model_version, bool)
-            or not isinstance(self.scoring_model_version, int)
-            or self.scoring_model_version != 2
-        ):
-            raise ValueError("scoring_model_version must be 2 or null")
         if self.score_coverage is not None:
             coverage = float(self.score_coverage)
             if not math.isfinite(coverage) or not 0 <= coverage <= 1:
@@ -434,6 +427,15 @@ class AssetAssessment:
         if not isinstance(value, Mapping):
             raise ValueError(f"assessment {symbol} must be an object")
         data = dict(value)
+        allowed = {
+            "symbol", "factor_scores", "weighted_score", "confidence", "asset_type",
+            "relative_strength_vs_btc", "risk_tier", "thesis_broken", "critical_data_complete",
+            "event_risk", "scoring_profile_name", "score_coverage", "confidence_score",
+            "confidence_explanation", "data_confidence",
+        }
+        unknown = set(data) - allowed
+        if unknown:
+            raise ValueError(f"assessment {symbol} contains unknown fields: {', '.join(sorted(unknown))}")
         data.setdefault("symbol", symbol)
         return cls(**data)
 
@@ -453,7 +455,6 @@ class AssetAssessment:
             "risk_tier": self.risk_tier,
             "event_risk": self.event_risk.as_dict() if self.event_risk is not None else None,
             "scoring_profile_name": self.scoring_profile_name,
-            "scoring_model_version": self.scoring_model_version,
             "score_coverage": self.score_coverage,
             "confidence_score": self.confidence_score,
             "confidence_explanation": dict(self.confidence_explanation) if self.confidence_explanation is not None else None,

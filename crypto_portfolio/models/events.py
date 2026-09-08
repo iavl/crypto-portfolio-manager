@@ -231,7 +231,7 @@ class EventScanResult:
 
     @property
     def event_items(self) -> tuple[EventItem, ...]:
-        """Return normalized typed items without breaking legacy mapping consumers."""
+        """Return normalized typed items from the current event record shape."""
         result = []
         for item in self.material_events:
             if isinstance(item, EventItem):

@@ -40,7 +40,6 @@ _REGIME_FIELDS = (
     "single_asset_max",
 )
 _TOP_LEVEL_FIELDS = {
-    "policy_version",
     "investment_horizon_months",
     "universe",
     "risk",
@@ -66,9 +65,6 @@ _TOP_LEVEL_FIELDS = {
     "source_quality",
     "event_severity",
     "nav_history",
-}
-_V3_TOP_LEVEL_FIELDS = _TOP_LEVEL_FIELDS - {
-    "confidence", "freshness_policy", "source_quality", "event_severity", "nav_history"
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -121,12 +117,12 @@ _TREND_RULE_FIELDS = {
     "extension_threshold_atr",
     "extension_penalty",
 }
-_RELATIVE_RULE_FIELDS_V2 = {
+_RELATIVE_RULE_FIELDS = {
     "horizon_weights",
     "risk_adjusted_neutral_band",
     "risk_adjusted_saturation",
 }
-_FLOW_RULE_FIELDS_V2 = {"neutral_abs_max", "strong_abs"}
+_FLOW_RULE_FIELDS = {"neutral_abs_max", "strong_abs"}
 _EXECUTION_FIELDS = {
     "timeframe",
     "preferred_history_days",
@@ -414,7 +410,7 @@ def _parse_event_risk_multipliers(value: Any) -> dict[str, float]:
 
 def _parse_core_allocation(value: Any) -> dict[str, Any]:
     if value is None:
-        raise PolicyError("core_allocation is required for policy v3")
+        raise PolicyError("core_allocation is required")
     if not isinstance(value, dict):
         raise PolicyError("core_allocation must be an object")
     _unknown_fields(value, _CORE_ALLOCATION_FIELDS, "core_allocation")
@@ -491,7 +487,6 @@ class RegimeLimits:
 
 @dataclass(frozen=True)
 class Policy:
-    policy_version: int
     investment_horizon_months: tuple[int, int]
     core_symbols: tuple[str, ...]
     satellite_symbols: tuple[str, ...]
@@ -564,7 +559,6 @@ class Policy:
 
     def as_dict(self) -> dict[str, Any]:
         result = {
-            "policy_version": self.policy_version,
             "investment_horizon_months": {
                 "min": self.investment_horizon_months[0],
                 "max": self.investment_horizon_months[1],
@@ -988,7 +982,7 @@ def _parse_factor_rules(
     relative = value["relative_strength"]
     if not isinstance(relative, dict):
         raise PolicyError("factor_rules.relative_strength must be an object")
-    relative_fields = _RELATIVE_RULE_FIELDS_V2
+    relative_fields = _RELATIVE_RULE_FIELDS
     _unknown_fields(relative, relative_fields, "factor_rules.relative_strength")
     if set(relative) != relative_fields:
         raise PolicyError("factor_rules.relative_strength fields are incomplete")
@@ -1021,7 +1015,7 @@ def _parse_factor_rules(
     flows = value["flows"]
     if not isinstance(flows, dict):
         raise PolicyError("factor_rules.flows must be an object")
-    flow_fields = _FLOW_RULE_FIELDS_V2
+    flow_fields = _FLOW_RULE_FIELDS
     _unknown_fields(flows, flow_fields, "factor_rules.flows")
     if set(flows) != flow_fields:
         raise PolicyError("factor_rules.flows fields are incomplete")
@@ -1567,11 +1561,7 @@ def _parse_policy(
     if not isinstance(data, dict):
         raise PolicyError("policy must be an object")
     _unknown_fields(data, _TOP_LEVEL_FIELDS, "policy")
-    version = data.get("policy_version")
-    if isinstance(version, bool) or not isinstance(version, int) or version not in {3, 4}:
-        raise PolicyError("policy_version must be 3 for historical records or 4 for active policy")
-    required_fields = _TOP_LEVEL_FIELDS if version == 4 else _V3_TOP_LEVEL_FIELDS
-    missing = set(required_fields - set(data))
+    missing = set(_TOP_LEVEL_FIELDS - set(data))
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -1663,11 +1653,11 @@ def _parse_policy(
     parsed_chain_liveness = _parse_chain_liveness(
         data.get("chain_liveness")
     )
-    parsed_confidence = _parse_confidence(data.get("confidence")) if version == 4 else {}
-    parsed_freshness_policy = _parse_freshness_policy(data.get("freshness_policy")) if version == 4 else {}
-    parsed_source_quality = _parse_source_quality(data.get("source_quality")) if version == 4 else {}
-    parsed_event_severity = _parse_event_severity(data.get("event_severity")) if version == 4 else {}
-    parsed_nav_history = _parse_nav_history(data.get("nav_history")) if version == 4 else {}
+    parsed_confidence = _parse_confidence(data.get("confidence"))
+    parsed_freshness_policy = _parse_freshness_policy(data.get("freshness_policy"))
+    parsed_source_quality = _parse_source_quality(data.get("source_quality"))
+    parsed_event_severity = _parse_event_severity(data.get("event_severity"))
+    parsed_nav_history = _parse_nav_history(data.get("nav_history"))
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -1765,7 +1755,6 @@ def _parse_policy(
         data.get("volume_profile")
     )
     policy = Policy(
-        policy_version=version,
         investment_horizon_months=(int(horizon_min), int(horizon_max)),
         core_symbols=core,
         satellite_symbols=satellites,
@@ -1828,17 +1817,6 @@ def resolve_policy(
     return load_policy(path, overrides)
 
 
-def historical_policy(policy: Policy | None = None) -> Policy:
-    """Return a v3-compatible resolved policy for historical record reads."""
-    value = (policy or load_policy()).as_dict()
-    value["policy_version"] = 3
-    for field_name in ("confidence", "freshness_policy", "source_quality", "event_severity", "nav_history"):
-        value.pop(field_name, None)
-    return _parse_policy(value)
-
-
-
-
 def policy_hash(policy: Policy | Mapping[str, Any]) -> str:
     """Return the SHA-256 digest of a policy's canonical JSON representation."""
     value = policy.as_dict() if isinstance(policy, Policy) else dict(policy)
@@ -1853,7 +1831,6 @@ __all__ = [
     "SCORING_FACTORS",
     "load_policy",
     "policy_hash",
-    "historical_policy",
     "policy_from_mapping",
     "resolve_policy",
 ]

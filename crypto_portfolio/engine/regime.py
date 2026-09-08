@@ -179,7 +179,7 @@ def _regime_confidence(
 ) -> ConfidenceResult:
     configured = resolved.confidence.get("regime_domain_weights", REGIME_DOMAIN_WEIGHTS) if resolved.confidence else REGIME_DOMAIN_WEIGHTS
     domains = inputs.domains or inputs.domain_confidence or {}
-    legacy = not bool(domains)
+    scalar_input = not bool(domains)
     state_values = {
         "trend": inputs.btc_trend,
         "volatility": inputs.volatility_state,
@@ -199,11 +199,11 @@ def _regime_confidence(
         evidence_ids.update(domain_evidence)
     caps: list[ConfidenceCap] = []
     unknown = {name for name, score in scores.items() if score == 0}
-    if legacy and inputs.provenance_complete and not (
+    if scalar_input and inputs.provenance_complete and not (
         inputs.systemic_event_risk is True or _state(inputs.systemic_event_risk) in _SEVERE_EVENT
     ):
-        caps.append(ConfidenceCap("LEGACY_INPUT_NO_PROVENANCE", 0.79, "PORTFOLIO", "legacy regime caller supplied scalar states without provenance"))
-        reasons.add("LEGACY_INPUT_NO_PROVENANCE")
+        caps.append(ConfidenceCap("SCALAR_INPUT_NO_PROVENANCE", 0.79, "PORTFOLIO", "regime caller supplied scalar states without provenance"))
+        reasons.add("SCALAR_INPUT_NO_PROVENANCE")
     if "portfolio_drawdown" in unknown and "systemic_risk" in unknown:
         caps.append(ConfidenceCap("DRAWDOWN_SYSTEMIC_UNKNOWN", 0.59, "PORTFOLIO", "portfolio drawdown and systemic evidence are unknown"))
     elif unknown & {"portfolio_drawdown", "systemic_risk"}:

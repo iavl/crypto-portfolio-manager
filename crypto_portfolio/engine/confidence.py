@@ -348,7 +348,7 @@ def calculate_data_confidence(
             for name, weight in (dimension_weights or DATA_DIMENSION_WEIGHTS).items()
         }
         medium, high = _thresholds_for_policy(policy)
-        return ConfidenceResult(1, 0.0, 0.0, _band_for_policy(0.0, policy), dimensions, status="BLOCKED", reasons=("NO_APPLICABLE_EVIDENCE",), medium_min=medium, high_min=high)
+        return ConfidenceResult(0.0, 0.0, _band_for_policy(0.0, policy), dimensions, status="BLOCKED", reasons=("NO_APPLICABLE_EVIDENCE",), medium_min=medium, high_min=high)
     configured_dimensions = dimension_weights or _policy_mapping(policy, "confidence", {}).get("data_dimension_weights", DATA_DIMENSION_WEIGHTS)
     configured_dimensions = configured_dimensions or DATA_DIMENSION_WEIGHTS
     dim_weights = _weights(configured_dimensions, "data dimension weights")
@@ -442,7 +442,6 @@ def calculate_data_confidence(
     status = "BLOCKED" if any(cap.ceiling < 0.60 for cap in merged_caps) else "PROVISIONAL" if reasons else "AVAILABLE"
     medium, high = _thresholds_for_policy(policy)
     return ConfidenceResult(
-        model_version=1,
         raw_score=raw,
         score=score,
         band=_band_for_policy(score, policy),
@@ -497,7 +496,6 @@ def calculate_regime_confidence(
     score = apply_confidence_caps(raw_score, parsed_caps)
     medium, high = _thresholds_for_policy(policy)
     return ConfidenceResult(
-        model_version=1,
         raw_score=raw_score,
         score=score,
         band=_band_for_policy(score, policy),
@@ -553,7 +551,6 @@ def calculate_decision_confidence(
     explanation = "confidence is capped by hard evidence constraints" if parsed_caps else "confidence is the fixed-denominator weighted evidence score"
     medium, high = _thresholds_for_policy(policy)
     return DecisionConfidence(
-        model_version=1,
         raw_score=raw,
         score=score,
         band=_band_for_policy(score, policy),

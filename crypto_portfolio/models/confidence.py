@@ -119,21 +119,11 @@ class ConfidenceCap:
             object.__setattr__(self, "reason", _text(self.reason, f"confidence cap {self.code}.reason"))
         object.__setattr__(self, "evidence_ids", _unique_texts(self.evidence_ids, f"confidence cap {self.code}.evidence_ids"))
 
-    @property
-    def scope(self) -> str:
-        """Compatibility alias used by report contracts."""
-        return self.applies_to
-
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ConfidenceCap":
         if not isinstance(value, Mapping):
             raise ValueError("confidence cap must be an object")
         data = dict(value)
-        if "scope" in data:
-            if "applies_to" in data and str(data["applies_to"]).upper() != str(data["scope"]).upper():
-                raise ValueError("confidence cap applies_to and scope disagree")
-            data.setdefault("applies_to", data["scope"])
-            data.pop("scope")
         allowed = {"code", "ceiling", "applies_to", "reason", "evidence_ids"}
         unknown = set(data) - allowed
         if unknown:
@@ -147,7 +137,6 @@ class ConfidenceCap:
             "code": self.code,
             "ceiling": self.ceiling,
             "applies_to": self.applies_to,
-            "scope": self.applies_to,
             "reason": self.reason,
             "evidence_ids": list(self.evidence_ids),
         }
@@ -167,7 +156,6 @@ def merge_caps(caps: tuple[ConfidenceCap, ...] | list[ConfidenceCap] | None) -> 
 
 @dataclass(frozen=True)
 class ConfidenceResult:
-    model_version: int
     raw_score: float
     score: float
     band: str
@@ -180,8 +168,6 @@ class ConfidenceResult:
     high_min: float = DEFAULT_HIGH_MIN
 
     def __post_init__(self) -> None:
-        if isinstance(self.model_version, bool) or not isinstance(self.model_version, int) or self.model_version < 1:
-            raise ValueError("confidence model_version must be a positive integer")
         raw = _finite_fraction(self.raw_score, "raw_score")
         score = _finite_fraction(self.score, "score")
         if score > raw + 1e-12:
@@ -219,10 +205,6 @@ class ConfidenceResult:
         object.__setattr__(self, "high_min", high)
 
     @property
-    def capped_score(self) -> float:
-        return self.score
-
-    @property
     def cap_reasons(self) -> tuple[str, ...]:
         return tuple(cap.code for cap in self.caps)
 
@@ -232,17 +214,21 @@ class ConfidenceResult:
             raise ValueError("confidence result must be an object")
         _reject_private(value, "confidence result")
         data = dict(value)
-        if "score" not in data and "capped_score" in data:
-            data["score"] = data.pop("capped_score")
-        else:
-            data.pop("capped_score", None)
+        allowed = {
+            "raw_score", "score", "band", "dimensions", "caps", "reasons",
+            "evidence_ids", "status", "medium_min", "high_min",
+        }
+        if cls.__name__ == "DecisionConfidence":
+            allowed |= {"components", "critical_blockers", "allowed_actions", "blocked_actions", "explanation"}
+        unknown = set(data) - allowed
+        if unknown:
+            raise ValueError("confidence result contains unknown fields: " + ", ".join(sorted(unknown)))
         if "dimensions" in data:
             data["dimensions"] = {
                 name: ConfidenceDimension.from_mapping(item, name=name)
                 for name, item in data["dimensions"].items()
             }
         data["caps"] = tuple(ConfidenceCap.from_mapping(item) for item in data.get("caps", ()))
-        data.setdefault("model_version", 1)
         data.setdefault("reasons", ())
         data.setdefault("evidence_ids", ())
         data.setdefault("status", "AVAILABLE")
@@ -254,10 +240,8 @@ class ConfidenceResult:
 
     def as_dict(self) -> dict[str, Any]:
         value = {
-            "model_version": self.model_version,
             "raw_score": self.raw_score,
             "score": self.score,
-            "capped_score": self.score,
             "band": self.band,
             "dimensions": {
                 name: dimension.as_dict()

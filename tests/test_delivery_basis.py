@@ -58,7 +58,7 @@ class DeliveryBasisTests(unittest.TestCase):
         self.plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("BTC", KEY),))
         self.request = build_provider_requests(self.plan.requests, now=NOW)[0]
         self.config = {
-            "version": 1, "providers": {"binance": {"enabled": True}, "bybit": {"enabled": True}},
+            "providers": {"binance": {"enabled": True}, "bybit": {"enabled": True}},
             "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
             "fallback": {"allow_web": True},
         }

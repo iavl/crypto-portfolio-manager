@@ -1,6 +1,6 @@
 [English](README.md) · [简体中文（当前）](README.zh-CN.md)
 
-当前写入契约使用政策 v4、评分 v2、路由 v2、执行计划 v2。历史政策 v3 记录仍可读取，但不会静默按 v4 回放。Confidence 由 Python 负责，并分为 Data -> Regime -> Decision 三层。时间戳必须带时区，执行计划必须使用带时间戳的 SpotPrice。
+仓库只支持当前内部契约。破坏性变更后，旧版本生成的本地状态可能需要手动重新生成。Confidence 由 Python 负责，并分为 Data -> Regime -> Decision 三层。时间戳必须带时区，执行计划必须使用带时间戳的 SpotPrice。
 
 # crypto-portfolio-manager
 
@@ -88,7 +88,7 @@ ${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/
 ~/.local/share/crypto-portfolio-manager/
 ```
 
-设置 `CRYPTO_PORTFOLIO_DATA_DIR` 可使用其他目录。免费的公共 provider 不需要 API key；可选 provider 的 key 仅通过环境变量提供。绝不要提交真实余额、数量、成本基础、交易历史、账户标识符、凭证、私钥或助记词。
+设置 `CRYPTO_PORTFOLIO_DATA_DIR` 可使用其他目录。免费的公共 provider 不需要 API key；可选 provider 的 key 仅通过环境变量提供。仓库只支持当前运行时数据契约；破坏性变更后的不兼容生成状态必须手动重新生成。绝不要提交真实余额、数量、成本基础、交易历史、账户标识符、凭证、私钥或助记词。
 
 内容寻址的公共 OHLCV 回放数据存储在同一运行时目录下的 `market-data/sha256/<ohlcv_hash>.json` 中。指标观测和采集事件存储在 `metrics/` 下；缓存的 Volume Profile 结果存储在 `volume-profiles/sha256/<profile_hash>.json` 下。Volume Profile 是历史成交量集中度的代理指标，不是精确的持仓成本基础。
 

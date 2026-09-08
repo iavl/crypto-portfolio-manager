@@ -3,10 +3,9 @@
   "$id": "https://example.local/crypto-portfolio-manager/portfolio-normalized.schema.json",
   "title": "Normalized Crypto Portfolio Snapshot",
   "type": "object",
-  "required": ["config", "policy_version", "timestamp", "base_currency", "total_value_usd", "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio", "stablecoin_weight", "core_weight", "satellite_weight", "portfolio_drawdown", "external_cash_flow", "cost_known_current_value_usd", "cost_known_cost_basis_usd", "total_unrealized_pnl_known_usd", "aggregate_unrealized_return_pct", "pnl_value_coverage_ratio", "position_performance", "positions", "warnings"],
+  "required": ["config", "timestamp", "base_currency", "total_value_usd", "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio", "stablecoin_weight", "core_weight", "satellite_weight", "portfolio_drawdown", "external_cash_flow", "cost_known_current_value_usd", "cost_known_cost_basis_usd", "total_unrealized_pnl_known_usd", "aggregate_unrealized_return", "pnl_value_coverage_ratio", "position_performance", "positions", "warnings"],
   "properties": {
     "config": {"type": "object"},
-    "policy_version": {"enum": [3, 4]},
     "timestamp": {"type": "string", "format": "date-time"},
     "source": {"type": ["string", "null"]},
     "base_currency": {"type": "string", "minLength": 1},
@@ -23,7 +22,7 @@
     "cost_known_current_value_usd": {"type": "number", "minimum": 0},
     "cost_known_cost_basis_usd": {"type": "number", "minimum": 0},
     "total_unrealized_pnl_known_usd": {"type": ["number", "null"]},
-    "aggregate_unrealized_return_pct": {"type": ["number", "null"]},
+    "aggregate_unrealized_return": {"type": ["number", "null"]},
     "pnl_value_coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
     "position_performance": {"type": "object"},
     "positions": {
@@ -31,7 +30,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["symbol", "quantity", "value_usd", "cost_basis_usd", "asset_type", "computed_weight"],
+        "required": ["symbol", "quantity", "value_usd", "cost_basis_usd", "asset_type", "portfolio_weight"],
         "properties": {
           "symbol": {"type": "string", "minLength": 1},
           "quantity": {"type": ["number", "null"], "minimum": 0},
@@ -41,7 +40,7 @@
           "exchange_unrealized_pnl_usd": {"type": ["number", "null"]},
           "cost_basis_usd": {"type": ["number", "null"], "minimum": 0},
           "unrealized_pnl_usd": {"type": ["number", "null"]},
-          "unrealized_return_pct": {"type": ["number", "null"]},
+          "unrealized_return": {"type": ["number", "null"]},
           "pnl_status": {
             "type": "string",
             "enum": ["AVAILABLE", "COST_UNKNOWN", "ZERO_COST", "INSUFFICIENT_DATA", "CROSSCHECK_WARNING", "MATERIAL_MISMATCH"]
@@ -51,7 +50,7 @@
             "enum": ["PASS", "ROUNDING_WARNING", "MATERIAL_MISMATCH", "INSUFFICIENT_DATA"]
           },
           "validation_notes": {"type": "array", "items": {"type": "string"}},
-          "computed_weight": {"type": "number", "minimum": 0, "maximum": 1},
+          "portfolio_weight": {"type": "number", "minimum": 0, "maximum": 1},
           "displayed_current_price_usd": {"type": ["number", "null"], "minimum": 0},
           "displayed_average_cost_price_usd": {"type": ["number", "null"], "minimum": 0},
           "performance": {"type": "object"},

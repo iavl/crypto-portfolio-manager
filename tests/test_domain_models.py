@@ -60,16 +60,17 @@ class DomainModelTests(unittest.TestCase):
         decision = Decision(
             "2026-09-01T00:00:00Z",
             "NORMAL",
-            3,
             {"BTC": 1.0},
             {"BTC": 0.9, "USDC": 0.1},
             evidence=(evidence,),
         )
         result = decision.as_dict()
         self.assertEqual(result["evidence_ids"], ["e-1"])
-        self.assertEqual(result["policy_version"], 3)
+        self.assertNotIn("policy_version", result)
         with self.assertRaises(ValueError):
-            Decision("2026-09-01T00:00:00Z", "NORMAL", 3, {"BTC": math.nan}, {"BTC": 1.0})
+            Decision.from_mapping({**result, "policy_version": 4})
+        with self.assertRaises(ValueError):
+            Decision("2026-09-01T00:00:00Z", "NORMAL", {"BTC": math.nan}, {"BTC": 1.0})
 
     def test_factor_score_evidence_references_are_integral(self):
         evidence = Evidence(
@@ -79,7 +80,6 @@ class DomainModelTests(unittest.TestCase):
             Decision(
                 "2026-09-01T00:00:00Z",
                 "NORMAL",
-                3,
                 {"BTC": 1.0},
                 {"BTC": 1.0},
                 evidence=(evidence,),
@@ -93,7 +93,6 @@ class DomainModelTests(unittest.TestCase):
             Decision(
                 "2026-09-01T00:00:00Z",
                 "NORMAL",
-                3,
                 {"BTC": 1.0},
                 {"BTC": 1.0},
                 evidence=(Evidence("e-2", "ETH", "trend", "example", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "CURRENT", "HIGH"),),

@@ -166,8 +166,8 @@ def build_position_pnl_context(
         ]
         latest = history[-1]
         previous = history[-2] if len(history) > 1 else None
-        latest_return = latest["unrealized_return_pct"]
-        previous_return = previous["unrealized_return_pct"] if previous else None
+        latest_return = latest["unrealized_return"]
+        previous_return = previous["unrealized_return"] if previous else None
         change_pp = (
             (latest_return - previous_return) * 100
             if latest_return is not None and previous_return is not None

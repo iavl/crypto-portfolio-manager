@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from ..models.decision import Decision, DecisionStatusEvent
 from ..models.evidence import Evidence
-from ..models.policy import Policy, historical_policy, policy_from_mapping, policy_hash, resolve_policy
+from ..models.policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from ..models.time import parse_timestamp
 from ._jsonl import append_record, read_records
 from .snapshots import runtime_data_dir
@@ -41,11 +41,7 @@ def _validated_decision(
             resolved = resolve_policy()
     else:
         raise ValueError("decision must be a Decision or mapping")
-    if model.policy_version == 3 and resolved.policy_version == 4 and model.resolved_policy is None and model.config is None:
-        resolved = historical_policy(resolved)
     parse_timestamp(model.timestamp)
-    if model.policy_version != resolved.policy_version:
-        raise ValueError("decision policy_version does not match resolved policy")
     expected_hash = policy_hash(resolved)
     if model.policy_hash is not None and model.policy_hash != expected_hash:
         raise ValueError("decision policy_hash does not match resolved policy")
@@ -54,7 +50,6 @@ def _validated_decision(
     record = model.as_dict()
     record["policy_hash"] = expected_hash
     record["resolved_policy"] = resolved.as_dict()
-    record["policy_version"] = resolved.policy_version
     return record, resolved
 
 

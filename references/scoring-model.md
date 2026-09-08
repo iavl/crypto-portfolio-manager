@@ -15,11 +15,11 @@ resulting portfolio action.
 Event/security risk, derivatives positioning, BTC cycle context, portfolio
 regime, and technical execution timing are separate gates or overlays. They may
 reduce eligibility, confidence, target size, or deployment, but cannot change
-the v2 base score.
+the base score.
 
-## v2 scoring profiles
+## Scoring profiles
 
-The default v2 profiles share eight canonical factor keys:
+The default profiles share eight canonical factor keys:
 
 | Factor | Weight | Ownership |
 |---|---:|---|
@@ -56,7 +56,7 @@ Active usage, settlement activity and blockspace demand belong to `onchain`.
 The same economic observation may be cited as context, but it must not add to
 two factor totals.
 
-In v2, technical drawdown remains visible in trend facts for context but adds
+In the current scoring model, technical drawdown remains visible in trend facts for context but adds
 no trend points or trend coverage requirement; valuation owns its score.
 
 Event-risk metrics use the `EVENT_RISK` role. Positioning and BTC-cycle metrics
@@ -72,7 +72,7 @@ points. Network health remains a separate risk/context overlay.
 
 Every factor is explicitly `AVAILABLE`, `MISSING`, or `NOT_APPLICABLE`.
 
-For an applicable factor, v2 uses neutral shrinkage:
+For an applicable factor, the current scoring model uses neutral shrinkage:
 
 ```text
 effective_factor_score = 50 + reliability * (raw_score - 50)
@@ -101,7 +101,7 @@ Inputs without source confidence use unit source quality.
 Explicit reliability cannot raise the metadata-derived value. Numeric
 factor inputs retain their documented reliability of 1.
 
-The v2 score and coverage are:
+The score and coverage are:
 
 ```text
 base_score = sum(profile_weight[f] * effective_factor_score[f])
@@ -109,16 +109,15 @@ coverage   = sum(profile_weight[f] * reliability[f])
 ```
 
 The profile weights are fixed resolved weights, not renormalized weights.
-Explicit custom v2 weights must also sum to 1; invalid sums are rejected.
+Explicit custom weights must also sum to 1; invalid sums are rejected.
 Coverage can permit at most `HIGH` at 90%, `MEDIUM` at 70%, and investability
 at 60%. Critical incompleteness forces `LOW`; a user-supplied confidence cannot
 raise a coverage cap.
 
 ## Relative strength versus BTC
 
-Raw 30D, 90D, 180D and (for policy v4) 365D excess returns, relative drawdown,
-pair trend and the normalized signal remain visible for explanation. In v2/v3
-each horizon uses:
+Raw 30D, 90D, 180D and 365D excess returns, relative drawdown, pair trend and
+the normalized signal remain visible for explanation. Each horizon uses:
 
 ```text
 excess_h = asset_return_h - btc_return_h
@@ -141,7 +140,7 @@ materially negative comparison is ineligible for new risk.
 
 ETH keeps the default six-factor weights: trend 20%, valuation 20%,
 fundamentals 25%, on-chain 15%, capital flows 10%, and BTC-relative strength
-10%. Policy v4 enriches the evidence inside those factors with monetary supply
+10%. The current policy enriches the evidence inside those factors with monetary supply
 and burn/issuance context, proof-of-stake security and staking flows, Ethereum
 L2 settlement rent, blob/data-availability demand, DeFi/stablecoin economics,
 realized valuation where supported, and ETH ETF flow/AUM ratios.
@@ -152,14 +151,14 @@ automatically bullish; cause, persistence, liquidity, and security context
 remain part of the bounded semantic judgment. Raw ETH ETF USD flow is evidence
 context; normalized ETH flow/AUM owns capital-flow scoring authority.
 
-The ETH/BTC factor remains part of the base score, while policy v4 also applies
+The ETH/BTC factor remains part of the base score, while the current policy also applies
 it as a separate core-allocation opportunity-cost gate. This gate never mutates
 the base score. ETH FDV/market-cap is `NOT_APPLICABLE` and cannot contribute
 positive valuation evidence.
 
 ## Capital flows
 
-V2 flow scoring prefers normalized ratios such as ETF net flow / ETF AUM or
+Flow scoring prefers normalized ratios such as ETF net flow / ETF AUM or
 exchange net flow / circulating market cap. If the denominator is unavailable,
 the normalized flow is missing; an absolute USD value is not substituted.
 
@@ -212,12 +211,11 @@ Materially negative BTC-relative evidence overrides the hold band.
 Scores do not directly imply `BUY`, `SELL`, or a full deployment. `HOLD`,
 `WAIT`, and `NO_TRADE` remain valid outcomes.
 
-## Supported version
+## Current scoring contract
 
-Active policy version 4 keeps scoring algorithm version 2, fixed profile
-weights, reliability shrinkage, and the separate event-risk gate. Historical
-policy v3 records remain readable with their embedded resolved policy; they are
-not silently replayed as v4.
+The current scoring model uses fixed profile weights, reliability shrinkage,
+and a separate event-risk gate. Old generated records are not replayed or
+migrated.
 
 ### Data Confidence
 

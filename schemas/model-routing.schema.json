@@ -3,12 +3,11 @@
   "$id": "https://example.local/crypto-portfolio-manager/model-routing.schema.json",
   "title": "Model routing policy",
   "type": "object",
-  "$ref": "#/$defs/v2",
+  "$ref": "#/$defs/current",
   "$defs": {
-    "v2": {
+    "current": {
       "type": "object",
       "required": [
-        "routing_policy_version",
         "runtime",
         "default_profile",
         "luna_policy",
@@ -18,7 +17,6 @@
         "sol_thresholds"
       ],
       "properties": {
-        "routing_policy_version": {"const": 2},
         "runtime": {"enum": ["AUTO", "CODEX", "CHATGPT", "OPENAI_API", "GENERIC"]},
         "default_profile": {"type": "string", "minLength": 1},
         "active_profile": {"type": "string", "minLength": 1},

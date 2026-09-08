@@ -47,7 +47,6 @@ from crypto_portfolio.providers.routes import provider_chain
 
 def config_for(*providers):
     return {
-        "version": 1,
         "providers": {name: {"enabled": True} for name in providers},
         "cache_ttl_seconds": {"default": 3600, "spot": 600},
         "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},

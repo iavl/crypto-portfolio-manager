@@ -36,7 +36,7 @@ class PositionPnlTests(unittest.TestCase):
         self.assertEqual(performance.average_cost_price_usd, 100)
         self.assertEqual(performance.cost_basis_usd, 200)
         self.assertEqual(performance.unrealized_pnl_usd, -20)
-        self.assertEqual(performance.unrealized_return_pct, -0.1)
+        self.assertEqual(performance.unrealized_return, -0.1)
         self.assertEqual(performance.pnl_status, "AVAILABLE")
 
         explicit = calculate_position_performance(
@@ -53,7 +53,7 @@ class PositionPnlTests(unittest.TestCase):
         )
         self.assertEqual(missing.pnl_status, "COST_UNKNOWN")
         self.assertIsNone(missing.unrealized_pnl_usd)
-        self.assertIsNone(missing.unrealized_return_pct)
+        self.assertIsNone(missing.unrealized_return)
 
         zero = calculate_position_performance(
             Position("AAA", quantity=1, value_usd=10, average_cost_price_usd=0),
@@ -61,7 +61,7 @@ class PositionPnlTests(unittest.TestCase):
         )
         self.assertEqual(zero.pnl_status, "ZERO_COST")
         self.assertEqual(zero.unrealized_pnl_usd, 10)
-        self.assertIsNone(zero.unrealized_return_pct)
+        self.assertIsNone(zero.unrealized_return)
 
         inconsistent_quantity = calculate_position_performance(
             Position("AAA", quantity=0, value_usd=1, current_price_usd=1),
@@ -118,7 +118,7 @@ class PositionPnlTests(unittest.TestCase):
             portfolio_total_usd=8,
         )
         self.assertAlmostEqual(low_price.current_price_usd, 0.00008)
-        self.assertAlmostEqual(low_price.unrealized_return_pct, -0.2)
+        self.assertAlmostEqual(low_price.unrealized_return, -0.2)
         self.assertIn("$0.00", " ".join(low_price.validation_notes))
 
     def test_portfolio_aggregation_uses_known_cost_basis_only(self):
@@ -140,7 +140,7 @@ class PositionPnlTests(unittest.TestCase):
         self.assertEqual(summary.cost_known_current_value_usd, 180)
         self.assertEqual(summary.cost_known_cost_basis_usd, 200)
         self.assertEqual(summary.total_unrealized_pnl_known_usd, -20)
-        self.assertEqual(summary.aggregate_unrealized_return_pct, -0.1)
+        self.assertEqual(summary.aggregate_unrealized_return, -0.1)
         self.assertAlmostEqual(summary.pnl_value_coverage_ratio, 180 / 280)
 
     def test_binance_observation_normalizes_usd_and_unknown_cost(self):
@@ -156,9 +156,9 @@ class PositionPnlTests(unittest.TestCase):
         result = normalize_binance_observation(observation)
         positions = {item["symbol"]: item for item in result["positions"]}
         self.assertEqual(positions["AAA"]["unrealized_pnl_usd"], -20)
-        self.assertEqual(positions["AAA"]["unrealized_return_pct"], -0.1)
+        self.assertEqual(positions["AAA"]["unrealized_return"], -0.1)
         self.assertEqual(positions["USDT"]["pnl_status"], "COST_UNKNOWN")
-        self.assertIsNone(positions["USDT"]["unrealized_return_pct"])
+        self.assertIsNone(positions["USDT"]["unrealized_return"])
         self.assertFalse(observation.positions[1].cost_available)
         self.assertAlmostEqual(result["visible_value_coverage_ratio"], 280 / 300)
         with self.assertRaises(ValueError):
@@ -205,11 +205,11 @@ class PositionPnlTests(unittest.TestCase):
             record = read_snapshots(path)[0]["positions"][0]
             self.assertEqual(record["average_cost_price_usd"], 100)
             self.assertEqual(record["unrealized_pnl_usd"], -20)
-            self.assertEqual(record["performance"]["unrealized_return_pct"], -0.1)
+            self.assertEqual(record["performance"]["unrealized_return"], -0.1)
             snapshot_record = read_snapshots(path)[0]
             self.assertEqual(snapshot_record["visible_positions_value_usd"], 280)
             self.assertIsNone(snapshot_record["visible_value_coverage_ratio"])
-            self.assertEqual(latest_position_performance("aaa", path).unrealized_return_pct, 0)
+            self.assertEqual(latest_position_performance("aaa", path).unrealized_return, 0)
             history = position_performance_history("AAA", path)
             self.assertEqual(len(history), 2)
             context = build_position_pnl_context(path)

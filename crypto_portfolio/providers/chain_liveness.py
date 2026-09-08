@@ -788,7 +788,6 @@ class ChainLivenessProvider:
             ),
             "sources_checked": list(assessment.sources_checked),
             "independent_sources": list(assessment.evidence.get("independent_groups", ())),
-            "threshold_policy_version": getattr(self.policy, "policy_version", 3),
         }
         if assessment.source_failures:
             metadata["source_failures"] = [dict(item) for item in assessment.source_failures]

@@ -113,7 +113,6 @@ class L2BeatContractTests(unittest.TestCase):
     def test_probe_reports_openapi_and_all_read_operations_without_secret(self):
         client = Client()
         config = {
-            "version": 1,
             "providers": {"l2beat": {"enabled": "AUTO", "api_key_env": "L2BEAT_API_KEY"}},
             "cache_ttl_seconds": {"default": 3600},
             "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},

@@ -36,7 +36,7 @@ Indicative allocation envelope, not a fixed target:
 - Satellites combined: 10–25%
 
 The BTC/ETH rows are an indicative risk envelope, not an entitlement. Core
-classification never guarantees a target or score floor. Policy v4 starts the
+classification never guarantees a target or score floor. The current policy starts the
 core risky sleeve from a configurable 70/30 BTC/ETH anchor, then applies score
 quality, confidence, ETH/BTC opportunity cost, event risk, liveness, and the
 existing portfolio caps. If the user changes `core_symbols`, apply the core

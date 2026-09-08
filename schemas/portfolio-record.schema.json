@@ -3,13 +3,12 @@
   "$id": "https://example.local/crypto-portfolio-manager/portfolio-record.schema.json",
   "title": "Persisted Crypto Portfolio Snapshot",
   "type": "object",
-  "required": ["snapshot_id", "timestamp", "base_currency", "positions", "external_cash_flow", "policy_version", "policy_hash", "resolved_policy"],
+  "required": ["snapshot_id", "timestamp", "base_currency", "positions", "external_cash_flow", "policy_hash", "resolved_policy"],
   "properties": {
     "snapshot_id": {"type": "string", "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
     "source": {"type": ["string", "null"]},
     "base_currency": {"type": "string", "minLength": 1},
-    "policy_version": {"enum": [3, 4]},
     "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "resolved_policy": {"type": "object"},
     "external_cash_flow": {"type": "number"},
@@ -33,7 +32,7 @@
           "exchange_unrealized_pnl_usd": {"type": ["number", "null"]},
           "cost_basis_usd": {"type": ["number", "null"], "minimum": 0},
           "unrealized_pnl_usd": {"type": ["number", "null"]},
-          "unrealized_return_pct": {"type": ["number", "null"]},
+          "unrealized_return": {"type": ["number", "null"]},
           "pnl_status": {
             "type": "string",
             "enum": ["AVAILABLE", "COST_UNKNOWN", "ZERO_COST", "INSUFFICIENT_DATA", "CROSSCHECK_WARNING", "MATERIAL_MISMATCH"]
@@ -43,15 +42,16 @@
             "enum": ["PASS", "ROUNDING_WARNING", "MATERIAL_MISMATCH", "INSUFFICIENT_DATA"]
           },
           "validation_notes": {"type": "array", "items": {"type": "string"}},
-          "computed_weight": {"type": "number", "minimum": 0, "maximum": 1},
+          "portfolio_weight": {"type": "number", "minimum": 0, "maximum": 1},
           "displayed_current_price_usd": {"type": ["number", "null"], "minimum": 0},
           "displayed_average_cost_price_usd": {"type": ["number", "null"], "minimum": 0},
           "performance": {
             "type": "object",
-            "required": ["unrealized_pnl_usd", "unrealized_return_pct", "pnl_status"],
+            "required": ["unrealized_pnl_usd", "unrealized_return", "pnl_status"],
             "properties": {
               "unrealized_pnl_usd": {"type": ["number", "null"]},
-              "unrealized_return_pct": {"type": ["number", "null"]},
+              "unrealized_return": {"type": ["number", "null"]},
+              "portfolio_weight": {"type": "number", "minimum": 0, "maximum": 1},
               "pnl_status": {
                 "type": "string",
                 "enum": ["AVAILABLE", "COST_UNKNOWN", "ZERO_COST", "INSUFFICIENT_DATA", "CROSSCHECK_WARNING", "MATERIAL_MISMATCH"]

@@ -88,9 +88,9 @@ Normalized OHLCV used by a plan may be stored as public, immutable content at
 technical summary and `execution_technical` evidence; no full candle array is
 embedded in every decision.
 
-`policy_version` remains the investment-policy version so existing historical
-records stay readable; execution serialization changes are tracked by
-`execution_plan_version` (new plans use version 2).
+Only the current internal data contract is supported. Breaking changes may
+require manually regenerating local generated state; no migration or legacy
+record reader is provided.
 
 Successful review metrics are normalized as `MetricObservation` records in the
 append-only runtime `metrics/observations.jsonl` series. The next review uses
@@ -303,7 +303,7 @@ Critical missing data:
 
 If critical data is missing, do not provide a strong actionable entry.
 
-In v2, non-critical missing data keeps its configured factor weight, contributes
+In the current scoring model, non-critical missing data keeps its configured factor weight, contributes
 neutral 50 through reliability shrinkage, and reduces weighted coverage and
 confidence.
 
@@ -317,7 +317,7 @@ When sources disagree materially:
 4. state unresolved discrepancy;
 5. reduce confidence and position size.
 
-Policy v4 defines metric/domain `max_age_seconds` and `half_life_seconds`.
+The current policy defines metric/domain `max_age_seconds` and `half_life_seconds`.
 `observed_at` measures the fact; `fetched_at` measures retrieval. Source
 quality is tiered, cache reuse is not independent redundancy, and unresolved
 material conflicts do not produce a synthetic value.

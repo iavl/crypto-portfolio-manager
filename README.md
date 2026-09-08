@@ -1,6 +1,6 @@
 [English (default)](README.md) · [简体中文](README.zh-CN.md)
 
-Active contracts use policy v4, scoring v2, routing v2, and execution plans v2. Historical policy v3 records remain readable but are not silently replayed as v4. Confidence is Python-owned and layered as Data -> Regime -> Decision. Timestamps require a timezone; execution requires a timestamped SpotPrice.
+The repository supports only the current internal contract. Generated local state from older breaking revisions may need to be regenerated. Confidence is Python-owned and layered as Data -> Regime -> Decision. Timestamps require a timezone; execution requires a timestamped SpotPrice.
 
 # crypto-portfolio-manager
 
@@ -127,6 +127,8 @@ Runtime history is outside the Git checkout by default:
 
 Set `CRYPTO_PORTFOLIO_DATA_DIR` to use another directory. Free public
 providers work without API keys; optional provider keys are environment-only.
+Only the current runtime data contract is supported; incompatible generated
+state must be regenerated manually after a breaking change.
 Never commit real balances, quantities, cost basis, transaction
 history, account identifiers, credentials, private keys, or seed phrases.
 Content-addressed public OHLCV replay data is stored under

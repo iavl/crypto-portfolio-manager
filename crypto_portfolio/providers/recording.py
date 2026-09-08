@@ -16,7 +16,6 @@ from .base import ProviderDiagnostic, ProviderResponseError
 from .http import redact_secrets, redact_url
 
 
-RECORDING_VERSION = 1
 _SECRET_HEADER_MARKERS = ("api", "auth", "token", "secret", "cookie", "password")
 
 
@@ -28,7 +27,6 @@ def _text(value: Any, field: str) -> str:
 
 @dataclass(frozen=True)
 class RecordingEnvelope:
-    version: int
     provider: str
     method: str
     endpoint: str
@@ -37,8 +35,6 @@ class RecordingEnvelope:
     response: Any
 
     def __post_init__(self) -> None:
-        if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version != RECORDING_VERSION:
-            raise ValueError("unsupported provider recording version")
         object.__setattr__(self, "provider", _text(self.provider, "provider").lower())
         object.__setattr__(self, "method", _text(self.method, "method").upper())
         object.__setattr__(self, "endpoint", redact_url(_text(self.endpoint, "endpoint")))
@@ -62,7 +58,7 @@ class RecordingEnvelope:
     def from_mapping(cls, value: Mapping[str, Any]) -> "RecordingEnvelope":
         if not isinstance(value, Mapping):
             raise ValueError("provider recording must be an object")
-        required = {"version", "provider", "method", "endpoint", "recorded_at", "status_code", "response"}
+        required = {"provider", "method", "endpoint", "recorded_at", "status_code", "response"}
         missing = required - set(value)
         if missing:
             raise ValueError(f"provider recording is missing fields: {', '.join(sorted(missing))}")
@@ -73,7 +69,6 @@ class RecordingEnvelope:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "version": self.version,
             "provider": self.provider,
             "method": self.method,
             "endpoint": self.endpoint,
@@ -167,7 +162,6 @@ class RecordingTransport:
             return None
         endpoint = redact_url(request.full_url, secrets)
         envelope = RecordingEnvelope(
-            version=RECORDING_VERSION,
             provider=self.provider,
             method=request.method or "GET",
             endpoint=endpoint,
@@ -223,7 +217,6 @@ def load_recording(path: str | Path) -> RecordingEnvelope:
 
 
 __all__ = [
-    "RECORDING_VERSION",
     "RecordingEnvelope",
     "RecordingTransport",
     "ReplayTransport",

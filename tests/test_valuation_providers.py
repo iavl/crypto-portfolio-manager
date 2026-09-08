@@ -272,7 +272,6 @@ class ValuationProviderTests(unittest.TestCase):
                 }]
 
         config = {
-            "version": 1,
             "providers": {
                 "coingecko": {"enabled": False},
                 "coinmetrics_community": {"enabled": True},
@@ -325,7 +324,6 @@ class ValuationProviderTests(unittest.TestCase):
             "last_updated": "2026-09-05T23:59:00Z",
         }])
         config = {
-            "version": 1,
             "providers": {"coingecko": {"enabled": True}},
             "cache_ttl_seconds": {"default": 3600, "valuation": 3600},
             "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},

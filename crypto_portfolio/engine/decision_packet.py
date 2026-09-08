@@ -361,7 +361,7 @@ def build_decision_review_packet(
     if regime_confidence_value is None:
         regime_confidence_value = calculate_regime_confidence(
             {name: 0.5 for name in ("trend", "volatility", "breadth", "flows", "portfolio_drawdown", "systemic_risk")},
-            caps=(ConfidenceCap("LEGACY_INPUT_NO_PROVENANCE", 0.79, "PORTFOLIO", "decision packet has no regime provenance"),),
+            caps=(ConfidenceCap("MISSING_REGIME_PROVENANCE", 0.79, "PORTFOLIO", "decision packet has no regime provenance"),),
         )
     decision_confidence_value = decision_confidence if decision_confidence is not None else source.get("decision_confidence")
     nav_value = nav_performance if nav_performance is not None else source.get("nav_performance")

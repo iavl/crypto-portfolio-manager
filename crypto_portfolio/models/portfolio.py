@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .policy import Policy, historical_policy, policy_from_mapping, policy_hash, resolve_policy
+from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
 
@@ -130,7 +130,6 @@ class PortfolioSnapshot:
     external_cash_flow: float = 0.0
     external_cash_flow_type: str | None = None
     total_value: float | None = None
-    policy_version: int | None = None
     source: str | None = None
     policy_hash: str | None = None
     resolved_policy: Mapping[str, Any] | None = None
@@ -178,12 +177,6 @@ class PortfolioSnapshot:
             "total_value",
             _optional_number(self.total_value, "total_value", minimum=0),
         )
-        if self.policy_version is not None and (
-            isinstance(self.policy_version, bool)
-            or not isinstance(self.policy_version, int)
-            or self.policy_version not in {3, 4}
-        ):
-            raise ValueError("policy_version must be 3 or 4")
         if self.source is not None and not isinstance(self.source, str):
             raise ValueError("source must be a string or null")
         if self.policy_hash is not None:
@@ -198,8 +191,6 @@ class PortfolioSnapshot:
             if not isinstance(self.resolved_policy, Mapping):
                 raise ValueError("resolved_policy must be an object or null")
             object.__setattr__(self, "resolved_policy", dict(self.resolved_policy))
-            if self.resolved_policy.get("policy_version") != self.policy_version:
-                raise ValueError("resolved_policy policy_version must match snapshot policy_version")
             if self.policy_hash is not None and policy_hash(self.resolved_policy) != self.policy_hash:
                 raise ValueError("policy_hash does not match resolved_policy")
         if self.snapshot_id is not None:
@@ -222,7 +213,6 @@ class PortfolioSnapshot:
             "timestamp": self.timestamp,
             "source": self.source,
             "base_currency": self.base_currency,
-            "policy_version": self.policy_version,
             "external_cash_flow": self.external_cash_flow,
             "external_cash_flow_type": self.external_cash_flow_type,
             "total_value": self.total_value,
@@ -239,8 +229,8 @@ def _position_from_mapping(raw: Mapping[str, Any], policy: Policy, index: int) -
     allowed = {
         "symbol", "quantity", "value_usd", "cost_basis_usd", "asset_type_hint", "asset_type",
         "current_price_usd", "average_cost_price_usd", "exchange_unrealized_pnl_usd", "displayed_weight",
-        "unrealized_pnl_usd", "unrealized_return_pct", "pnl_status", "validation_status",
-        "validation_notes", "computed_weight", "displayed_current_price_usd",
+        "unrealized_pnl_usd", "unrealized_return", "pnl_status", "validation_status",
+        "validation_notes", "portfolio_weight", "displayed_current_price_usd",
         "displayed_average_cost_price_usd", "performance",
     }
     unknown = set(raw) - allowed
@@ -285,22 +275,19 @@ def snapshot_from_mapping(
     if not isinstance(data, Mapping):
         raise ValueError("snapshot must be an object")
     allowed = {
-        "timestamp", "source", "base_currency", "positions", "policy_version", "external_cash_flow",
+        "timestamp", "source", "base_currency", "positions", "external_cash_flow",
         "external_cash_flow_type", "total_value", "config", "policy_hash", "resolved_policy", "snapshot_id",
         "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio",
     }
     unknown = set(data) - allowed
     if unknown:
         raise ValueError(f"snapshot contains unknown fields: {', '.join(sorted(unknown))}")
-    supplied_version = data.get("policy_version")
     if policy is not None:
         resolved_policy = policy
     elif data.get("resolved_policy") is not None:
         resolved_policy = policy_from_mapping(data["resolved_policy"])
     else:
         resolved_policy = resolve_policy(data.get("config"))
-    if supplied_version == 3 and resolved_policy.policy_version == 4 and data.get("resolved_policy") is None and data.get("config") is None:
-        resolved_policy = historical_policy(resolved_policy)
     if "portfolio_peak_value" in data:
         raise ValueError("portfolio_peak_value is unsupported; use cash-flow-aware NAV history")
     raw_positions = data.get("positions")
@@ -311,13 +298,6 @@ def snapshot_from_mapping(
         for index, raw in enumerate(raw_positions)
     )
     timestamp = data.get("timestamp")
-    expected_policy_version = resolved_policy.policy_version
-    supplied_policy_version = data.get("policy_version", expected_policy_version)
-    if supplied_policy_version != expected_policy_version:
-        raise ValueError(
-            f"snapshot policy_version {supplied_policy_version!r} does not match resolved policy "
-            f"version {expected_policy_version}"
-        )
     expected_policy_hash = policy_hash(resolved_policy)
     supplied_policy_hash = data.get("policy_hash", expected_policy_hash)
     if supplied_policy_hash != expected_policy_hash:
@@ -334,7 +314,6 @@ def snapshot_from_mapping(
         external_cash_flow=flow_value,
         external_cash_flow_type=flow_type,
         total_value=reported_total_value,
-        policy_version=supplied_policy_version,
         source=data.get("source"),
         policy_hash=expected_policy_hash,
         resolved_policy=resolved_policy.as_dict(),
@@ -432,7 +411,6 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
 
     return {
         "config": resolved_policy.as_dict(),
-        "policy_version": resolved_policy.policy_version,
         "timestamp": snapshot.timestamp,
         "source": snapshot.source,
         "base_currency": snapshot.base_currency,
@@ -449,7 +427,7 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
         "cost_known_current_value_usd": performance.cost_known_current_value_usd,
         "cost_known_cost_basis_usd": performance.cost_known_cost_basis_usd,
         "total_unrealized_pnl_known_usd": performance.total_unrealized_pnl_known_usd,
-        "aggregate_unrealized_return_pct": performance.aggregate_unrealized_return_pct,
+        "aggregate_unrealized_return": performance.aggregate_unrealized_return,
         "pnl_value_coverage_ratio": performance.pnl_value_coverage_ratio,
         "position_performance": performance.as_dict(),
         "positions": positions,

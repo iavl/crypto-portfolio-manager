@@ -80,16 +80,18 @@ class ConfidenceTests(unittest.TestCase):
         ]
         self.assertEqual(signal_consistency_score(observations), 0.5)
 
-    def test_confidence_cap_round_trip_keeps_scope(self):
+    def test_confidence_cap_round_trip_uses_canonical_target(self):
         result = ConfidenceResult(
-            1,
             0.9,
             0.59,
             "LOW",
             caps=(ConfidenceCap("SECURITY_UNKNOWN", 0.59, "ACTION:INCREASE", "unknown"),),
         )
         restored = ConfidenceResult.from_mapping(result.as_dict())
-        self.assertEqual(restored.caps[0].scope, "ACTION:INCREASE")
+        self.assertEqual(restored.caps[0].applies_to, "ACTION:INCREASE")
+        self.assertNotIn("scope", result.as_dict()["caps"][0])
+        with self.assertRaises(ValueError):
+            ConfidenceResult.from_mapping({**result.as_dict(), "caps": [{"code": "X", "ceiling": 0.5, "scope": "ACTION:INCREASE"}]})
 
     def test_unresolved_nav_is_provisional_and_benchmark_stays_unavailable(self):
         result = build_nav_history_result([

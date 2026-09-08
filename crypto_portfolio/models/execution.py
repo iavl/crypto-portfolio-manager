@@ -254,7 +254,6 @@ class ExecutionTranche:
 
 @dataclass(frozen=True)
 class ExecutionPlan:
-    execution_plan_version: int
     symbol: str
     action: str
     approved_amount_usd: float
@@ -277,8 +276,6 @@ class ExecutionPlan:
     overlay_warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if isinstance(self.execution_plan_version, bool) or not isinstance(self.execution_plan_version, int) or self.execution_plan_version != 2:
-            raise ValueError("execution_plan_version must be 2")
         object.__setattr__(self, "symbol", _text(self.symbol, "execution symbol").upper())
         action = _text(self.action, "execution action").upper()
         if action not in _ACTIONS:
@@ -431,13 +428,13 @@ class ExecutionPlan:
             raise ValueError("overlay_warnings must contain unique values")
         object.__setattr__(self, "overlay_warnings", warnings)
         if self.technical_summary is None:
-            raise ValueError("execution plan version 2 requires technical_summary")
+            raise ValueError("execution plan requires technical_summary")
         if self.technical_summary is not None:
             if not isinstance(self.technical_summary, Mapping):
                 raise ValueError("technical_summary must be an object or null")
             summary = dict(self.technical_summary)
             allowed_summary = {
-                "summary_version", "symbol", "spot_price", "spot_observed_at", "spot_source",
+                "symbol", "spot_price", "spot_observed_at", "spot_source",
                 "spot_fetched_at", "spot_venue", "spot_market", "spot_quote_currency", "ma20",
                 "ma50", "ma100", "ma200", "atr14", "atr_percent", "return_30d", "return_90d",
                 "return_180d", "realized_vol_30d", "realized_vol_90d", "relative_volume",
@@ -452,7 +449,7 @@ class ExecutionPlan:
                     f"technical_summary contains unknown fields: {', '.join(sorted(unknown_summary))}"
                 )
             required_summary = {
-                "summary_version", "symbol", "spot_price", "spot_observed_at",
+                "symbol", "spot_price", "spot_observed_at",
                 "spot_source", "data_confidence", "setup_quality", "selected_zones",
                 "ohlcv_hash",
             }
@@ -461,12 +458,6 @@ class ExecutionPlan:
                 raise ValueError(
                     f"technical_summary is missing fields: {', '.join(sorted(missing_summary))}"
                 )
-            if (
-                isinstance(summary["summary_version"], bool)
-                or not isinstance(summary["summary_version"], int)
-                or summary["summary_version"] != 1
-            ):
-                raise ValueError("technical_summary summary_version must be 1")
             if not isinstance(summary["symbol"], str) or summary["symbol"].strip().upper() != self.symbol:
                 raise ValueError("technical_summary symbol does not match plan symbol")
             summary["symbol"] = self.symbol
@@ -559,7 +550,6 @@ class ExecutionPlan:
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
-            "execution_plan_version": self.execution_plan_version,
             "symbol": self.symbol,
             "action": self.action,
             "approved_amount_usd": self.approved_amount_usd,
@@ -597,7 +587,7 @@ class ExecutionPlan:
         if not isinstance(value, Mapping):
             raise ValueError("execution plan must be an object")
         allowed = {
-            "execution_plan_version", "symbol", "action", "approved_amount_usd",
+            "symbol", "action", "approved_amount_usd",
             "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
             "volume_profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
@@ -607,7 +597,7 @@ class ExecutionPlan:
         if unknown:
             raise ValueError(f"execution plan contains unknown fields: {', '.join(sorted(unknown))}")
         required = (
-            "execution_plan_version", "symbol", "action", "approved_amount_usd",
+            "symbol", "action", "approved_amount_usd",
             "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
         )

@@ -429,6 +429,10 @@ public market/profile artifacts use
 `volume-profiles/sha256/<profile_hash>.json`. Provider acquisition artifacts
 use `provider-cache/responses/` and `provider-cache/series/`.
 
+Only the current internal runtime contract is supported. If a breaking change
+makes generated local state incompatible, report it clearly and regenerate the
+state manually; do not transform or migrate it.
+
 For a snapshot normalization check, run:
 
 ```bash

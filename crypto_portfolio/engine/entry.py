@@ -110,7 +110,6 @@ def _wait_plan(
     overlay_warnings: Iterable[str] = (),
 ) -> ExecutionPlan:
     return ExecutionPlan(
-        execution_plan_version=2,
         symbol=symbol,
         action=action,
         approved_amount_usd=approved,
@@ -442,7 +441,6 @@ def build_entry_plan(
         f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity{overlay_note}"
     )
     return ExecutionPlan(
-        execution_plan_version=2,
         symbol=normalized_symbol,
         action="INCREASE",
         approved_amount_usd=approved,

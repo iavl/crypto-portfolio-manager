@@ -10,7 +10,7 @@ from ..engine.position_pnl import (
     calculate_portfolio_position_performance,
     position_performance_record,
 )
-from ..models.policy import Policy, historical_policy, policy_from_mapping, policy_hash, resolve_policy
+from ..models.policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from ..models.portfolio import PortfolioSnapshot, snapshot_from_mapping
 from ..models.time import parse_timestamp
 from ._jsonl import append_record, read_records
@@ -46,11 +46,7 @@ def _validated_snapshot(
             resolved = resolve_policy()
     else:
         raise ValueError("snapshot must be a PortfolioSnapshot or mapping")
-    if model.policy_version == 3 and resolved.policy_version == 4 and isinstance(snapshot, PortfolioSnapshot):
-        resolved = historical_policy(resolved)
     parse_timestamp(model.timestamp)
-    if model.policy_version != resolved.policy_version:
-        raise ValueError("snapshot policy_version does not match resolved policy")
     expected_hash = policy_hash(resolved)
     if model.policy_hash is not None and model.policy_hash != expected_hash:
         raise ValueError("snapshot policy_hash does not match resolved policy")
@@ -102,7 +98,6 @@ def append_snapshot(
         from uuid import uuid4
 
         record["snapshot_id"] = str(uuid4())
-    record["policy_version"] = resolved.policy_version
     return append_record(destination, record)
 
 

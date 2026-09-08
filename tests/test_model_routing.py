@@ -50,7 +50,6 @@ class ModelRoutingTests(unittest.TestCase):
     def test_default_and_builtin_profiles(self):
         with patch.dict(os.environ, {"CRYPTO_PORTFOLIO_MODEL_PROFILE": ""}, clear=False):
             routing = load_model_routing()
-        self.assertEqual(routing.routing_policy_version, 2)
         self.assertEqual(routing.profile, "balanced")
         self.assertEqual(routing.preset_for_stage("factor_semantic_analysis"), "luna_max")
         self.assertEqual(load_model_routing(profile="efficient").preset_for_stage("source_conflict_resolution"), "luna_max")
@@ -174,19 +173,11 @@ class ModelRoutingTests(unittest.TestCase):
             self.assertEqual(route.effective_model, "custom-model-id")
             self.assertFalse(route.fallback_used)
 
-    def test_noncurrent_routing_version_is_rejected(self):
-        value = {
-            "routing_policy_version": 1,
-            "mode": "AUTO",
-            "luna_policy": "LUNA_MAX_ONLY",
-            "stages": {
-                "metric_collection": "LUNA_MAX",
-                "factor_semantic_analysis": "TERRA",
-                "technical": "PYTHON",
-            },
-        }
+    def test_removed_routing_version_field_is_rejected(self):
+        value = json.loads((ROOT / "config" / "model-routing.json").read_text(encoding="utf-8"))
+        value["routing_policy_version"] = 1
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "v1.json"
+            path = Path(directory) / "invalid.json"
             original = json.dumps(value, indent=2)
             path.write_text(original, encoding="utf-8")
             with self.assertRaises(RoutingError):
@@ -270,7 +261,6 @@ class ModelRoutingTests(unittest.TestCase):
         decision = Decision(
             "2026-09-02T00:00:00Z",
             "NORMAL",
-            3,
             {"BTC": 1.0},
             {"BTC": 1.0},
             routing_metadata=metadata,
@@ -286,7 +276,7 @@ class ModelRoutingTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("valid: routing policy v2", result.stdout)
+        self.assertIn("valid: current routing policy", result.stdout)
         self.assertIn("balanced", result.stdout)
 
 

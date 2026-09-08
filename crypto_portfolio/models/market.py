@@ -536,7 +536,6 @@ class TechnicalSnapshot:
 
     def technical_summary(self, selected_zones: Iterable[PriceZone] = ()) -> dict[str, Any]:
         return {
-            "summary_version": 1,
             "symbol": self.symbol,
             "spot_price": self.current_spot_price,
             "spot_observed_at": self.spot_observed_at,

@@ -69,7 +69,6 @@ class SchemaValidationTests(unittest.TestCase):
                 Decision(
                     "2026-09-01T00:00:00Z",
                     "NORMAL",
-                    3,
                     {"BTC": 1.0},
                     {"BTC": 0.9, "USDT": 0.1},
                     evidence=(evidence,),

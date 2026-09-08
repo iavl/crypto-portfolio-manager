@@ -24,9 +24,6 @@ _SECRET_NAMES = {"api_key", "apikey", "api_secret", "authorization", "cookie", "
 def _is_secret_name(value: Any) -> bool:
     name = str(value).strip().lower().replace("-", "_")
     return name in _SECRET_NAMES or "api_key" in name or name.endswith(("_secret", "_token")) or "authorization" in name
-_CACHE_VERSION = 1
-
-
 def canonical_json(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
@@ -156,7 +153,6 @@ class ProviderCache:
         fetched_at: str | datetime | None = None,
         observed_range: Mapping[str, Any] | None = None,
         expires_at: str | datetime | None = None,
-        parser_version: int = 1,
     ) -> Path:
         if _contains_secret_field(payload):
             raise ValueError("provider cache payload must not contain credentials")
@@ -181,8 +177,6 @@ class ProviderCache:
                 if observed:
                     observed_range = {"start": observed[0], "end": observed[-1]}
         record = {
-            "cache_version": _CACHE_VERSION,
-            "parser_version": parser_version,
             "provider": request_identity(request)["provider"],
             "dataset": request_identity(request)["dataset"],
             "asset": request_identity(request)["asset"],
@@ -210,8 +204,14 @@ class ProviderCache:
             raise CacheCorruption(f"invalid provider cache entry {path}") from exc
         if not isinstance(record, Mapping):
             raise CacheCorruption(f"provider cache entry {path} is not an object")
+        allowed = {
+            "provider", "dataset", "asset", "request_identity", "fetched_at",
+            "observed_range", "expires_at", "mutable", "content_hash", "payload",
+        }
+        if set(record) != allowed:
+            raise CacheCorruption(f"provider cache entry has unknown or missing fields {path}")
         identity = request_identity(request)
-        if record.get("cache_version") != _CACHE_VERSION or record.get("request_identity") != identity:
+        if record.get("request_identity") != identity:
             raise CacheCorruption(f"provider cache identity mismatch {path}")
         try:
             if record.get("content_hash") != content_hash(record.get("payload")):
@@ -313,10 +313,12 @@ class ProviderCache:
             raise CacheCorruption(f"invalid series manifest {path}") from exc
         if (
             not isinstance(value, dict)
-            or value.get("manifest_version") != 1
             or value.get("series_key") != self.series_key(provider, symbol, timeframe, market=market, quote_currency=quote_currency)
         ):
             raise CacheCorruption(f"series manifest identity mismatch {path}")
+        allowed = {"series_key", "latest_content_hash", "start", "end", "completed_through"}
+        if set(value) != allowed:
+            raise CacheCorruption(f"series manifest has unknown or missing fields {path}")
         if not isinstance(value.get("latest_content_hash"), str):
             raise CacheCorruption(f"series manifest has no latest content hash {path}")
         try:
@@ -376,7 +378,6 @@ class ProviderCache:
         directory = self.series_directory(provider_name, series.symbol, series.timeframe, market=market_name, quote_currency=quote)
         directory.mkdir(parents=True, exist_ok=True)
         manifest = {
-            "manifest_version": 1,
             "series_key": self.series_key(provider_name, series.symbol, series.timeframe, market=market_name, quote_currency=quote),
             "latest_content_hash": series.ohlcv_hash,
             "start": series.candles[0].timestamp,

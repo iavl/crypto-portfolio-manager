@@ -40,11 +40,7 @@ def _optional_number(value: Any, field: str, *, minimum: float | None = None) ->
 
 @dataclass(frozen=True)
 class PositionPerformance:
-    """Deterministic unrealized performance for one remaining position.
-
-    Return values are stored as decimal fractions, despite the historical
-    ``*_pct`` field name.  For example, ``-0.1`` is a -10% return.
-    """
+    """Deterministic unrealized performance for one remaining position."""
 
     symbol: str
     quantity: float | None
@@ -53,7 +49,7 @@ class PositionPerformance:
     current_value_usd: float
     cost_basis_usd: float | None
     unrealized_pnl_usd: float | None
-    unrealized_return_pct: float | None
+    unrealized_return: float | None
     portfolio_weight: float
     pnl_status: str
     validation_status: str = "PASS"
@@ -107,10 +103,10 @@ class PositionPerformance:
         )
         object.__setattr__(
             self,
-            "unrealized_return_pct",
+            "unrealized_return",
             _optional_number(
-                self.unrealized_return_pct,
-                f"performance {self.symbol}.unrealized_return_pct",
+                self.unrealized_return,
+                f"performance {self.symbol}.unrealized_return",
             ),
         )
         object.__setattr__(
@@ -130,10 +126,10 @@ class PositionPerformance:
         object.__setattr__(self, "validation_status", self.validation_status.upper())
         if self.validation_status not in VALIDATION_STATUSES:
             raise ValueError(f"validation_status must be one of {sorted(VALIDATION_STATUSES)}")
-        if self.unrealized_return_pct is not None and (
+        if self.unrealized_return is not None and (
             self.cost_basis_usd is None or self.cost_basis_usd <= 0 or self.unrealized_pnl_usd is None
         ):
-            raise ValueError("unrealized_return_pct requires positive cost_basis_usd and unrealized_pnl_usd")
+            raise ValueError("unrealized_return requires positive cost_basis_usd and unrealized_pnl_usd")
         notes = tuple(self.validation_notes)
         if any(not isinstance(note, str) or not note.strip() for note in notes):
             raise ValueError("validation_notes must contain non-empty strings")
@@ -149,10 +145,6 @@ class PositionPerformance:
             and self.validation_status != "MATERIAL_MISMATCH"
         )
 
-    @property
-    def computed_weight(self) -> float:
-        return self.portfolio_weight
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
@@ -162,7 +154,7 @@ class PositionPerformance:
             "current_value_usd": self.current_value_usd,
             "cost_basis_usd": self.cost_basis_usd,
             "unrealized_pnl_usd": self.unrealized_pnl_usd,
-            "unrealized_return_pct": self.unrealized_return_pct,
+            "unrealized_return": self.unrealized_return,
             "portfolio_weight": self.portfolio_weight,
             "pnl_status": self.pnl_status,
             "validation_status": self.validation_status,
@@ -176,7 +168,7 @@ class PortfolioPerformanceSummary:
     cost_known_current_value_usd: float
     cost_known_cost_basis_usd: float
     total_unrealized_pnl_known_usd: float | None
-    aggregate_unrealized_return_pct: float | None
+    aggregate_unrealized_return: float | None
     pnl_value_coverage_ratio: float
     positions: tuple[PositionPerformance, ...]
     validation_notes: tuple[str, ...] = ()
@@ -205,8 +197,8 @@ class PortfolioPerformanceSummary:
         )
         object.__setattr__(
             self,
-            "aggregate_unrealized_return_pct",
-            _optional_number(self.aggregate_unrealized_return_pct, "aggregate_unrealized_return_pct"),
+            "aggregate_unrealized_return",
+            _optional_number(self.aggregate_unrealized_return, "aggregate_unrealized_return"),
         )
         object.__setattr__(
             self,
@@ -227,21 +219,13 @@ class PortfolioPerformanceSummary:
     def by_symbol(self) -> dict[str, PositionPerformance]:
         return {position.symbol: position for position in self.positions}
 
-    @property
-    def total_unrealized_pnl_usd(self) -> float | None:
-        return self.total_unrealized_pnl_known_usd
-
-    @property
-    def cost_coverage_ratio(self) -> float:
-        return self.pnl_value_coverage_ratio
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "total_portfolio_value_usd": self.total_portfolio_value_usd,
             "cost_known_current_value_usd": self.cost_known_current_value_usd,
             "cost_known_cost_basis_usd": self.cost_known_cost_basis_usd,
             "total_unrealized_pnl_known_usd": self.total_unrealized_pnl_known_usd,
-            "aggregate_unrealized_return_pct": self.aggregate_unrealized_return_pct,
+            "aggregate_unrealized_return": self.aggregate_unrealized_return,
             "pnl_value_coverage_ratio": self.pnl_value_coverage_ratio,
             "positions": [position.as_dict() for position in self.positions],
             "validation_notes": list(self.validation_notes),

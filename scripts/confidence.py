@@ -23,7 +23,6 @@ def build_output(data_dir: str | None = None) -> dict:
     history = build_history_context()
     decision = history.get("latest_decision") or {}
     return {
-        "policy_version": policy.policy_version,
         "policy_hash": policy.canonical_hash,
         "history": {
             "performance_status": history.get("performance_status"),
@@ -47,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json or args.explain:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False))
     else:
-        print(f"policy v{result['policy_version']} confidence status: {result['status']}")
+        print(f"confidence status: {result['status']}")
     return 0
 
 

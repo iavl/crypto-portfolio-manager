@@ -427,7 +427,6 @@ def _logical_model(spec: ModelSpec) -> str:
 class ModelRouting:
     """Validated model routing profiles."""
 
-    routing_policy_version: int
     luna_policy: str = "LUNA_MAX_ONLY"
     sol_thresholds: Mapping[str, float] = field(default_factory=dict)
     runtime: str = "AUTO"
@@ -440,12 +439,6 @@ class ModelRouting:
     _stage_models: Mapping[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.routing_policy_version, bool)
-            or not isinstance(self.routing_policy_version, int)
-            or self.routing_policy_version != 2
-        ):
-            raise RoutingError("routing_policy_version must be 2")
         policy = _text(self.luna_policy, "luna_policy").upper()
         if policy != "LUNA_MAX_ONLY":
             raise RoutingError("luna_policy must be LUNA_MAX_ONLY")
@@ -533,7 +526,6 @@ class ModelRouting:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "routing_policy_version": 2,
             "runtime": self.runtime,
             "default_profile": self.default_profile,
             "luna_policy": self.luna_policy,
@@ -580,7 +572,6 @@ def validate_model_routing(value: Mapping[str, Any] | ModelRouting) -> ModelRout
     if not isinstance(value, Mapping):
         raise RoutingError("model routing must be an object")
     allowed = {
-        "routing_policy_version",
         "runtime",
         "default_profile",
         "luna_policy",
@@ -594,14 +585,11 @@ def validate_model_routing(value: Mapping[str, Any] | ModelRouting) -> ModelRout
     unknown = set(value) - allowed
     if unknown:
         raise RoutingError(f"model routing contains unknown fields: {', '.join(sorted(unknown))}")
-    required = {"routing_policy_version", "runtime", "default_profile", "luna_policy", "models", "profiles"}
+    required = {"runtime", "default_profile", "luna_policy", "models", "profiles"}
     missing = required - set(value)
     if missing:
         raise RoutingError(f"model routing is missing fields: {', '.join(sorted(missing))}")
-    if value["routing_policy_version"] != 2:
-        raise RoutingError("routing_policy_version must be 2 for v2 routing")
     return ModelRouting(
-        routing_policy_version=2,
         runtime=value["runtime"],
         default_profile=value["default_profile"],
         luna_policy=value["luna_policy"],
@@ -657,7 +645,6 @@ def _merge_mapping(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict
 
 def _validate_override(value: Mapping[str, Any], source: Path) -> None:
     allowed = {
-        "routing_policy_version",
         "runtime",
         "default_profile",
         "luna_policy",
@@ -1001,7 +988,6 @@ def routing_metadata(
     if routing is None and isinstance(stages_used, ModelRouting):
         resolved = stages_used
     elif routing is None and isinstance(stages_used, Mapping) and {
-        "routing_policy_version",
         "models",
         "profiles",
     }.issubset(stages_used):
@@ -1072,7 +1058,6 @@ def routing_metadata(
         routes[name] = route
         logical_used[name] = _logical_model(resolved.model_spec(route.requested_preset))
     return {
-        "routing_policy_version": resolved.routing_policy_version,
         "profile": resolved.profile,
         "runtime": (runtime_capabilities.runtime if runtime_capabilities else resolved.runtime),
         "config_hash": resolved.config_hash,

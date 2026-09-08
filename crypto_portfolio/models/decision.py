@@ -45,7 +45,6 @@ def _weights(value: Mapping[str, Any], field: str, *, require_sum: bool = True) 
 class Decision:
     timestamp: str
     market_regime: str
-    policy_version: int
     current_weights: Mapping[str, float]
     target_weights: Mapping[str, float]
     actions: tuple[Any, ...] = ()
@@ -76,8 +75,6 @@ class Decision:
         object.__setattr__(self, "market_regime", self.market_regime.upper())
         if self.market_regime not in _REGIMES:
             raise ValueError(f"market_regime must be one of {sorted(_REGIMES)}")
-        if isinstance(self.policy_version, bool) or not isinstance(self.policy_version, int) or self.policy_version not in {3, 4}:
-            raise ValueError("policy_version must be 3 or 4")
         object.__setattr__(self, "current_weights", _weights(self.current_weights, "current_weights"))
         object.__setattr__(self, "target_weights", _weights(self.target_weights, "target_weights"))
         if not self.current_weights or not self.target_weights:
@@ -203,8 +200,6 @@ class Decision:
             if not isinstance(self.resolved_policy, Mapping):
                 raise ValueError("resolved_policy must be an object or null")
             object.__setattr__(self, "resolved_policy", dict(self.resolved_policy))
-            if self.resolved_policy.get("policy_version") != self.policy_version:
-                raise ValueError("resolved_policy policy_version must match decision policy_version")
             if self.policy_hash is not None and policy_hash(self.resolved_policy) != self.policy_hash:
                 raise ValueError("policy_hash does not match resolved_policy")
 
@@ -257,9 +252,6 @@ class Decision:
             metadata = dict(self.routing_metadata)
             if contains_private_reasoning(metadata):
                 raise ValueError("routing_metadata must not contain private reasoning")
-            routing_version = metadata.get("routing_policy_version")
-            if isinstance(routing_version, bool) or not isinstance(routing_version, int) or routing_version != 2:
-                raise ValueError("routing_metadata.routing_policy_version must be 2")
             stages_used = metadata.get("stages_used")
             if stages_used is not None:
                 if not isinstance(stages_used, Mapping):
@@ -319,7 +311,18 @@ class Decision:
         if not isinstance(value, Mapping):
             raise ValueError("decision must be an object")
         data = dict(value)
-        required = ("timestamp", "market_regime", "policy_version", "current_weights", "target_weights")
+        allowed = {
+            "timestamp", "market_regime", "current_weights", "target_weights", "actions",
+            "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "constraints_applied",
+            "config", "policy_hash", "resolved_policy", "review_type", "decision_id",
+            "based_on_snapshot_id", "execution_plans", "routing_metadata", "market_overlays",
+            "regime_confidence", "decision_confidence", "nav_performance",
+            "benchmark_performance", "event_scan_summary",
+        }
+        unknown = set(data) - allowed
+        if unknown:
+            raise ValueError("decision contains unknown fields: " + ", ".join(sorted(unknown)))
+        required = ("timestamp", "market_regime", "current_weights", "target_weights")
         missing = [field for field in required if field not in data]
         if missing:
             raise ValueError(f"decision is missing fields: {', '.join(missing)}")
@@ -335,7 +338,6 @@ class Decision:
         return cls(
             timestamp=data["timestamp"],
             market_regime=data["market_regime"],
-            policy_version=data["policy_version"],
             current_weights=data["current_weights"],
             target_weights=data["target_weights"],
             actions=tuple(data.get("actions", ())),
@@ -364,7 +366,6 @@ class Decision:
         evidence = [item.as_dict() for item in self.evidence]
         result = {
             "timestamp": self.timestamp,
-            "policy_version": self.policy_version,
             "market_regime": self.market_regime,
             "current_weights": dict(self.current_weights),
             "target_weights": dict(self.target_weights),

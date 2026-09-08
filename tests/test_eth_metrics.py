@@ -66,7 +66,7 @@ class EthMetricsTests(unittest.TestCase):
         self.assertNotIn("eth.l2.rent_paid_30d_usd", aave)
         self.assertNotIn("relative.return_vs_btc_365d", {item.metric_key for item in plan.for_asset("BTC")})
 
-    def test_relative_strength_v3_includes_365d(self):
+    def test_relative_strength_includes_365d(self):
         asset = [100.0 * 1.001**index for index in range(366)]
         btc = [100.0] * 366
         result = calculate_relative_strength(asset, btc, symbol="ETH")

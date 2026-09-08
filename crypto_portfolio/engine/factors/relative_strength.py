@@ -214,7 +214,7 @@ def _rules(policy: Policy) -> Mapping[str, Any]:
 
 
 
-def _v2_horizon_score(value: float | None, neutral: float, saturation: float) -> float | None:
+def _horizon_score(value: float | None, neutral: float, saturation: float) -> float | None:
     if value is None:
         return None
     if abs(value) <= neutral:
@@ -308,7 +308,7 @@ def calculate_relative_strength(
     if available:
         total_weight = sum(float(weights[f"{days}d"]) for days in available)
         scores = {
-            days: _v2_horizon_score(adjusted[days], neutral, saturation) for days in available
+            days: _horizon_score(adjusted[days], neutral, saturation) for days in available
         }
         weighted_score = sum(scores[days] * float(weights[f"{days}d"]) for days in available) / total_weight
         signal = sum(adjusted[days] * float(weights[f"{days}d"]) for days in available) / total_weight

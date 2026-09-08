@@ -70,7 +70,6 @@ class ScoreResult:
     factor_reliability: Mapping[str, float] = None
     factor_availability: Mapping[str, str] = None
     not_applicable_factors: tuple[str, ...] = ()
-    scoring_model_version: int = 2
     factor_data_confidence: ConfidenceResult | None = None
     data_confidence_score: float | None = None
     data_confidence_band: str | None = None
@@ -93,7 +92,6 @@ class ScoreResult:
             "confidence_adjustment": self.confidence_adjustment,
             "coverage": self.coverage,
             "critical_data_complete": self.critical_data_complete,
-            "scoring_model_version": self.scoring_model_version,
             "factor_data_confidence": self.factor_data_confidence.as_dict() if self.factor_data_confidence else None,
             "data_confidence_score": self.data_confidence_score,
             "data_confidence_band": self.data_confidence_band,
@@ -215,7 +213,7 @@ def _weight_mapping(value: Mapping[str, float]) -> dict[str, float]:
         if factor not in SCORING_FACTORS:
             raise ValueError(f"unknown scoring factor {factor}")
         if factor == "event_risk":
-            raise ValueError("event_risk is not a v2 scoring factor")
+            raise ValueError("event_risk is not a base scoring factor")
         result[factor] = weight
     if not result or sum(result.values()) <= 0:
         raise ValueError("scoring weights must sum to > 0")
@@ -239,7 +237,7 @@ def _confidence_for_coverage(
 
 
 
-def _score_factors_v2(
+def _score_factors(
     factor_scores: Mapping[str, Any],
     weights: Mapping[str, float],
     *,
@@ -251,7 +249,7 @@ def _score_factors_v2(
 ) -> ScoreResult:
     resolved_weights = _weight_mapping(weights)
     if not math.isclose(sum(resolved_weights.values()), 1.0, rel_tol=0, abs_tol=1e-9):
-        raise ValueError("v2 scoring weights must sum to 1")
+        raise ValueError("scoring weights must sum to 1")
     unknown = sorted(set(factor_scores) - set(resolved_weights))
     if unknown:
         raise ValueError(f"unknown scoring factor(s): {', '.join(unknown)}")
@@ -314,7 +312,6 @@ def _score_factors_v2(
     raw_data_score = sum(item.score * item.weight for item in data_dimensions.values())
     data_score = min(raw_data_score, 0.59) if confidence_caps else raw_data_score
     factor_data_confidence = ConfidenceResult(
-        model_version=1,
         raw_score=raw_data_score,
         score=data_score,
         band=confidence_band(data_score),
@@ -338,7 +335,6 @@ def _score_factors_v2(
         coverage=coverage,
         critical_data_complete=critical_data_complete,
         profile_name=profile_name,
-        scoring_model_version=2,
         factor_data_confidence=factor_data_confidence,
         data_confidence_score=data_score,
         data_confidence_band=confidence_band(data_score),
@@ -370,7 +366,7 @@ def score_factors(
     else:
         profile_name = "custom"
         raw_weights = weights
-    return _score_factors_v2(
+    return _score_factors(
         factors,
         raw_weights,
         confidence=confidence,
@@ -410,7 +406,6 @@ def score_assessment(
         risk_tier=assessment.risk_tier,
         event_risk=assessment.event_risk,
         scoring_profile_name=result.profile_name,
-        scoring_model_version=result.scoring_model_version,
         score_coverage=result.coverage,
         confidence_score=result.data_confidence_score,
         confidence_explanation=result.factor_data_confidence.as_dict() if result.factor_data_confidence else None,

@@ -149,7 +149,6 @@ class MetricAvailabilityTests(unittest.TestCase):
                 raise ProviderUnavailable("premium provider unavailable")
 
         config = {
-            "version": 1,
             "providers": {
                 "coinmetrics_community": {"enabled": True},
                 "coinmetrics_pro": {"enabled": True},

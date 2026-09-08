@@ -93,7 +93,6 @@ class FailingProvider:
 def chain_config():
     config = load_provider_config()
     return {
-        "version": config["version"],
         "providers": {"chain_liveness": {"enabled": True}},
         "cache_ttl_seconds": {"default": 3600, "chain_liveness": 300},
         "network": config["network"],

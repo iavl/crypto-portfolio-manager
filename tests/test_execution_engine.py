@@ -146,7 +146,7 @@ class ExecutionEngineTests(unittest.TestCase):
             ExecutionTranche(1, 1, 10, 90, 100, 95, 10 / 95, structural_sources=("MA50", "MA50"))
         tranche = ExecutionTranche(1, 1, 10, 90, 100, 95, 10 / 95, structural_sources=zone.sources)
         with self.assertRaises(ValueError):
-            ExecutionPlan(1, "ETH", "INCREASE", 10, 11, 0, 110, "PULLBACK", "HIGH", (tranche,))
+            ExecutionPlan("ETH", "INCREASE", 10, 11, 0, 110, "PULLBACK", "HIGH", (tranche,))
         plan = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
         schema = json.loads((Path(__file__).parents[1] / "schemas" / "execution-plan.schema.json").read_text())
         errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(plan.as_dict()))
@@ -178,7 +178,6 @@ class ExecutionEngineTests(unittest.TestCase):
         decision = Decision(
             "2026-01-01T00:00:00Z",
             "NORMAL",
-            3,
             {"BTC": 1.0},
             {"BTC": 0.9, "USDT": 0.1},
             actions=(action,),
@@ -201,24 +200,24 @@ class ExecutionEngineTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
                 execution_plans={"ETH": wait_plan("ETH", 500)},
             )
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
                 execution_plans={"ETH": wait_plan("ETH", 1000)},
             )
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
                 execution_plans={"SOL": wait_plan("SOL", 1000)},
             )
         plan = wait_plan("ETH", 1000)
         accepted = Decision(
-            "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
+            "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
             actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
             execution_plans={"ETH": plan},
             evidence=(build_execution_evidence(self.snapshot, plan),),
@@ -254,9 +253,9 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_plan_model_rejects_mixed_and_invalid_invalidation(self):
         with self.assertRaises(ValueError):
-            ExecutionPlan(1, "ETH", "WAIT", 0, 0, 0, 100, "MIXED", "LOW")
+            ExecutionPlan("ETH", "WAIT", 0, 0, 0, 100, "MIXED", "LOW")
         with self.assertRaises(ValueError):
-            ExecutionPlan(2, "ETH", "WAIT", 0, 0, 0, 100, "WAIT", "LOW")
+            ExecutionPlan("ETH", "WAIT", 0, 0, 0, 100, "WAIT", "LOW")
         with self.assertRaises(ValueError):
             Invalidation("BAD", "review", 100, review_only=False)
         plan = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
@@ -264,20 +263,28 @@ class ExecutionEngineTests(unittest.TestCase):
         raw["invalidation"] = {"kind": "BAD", "trigger": "review", "reference_price": 100, "review_only": False, "automatic_order": False}
         with self.assertRaises(ValueError):
             ExecutionPlan.from_mapping(raw)
+        current = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH").as_dict()
+        current["execution_plan_version"] = 2
+        with self.assertRaises(ValueError):
+            ExecutionPlan.from_mapping(current)
+        current = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH").as_dict()
+        current["technical_summary"]["summary_version"] = 1
+        with self.assertRaises(ValueError):
+            ExecutionPlan.from_mapping(current)
 
     def test_decision_requires_matching_execution_technical_evidence(self):
         plan = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
         action = RebalanceAction("ETH", "INCREASE", 0, 0.5, 2000, "NORMAL")
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(action,), execution_plans={"ETH": plan},
             )
         evidence = build_execution_evidence(self.snapshot, plan)
         broken = replace(evidence, value={"ohlcv_hash": plan.ohlcv_hash, "technical_summary": {}})
         with self.assertRaises(ValueError):
             Decision(
-                "2026-01-01T00:00:00Z", "NORMAL", 3, {"BTC": 1.0}, {"BTC": 1.0},
+                "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
                 actions=(action,), evidence=(broken,), execution_plans={"ETH": plan},
             )
 

@@ -130,7 +130,7 @@ values. Do not mix percentage points and fractions without conversion.
 
 ## Scoring, regimes, and allocation
 
-The v2 base score covers exactly trend, valuation, fundamentals, on-chain
+The base score covers exactly trend, valuation, fundamentals, on-chain
 activity, capital flows, and BTC-relative strength. Event/security risk is a
 separate evidence-backed gate; positioning and BTC-cycle context are overlays.
 The score is an input to portfolio construction, never a direct
@@ -138,7 +138,7 @@ The score is an input to portfolio construction, never a direct
 conditions, risk tier, concentration, BTC opportunity cost, drawdown capacity,
 stable constraints, and rebalance thresholds.
 
-Policy v3 adds ETH-specific monetary, staking, L2/DA, realized-valuation, and
+The current policy adds ETH-specific monetary, staking, L2/DA, realized-valuation, and
 normalized ETF-flow evidence without changing the six top-level factor weights.
 ETH core classification is not an allocation entitlement and must not restore
 the old `core_min_score` score floor. The configurable 70/30 BTC/ETH core-sleeve
@@ -151,7 +151,7 @@ DA value capture is demonstrated. Monetary, staking, burn, supply, ratio, and
 allocation arithmetic is Python-owned. Do not scrape unstable dashboards for
 deterministic structural-risk values; structural risk remains non-scoring.
 
-For v2, `MISSING` factors remain at their configured weight and shrink their
+In the current scoring model, `MISSING` factors remain at their configured weight and shrink their
 raw score toward neutral 50 according to deterministic reliability; do not
 renormalize missing factors. `NOT_APPLICABLE` is defined by a zero-weight
 profile factor. Only the latest policy and data contracts are supported.
@@ -239,11 +239,10 @@ score. Persist complete Evidence records in decisions; derive `evidence_ids`.
 Every factor evidence ID must exist in that decision and match its asset and
 factor. Dangling or duplicate references are invalid.
 
-Persist `snapshot_id`, `decision_id`, `based_on_snapshot_id` when applicable,
-policy version, and a deterministic canonical policy SHA-256 hash. Persist the
-resolved policy (or another exact historical-policy artifact) so a decision is
-reproducible after config files change. Do not trust a persisted state digest
-or policy version without validating it against the resolved policy.
+Persist `snapshot_id`, `decision_id`, and `based_on_snapshot_id` when applicable,
+plus a deterministic canonical policy SHA-256 hash and the exact resolved policy.
+This preserves reproducibility after config files change; always validate the
+hash against the resolved policy.
 
 Persisted timestamps are timezone-aware RFC3339 normalized to UTC and compared
 as datetimes, never raw strings. Date-only input must be rejected at domain boundaries; ambiguous timestamps must not be persisted.
@@ -359,8 +358,8 @@ is surfaced for confirmation. Never guess through uncertainty that could change
 financial behavior or persistent data semantics.
 
 Keep only current contracts; do not add backward-compatibility branches or
-legacy replay. When explicitly asked to upgrade local data, preserve verifiable
-facts in the latest format and remove records that cannot be reliably upgraded.
+legacy replay. Breaking internal changes may require regenerating local state;
+never silently upgrade or rewrite old records.
 Breaking changes must identify affected schemas/history/CLI/Skill behavior. Invalid financial inputs generally fail clearly: NaN,
 Infinity, negative quantities/values, unknown policy fields, overlapping asset
 groups, invalid percentages, and duplicate symbols without explicit semantics.
@@ -369,6 +368,23 @@ The CLI is a thin orchestrator over models/engine/providers/state. `SKILL.md`
 orchestrates workflow and points to canonical references; it is not a second
 portfolio engine. Keep README installation/overview, references methodology,
 config policy, and this file coding constraints concise and non-duplicative.
+
+## Current-contract-only development
+
+This repository intentionally supports only the current internal contract.
+Do not add:
+
+- backward-compatible schema readers;
+- internal version dispatch;
+- deprecated field aliases;
+- legacy field adapters;
+- migration shims or migrations;
+- dual old/new serialization.
+
+When an internal contract changes, update all producers, consumers, schemas,
+tests, fixtures, and docs in the same change. Old generated runtime state may
+be regenerated instead of migrated, and application code must not silently
+delete user state.
 
 ## Tests and definition of done
 

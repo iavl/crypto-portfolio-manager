@@ -96,7 +96,7 @@ def _number(value: Any) -> float | None:
 
 
 def _context_rules(policy: Policy) -> Mapping[str, float]:
-    # Sign classification is regime context; v2 scoring uses normalized ratios.
+    # Sign classification is regime context; scoring uses normalized ratios.
     return {
         **_CONTEXT_THRESHOLDS,
         **(
@@ -242,7 +242,7 @@ def _normalized_ratios(value: Any) -> dict[str, float | None]:
     return {"30d": None}
 
 
-def _v2_score(value: float, neutral: float, strong: float) -> float:
+def _score(value: float, neutral: float, strong: float) -> float:
     if abs(value) <= neutral:
         return 50.0
     span = strong - neutral
@@ -349,7 +349,7 @@ def calculate_flow_factor(
     if available:
         total = sum(_HORIZON_WEIGHTS[key] for key in available)
         normalized = sum(float(ratio) * _HORIZON_WEIGHTS[key] for key, ratio in available.items()) / total
-        score = _v2_score(normalized, neutral, strong)
+        score = _score(normalized, neutral, strong)
         state = "POSITIVE" if normalized > neutral else "NEGATIVE" if normalized < -neutral else "NEUTRAL"
         coverage = total / sum(_HORIZON_WEIGHTS.values())
         confidence = "HIGH" if coverage == 1 else "MEDIUM" if coverage >= 0.6 else "LOW"

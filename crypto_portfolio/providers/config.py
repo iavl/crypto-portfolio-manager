@@ -16,6 +16,7 @@ _SECRET_FIELDS = {
     "api_key", "api_secret", "authorization", "password", "token",
     "x_soso_api_key", "x_cg_demo_api_key", "coingecko_api_key",
 }
+_CONFIG_FIELDS = {"providers", "cache_ttl_seconds", "network", "fallback"}
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -40,9 +41,9 @@ def _merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, An
 
 def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(config)
-    version = result.get("version", 1)
-    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
-        raise ValueError("provider config version must be 1")
+    unknown = set(result) - _CONFIG_FIELDS
+    if unknown:
+        raise ValueError("provider config contains unknown fields: " + ", ".join(sorted(unknown)))
     providers = result.get("providers", {})
     if not isinstance(providers, Mapping):
         raise ValueError("provider config providers must be an object")
@@ -64,7 +65,6 @@ def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
         if any(str(key).strip().lower().replace("-", "_") in _SECRET_FIELDS for key in settings):
             raise ValueError(f"provider {raw_name} config must not contain secret values")
         normalized_providers[raw_name.strip().lower()] = settings
-    result["version"] = version
     result["providers"] = normalized_providers
 
     ttl = result.get("cache_ttl_seconds", {})

@@ -3,13 +3,12 @@
   "$id": "https://example.local/crypto-portfolio-manager/decision.schema.json",
   "title": "Persisted Crypto Portfolio Decision",
   "type": "object",
-  "required": ["decision_id", "timestamp", "market_regime", "policy_version", "policy_hash", "resolved_policy", "current_weights", "target_weights", "actions", "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "review_type"],
+  "required": ["decision_id", "timestamp", "market_regime", "policy_hash", "resolved_policy", "current_weights", "target_weights", "actions", "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "review_type"],
   "properties": {
     "decision_id": {"type": "string", "minLength": 1},
     "based_on_snapshot_id": {"type": ["string", "null"], "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
     "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "policy_version": {"enum": [3, 4]},
     "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "resolved_policy": {"type": "object"},
     "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
@@ -70,7 +69,6 @@
         "risk_tier": {"type": "string", "minLength": 1},
         "event_risk": {"oneOf": [{"$ref": "#/$defs/eventRisk"}, {"type": "null"}]},
         "scoring_profile_name": {"type": ["string", "null"]},
-        "scoring_model_version": {"enum": [2, null]},
         "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "confidence_explanation": {"type": ["object", "null"]},
@@ -152,9 +150,8 @@
     },
     "executionPlan": {
       "type": "object",
-      "required": ["execution_plan_version", "symbol", "action", "approved_amount_usd", "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode", "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash"],
+      "required": ["symbol", "action", "approved_amount_usd", "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode", "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash", "technical_summary"],
       "properties": {
-        "execution_plan_version": {"const": 2},
         "symbol": {"type": "string", "minLength": 1},
         "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
         "approved_amount_usd": {"type": "number", "minimum": 0},
@@ -176,13 +173,7 @@
         ,"effective_deployment_factor": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
         ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {"properties": {"execution_plan_version": {"minimum": 2}}, "required": ["execution_plan_version"]},
-          "then": {"required": ["technical_summary"]}
-        }
-      ]
+      "additionalProperties": false
     },
     "executionTranche": {
       "type": "object",
@@ -266,10 +257,9 @@
       "additionalProperties": false
     },
     "technicalSummary": {
-      "type": ["object", "null"],
-      "required": ["summary_version", "symbol", "spot_price", "spot_observed_at", "spot_source", "data_confidence", "setup_quality", "selected_zones", "ohlcv_hash"],
+      "type": "object",
+      "required": ["symbol", "spot_price", "spot_observed_at", "spot_source", "data_confidence", "setup_quality", "selected_zones", "ohlcv_hash"],
       "properties": {
-        "summary_version": {"const": 1},
         "symbol": {"type": "string", "minLength": 1},
         "spot_price": {"type": "number", "exclusiveMinimum": 0},
         "spot_observed_at": {"type": "string", "format": "date-time"},

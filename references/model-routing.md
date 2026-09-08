@@ -1,6 +1,6 @@
 # Model Routing
 
-`config/model-routing.json` is the v2 repository default. It names model
+`config/model-routing.json` is the current repository default. It names model
 presets (`luna_max`, `terra_medium`, `sol_high`, and so on), reasoning effort,
 profiles, and fallback policy. The built-in default is `balanced`; available
 profiles are `balanced`, `efficient`, `quality`, and `session_compatible`.

@@ -3,9 +3,8 @@
   "$id": "https://example.local/crypto-portfolio-manager/data-providers.schema.json",
   "title": "Data provider configuration",
   "type": "object",
-  "required": ["version", "providers", "cache_ttl_seconds", "network", "fallback"],
+  "required": ["providers", "cache_ttl_seconds", "network", "fallback"],
   "properties": {
-    "version": {"const": 1},
     "providers": {"type": "object", "additionalProperties": {"type": "object"}},
     "cache_ttl_seconds": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
     "network": {

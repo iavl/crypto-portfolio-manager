@@ -10,7 +10,7 @@ from ..models.time import normalize_timestamp, parse_timestamp
 from .base import ProviderRequest
 
 
-BASIS_METHODOLOGY = "delivery_mark_index_act365_v1"
+BASIS_METHODOLOGY = "delivery_mark_index_act365"
 
 
 def current_delivery_basis(metadata: Mapping[str, Any] | None, as_of: str | datetime) -> bool:

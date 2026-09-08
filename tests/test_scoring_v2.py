@@ -18,12 +18,12 @@ from crypto_portfolio.models.market import Candle, OHLCVSeries
 from crypto_portfolio.models.policy import load_policy
 
 
-class ScoringV2Tests(unittest.TestCase):
+class ScoringTests(unittest.TestCase):
     @staticmethod
-    def v2_policy():
+    def scoring_policy():
         return load_policy()
 
-    def test_drawdown_has_no_v2_trend_score_authority(self):
+    def test_drawdown_has_no_trend_score_authority(self):
         from crypto_portfolio.engine.factors.trend import calculate_trend_factor
         common = dict(symbol="ETH", current_spot_price=100, ma20=100, ma50=100, ma100=100, ma200=100,
                       return_30d=0, return_90d=0, return_180d=0, support_zones=(), volume_state="UNKNOWN",
@@ -63,7 +63,7 @@ class ScoringV2Tests(unittest.TestCase):
                 timestamp = (datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(hours=hour)).isoformat()
                 candles.append(Candle(timestamp, price, price, price, price, 1))
             return OHLCVSeries(symbol, "1D" if hours == 24 else "4H", tuple(candles))
-        policy = self.v2_policy()
+        policy = self.scoring_policy()
         daily = calculate_relative_strength(series("ETH", 24), series("BTC", 24), symbol="ETH", policy=policy)
         intraday = calculate_relative_strength(series("ETH", 4), series("BTC", 4), symbol="ETH", policy=policy)
         self.assertEqual(daily.risk_adjusted_excess_returns, intraday.risk_adjusted_excess_returns)
@@ -110,7 +110,7 @@ class ScoringV2Tests(unittest.TestCase):
             self.assertEqual(scores, sorted(scores, reverse=raw < 50))
         scores = [calculate_flow_factor({"normalized_flow_ratio": value / 100000}).score for value in range(-1100, 1101)]
         self.assertEqual(scores, sorted(scores))
-    def test_v2_weights_are_validated_not_rescaled(self):
+    def test_weights_are_validated_not_rescaled(self):
         for weights in ({"trend": 2.0}, {"trend": 0.2}):
             with self.assertRaisesRegex(ValueError, "sum to 1"):
                 score_factors({"trend": 80}, weights)
@@ -182,7 +182,7 @@ class ScoringV2Tests(unittest.TestCase):
         self.assertEqual(result.state, "POSITIVE")
         self.assertEqual(result.score, 100.0)
 
-    def test_relative_strength_v2_retains_raw_and_normalized_values(self):
+    def test_relative_strength_retains_raw_and_normalized_values(self):
         btc = [100.0] * 181
         asset = [100.0 * 1.001**index for index in range(181)]
         result = calculate_relative_strength(asset, btc, symbol="ETH")

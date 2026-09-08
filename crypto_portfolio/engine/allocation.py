@@ -134,7 +134,7 @@ def _core_relative_multiplier(value: Any, policy: Policy) -> float:
     return float(policy.core_allocation["relative_multipliers"][state])
 
 
-def _allocate_core_v3(
+def _allocate_core(
     policy: Policy,
     budget: float,
     assessments: Mapping[str, Any],
@@ -473,7 +473,7 @@ def build_target_allocation(
     }
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight
-    core_weights, residual_core, core_reasons = _allocate_core_v3(
+    core_weights, residual_core, core_reasons = _allocate_core(
         resolved,
         core_budget,
         core_assessments,

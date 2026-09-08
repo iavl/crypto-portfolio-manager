@@ -33,7 +33,6 @@ class StateContextTests(unittest.TestCase):
                 Decision(
                     "2026-01-01T00:00:00Z",
                     "NORMAL",
-                    3,
                     {"BTC": 0.5, "USDT": 0.5},
                     {"BTC": 0.6, "USDT": 0.4},
                     review_type="FULL_REVIEW",

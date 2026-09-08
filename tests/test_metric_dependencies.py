@@ -26,7 +26,6 @@ NOW = "2026-09-06T00:00:00Z"
 
 def _config():
     return {
-        "version": 1,
         "providers": {"binance": {"enabled": True}},
         "cache_ttl_seconds": {"default": 3600, "spot": 600},
         "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},

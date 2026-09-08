@@ -399,6 +399,6 @@ The ownership boundaries are:
 | [`HOW_IT_WORKS.md`](../docs/HOW_IT_WORKS.md) | Software ownership, data flow, persistence, and deterministic/semantic boundaries. |
 | [Data Sources](data-sources.md) / [Data Providers](data-providers.md) | Evidence methodology and operational acquisition boundaries. |
 
-The active contract is policy v4 with scoring v2, routing v2, and execution
-plans v2. Historical policy v3 records remain readable when their embedded
-resolved policy is valid; they do not silently become current policy behavior.
+The repository supports only the current internal contract. Breaking changes
+may require manually regenerating local generated state; resolved policy and
+policy hash preserve reproducibility for current-format decisions.

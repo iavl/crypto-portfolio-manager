@@ -283,7 +283,7 @@ Volume Profile 使用 completed `1H`/`4H` 数据优先，按
 `(high + low + close) / 3` 分配成交量，输出 `POC`、`VAL`、`VAH`、HVN 和
 LVN。它是历史成交量集中度代理，不是持仓者精确成本；LVN 只能作为背景。
 
-v1 只生成 `PULLBACK` 计划。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。
+当前执行计划只生成 `PULLBACK` 计划。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。
 `planned_amount_usd` 是建议分配额度，不代表已经成交。
 
 ## 12. 历史数据与隐私
@@ -380,13 +380,17 @@ python3 -m compileall crypto_portfolio scripts
 出现缺失、过期、冲突或来源不可用时，报告必须保留状态和对 confidence、
 交易资格及最终 Action 的影响。未知数据不会被默认为安全，也不会被填成零。
 
-## Confidence 与迁移检查
+## Confidence 与当前状态检查
 
 以下命令只读运行时目录，不抓取数据、不下单：
 
 ```bash
 python3 scripts/confidence.py --data-dir "$CRYPTO_PORTFOLIO_DATA_DIR" --json
-python3 scripts/migrate_confidence.py --check --data-dir "$CRYPTO_PORTFOLIO_DATA_DIR"
 ```
 
-迁移 `--dry-run` 不改原始 JSONL；`--write` 只追加版本化 sidecar，未解决的现金流仍保持未知。
+仓库只支持当前运行时数据契约。破坏性契约变更后的旧生成状态不受支持，必须手动
+备份后重新生成；系统不会自动迁移或删除用户状态。例如：
+
+```bash
+mv "$CRYPTO_PORTFOLIO_DATA_DIR" "${CRYPTO_PORTFOLIO_DATA_DIR}.backup"
+```

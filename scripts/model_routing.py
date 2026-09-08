@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if args.validate:
-        print(f"valid: routing policy v{routing.routing_policy_version}")
+        print("valid: current routing policy")
     if args.list_profiles:
         for name in routing.profiles:
             marker = " (active)" if name == routing.profile else ""

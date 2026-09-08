@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "providers": {
     "binance": {"enabled": true},
     "bybit": {"enabled": true},

@@ -455,31 +455,44 @@ class DocumentationTests(unittest.TestCase):
                 with self.subTest(path=path.relative_to(ROOT), target=target):
                     self.assertTrue((path.parent / target).is_file())
 
-    def test_active_policy_version_and_canonical_factor_contracts(self):
-        policy = json.loads((ROOT / "config" / "policy.json").read_text(encoding="utf-8"))
-        active_version = int(policy["policy_version"])
-        primary_paths = (
+    def test_internal_contract_has_no_removed_markers(self):
+        paths = (
+            ROOT / "crypto_portfolio",
+            ROOT / "config",
+            ROOT / "schemas",
+            ROOT / "docs",
+            ROOT / "references",
             ROOT / "README.md",
             ROOT / "README.zh-CN.md",
             ROOT / "SKILL.md",
-            ROOT / "references" / "investment-strategy.md",
-            ROOT / "references" / "scoring-model.md",
-            ROOT / "references" / "risk-model.md",
-            ROOT / "references" / "decision-rules.md",
-            ROOT / "docs" / "HOW_IT_WORKS.md",
+            ROOT / "AGENTS.md",
         )
-        version_patterns = (
-            re.compile(r"\bactive contracts use policy v(\d+)\b", re.IGNORECASE),
-            re.compile(r"\b(?:the )?active contract is policy v(\d+)\b", re.IGNORECASE),
-            re.compile(r"\bactive policy version\s+v?(\d+)\b", re.IGNORECASE),
-            re.compile(r"当前写入契约使用政策\s*v?(\d+)", re.IGNORECASE),
+        forbidden = (
+            "policy_version",
+            "routing_policy_version",
+            "scoring_model_version",
+            "execution_plan_version",
+            "summary_version",
+            "historical_policy",
+            "_score_factors_v2",
+            "_RELATIVE_RULE_FIELDS_V2",
+            "_FLOW_RULE_FIELDS_V2",
+            "model_version",
+            "capped_score",
         )
-        for path in primary_paths:
+        files = [
+            path if path.is_file() else item
+            for path in paths
+            for item in ((path,) if path.is_file() else path.rglob("*"))
+            if item.is_file()
+        ]
+        for path in files:
+            if path.suffix not in {".py", ".json", ".jsonl", ".md"}:
+                continue
             content = path.read_text(encoding="utf-8")
-            for pattern in version_patterns:
-                for match in pattern.finditer(content):
-                    with self.subTest(path=path.relative_to(ROOT), version=match.group(1)):
-                        self.assertEqual(int(match.group(1)), active_version)
+            for token in forbidden:
+                with self.subTest(path=path.relative_to(ROOT), token=token):
+                    self.assertNotIn(token, content)
 
         factors = (
             "trend",

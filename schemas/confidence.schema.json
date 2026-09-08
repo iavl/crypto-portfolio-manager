@@ -3,12 +3,10 @@
   "$id": "https://example.local/crypto-portfolio-manager/confidence.schema.json",
   "title": "Bounded confidence result",
   "type": "object",
-  "required": ["model_version", "raw_score", "score", "band", "dimensions", "caps", "reasons", "evidence_ids", "status"],
+  "required": ["raw_score", "score", "band", "dimensions", "caps", "reasons", "evidence_ids", "status"],
   "properties": {
-    "model_version": {"type": "integer", "minimum": 1},
     "raw_score": {"type": "number", "minimum": 0, "maximum": 1},
     "score": {"type": "number", "minimum": 0, "maximum": 1},
-    "capped_score": {"type": "number", "minimum": 0, "maximum": 1},
     "band": {"enum": ["LOW", "MEDIUM", "HIGH"]},
     "dimensions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/dimension"}},
     "caps": {"type": "array", "items": {"$ref": "#/$defs/cap"}},
@@ -44,7 +42,6 @@
         "code": {"type": "string", "minLength": 1},
         "ceiling": {"type": "number", "minimum": 0, "maximum": 1},
         "applies_to": {"type": "string", "minLength": 1},
-        "scope": {"type": "string", "minLength": 1},
         "reason": {"type": "string"},
         "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       },

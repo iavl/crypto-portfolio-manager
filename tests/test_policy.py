@@ -9,7 +9,6 @@ from crypto_portfolio.models.policy import PolicyError, load_policy, policy_from
 class PolicyTests(unittest.TestCase):
     def test_canonical_policy_loads_and_normalizes(self):
         policy = load_policy()
-        self.assertEqual(policy.policy_version, 4)
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
         self.assertEqual(policy.excluded_symbols, ("LUNC",))
         self.assertTrue(policy.is_excluded(" lunc "))
@@ -24,6 +23,12 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.scoring_profile("BTC")["relative_strength_btc"], 0.0)
         self.assertEqual(policy.allocation["satellite_entry_score"], 67.0)
         self.assertEqual(policy.allocation["satellite_exit_score"], 60.0)
+
+    def test_removed_policy_version_field_is_rejected(self):
+        value = load_policy().as_dict()
+        value["policy_version"] = 4
+        with self.assertRaises(PolicyError):
+            policy_from_mapping(value)
 
     def test_policy_hash_is_canonical_and_changes_with_policy(self):
         policy = load_policy()
@@ -180,7 +185,7 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             policy_from_mapping(incomplete)
 
-    def test_v2_scoring_profiles_and_event_multipliers_are_strict(self):
+    def test_scoring_profiles_and_event_multipliers_are_strict(self):
         original = load_policy().as_dict()
         for mutate in (
             lambda data: data["scoring_profiles"]["default"].pop("trend"),

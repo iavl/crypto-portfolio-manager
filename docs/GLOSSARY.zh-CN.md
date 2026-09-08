@@ -6,7 +6,7 @@
 每一条都包含四部分：原词、通俗解释、在本项目中的具体含义，以及它可能怎样影响
 组合决策。
 
-本文解释当前写入的 policy v4、scoring v2、routing v2 和 execution plan v2；历史 policy v3 只用于可验证读取。
+本文解释当前内部契约；破坏性变更后的旧生成状态不受支持，需手动重新生成。
 代码标识保留原样，方便在报告、JSON、配置和源码中搜索。--、缺失数据和失败状态
 表示“未知或不可用”，不是可以随便填成零或安全的意思。
 
@@ -90,8 +90,8 @@
 | **POC** | 成交量控制点（Point of Control） | Volume Profile 中成交量最大的价格区间。 | 可作为结构参考，不能独立创建组合风险或交易。 |
 | **VAL / VAH** | 价值区间下沿/上沿 | Value Area Low / High，覆盖配置比例成交量的价格区间边界。 | 帮助描述结构区域，不是保证支撑或阻力。 |
 | **HVN / LVN** | 高量节点/低量节点 | High Volume Node / Low Volume Node，分别表示成交量集中或稀疏的价格节点。 | HVN 可作区域背景；LVN 只能作背景，不能单独决定动作。 |
-| **pullback** | 回撤后的回踩 | 上行或下行结构中的暂时回撤与重新测试。 | 当前执行计划 v1 只生成 PULLBACK 模式。 |
-| **breakout** | 突破 | 价格离开原有区间或关键结构。 | 当前 v1 对 BREAKOUT 返回 WAIT，避免机械追涨。 |
+| **pullback** | 回撤后的回踩 | 上行或下行结构中的暂时回撤与重新测试。 | 当前执行计划只生成 PULLBACK 模式。 |
+| **breakout** | 突破 | 价格离开原有区间或关键结构。 | 当前对 BREAKOUT 返回 WAIT，避免机械追涨。 |
 | **market cap** | 市值 | 当前价格乘以可计入流通供应量的估计值。 | 主要用于估值和相对规模比较；由 CoinGecko 等结构化来源提供。 |
 | **FDV** | 完全稀释估值（Fully Diluted Valuation） | 假设完整供应量都按当前价格计价的估值。 | 与 market cap 的比例只在经济上适用且输入新鲜时使用。 |
 | **FDV / market cap ratio** | FDV/市值比 | FDV 除以 market cap 的派生比例。 | 用于观察潜在稀释差异；由 Python 从同资产输入派生。 |

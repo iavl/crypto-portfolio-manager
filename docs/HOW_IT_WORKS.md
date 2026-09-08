@@ -111,6 +111,9 @@ snapshot 和 decision 是 append-only。状态变更写入独立 status event，
 旧 rationale。MetricObservation 保留成功的规范化观测；CollectionEvent 保留
 所有采集结果，包括失败和 skipped。
 
+仓库只支持当前内部运行时契约。破坏性变更后的不兼容生成状态必须手动重新生成，
+不会自动迁移或静默删除用户状态。
+
 现金流调整后的 NAV 使用 unitized NAV。一个 snapshot 附着的外部现金流被视为
 发生在该 snapshot valuation 之前。如果 material balance change 没有明确
 DEPOSIT/WITHDRAWAL/NONE 分类，NAV 和 benchmark 表现必须标记为 `PROVISIONAL`。
@@ -234,7 +237,7 @@ Python 从 MetricObservation 构建 compact Facts 和 metric history。趋势、
 解释、BTC-relative strength 等已有确定性实现；其他需要上下文的 fundamentals、
 valuation、event risk 可由模型在 bounded packet 中判断。
 
-v4 policy 的 canonical factor namespace 有八个 key；其中正权重因子由资产
+当前 policy 的 canonical factor namespace 有八个 key；其中正权重因子由资产
 profile 决定：默认非 BTC profile 有六个正权重因子，BTC profile 有四个。
 
 ```text
@@ -259,7 +262,7 @@ overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩
 关键 current price、trend、portfolio value 或材料安全事件缺失时，高置信新增
 仓位被阻止。
 
-Policy v4 对 ETH 额外分组展示 monetary economics、staking security、L2/DA
+当前 Policy 对 ETH 额外分组展示 monetary economics、staking security、L2/DA
 settlement、DeFi/stablecoin 和 developer/ecosystem 证据；这些只是语义分组，
 数值仍由 Python 的 MetricObservation 和确定性派生函数拥有。ETH 核心门控与
 70/30 BTC/ETH 核心袖套锚点独立于 base score，不能把 core 分类当作目标保证。
@@ -299,7 +302,7 @@ Volume Profile 优先使用同一流动 spot venue 的 completed `1H`/`4H` bars�
 `(high + low + close) / 3` 分配 volume，输出 POC、VAL、VAH、HVN 和 LVN。它
 是历史成交量集中度 proxy，不是 holder cost basis；LVN 只能作背景。
 
-v1 只生成 `PULLBACK`。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。技术层可以
+当前只生成 `PULLBACK`。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。技术层可以
 stage less 或返回 WAIT，但不能增加 approved USD 或提交订单。
 
 ## 10. Packets 与报告

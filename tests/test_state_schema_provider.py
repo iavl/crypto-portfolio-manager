@@ -26,7 +26,6 @@ class StateSchemaProviderTests(unittest.TestCase):
             snapshot_path = Path(directory) / "portfolio.jsonl"
             snapshot = {
                 "timestamp": "2026-09-01T00:00:00Z",
-                "policy_version": 3,
                 "positions": [
                     {"symbol": "BTC", "value_usd": 100},
                     {"symbol": "USDT", "value_usd": 100},
@@ -43,7 +42,6 @@ class StateSchemaProviderTests(unittest.TestCase):
             decision = Decision(
                 "2026-09-01T00:00:00Z",
                 "NORMAL",
-                3,
                 {"BTC": 1.0},
                 {"BTC": 0.9, "USDT": 0.1},
             )
@@ -64,7 +62,6 @@ class StateSchemaProviderTests(unittest.TestCase):
             decision = Decision(
                 "2026-09-01T00:00:00Z",
                 "NORMAL",
-                3,
                 {"BTC": 1.0},
                 {"BTC": 1.0},
                 decision_id="decision-1",
@@ -105,7 +102,6 @@ class StateSchemaProviderTests(unittest.TestCase):
                     Decision(
                         "2026-09-01T00:00:00Z",
                         "NORMAL",
-                        3,
                         {"BTC": 1.0},
                         {"BTC": 1.0},
                         evidence=("missing-evidence",),
@@ -123,7 +119,7 @@ class StateSchemaProviderTests(unittest.TestCase):
             data = json.loads((Path(__file__).parents[1] / "schemas" / filename).read_text())
             self.assertEqual(data["type"], "object")
         decision = json.loads((Path(__file__).parents[1] / "schemas" / "decision.schema.json").read_text())
-        self.assertIn("policy_version", decision["properties"])
+        self.assertNotIn("policy_version", decision["properties"])
         self.assertIn("evidence", decision["properties"])
 
     def test_provider_protocols_exist_without_network_implementation(self):
