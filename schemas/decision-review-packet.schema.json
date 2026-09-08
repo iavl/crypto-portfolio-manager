@@ -24,7 +24,12 @@
     "major_event_risk": {"type": "boolean"},
     "risk_budget_breach": {"type": "boolean"},
     "risk_escalation": {"type": "boolean"},
-    "recommendation_reversal": {"type": "boolean"}
+    "recommendation_reversal": {"type": "boolean"},
+    "regime_confidence": {"type": ["object", "null"]},
+    "decision_confidence": {"type": ["object", "null"]},
+    "nav_performance": {"type": ["object", "null"]},
+    "benchmark_performance": {"type": ["object", "null"]},
+    "event_scan_summary": {"type": ["object", "null"]}
   },
   "additionalProperties": false,
   "$defs": {
@@ -47,7 +52,9 @@
         "contrary_evidence_ids": {"type": "array"},
         "thesis_broken": {"type": "boolean"},
         "event_risk": {"type": ["object", "null"]},
-        "portfolio_constraint": {"type": "string"}
+        "portfolio_constraint": {"type": "string"},
+        "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "confidence_explanation": {"type": ["object", "null"]}
       },
       "additionalProperties": false
     }

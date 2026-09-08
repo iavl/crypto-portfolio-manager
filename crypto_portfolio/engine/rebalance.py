@@ -181,6 +181,7 @@ def recommend_rebalance(
     thesis_broken: Iterable[str] | Mapping[str, bool] | None = None,
     policy: Policy | None = None,
     regime: str = "NORMAL",
+    decision_confidence: Any | None = None,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -321,6 +322,25 @@ def recommend_rebalance(
             item["priority"] = "WATCH"
             item["rationale"] = "underweight is not funded by available cash or executable sales"
 
+    if decision_confidence is not None:
+        confidence_score = getattr(decision_confidence, "score", None) if not isinstance(decision_confidence, Mapping) else decision_confidence.get("score", decision_confidence.get("confidence_score"))
+        if confidence_score is not None:
+            confidence_score = float(confidence_score)
+            if not math.isfinite(confidence_score) or not 0 <= confidence_score <= 1:
+                raise ValueError("decision_confidence score must be finite and in [0, 1]")
+            factor = 0.0 if confidence_score < 0.60 else 0.70 if confidence_score < 0.80 else 1.0
+            if factor < 1.0:
+                for item in candidates:
+                    if item["action"] == "INCREASE":
+                        if factor == 0.0:
+                            item["action"] = "WAIT"
+                            item["amount"] = 0.0
+                            item["priority"] = "WATCH"
+                            item["rationale"] = "new increase is blocked by LOW decision confidence"
+                        else:
+                            item["amount"] *= factor
+                            item["rationale"] += f"; decision confidence caps deployment at {factor:.0%}"
+
     actions = [
         RebalanceAction(
             symbol=item["symbol"],
@@ -352,6 +372,7 @@ def rebalance(
     thesis_broken: Iterable[str] | Mapping[str, bool] | None = None,
     policy: Policy | None = None,
     regime: str = "NORMAL",
+    decision_confidence: Any | None = None,
 ) -> RebalanceResult:
     return recommend_rebalance(
         current_weights,
@@ -361,6 +382,7 @@ def rebalance(
         thesis_broken=thesis_broken,
         policy=policy,
         regime=regime,
+        decision_confidence=decision_confidence,
     )
 
 

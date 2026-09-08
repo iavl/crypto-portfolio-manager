@@ -13,7 +13,16 @@
     "material_events": {"type": "array"},
     "coverage": {"type": "number", "minimum": 0, "maximum": 1},
     "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
-    "status": {"enum": ["NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES", "MATERIAL_EVENT_FOUND", "INSUFFICIENT_SOURCE_COVERAGE"]}
+    "status": {"enum": ["NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES", "MATERIAL_EVENT_FOUND", "INSUFFICIENT_SOURCE_COVERAGE"]},
+    "state": {"enum": ["CLEAR", "WATCH", "ELEVATED", "CRITICAL"]},
+    "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "source_coverage": {"type": ["object", "null"]},
+    "source_quality": {"type": ["object", "null"]},
+    "source_redundancy": {"type": ["object", "null"]},
+    "signal_consistency": {"type": ["object", "null"]},
+    "conflict_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "deduplicated_event_count": {"type": ["integer", "null"], "minimum": 0},
+    "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
   },
   "additionalProperties": false
 }

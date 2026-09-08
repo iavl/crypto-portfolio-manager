@@ -225,3 +225,12 @@ Required `FAILED`, `STALE`, and `CONFLICT` events remain in the denominator.
 The configured medium/high thresholds
 and minimum investable coverage control confidence, and any hard-critical
 failure still forces LOW confidence.
+
+## Rule 14 — Decision Confidence
+
+Decision confidence uses fixed weights for portfolio data, regime confidence,
+asset evidence, portfolio accounting, and signal agreement. It is calculated
+after the action/risk inputs exist and then capped by hard-critical security,
+liveness, valuation, drawdown, and conflict conditions. Low confidence blocks
+new risk where specified but does not force-sell otherwise valid holdings.
+`NO_TRADE` and `HOLD_ONLY` are valid conclusions, not missing output.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 
 PNL_STATUSES = frozenset(
@@ -20,6 +20,7 @@ PNL_STATUSES = frozenset(
 VALIDATION_STATUSES = frozenset(
     {"PASS", "ROUNDING_WARNING", "MATERIAL_MISMATCH", "INSUFFICIENT_DATA"}
 )
+NAV_HISTORY_STATUSES = frozenset({"AVAILABLE", "PROVISIONAL", "UNAVAILABLE"})
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
@@ -247,9 +248,83 @@ class PortfolioPerformanceSummary:
         }
 
 
+@dataclass(frozen=True)
+class NAVHistoryResult:
+    """Status-bearing cash-flow-adjusted history; unknown flows stay unknown."""
+
+    status: str
+    states: Sequence[Any] = ()
+    segments: Sequence[Any] = ()
+    unresolved_cash_flows: Sequence[Any] = ()
+    cash_flow_adjusted_return: float | None = None
+    nav_return: float | None = None
+    current_drawdown: float | None = None
+    max_drawdown: float | None = None
+    benchmark_status: str = "UNAVAILABLE"
+    btc_return: float | None = None
+    btc_excess_return: float | None = None
+    secondary_benchmark_return: float | None = None
+    explanations: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        status = str(self.status).strip().upper()
+        if status not in NAV_HISTORY_STATUSES:
+            raise ValueError("NAV history status is unsupported")
+        benchmark_status = str(self.benchmark_status).strip().upper()
+        if benchmark_status not in NAV_HISTORY_STATUSES:
+            raise ValueError("benchmark_status is unsupported")
+        for field_name in (
+            "cash_flow_adjusted_return", "nav_return", "current_drawdown", "max_drawdown",
+            "btc_return", "btc_excess_return", "secondary_benchmark_return",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    raise ValueError(f"{field_name} must be finite or null")
+                object.__setattr__(self, field_name, float(value))
+        states = tuple(self.states)
+        segments = tuple(self.segments)
+        unresolved = tuple(self.unresolved_cash_flows)
+        explanations = tuple(str(item).strip() for item in self.explanations)
+        if any(not item for item in explanations):
+            raise ValueError("explanations must contain non-empty strings")
+        object.__setattr__(self, "status", status)
+        object.__setattr__(self, "benchmark_status", benchmark_status)
+        object.__setattr__(self, "states", states)
+        object.__setattr__(self, "segments", segments)
+        object.__setattr__(self, "unresolved_cash_flows", unresolved)
+        object.__setattr__(self, "explanations", explanations)
+
+    def as_dict(self) -> dict[str, Any]:
+        def render(value: Any) -> Any:
+            if hasattr(value, "__dict__"):
+                return dict(value.__dict__)
+            if hasattr(value, "as_dict"):
+                return value.as_dict()
+            return value
+
+        return {
+            "status": self.status,
+            "states": [render(item) for item in self.states],
+            "segments": [render(item) for item in self.segments],
+            "unresolved_cash_flows": [render(item) for item in self.unresolved_cash_flows],
+            "cash_flow_adjusted_return": self.cash_flow_adjusted_return,
+            "nav_return": self.nav_return,
+            "current_drawdown": self.current_drawdown,
+            "max_drawdown": self.max_drawdown,
+            "benchmark_status": self.benchmark_status,
+            "btc_return": self.btc_return,
+            "btc_excess_return": self.btc_excess_return,
+            "secondary_benchmark_return": self.secondary_benchmark_return,
+            "explanations": list(self.explanations),
+        }
+
+
 __all__ = [
     "PNL_STATUSES",
     "VALIDATION_STATUSES",
     "PortfolioPerformanceSummary",
+    "NAVHistoryResult",
+    "NAV_HISTORY_STATUSES",
     "PositionPerformance",
 ]

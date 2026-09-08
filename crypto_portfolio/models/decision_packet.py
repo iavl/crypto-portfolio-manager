@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from .confidence import ConfidenceResult, DecisionConfidence
 from .evidence import EventRiskAssessment
 from .factor_packet import freeze_packet_value, thaw_packet_value
 
@@ -102,6 +103,8 @@ class AssetDecisionSummary:
     thesis_broken: bool = False
     portfolio_constraint: str = ""
     event_risk: Mapping[str, Any] | None = None
+    confidence_score: float | None = None
+    confidence_explanation: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "asset summary symbol").upper())
@@ -115,6 +118,15 @@ class AssetDecisionSummary:
         if confidence not in _CONFIDENCE:
             raise ValueError("asset summary confidence must be HIGH, MEDIUM, or LOW")
         object.__setattr__(self, "confidence", confidence)
+        if self.confidence_score is not None:
+            score = float(self.confidence_score)
+            if not math.isfinite(score) or not 0 <= score <= 1:
+                raise ValueError("asset confidence_score must be finite and in [0, 1] or null")
+            object.__setattr__(self, "confidence_score", score)
+        if self.confidence_explanation is not None:
+            if not isinstance(self.confidence_explanation, Mapping):
+                raise ValueError("confidence_explanation must be an object or null")
+            object.__setattr__(self, "confidence_explanation", freeze_packet_value(self.confidence_explanation, path="confidence_explanation"))
         if self.previous_score is not None:
             if isinstance(self.previous_score, bool) or not isinstance(self.previous_score, (int, float)):
                 raise ValueError("previous_score must be a number or null")
@@ -189,6 +201,8 @@ class AssetDecisionSummary:
             "thesis_broken": self.thesis_broken,
             "portfolio_constraint": self.portfolio_constraint,
             "event_risk": thaw_packet_value(self.event_risk) if self.event_risk is not None else None,
+            "confidence_score": self.confidence_score,
+            "confidence_explanation": thaw_packet_value(self.confidence_explanation) if self.confidence_explanation is not None else None,
         }
         return result
 
@@ -234,6 +248,11 @@ class DecisionReviewPacket:
     overlay_confidence: str = "LOW"
     overlay_warnings: tuple[str, ...] = ()
     effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
+    regime_confidence: ConfidenceResult | Mapping[str, Any] | None = None
+    decision_confidence: DecisionConfidence | Mapping[str, Any] | None = None
+    nav_performance: Mapping[str, Any] | None = None
+    benchmark_performance: Mapping[str, Any] | None = None
+    event_scan_summary: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -312,6 +331,18 @@ class DecisionReviewPacket:
         for field_name in ("major_event_risk", "risk_budget_breach", "risk_escalation", "recommendation_reversal"):
             if not isinstance(getattr(self, field_name), bool):
                 raise ValueError(f"{field_name} must be boolean")
+        if self.regime_confidence is not None:
+            value = self.regime_confidence if isinstance(self.regime_confidence, ConfidenceResult) else ConfidenceResult.from_mapping(self.regime_confidence)
+            object.__setattr__(self, "regime_confidence", value)
+        if self.decision_confidence is not None:
+            value = self.decision_confidence if isinstance(self.decision_confidence, DecisionConfidence) else DecisionConfidence.from_mapping(self.decision_confidence)
+            object.__setattr__(self, "decision_confidence", value)
+        for field_name in ("nav_performance", "benchmark_performance", "event_scan_summary"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{field_name} must be an object or null")
+                object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -338,6 +369,11 @@ class DecisionReviewPacket:
             "overlay_confidence": self.overlay_confidence,
             "overlay_warnings": list(self.overlay_warnings),
             "effective_deployment_caps": dict(self.effective_deployment_caps),
+            "regime_confidence": self.regime_confidence.as_dict() if isinstance(self.regime_confidence, ConfidenceResult) else self.regime_confidence,
+            "decision_confidence": self.decision_confidence.as_dict() if isinstance(self.decision_confidence, DecisionConfidence) else self.decision_confidence,
+            "nav_performance": thaw_packet_value(self.nav_performance) if self.nav_performance is not None else None,
+            "benchmark_performance": thaw_packet_value(self.benchmark_performance) if self.benchmark_performance is not None else None,
+            "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
         }
 
     @classmethod

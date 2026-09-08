@@ -9,7 +9,7 @@
     "timestamp": {"type": "string", "format": "date-time"},
     "source": {"type": ["string", "null"]},
     "base_currency": {"type": "string", "minLength": 1},
-    "policy_version": {"const": 3},
+    "policy_version": {"enum": [3, 4]},
     "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "resolved_policy": {"type": "object"},
     "external_cash_flow": {"type": "number"},

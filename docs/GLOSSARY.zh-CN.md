@@ -6,7 +6,7 @@
 每一条都包含四部分：原词、通俗解释、在本项目中的具体含义，以及它可能怎样影响
 组合决策。
 
-本文只解释当前支持的 policy v3、scoring v2、routing v2 和 execution plan v2。
+本文解释当前写入的 policy v4、scoring v2、routing v2 和 execution plan v2；历史 policy v3 只用于可验证读取。
 代码标识保留原样，方便在报告、JSON、配置和源码中搜索。--、缺失数据和失败状态
 表示“未知或不可用”，不是可以随便填成零或安全的意思。
 
@@ -175,6 +175,11 @@
 
 高分不保证 INCREASE：稳定资金底线、集中度、风险状态、事件风险、BTC 相对机会成本、
 数据覆盖率和技术执行条件都可能让最终结果成为 HOLD、WAIT、HOLD_ONLY 或 NO_TRADE。
+
+`Data Confidence` 衡量证据覆盖、新鲜度、来源质量、独立来源冗余和信号一致性；
+`Regime Confidence` 衡量市场状态判断的证据把握；`Decision Confidence` 衡量当前
+动作结论的证据把握。三者都是 Python 派生值，不能由 LLM 重算或抬高。`PROVISIONAL`
+和 `BLOCKED` 是显式状态，不等于零分或安全。
 
 ## 进一步阅读
 

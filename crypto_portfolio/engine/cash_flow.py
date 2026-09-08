@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 from .ledger import PortfolioSnapshot as LedgerSnapshot
 from .ledger import build_nav_history, nav_return
 from ..models.portfolio import PortfolioSnapshot
+from ..models.cash_flow import CashFlowResolution
 
 
 def _total_value(value: PortfolioSnapshot | Mapping[str, Any]) -> float:
@@ -143,4 +144,24 @@ def cash_flow_adjusted_performance(
     }
 
 
-__all__ = ["cash_flow_adjusted_performance", "detect_external_cash_flow"]
+def resolve_cash_flow_issue(
+    *,
+    resolution_id: str,
+    snapshot_id: str,
+    timestamp: str,
+    cash_flow_type: str,
+    amount: float,
+    rationale: str,
+) -> CashFlowResolution:
+    """Validate an explicit user resolution; never infer amount or type."""
+    return CashFlowResolution(
+        resolution_id=resolution_id,
+        snapshot_id=snapshot_id,
+        timestamp=timestamp,
+        cash_flow_type=cash_flow_type,
+        amount=amount,
+        rationale=rationale,
+    )
+
+
+__all__ = ["cash_flow_adjusted_performance", "detect_external_cash_flow", "resolve_cash_flow_issue"]

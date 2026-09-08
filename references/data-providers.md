@@ -409,3 +409,8 @@ network access; it is not endpoint health. `--probe` is opt-in network,
 authentication, entitlement, schema, and history diagnostics. TLS certificate
 and hostname verification remain enabled. `CRYPTO_PORTFOLIO_CA_BUNDLE` may point
 at a trusted bundle; credentials and response bodies are not printed.
+
+Fallback success preserves the primary failed attempt and applies the configured
+quality penalty. A partial EventScanner response is `WATCH`, never `CLEAR`;
+provider transport failure is not chain halt. The report retains bounded,
+redacted failure telemetry and confidence caps.

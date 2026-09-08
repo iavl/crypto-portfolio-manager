@@ -22,7 +22,12 @@
     "summary": {"type": ["string", "null"], "minLength": 1},
     "metadata": {"type": ["object", "null"]},
     "supersedes_observation_id": {"type": ["string", "null"], "minLength": 1},
-    "revision_reason": {"type": ["string", "null"], "minLength": 1}
+    "revision_reason": {"type": ["string", "null"], "minLength": 1},
+    "source_group": {"type": ["string", "null"], "minLength": 1},
+    "authority_tier": {"type": ["integer", "null"], "enum": [1, 2, 3, null]},
+    "source_quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "conflict_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
   },
   "additionalProperties": false
 }

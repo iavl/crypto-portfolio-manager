@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..engine.ledger import PortfolioSnapshot as LedgerSnapshot
-from ..engine.ledger import build_nav_history
+from ..engine.ledger import build_nav_history, build_nav_history_result
 from ..engine.cash_flow import detect_external_cash_flow
 from ..engine.position_pnl import calculate_portfolio_position_performance
 from ..models.performance import PositionPerformance
@@ -60,6 +60,28 @@ def portfolio_nav_history(path: str | Path | None = None):
             for _, snapshot in snapshots
         ]
     ) if snapshots else []
+
+
+def portfolio_nav_history_result(path: str | Path | None = None):
+    records = []
+    for index, record in enumerate(read_snapshots(path)):
+        snapshot, _, _ = snapshot_from_mapping(record)
+        records.append((index, snapshot))
+    records.sort(key=lambda item: (parse_timestamp(item[1].timestamp), item[0]))
+    ledger = []
+    for index, (_, snapshot) in enumerate(records):
+        flow_type = snapshot.external_cash_flow_type
+        if index and flow_type == "UNRESOLVED":
+            transition = detect_external_cash_flow(records[index - 1][1], snapshot)
+            if not transition["requires_confirmation"]:
+                flow_type = "NONE"
+        ledger.append({
+            "timestamp": snapshot.timestamp,
+            "portfolio_value": snapshot.total_value_usd,
+            "external_cash_flow": snapshot.external_cash_flow,
+            "external_cash_flow_type": flow_type,
+        })
+    return build_nav_history_result(ledger)
 
 
 def external_cash_flow_review(path: str | Path | None = None) -> dict[str, Any]:
@@ -180,6 +202,7 @@ def build_history_context(
     snapshot = latest_snapshot(snapshot_path)
     decision = latest_decision(decision_path)
     nav = portfolio_nav_history(snapshot_path)
+    nav_result = portfolio_nav_history_result(snapshot_path)
     full_review = last_full_review(decision_path)
     reference = as_of or (snapshot or decision or {}).get("timestamp")
     full_review_due = False
@@ -230,7 +253,8 @@ def build_history_context(
         "latest_decision": decision,
         "nav_history": nav,
         "external_cash_flow_review": cash_flow_review,
-        "performance_status": cash_flow_review["status"],
+        "performance_status": nav_result.status,
+        "nav_history_result": nav_result.as_dict(),
         "current_drawdown": nav[-1].current_drawdown if nav else None,
         "max_drawdown": nav[-1].max_drawdown if nav else None,
         "previous_target_weights": (decision or {}).get("target_weights"),
@@ -254,5 +278,6 @@ __all__ = [
     "latest_snapshot",
     "position_performance_history",
     "portfolio_nav_history",
+    "portfolio_nav_history_result",
     "previous_asset_assessment",
 ]

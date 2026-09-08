@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .time import normalize_timestamp
+from .confidence import ConfidenceResult
 
 
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
@@ -66,6 +67,11 @@ class Evidence:
     value: Any = None
     summary: str | None = None
     metadata: Mapping[str, Any] | None = None
+    source_group: str | None = None
+    authority_tier: int | None = None
+    source_quality: float | None = None
+    confidence_score: float | None = None
+    conflict_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field in ("id", "factor", "source", "observed_at", "fetched_at"):
@@ -95,6 +101,23 @@ class Evidence:
             except (TypeError, ValueError) as exc:
                 raise ValueError("evidence.metadata must be JSON serializable and finite") from exc
             object.__setattr__(self, "metadata", metadata)
+        if self.source_group is not None:
+            object.__setattr__(self, "source_group", _text(self.source_group, "source_group").lower())
+        if self.authority_tier is not None:
+            if isinstance(self.authority_tier, bool) or not isinstance(self.authority_tier, int) or self.authority_tier not in {1, 2, 3}:
+                raise ValueError("authority_tier must be 1, 2, 3, or null")
+        for field_name in ("source_quality", "confidence_score"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0 <= float(value) <= 1:
+                    raise ValueError(f"{field_name} must be finite and in [0, 1] or null")
+                object.__setattr__(self, field_name, float(value))
+        if isinstance(self.conflict_ids, (str, bytes)):
+            raise ValueError("conflict_ids must be a sequence")
+        conflict_ids = tuple(_text(item, "conflict_id") for item in self.conflict_ids)
+        if len(conflict_ids) != len(set(conflict_ids)):
+            raise ValueError("conflict_ids must be unique")
+        object.__setattr__(self, "conflict_ids", conflict_ids)
 
     def as_dict(self) -> dict[str, Any]:
         result = {
@@ -113,6 +136,12 @@ class Evidence:
             result["summary"] = self.summary
         if self.metadata is not None:
             result["metadata"] = dict(self.metadata)
+        for field_name in ("source_group", "authority_tier", "source_quality", "confidence_score"):
+            value = getattr(self, field_name)
+            if value is not None:
+                result[field_name] = value
+        if self.conflict_ids:
+            result["conflict_ids"] = list(self.conflict_ids)
         return result
 
 
@@ -268,6 +297,9 @@ class AssetAssessment:
     scoring_profile_name: str | None = None
     scoring_model_version: int | None = None
     score_coverage: float | None = None
+    confidence_score: float | None = None
+    confidence_explanation: Mapping[str, Any] | None = None
+    data_confidence: ConfidenceResult | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "symbol").upper())
@@ -339,6 +371,24 @@ class AssetAssessment:
                 _score(self.weighted_score, f"asset {self.symbol}.weighted_score"),
             )
         object.__setattr__(self, "confidence", _confidence(self.confidence))
+        if self.confidence_score is not None:
+            score = float(self.confidence_score)
+            if not math.isfinite(score) or not 0 <= score <= 1:
+                raise ValueError("confidence_score must be finite and in [0, 1] or null")
+            object.__setattr__(self, "confidence_score", score)
+        if self.confidence_explanation is not None:
+            if not isinstance(self.confidence_explanation, Mapping):
+                raise ValueError("confidence_explanation must be an object or null")
+            if contains_private_reasoning(self.confidence_explanation):
+                raise ValueError("confidence_explanation must not contain private reasoning")
+            object.__setattr__(self, "confidence_explanation", dict(self.confidence_explanation))
+        if self.data_confidence is not None:
+            data_confidence = (
+                self.data_confidence
+                if isinstance(self.data_confidence, ConfidenceResult)
+                else ConfidenceResult.from_mapping(self.data_confidence)
+            )
+            object.__setattr__(self, "data_confidence", data_confidence)
         if self.asset_type not in _ASSET_TYPES:
             raise ValueError(f"asset_type must be one of {sorted(_ASSET_TYPES)}")
         if isinstance(self.relative_strength_vs_btc, str):
@@ -405,6 +455,9 @@ class AssetAssessment:
             "scoring_profile_name": self.scoring_profile_name,
             "scoring_model_version": self.scoring_model_version,
             "score_coverage": self.score_coverage,
+            "confidence_score": self.confidence_score,
+            "confidence_explanation": dict(self.confidence_explanation) if self.confidence_explanation is not None else None,
+            "data_confidence": self.data_confidence.as_dict() if isinstance(self.data_confidence, ConfidenceResult) else self.data_confidence,
         }
 
 

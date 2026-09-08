@@ -91,6 +91,10 @@ def build_regime_inputs(
     systemic_event_risk: bool | str = False,
     *,
     policy: Policy | None = None,
+    domains: Mapping[str, Any] | None = None,
+    domain_confidence: Mapping[str, Any] | None = None,
+    evidence_ids: tuple[str, ...] = (),
+    provenance_complete: bool = True,
 ) -> RegimeInputs:
     """Build inputs for the existing deterministic regime authority."""
     resolved = policy or resolve_policy()
@@ -105,6 +109,10 @@ def build_regime_inputs(
         flow_state=flow_state(flow_facts, policy=resolved),
         breadth_state=breadth_state(breadth),
         systemic_event_risk=systemic_event_risk,
+        domains=domains,
+        domain_confidence=domain_confidence,
+        evidence_ids=evidence_ids,
+        provenance_complete=provenance_complete,
     )
 
 

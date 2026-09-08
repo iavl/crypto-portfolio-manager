@@ -9,7 +9,7 @@
     "based_on_snapshot_id": {"type": ["string", "null"], "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
     "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "policy_version": {"const": 3},
+    "policy_version": {"enum": [3, 4]},
     "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "resolved_policy": {"type": "object"},
     "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
@@ -33,7 +33,12 @@
           "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
           "value": {},
           "summary": {"type": ["string", "null"]},
-          "metadata": {"type": ["object", "null"]}
+          "metadata": {"type": ["object", "null"]},
+          "source_group": {"type": ["string", "null"], "minLength": 1},
+          "authority_tier": {"type": ["integer", "null"], "enum": [1, 2, 3, null]},
+          "source_quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "conflict_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
         },
         "additionalProperties": false
       }
@@ -66,7 +71,10 @@
         "event_risk": {"oneOf": [{"$ref": "#/$defs/eventRisk"}, {"type": "null"}]},
         "scoring_profile_name": {"type": ["string", "null"]},
         "scoring_model_version": {"enum": [2, null]},
-        "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+        "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "confidence_explanation": {"type": ["object", "null"]},
+        "data_confidence": {"type": ["object", "null"]}
         },
         "additionalProperties": false
       }
@@ -77,6 +85,11 @@
     "routing_metadata": {"type": ["object", "null"]},
     "execution_plans": {"type": ["object", "null"], "additionalProperties": {"$ref": "#/$defs/executionPlan"}}
     ,"market_overlays": {"type": ["object", "null"]}
+    ,"regime_confidence": {"type": ["object", "null"]}
+    ,"decision_confidence": {"type": ["object", "null"]}
+    ,"nav_performance": {"type": ["object", "null"]}
+    ,"benchmark_performance": {"type": ["object", "null"]}
+    ,"event_scan_summary": {"type": ["object", "null"]}
   },
   "additionalProperties": false,
   "$defs": {

@@ -83,6 +83,13 @@
     ,"overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]}
     ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
     ,"effective_deployment_caps": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
+    ,"regime_confidence": {"type": ["object", "null"]}
+    ,"decision_confidence": {"type": ["object", "null"]}
+    ,"confidence_caps": {"type": "array"}
+    ,"signal_consistency_summary": {"type": ["object", "null"]}
+    ,"nav_performance": {"type": ["object", "null"]}
+    ,"benchmark_performance": {"type": ["object", "null"]}
+    ,"event_scan_summary": {"type": ["object", "null"]}
   },
   "additionalProperties": false
 }

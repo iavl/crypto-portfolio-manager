@@ -1,6 +1,6 @@
 [English (default)](README.md) · [简体中文](README.zh-CN.md)
 
-Only current contracts are supported: policy v3, scoring v2, routing v2, and execution plans v2. Old versions are rejected; no legacy replay or automatic migration is provided. Local data must be upgraded from verifiable facts or removed. Timestamps require a timezone; execution requires a timestamped SpotPrice.
+Active contracts use policy v4, scoring v2, routing v2, and execution plans v2. Historical policy v3 records remain readable but are not silently replayed as v4. Confidence is Python-owned and layered as Data -> Regime -> Decision. Timestamps require a timezone; execution requires a timestamped SpotPrice.
 
 # crypto-portfolio-manager
 

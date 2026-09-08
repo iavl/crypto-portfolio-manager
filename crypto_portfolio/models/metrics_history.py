@@ -113,6 +113,11 @@ class MetricObservation:
     supersedes_observation_id: str | None = None
     revision_reason: str | None = None
     summary: str | None = None
+    source_group: str | None = None
+    authority_tier: int | None = None
+    source_quality: float | None = None
+    confidence_score: float | None = None
+    conflict_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observation_id", _text(self.observation_id, "observation_id"))
@@ -144,6 +149,23 @@ class MetricObservation:
         if parse_timestamp(self.fetched_at) < parse_timestamp(self.observed_at):
             raise ValueError("fetched_at must be at or after observed_at")
         object.__setattr__(self, "source", _text(self.source, "source"))
+        if self.source_group is not None:
+            object.__setattr__(self, "source_group", _text(self.source_group, "source_group").lower())
+        if self.authority_tier is not None:
+            if isinstance(self.authority_tier, bool) or not isinstance(self.authority_tier, int) or self.authority_tier not in {1, 2, 3}:
+                raise ValueError("authority_tier must be 1, 2, 3, or null")
+        for field_name in ("source_quality", "confidence_score"):
+            number = getattr(self, field_name)
+            if number is not None:
+                if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(float(number)) or not 0 <= float(number) <= 1:
+                    raise ValueError(f"{field_name} must be finite and in [0, 1] or null")
+                object.__setattr__(self, field_name, float(number))
+        if isinstance(self.conflict_ids, (str, bytes)):
+            raise ValueError("conflict_ids must be a sequence")
+        conflict_ids = tuple(_text(item, "conflict_id") for item in self.conflict_ids)
+        if len(conflict_ids) != len(set(conflict_ids)):
+            raise ValueError("conflict_ids must be unique")
+        object.__setattr__(self, "conflict_ids", conflict_ids)
         freshness = _text(self.freshness, "freshness").upper()
         if freshness not in _FRESHNESS:
             raise ValueError(f"freshness must be one of {sorted(_FRESHNESS)}")
@@ -190,6 +212,7 @@ class MetricObservation:
             "observation_id", "asset", "metric_key", "factor", "value", "unit", "period",
             "observed_at", "fetched_at", "source", "freshness", "confidence", "decision_id",
             "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason",
+            "source_group", "authority_tier", "source_quality", "confidence_score", "conflict_ids",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -225,6 +248,12 @@ class MetricObservation:
             value = getattr(self, field)
             if value is not None:
                 result[field] = dict(value) if field == "metadata" else value
+        for field in ("source_group", "authority_tier", "source_quality", "confidence_score"):
+            value = getattr(self, field)
+            if value is not None:
+                result[field] = value
+        if self.conflict_ids:
+            result["conflict_ids"] = list(self.conflict_ids)
         return result
 
     def __getitem__(self, key: str) -> Any:
@@ -242,6 +271,11 @@ class MetricObservation:
             "period": self.period,
             "decision_role": metric_definition(self.metric_key).decision_role,
             "context_group": metric_definition(self.metric_key).context_group,
+            "source_group": self.source_group,
+            "authority_tier": self.authority_tier,
+            "source_quality": self.source_quality,
+            "confidence_score": self.confidence_score,
+            "conflict_ids": list(self.conflict_ids),
         })
         if self.supersedes_observation_id is not None:
             metadata.update({
@@ -260,6 +294,11 @@ class MetricObservation:
             value=self.value,
             summary=self.summary,
             metadata=metadata,
+            source_group=self.source_group,
+            authority_tier=self.authority_tier,
+            source_quality=self.source_quality,
+            confidence_score=self.confidence_score,
+            conflict_ids=self.conflict_ids,
         )
 
 

@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from ..metrics_registry import metric_definition
+from .confidence import ConfidenceResult, DecisionConfidence
 from .decision_packet import SolReview
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .time import normalize_timestamp
@@ -340,6 +341,13 @@ class ReportPacket:
     effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
     failed_data_fetches: tuple[Mapping[str, Any], ...] = ()
     script_failures: tuple[Mapping[str, Any], ...] = ()
+    regime_confidence: ConfidenceResult | Mapping[str, Any] | None = None
+    decision_confidence: DecisionConfidence | Mapping[str, Any] | None = None
+    confidence_caps: tuple[Mapping[str, Any], ...] = ()
+    signal_consistency_summary: Mapping[str, Any] | None = None
+    nav_performance: Mapping[str, Any] | None = None
+    benchmark_performance: Mapping[str, Any] | None = None
+    event_scan_summary: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -432,6 +440,23 @@ class ReportPacket:
         if review is not None and not isinstance(review, SolReview):
             review = SolReview(**dict(review))
         object.__setattr__(self, "sol_review", review)
+        if self.regime_confidence is not None:
+            value = self.regime_confidence if isinstance(self.regime_confidence, ConfidenceResult) else ConfidenceResult.from_mapping(self.regime_confidence)
+            object.__setattr__(self, "regime_confidence", value)
+        if self.decision_confidence is not None:
+            value = self.decision_confidence if isinstance(self.decision_confidence, DecisionConfidence) else DecisionConfidence.from_mapping(self.decision_confidence)
+            object.__setattr__(self, "decision_confidence", value)
+        caps = tuple(
+            freeze_packet_value(item.as_dict() if hasattr(item, "as_dict") else item, path="confidence_caps")
+            for item in self.confidence_caps
+        )
+        object.__setattr__(self, "confidence_caps", caps)
+        for field_name in ("signal_consistency_summary", "nav_performance", "benchmark_performance", "event_scan_summary"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{field_name} must be an object or null")
+                object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -458,6 +483,13 @@ class ReportPacket:
             "overlay_confidence": self.overlay_confidence,
             "overlay_warnings": list(self.overlay_warnings),
             "effective_deployment_caps": dict(self.effective_deployment_caps),
+            "regime_confidence": self.regime_confidence.as_dict() if isinstance(self.regime_confidence, ConfidenceResult) else self.regime_confidence,
+            "decision_confidence": self.decision_confidence.as_dict() if isinstance(self.decision_confidence, DecisionConfidence) else self.decision_confidence,
+            "confidence_caps": thaw_packet_value(self.confidence_caps),
+            "signal_consistency_summary": thaw_packet_value(self.signal_consistency_summary) if self.signal_consistency_summary is not None else None,
+            "nav_performance": thaw_packet_value(self.nav_performance) if self.nav_performance is not None else None,
+            "benchmark_performance": thaw_packet_value(self.benchmark_performance) if self.benchmark_performance is not None else None,
+            "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
         }
 
     @classmethod

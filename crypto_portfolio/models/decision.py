@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .evidence import AssetAssessment, Evidence, FactorScore, contains_private_reasoning
+from .confidence import ConfidenceResult, DecisionConfidence
 from .execution import ExecutionPlan
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .policy import policy_hash
@@ -62,6 +63,11 @@ class Decision:
     execution_plans: Mapping[str, ExecutionPlan | Mapping[str, Any]] | None = None
     routing_metadata: Mapping[str, Any] | None = None
     market_overlays: Mapping[str, Any] | None = None
+    regime_confidence: ConfidenceResult | Mapping[str, Any] | None = None
+    decision_confidence: DecisionConfidence | Mapping[str, Any] | None = None
+    nav_performance: Mapping[str, Any] | None = None
+    benchmark_performance: Mapping[str, Any] | None = None
+    event_scan_summary: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -70,8 +76,8 @@ class Decision:
         object.__setattr__(self, "market_regime", self.market_regime.upper())
         if self.market_regime not in _REGIMES:
             raise ValueError(f"market_regime must be one of {sorted(_REGIMES)}")
-        if isinstance(self.policy_version, bool) or not isinstance(self.policy_version, int) or self.policy_version != 3:
-            raise ValueError("policy_version must be 3")
+        if isinstance(self.policy_version, bool) or not isinstance(self.policy_version, int) or self.policy_version not in {3, 4}:
+            raise ValueError("policy_version must be 3 or 4")
         object.__setattr__(self, "current_weights", _weights(self.current_weights, "current_weights"))
         object.__setattr__(self, "target_weights", _weights(self.target_weights, "target_weights"))
         if not self.current_weights or not self.target_weights:
@@ -115,6 +121,18 @@ class Decision:
             if not isinstance(value, Mapping):
                 raise ValueError("market_overlays must be an object or null")
             object.__setattr__(self, "market_overlays", freeze_packet_value(value, path="market_overlays"))
+        if self.regime_confidence is not None:
+            value = self.regime_confidence if isinstance(self.regime_confidence, ConfidenceResult) else ConfidenceResult.from_mapping(self.regime_confidence)
+            object.__setattr__(self, "regime_confidence", value)
+        if self.decision_confidence is not None:
+            value = self.decision_confidence if isinstance(self.decision_confidence, DecisionConfidence) else DecisionConfidence.from_mapping(self.decision_confidence)
+            object.__setattr__(self, "decision_confidence", value)
+        for field_name in ("nav_performance", "benchmark_performance", "event_scan_summary"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{field_name} must be an object or null")
+                object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
         if self.config is not None:
             if not isinstance(self.config, Mapping):
                 raise ValueError("config must be an object or null")
@@ -335,6 +353,11 @@ class Decision:
             execution_plans=data.get("execution_plans"),
             routing_metadata=data.get("routing_metadata"),
             market_overlays=data.get("market_overlays"),
+            regime_confidence=data.get("regime_confidence"),
+            decision_confidence=data.get("decision_confidence"),
+            nav_performance=data.get("nav_performance"),
+            benchmark_performance=data.get("benchmark_performance"),
+            event_scan_summary=data.get("event_scan_summary"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -375,6 +398,14 @@ class Decision:
             result["routing_metadata"] = dict(self.routing_metadata)
         if self.market_overlays is not None:
             result["market_overlays"] = thaw_packet_value(self.market_overlays)
+        if self.regime_confidence is not None:
+            result["regime_confidence"] = self.regime_confidence.as_dict() if isinstance(self.regime_confidence, ConfidenceResult) else self.regime_confidence
+        if self.decision_confidence is not None:
+            result["decision_confidence"] = self.decision_confidence.as_dict() if isinstance(self.decision_confidence, DecisionConfidence) else self.decision_confidence
+        for field_name in ("nav_performance", "benchmark_performance", "event_scan_summary"):
+            value = getattr(self, field_name)
+            if value is not None:
+                result[field_name] = thaw_packet_value(value)
         return result
 
 

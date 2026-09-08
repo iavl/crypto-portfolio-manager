@@ -443,3 +443,12 @@ or pass a run-level mode, with the run-level choice taking precedence.
 The report writer uses only finalized packet values. It must not recalculate
 scores, weights, amounts, zones, or missing evidence, and it must not persist
 private model reasoning.
+
+## Confidence workflow
+
+The Python-owned confidence chain is Data Confidence -> Regime Confidence ->
+Decision Confidence. Preserve each layer's bounded score, band, dimensions,
+caps, reasons, and evidence IDs. A normal regime is a state classification,
+not an entry signal. Unknown, stale, conflict, partial EventScanner coverage,
+and unresolved NAV history remain explicit and may produce `HOLD_ONLY`,
+`NO_TRADE`, `PROVISIONAL`, or `BLOCKED`.

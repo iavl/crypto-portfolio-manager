@@ -33,7 +33,7 @@ Indicative allocation envelope, not a fixed target:
 - Satellites combined: 10–25%
 
 The BTC/ETH rows are an indicative risk envelope, not an entitlement. Core
-classification never guarantees a target or score floor. Policy v3 starts the
+classification never guarantees a target or score floor. Policy v4 starts the
 core risky sleeve from a configurable 70/30 BTC/ETH anchor, then applies score
 quality, confidence, ETH/BTC opportunity cost, event risk, liveness, and the
 existing portfolio caps. If the user changes `core_symbols`, apply the core
@@ -250,3 +250,11 @@ premium `SKIPPED` evidence is excluded when no eligible provider exists.
 Required `FAILED`, `STALE`, and `CONFLICT` evidence stays in the denominator
 and lowers coverage; a hard-critical required failure remains a
 `CRITICAL DATA FAILURE`.
+
+## Regime Confidence
+
+Regime labels remain deterministic Python output. Regime confidence is a
+separate fixed weighted score over trend, volatility, breadth, flows, portfolio
+drawdown, and systemic risk. `NORMAL` therefore does not mean “safe to buy”.
+Unknown or stale drawdown/systemic evidence applies a configured cap; severe
+events and drawdown floors still take precedence over the confidence score.

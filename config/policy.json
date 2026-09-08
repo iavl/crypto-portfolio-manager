@@ -1,5 +1,5 @@
 {
-  "policy_version": 3,
+  "policy_version": 4,
   "investment_horizon_months": {
     "min": 6,
     "max": 12
@@ -335,5 +335,79 @@
       "max_atr_extension": 2.00,
       "max_initial_tranche": 0.20
     }
+  },
+  "confidence": {
+    "band_thresholds": {"medium_min": 0.6, "high_min": 0.8},
+    "data_dimension_weights": {
+      "coverage": 0.3,
+      "freshness": 0.2,
+      "source_quality": 0.2,
+      "redundancy": 0.1,
+      "signal_consistency": 0.2
+    },
+    "regime_domain_weights": {
+      "trend": 0.2,
+      "volatility": 0.15,
+      "breadth": 0.15,
+      "flows": 0.15,
+      "portfolio_drawdown": 0.15,
+      "systemic_risk": 0.2
+    },
+    "decision_component_weights": {
+      "portfolio_data": 0.3,
+      "regime_confidence": 0.2,
+      "asset_evidence": 0.2,
+      "portfolio_accounting": 0.15,
+      "signal_agreement": 0.15
+    },
+    "caps": {
+      "hard_critical_missing": 0.59,
+      "hard_critical_stale": 0.59,
+      "regime_unknown_critical": 0.79,
+      "regime_drawdown_systemic_unknown": 0.59,
+      "event_partial": 0.59,
+      "security_unknown": 0.59,
+      "security_critical": 0.39,
+      "liveness_degraded": 0.79,
+      "liveness_unknown": 0.59,
+      "liveness_halted": 0.39,
+      "valuation_low": 0.59,
+      "drawdown_provisional": 0.79,
+      "signal_consistency_low": 0.79
+    }
+  },
+  "freshness_policy": {
+    "domain_defaults": {
+      "trend": {"max_age_seconds": 1209600, "half_life_seconds": 604800},
+      "volatility": {"max_age_seconds": 1209600, "half_life_seconds": 604800},
+      "breadth": {"max_age_seconds": 604800, "half_life_seconds": 259200},
+      "flows": {"max_age_seconds": 1209600, "half_life_seconds": 604800},
+      "portfolio_drawdown": {"max_age_seconds": 2592000, "half_life_seconds": 1209600},
+      "systemic_risk": {"max_age_seconds": 259200, "half_life_seconds": 86400}
+    },
+    "metric_overrides": {
+      "market.spot_price": {"max_age_seconds": 86400, "half_life_seconds": 21600},
+      "risk.chain_liveness_status": {"max_age_seconds": 86400, "half_life_seconds": 21600},
+      "risk.security_event_status": {"max_age_seconds": 86400, "half_life_seconds": 21600}
+    },
+    "dimension_weights": {
+      "coverage": 0.3,
+      "freshness": 0.2,
+      "source_quality": 0.2,
+      "redundancy": 0.1,
+      "signal_consistency": 0.2
+    }
+  },
+  "source_quality": {
+    "tier_scores": {"1": 1.0, "2": 0.75, "3": 0.5, "unknown": 0.25},
+    "redundancy_scores": {"0": 0.0, "1": 0.5, "2": 0.8, "3_plus": 1.0}
+  },
+  "event_severity": {
+    "states": ["CLEAR", "WATCH", "ELEVATED", "CRITICAL"],
+    "coverage_state": {"partial": "WATCH", "unreachable": "WATCH", "unknown": "WATCH"}
+  },
+  "nav_history": {
+    "unresolved_flow_cap": 0.79,
+    "provisional_cap": 0.79
   }
 }

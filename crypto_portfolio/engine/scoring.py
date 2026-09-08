@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from ..models.confidence import ConfidenceCap, ConfidenceDimension, ConfidenceResult, confidence_band
 from ..models.evidence import AVAILABILITY_STATES, AssetAssessment, FactorScore
 from ..models.policy import Policy, SCORING_FACTORS, resolve_policy
 
@@ -70,6 +71,13 @@ class ScoreResult:
     factor_availability: Mapping[str, str] = None
     not_applicable_factors: tuple[str, ...] = ()
     scoring_model_version: int = 2
+    factor_data_confidence: ConfidenceResult | None = None
+    data_confidence_score: float | None = None
+    data_confidence_band: str | None = None
+    confidence_reason_codes: tuple[str, ...] = ()
+    source_groups: tuple[str, ...] = ()
+    conflict_ids: tuple[str, ...] = ()
+    fallback_used: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +94,13 @@ class ScoreResult:
             "coverage": self.coverage,
             "critical_data_complete": self.critical_data_complete,
             "scoring_model_version": self.scoring_model_version,
+            "factor_data_confidence": self.factor_data_confidence.as_dict() if self.factor_data_confidence else None,
+            "data_confidence_score": self.data_confidence_score,
+            "data_confidence_band": self.data_confidence_band,
+            "confidence_reason_codes": list(self.confidence_reason_codes),
+            "source_groups": list(self.source_groups),
+            "conflict_ids": list(self.conflict_ids),
+            "fallback_used": self.fallback_used,
         }
 
     def __float__(self) -> float:
@@ -282,6 +297,34 @@ def _score_factors_v2(
         resolved_weights[factor] * effective_scores.get(factor, 0.0)
         for factor in resolved_weights
     )
+    data_score = coverage
+    confidence_caps: tuple[ConfidenceCap, ...] = ()
+    reason_codes = set(f"MISSING_FACTOR:{factor}" for factor in missing)
+    if not critical_data_complete:
+        confidence_caps = (ConfidenceCap("HARD_CRITICAL_DATA_INCOMPLETE", 0.59, "ASSET", "critical factor data is incomplete"),)
+        data_score = min(data_score, 0.59)
+        reason_codes.add("HARD_CRITICAL_DATA_INCOMPLETE")
+    data_dimensions = {
+        "coverage": ConfidenceDimension("coverage", coverage, 0.30, tuple(sorted(reason_codes))),
+        "freshness": ConfidenceDimension("freshness", coverage, 0.20),
+        "source_quality": ConfidenceDimension("source_quality", coverage, 0.20),
+        "redundancy": ConfidenceDimension("redundancy", 0.5 if any(reliabilities.values()) else 0.0, 0.10),
+        "signal_consistency": ConfidenceDimension("signal_consistency", 1.0 if not reason_codes else 0.5, 0.20),
+    }
+    raw_data_score = sum(item.score * item.weight for item in data_dimensions.values())
+    data_score = min(raw_data_score, 0.59) if confidence_caps else raw_data_score
+    factor_data_confidence = ConfidenceResult(
+        model_version=1,
+        raw_score=raw_data_score,
+        score=data_score,
+        band=confidence_band(data_score),
+        dimensions=data_dimensions,
+        caps=confidence_caps,
+        reasons=tuple(sorted(reason_codes)),
+        status="BLOCKED" if confidence_caps else "PROVISIONAL" if reason_codes else "AVAILABLE",
+        medium_min=(policy.confidence.get("band_thresholds", {}).get("medium_min", 0.60) if policy.confidence else 0.60),
+        high_min=(policy.confidence.get("band_thresholds", {}).get("high_min", 0.80) if policy.confidence else 0.80),
+    )
     return ScoreResult(
         score=result_score,
         effective_weights={factor: weight for factor, weight in resolved_weights.items() if weight > 0},
@@ -296,6 +339,10 @@ def _score_factors_v2(
         critical_data_complete=critical_data_complete,
         profile_name=profile_name,
         scoring_model_version=2,
+        factor_data_confidence=factor_data_confidence,
+        data_confidence_score=data_score,
+        data_confidence_band=confidence_band(data_score),
+        confidence_reason_codes=tuple(sorted(reason_codes)),
     )
 
 
@@ -365,6 +412,9 @@ def score_assessment(
         scoring_profile_name=result.profile_name,
         scoring_model_version=result.scoring_model_version,
         score_coverage=result.coverage,
+        confidence_score=result.data_confidence_score,
+        confidence_explanation=result.factor_data_confidence.as_dict() if result.factor_data_confidence else None,
+        data_confidence=result.factor_data_confidence,
     )
     return updated, result
 

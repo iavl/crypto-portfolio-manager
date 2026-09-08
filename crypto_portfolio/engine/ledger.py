@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from ..models.time import normalize_timestamp, parse_timestamp
+from ..models.performance import NAVHistoryResult
 
 
 def _finite(value: Any, field: str, *, minimum: float | None = None) -> float:
@@ -204,6 +205,72 @@ def cash_flow_adjusted_return(
     return nav_return(build_nav_history(snapshots))
 
 
+def _unresolved_flow(value: Any, index: int) -> bool:
+    if index == 0:
+        return False
+    if isinstance(value, Mapping):
+        flow_type = value.get("external_cash_flow_type")
+        if flow_type is not None:
+            return str(flow_type).strip().upper() == "UNRESOLVED"
+        return "external_cash_flow" not in value
+    flow_type = getattr(value, "external_cash_flow_type", None)
+    return flow_type is not None and str(flow_type).strip().upper() == "UNRESOLVED"
+
+
+def build_nav_history_result(
+    snapshots: Sequence[PortfolioSnapshot | Mapping[str, Any] | Any],
+) -> NAVHistoryResult:
+    """Build a status-bearing NAV history without guessing unresolved flows."""
+    if not snapshots:
+        return NAVHistoryResult("UNAVAILABLE", explanations=("no portfolio snapshots are available",))
+    unresolved = tuple(
+        {
+            "index": index,
+            "timestamp": getattr(value, "timestamp", value.get("timestamp") if isinstance(value, Mapping) else None),
+            "amount": value.get("external_cash_flow") if isinstance(value, Mapping) else getattr(value, "external_cash_flow", 0.0),
+            "reason": "external cash-flow classification is required",
+        }
+        for index, value in enumerate(snapshots)
+        if _unresolved_flow(value, index)
+    )
+    if unresolved:
+        first_gap = int(unresolved[0]["index"])
+        prefix = snapshots[:first_gap]
+        states = tuple(build_nav_history(prefix)) if prefix else ()
+        segments = (
+            {
+                "status": "AVAILABLE" if states else "UNAVAILABLE",
+                "start": states[0].timestamp if states else None,
+                "end": states[-1].timestamp if states else None,
+            },
+            {"status": "PROVISIONAL", "start": unresolved[0]["timestamp"], "end": None},
+        )
+        return NAVHistoryResult(
+            "PROVISIONAL",
+            states=states,
+            segments=segments,
+            unresolved_cash_flows=unresolved,
+            benchmark_status="PROVISIONAL",
+            explanations=("unresolved historical cash flow blocks cross-gap NAV and benchmark performance",),
+        )
+    states = tuple(build_nav_history(snapshots))
+    result = nav_return(states)
+    return NAVHistoryResult(
+        "AVAILABLE",
+        states=states,
+        segments=({
+            "status": "AVAILABLE",
+            "start": states[0].timestamp,
+            "end": states[-1].timestamp,
+        },),
+        cash_flow_adjusted_return=result,
+        nav_return=result,
+        current_drawdown=states[-1].current_drawdown,
+        max_drawdown=min(state.max_drawdown for state in states),
+        benchmark_status="UNAVAILABLE",
+    )
+
+
 __all__ = [
     "ExternalCashFlow",
     "NAVState",
@@ -213,4 +280,5 @@ __all__ = [
     "current_drawdown",
     "max_drawdown",
     "nav_return",
+    "build_nav_history_result",
 ]

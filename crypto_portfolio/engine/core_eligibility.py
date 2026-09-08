@@ -121,8 +121,8 @@ def eth_core_eligibility(
 ) -> str:
     """Return the v3 ETH core state without changing the base score."""
     resolved = policy or resolve_policy()
-    if resolved.policy_version != 3:
-        raise ValueError("ETH core eligibility requires policy v3")
+    if resolved.policy_version not in {3, 4}:
+        raise ValueError("ETH core eligibility requires policy v3 or v4")
     if isinstance(current_weight, bool) or not isinstance(current_weight, (int, float)) or not math.isfinite(float(current_weight)) or current_weight < 0:
         raise ValueError("current_weight must be finite and >= 0")
     assessment = assessment or {}

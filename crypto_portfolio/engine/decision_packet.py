@@ -6,11 +6,13 @@ import math
 from typing import Any, Iterable, Mapping
 
 from ..models.decision_packet import AssetDecisionSummary, DecisionReviewPacket
+from ..models.confidence import ConfidenceCap
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 from ..model_routing import ModelRouting, validate_model_routing
+from .confidence import calculate_decision_confidence, calculate_regime_confidence
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
@@ -175,6 +177,8 @@ def _asset_summary(
         thesis_broken=_bool_flag(assessment_dict.get("thesis_broken", False), "thesis_broken"),
         portfolio_constraint=str(action_dict.get("rationale", "")),
         event_risk=event_risk,
+        confidence_score=assessment_dict.get("confidence_score"),
+        confidence_explanation=assessment_dict.get("confidence_explanation", assessment_dict.get("data_confidence")),
     )
 
 
@@ -274,6 +278,11 @@ def build_decision_review_packet(
     risk_escalation: bool = False,
     recommendation_reversal: bool = False,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    regime_confidence: Any = None,
+    decision_confidence: Any = None,
+    nav_performance: Mapping[str, Any] | None = None,
+    benchmark_performance: Mapping[str, Any] | None = None,
+    event_scan_summary: Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
@@ -348,6 +357,42 @@ def build_decision_review_packet(
         )
         for symbol in symbols
     )
+    regime_confidence_value = regime_confidence if regime_confidence is not None else source.get("regime_confidence")
+    if regime_confidence_value is None:
+        regime_confidence_value = calculate_regime_confidence(
+            {name: 0.5 for name in ("trend", "volatility", "breadth", "flows", "portfolio_drawdown", "systemic_risk")},
+            caps=(ConfidenceCap("LEGACY_INPUT_NO_PROVENANCE", 0.79, "PORTFOLIO", "decision packet has no regime provenance"),),
+        )
+    decision_confidence_value = decision_confidence if decision_confidence is not None else source.get("decision_confidence")
+    nav_value = nav_performance if nav_performance is not None else source.get("nav_performance")
+    if decision_confidence_value is None:
+        confidence_values = {"HIGH": 0.9, "MEDIUM": 0.7, "LOW": 0.3}
+        asset_scores = [
+            item.confidence_score
+            if item.confidence_score is not None
+            else confidence_values.get(item.confidence, 0.3)
+            for item in assets
+        ]
+        accounting = 0.5
+        if nav_value is not None:
+            accounting = {"AVAILABLE": 1.0, "PROVISIONAL": 0.5, "UNAVAILABLE": 0.0}.get(
+                str(nav_value.get("status", "UNAVAILABLE")).upper(), 0.0
+            )
+        caps = []
+        if critical_missing_data or major_conflicts:
+            caps.append(ConfidenceCap("CRITICAL_EVIDENCE_INCOMPLETE", 0.59, "PORTFOLIO", "critical evidence is incomplete"))
+        if nav_value is not None and str(nav_value.get("status", "")).upper() != "AVAILABLE":
+            caps.append(ConfidenceCap("PORTFOLIO_DRAWDOWN_PROVISIONAL", 0.79, "PORTFOLIO", "NAV history is provisional"))
+        decision_confidence_value = calculate_decision_confidence(
+            {
+                "portfolio_data": min(asset_scores) if asset_scores else 0.0,
+                "regime_confidence": regime_confidence_value,
+                "asset_evidence": min(asset_scores) if asset_scores else 0.0,
+                "portfolio_accounting": accounting,
+                "signal_agreement": 0.0 if major_conflicts else 1.0,
+            },
+            caps=caps,
+        )
     return DecisionReviewPacket(
         review_type=review,
         market_regime=regime,
@@ -369,6 +414,11 @@ def build_decision_review_packet(
         overlay_confidence=overlay_confidence,
         overlay_warnings=tuple(overlay_warnings),
         effective_deployment_caps=deployment_caps,
+        regime_confidence=regime_confidence_value,
+        decision_confidence=decision_confidence_value,
+        nav_performance=nav_value,
+        benchmark_performance=benchmark_performance if benchmark_performance is not None else source.get("benchmark_performance"),
+        event_scan_summary=event_scan_summary if event_scan_summary is not None else source.get("event_scan_summary"),
     )
 
 

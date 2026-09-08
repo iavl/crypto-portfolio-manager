@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/confidence.schema.json",
+  "title": "Bounded confidence result",
+  "type": "object",
+  "required": ["model_version", "raw_score", "score", "band", "dimensions", "caps", "reasons", "evidence_ids", "status"],
+  "properties": {
+    "model_version": {"type": "integer", "minimum": 1},
+    "raw_score": {"type": "number", "minimum": 0, "maximum": 1},
+    "score": {"type": "number", "minimum": 0, "maximum": 1},
+    "capped_score": {"type": "number", "minimum": 0, "maximum": 1},
+    "band": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+    "dimensions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/dimension"}},
+    "caps": {"type": "array", "items": {"$ref": "#/$defs/cap"}},
+    "reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "status": {"enum": ["AVAILABLE", "PROVISIONAL", "BLOCKED"]},
+    "medium_min": {"type": "number", "minimum": 0, "maximum": 1},
+    "high_min": {"type": "number", "minimum": 0, "maximum": 1},
+    "components": {"type": "object"},
+    "critical_blockers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "allowed_actions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "blocked_actions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "explanation": {"type": "string"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "required": ["name", "score", "weight", "reason_codes", "evidence_ids"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "score": {"type": "number", "minimum": 0, "maximum": 1},
+        "weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason_codes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "cap": {
+      "type": "object",
+      "required": ["code", "ceiling", "applies_to", "reason", "evidence_ids"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "ceiling": {"type": "number", "minimum": 0, "maximum": 1},
+        "applies_to": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "minLength": 1},
+        "reason": {"type": "string"},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

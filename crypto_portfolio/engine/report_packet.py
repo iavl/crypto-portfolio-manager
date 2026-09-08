@@ -136,6 +136,16 @@ def build_report_packet(
         overlay_confidence=overlay_confidence,
         overlay_warnings=overlay_warnings,
         effective_deployment_caps=deployment_caps,
+        regime_confidence=packet.regime_confidence,
+        decision_confidence=packet.decision_confidence,
+        confidence_caps=(
+            tuple(packet.decision_confidence.caps)
+            if packet.decision_confidence is not None and hasattr(packet.decision_confidence, "caps")
+            else ()
+        ),
+        nav_performance=packet.nav_performance,
+        benchmark_performance=packet.benchmark_performance,
+        event_scan_summary=packet.event_scan_summary,
     )
 
 
@@ -195,6 +205,15 @@ def build_final_review_output(
             "positioning": packet_value["positioning_summaries"],
             "btc_cycle": packet_value["btc_cycle_summary"],
             "effective_deployment_caps": packet_value["effective_deployment_caps"],
+        },
+        "confidence": {
+            "regime": packet_value["regime_confidence"],
+            "decision": packet_value["decision_confidence"],
+            "caps": packet_value["confidence_caps"],
+        },
+        "performance": {
+            "nav": packet_value["nav_performance"],
+            "benchmark": packet_value["benchmark_performance"],
         },
         "event_scans": acquisition_value.get("event_scans", []),
         "report_packet": packet_value,

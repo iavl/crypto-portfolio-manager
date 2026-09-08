@@ -136,7 +136,10 @@ class EventSourceScanRequest:
 def _normalize_item(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("event scan item must be an object")
-    allowed = {"title", "published_at", "canonical_url", "summary", "materiality", "affected_assets"}
+    allowed = {
+        "title", "published_at", "canonical_url", "summary", "materiality", "affected_assets",
+        "severity", "relevance", "evidence_ids", "source_group",
+    }
     unknown = set(value) - allowed
     if unknown:
         raise ValueError("event scan item contains unknown fields: " + ", ".join(sorted(unknown)))
@@ -164,6 +167,24 @@ def _normalize_item(value: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(affected, str) or not isinstance(affected, (list, tuple)):
         raise ValueError("event scan affected_assets must be a sequence")
     result["affected_assets"] = list(dict.fromkeys(_text(item, "affected asset").upper() for item in affected))
+    severity = value.get("severity")
+    if severity is not None:
+        severity = _text(severity, "severity").upper()
+        if severity not in {"CLEAR", "WATCH", "ELEVATED", "CRITICAL"}:
+            raise ValueError("event scan severity is unsupported")
+        result["severity"] = severity
+    relevance = value.get("relevance")
+    if relevance is not None:
+        relevance = _text(relevance, "relevance").upper()
+        if relevance not in {"RELEVANT", "IRRELEVANT", "UNKNOWN"}:
+            raise ValueError("event scan relevance is unsupported")
+        result["relevance"] = relevance
+    evidence_ids = value.get("evidence_ids", ())
+    if isinstance(evidence_ids, str) or not isinstance(evidence_ids, (list, tuple)):
+        raise ValueError("event scan evidence_ids must be a sequence")
+    result["evidence_ids"] = list(dict.fromkeys(_text(item, "evidence_id") for item in evidence_ids))
+    if value.get("source_group") is not None:
+        result["source_group"] = _text(value["source_group"], "source_group").lower()
     _json_finite(result, "event scan item")
     return result
 
@@ -376,14 +397,61 @@ class EventScanner:
             conflict = conflict or response.conflict
             for item in response.items if response.reachable else ():
                 if self._material(item, asset, start, end_time):
-                    material_events.append({"source_id": source_id, **dict(item)})
-        by_url: dict[str, set[Any]] = {}
+                    source = next(source for source in self.sources if source.id == source_id)
+                    materiality = str(item.get("materiality", "WATCH")).upper()
+                    severity = item.get("severity") or (
+                        "CRITICAL" if materiality == "CRITICAL" else
+                        "ELEVATED" if materiality in {"HIGH", "SEVERE"} else "WATCH"
+                    )
+                    material_events.append({
+                        "source_id": source_id,
+                        "source_group": item.get("source_group", source.authority.strip().lower()),
+                        "severity": severity,
+                        **dict(item),
+                    })
+        deduplicated: dict[str, dict[str, Any]] = {}
+        conflict_ids: set[str] = set()
         for item in material_events:
-            if item.get("canonical_url"):
-                by_url.setdefault(item["canonical_url"], set()).add(str(item.get("materiality")).upper())
-        conflict = conflict or any(len(values) > 1 for values in by_url.values())
+            fingerprint = item.get("canonical_url") or "|".join(
+                str(item.get(field, "")).strip().lower()
+                for field in ("title", "published_at", "materiality")
+            )
+            existing = deduplicated.get(fingerprint)
+            if existing is None:
+                deduplicated[fingerprint] = dict(item)
+                deduplicated[fingerprint]["source_ids"] = [item["source_id"]]
+                deduplicated[fingerprint]["source_groups"] = [item["source_group"]]
+            else:
+                existing["source_ids"] = sorted(set(existing["source_ids"]) | {item["source_id"]})
+                existing["source_groups"] = sorted(set(existing["source_groups"]) | {item["source_group"]})
+                severity_order = {"CLEAR": 0, "WATCH": 1, "ELEVATED": 2, "CRITICAL": 3}
+                if severity_order[item["severity"]] != severity_order[existing["severity"]]:
+                    conflict = True
+                    conflict_ids.add(fingerprint)
+                if severity_order[item["severity"]] > severity_order[existing["severity"]]:
+                    existing["severity"] = item["severity"]
+        material_events = sorted(
+            deduplicated.values(),
+            key=lambda item: (
+                -{"CLEAR": 0, "WATCH": 1, "ELEVATED": 2, "CRITICAL": 3}[item.get("severity", "WATCH")],
+                str(item.get("published_at", "")),
+                str(item.get("canonical_url", item.get("title", ""))),
+            ),
+        )
         medium, high = self._coverage_thresholds()
         confidence = "LOW" if conflict or coverage < medium else "HIGH" if coverage >= high else "MEDIUM"
+        state = (
+            "CRITICAL" if any(item.get("severity") == "CRITICAL" for item in material_events)
+            else "ELEVATED" if any(item.get("severity") == "ELEVATED" for item in material_events)
+            else "WATCH" if material_events or conflict or coverage < 1.0
+            else "CLEAR"
+        )
+        source_groups = {
+            source.authority.strip().lower()
+            for source in self.sources
+            if source.category == category and source.applies_to(asset)
+        }
+        source_quality = sum({1: 1.0, 2: 0.75, 3: 0.5}[source.tier] for source in self.sources if source.category == category and source.applies_to(asset)) / len(required) if required else 0.0
         return EventScanResult(
             asset=asset,
             category=category,
@@ -393,6 +461,20 @@ class EventScanner:
             material_events=tuple(material_events),
             coverage=coverage,
             confidence=confidence,
+            state=state,
+            confidence_score=coverage * (0.5 if conflict else 1.0),
+            source_coverage={
+                "required": len(required),
+                "reachable": reachable_required,
+                "ratio": coverage,
+                "by_source": {source_id: responses_by_id[source_id].reachable for source_id in sorted(responses_by_id)},
+            },
+            source_quality={"mean": source_quality},
+            source_redundancy={"independent_groups": len(source_groups)},
+            signal_consistency={"score": 0.0 if conflict else 1.0},
+            conflict_ids=tuple(sorted(conflict_ids)),
+            deduplicated_event_count=len(material_events),
+            evidence_ids=tuple(sorted({evidence_id for item in material_events for evidence_id in item.get("evidence_ids", ())})),
         )
 
     def scan(

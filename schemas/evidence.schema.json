@@ -24,7 +24,12 @@
     "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
     "value": {},
     "summary": {"type": ["string", "null"]},
-    "metadata": {"type": ["object", "null"]}
+    "metadata": {"type": ["object", "null"]},
+    "source_group": {"type": ["string", "null"], "minLength": 1},
+    "authority_tier": {"type": ["integer", "null"], "enum": [1, 2, 3, null]},
+    "source_quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "conflict_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
   },
   "additionalProperties": false
 }

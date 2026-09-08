@@ -61,6 +61,14 @@ _TOP_LEVEL_FIELDS = {
     "execution_overlay",
     "events",
     "event_risk_multipliers",
+    "confidence",
+    "freshness_policy",
+    "source_quality",
+    "event_severity",
+    "nav_history",
+}
+_V3_TOP_LEVEL_FIELDS = _TOP_LEVEL_FIELDS - {
+    "confidence", "freshness_policy", "source_quality", "event_severity", "nav_history"
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
@@ -217,6 +225,25 @@ _EXECUTION_OVERLAY_FIELDS = {"positioning", "btc_cycle", "wait"}
 _EVENTS_FIELDS = {"lookback_days", "coverage"}
 _EVENT_REVIEW_TYPES = ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")
 _EVENT_CATEGORIES = ("security", "governance", "regulatory")
+_CONFIDENCE_FIELDS = {
+    "band_thresholds",
+    "data_dimension_weights",
+    "regime_domain_weights",
+    "decision_component_weights",
+    "caps",
+}
+_CONFIDENCE_BAND_FIELDS = {"medium_min", "high_min"}
+_DATA_DIMENSIONS = {"coverage", "freshness", "source_quality", "redundancy", "signal_consistency"}
+_REGIME_DOMAINS = {"trend", "volatility", "breadth", "flows", "portfolio_drawdown", "systemic_risk"}
+_DECISION_COMPONENTS = {
+    "portfolio_data", "regime_confidence", "asset_evidence", "portfolio_accounting", "signal_agreement"
+}
+_FRESHNESS_DOMAINS = set(_REGIME_DOMAINS)
+_FRESHNESS_FIELDS = {"domain_defaults", "metric_overrides", "dimension_weights"}
+_FRESHNESS_AGE_FIELDS = {"max_age_seconds", "half_life_seconds"}
+_SOURCE_QUALITY_FIELDS = {"tier_scores", "redundancy_scores"}
+_EVENT_SEVERITY_FIELDS = {"states", "coverage_state"}
+_NAV_HISTORY_FIELDS = {"unresolved_flow_cap", "provisional_cap"}
 _OVERLAY_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "EXTREME")
 _POSITIONING_REQUIRED_FIELDS = {
     "enabled",
@@ -489,6 +516,11 @@ class Policy:
     execution_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     events: Mapping[str, Any] = dataclass_field(default_factory=dict)
     chain_liveness: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    confidence: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    freshness_policy: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    source_quality: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    event_severity: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    nav_history: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -588,6 +620,16 @@ class Policy:
             result["chain_liveness"] = _copy_mapping(self.chain_liveness)
         if self.core_allocation:
             result["core_allocation"] = _copy_mapping(self.core_allocation)
+        if self.confidence:
+            result["confidence"] = _copy_mapping(self.confidence)
+        if self.freshness_policy:
+            result["freshness_policy"] = _copy_mapping(self.freshness_policy)
+        if self.source_quality:
+            result["source_quality"] = _copy_mapping(self.source_quality)
+        if self.event_severity:
+            result["event_severity"] = _copy_mapping(self.event_severity)
+        if self.nav_history:
+            result["nav_history"] = _copy_mapping(self.nav_history)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -1319,6 +1361,145 @@ def _parse_events(value: Any) -> dict[str, Any]:
     }
 
 
+def _parse_confidence(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PolicyError("confidence must be an object")
+    _unknown_fields(value, _CONFIDENCE_FIELDS, "confidence")
+    if set(value) != _CONFIDENCE_FIELDS:
+        raise PolicyError("confidence fields are incomplete")
+    bands = value["band_thresholds"]
+    if not isinstance(bands, dict) or set(bands) != _CONFIDENCE_BAND_FIELDS:
+        raise PolicyError("confidence.band_thresholds must contain medium_min and high_min")
+    medium = _fraction(bands["medium_min"], "confidence.band_thresholds.medium_min", exclusive_minimum=True)
+    high = _fraction(bands["high_min"], "confidence.band_thresholds.high_min", exclusive_minimum=True)
+    if medium > high:
+        raise PolicyError("confidence band thresholds must be ordered")
+
+    def weights(raw: Any, name: str, expected: set[str]) -> dict[str, float]:
+        if not isinstance(raw, dict) or set(raw) != expected:
+            raise PolicyError(f"{name} must contain exactly {', '.join(sorted(expected))}")
+        parsed = {key: _fraction(raw[key], f"{name}.{key}") for key in expected}
+        if not math.isclose(sum(parsed.values()), 1.0, abs_tol=1e-9):
+            raise PolicyError(f"{name} weights must sum to 1")
+        return {key: parsed[key] for key in sorted(parsed)}
+
+    caps = value["caps"]
+    if not isinstance(caps, dict) or not caps:
+        raise PolicyError("confidence.caps must be a non-empty object")
+    parsed_caps = {
+        str(key).strip().lower(): _fraction(raw, f"confidence.caps.{key}")
+        for key, raw in caps.items()
+        if isinstance(key, str) and key.strip()
+    }
+    if len(parsed_caps) != len(caps):
+        raise PolicyError("confidence.caps keys must be non-empty strings")
+    return {
+        "band_thresholds": {"medium_min": medium, "high_min": high},
+        "data_dimension_weights": weights(value["data_dimension_weights"], "confidence.data_dimension_weights", _DATA_DIMENSIONS),
+        "regime_domain_weights": weights(value["regime_domain_weights"], "confidence.regime_domain_weights", _REGIME_DOMAINS),
+        "decision_component_weights": weights(value["decision_component_weights"], "confidence.decision_component_weights", _DECISION_COMPONENTS),
+        "caps": parsed_caps,
+    }
+
+
+def _parse_freshness_policy(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PolicyError("freshness_policy must be an object")
+    _unknown_fields(value, _FRESHNESS_FIELDS, "freshness_policy")
+    if set(value) != _FRESHNESS_FIELDS:
+        raise PolicyError("freshness_policy fields are incomplete")
+    defaults = value["domain_defaults"]
+    if not isinstance(defaults, dict) or set(defaults) != _FRESHNESS_DOMAINS:
+        raise PolicyError("freshness_policy.domain_defaults must contain all regime domains")
+
+    def age_entry(raw: Any, name: str) -> dict[str, float]:
+        if not isinstance(raw, dict) or set(raw) != _FRESHNESS_AGE_FIELDS:
+            raise PolicyError(f"{name} must contain max_age_seconds and half_life_seconds")
+        max_age = _number(raw["max_age_seconds"], f"{name}.max_age_seconds", minimum=1.0)
+        half_life = _number(raw["half_life_seconds"], f"{name}.half_life_seconds", minimum=1.0)
+        if half_life > max_age:
+            raise PolicyError(f"{name}.half_life_seconds must not exceed max_age_seconds")
+        return {"max_age_seconds": max_age, "half_life_seconds": half_life}
+
+    parsed_defaults = {
+        name: age_entry(defaults[name], f"freshness_policy.domain_defaults.{name}")
+        for name in sorted(defaults)
+    }
+    overrides = value["metric_overrides"]
+    if not isinstance(overrides, dict):
+        raise PolicyError("freshness_policy.metric_overrides must be an object")
+    parsed_overrides = {
+        str(key).strip().lower(): age_entry(raw, f"freshness_policy.metric_overrides.{key}")
+        for key, raw in overrides.items()
+        if isinstance(key, str) and key.strip()
+    }
+    if len(parsed_overrides) != len(overrides):
+        raise PolicyError("freshness_policy.metric_overrides keys must be non-empty strings")
+    dimensions = value["dimension_weights"]
+    if not isinstance(dimensions, dict) or set(dimensions) != _DATA_DIMENSIONS:
+        raise PolicyError("freshness_policy.dimension_weights must contain all data dimensions")
+    parsed_dimensions = {
+        key: _fraction(dimensions[key], f"freshness_policy.dimension_weights.{key}")
+        for key in _DATA_DIMENSIONS
+    }
+    if not math.isclose(sum(parsed_dimensions.values()), 1.0, abs_tol=1e-9):
+        raise PolicyError("freshness_policy.dimension_weights must sum to 1")
+    return {
+        "domain_defaults": parsed_defaults,
+        "metric_overrides": parsed_overrides,
+        "dimension_weights": {key: parsed_dimensions[key] for key in sorted(parsed_dimensions)},
+    }
+
+
+def _parse_source_quality(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PolicyError("source_quality must be an object")
+    _unknown_fields(value, _SOURCE_QUALITY_FIELDS, "source_quality")
+    if set(value) != _SOURCE_QUALITY_FIELDS:
+        raise PolicyError("source_quality fields are incomplete")
+    tiers = value["tier_scores"]
+    if not isinstance(tiers, dict) or set(tiers) != {"1", "2", "3", "unknown"}:
+        raise PolicyError("source_quality.tier_scores must contain 1, 2, 3, and unknown")
+    parsed_tiers = {key: _fraction(raw, f"source_quality.tier_scores.{key}") for key, raw in tiers.items()}
+    redundancy = value["redundancy_scores"]
+    if not isinstance(redundancy, dict) or set(redundancy) != {"0", "1", "2", "3_plus"}:
+        raise PolicyError("source_quality.redundancy_scores must contain 0, 1, 2, and 3_plus")
+    parsed_redundancy = {key: _fraction(raw, f"source_quality.redundancy_scores.{key}") for key, raw in redundancy.items()}
+    if not parsed_redundancy["0"] <= parsed_redundancy["1"] <= parsed_redundancy["2"] <= parsed_redundancy["3_plus"]:
+        raise PolicyError("source_quality.redundancy_scores must be ordered")
+    return {"tier_scores": parsed_tiers, "redundancy_scores": parsed_redundancy}
+
+
+def _parse_event_severity(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PolicyError("event_severity must be an object")
+    _unknown_fields(value, _EVENT_SEVERITY_FIELDS, "event_severity")
+    if set(value) != _EVENT_SEVERITY_FIELDS:
+        raise PolicyError("event_severity fields are incomplete")
+    states = value["states"]
+    if not isinstance(states, list) or tuple(states) != ("CLEAR", "WATCH", "ELEVATED", "CRITICAL"):
+        raise PolicyError("event_severity.states must be CLEAR, WATCH, ELEVATED, CRITICAL")
+    coverage_state = value["coverage_state"]
+    if not isinstance(coverage_state, dict) or set(coverage_state) != {"partial", "unreachable", "unknown"}:
+        raise PolicyError("event_severity.coverage_state must contain partial, unreachable, and unknown")
+    parsed = {key: str(coverage_state[key]).strip().upper() for key in coverage_state}
+    if any(item not in {"WATCH", "ELEVATED", "CRITICAL"} for item in parsed.values()):
+        raise PolicyError("event_severity coverage states must be WATCH, ELEVATED, or CRITICAL")
+    return {"states": list(states), "coverage_state": parsed}
+
+
+def _parse_nav_history(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        raise PolicyError("nav_history must be an object")
+    _unknown_fields(value, _NAV_HISTORY_FIELDS, "nav_history")
+    if set(value) != _NAV_HISTORY_FIELDS:
+        raise PolicyError("nav_history fields are incomplete")
+    return {
+        key: _fraction(value[key], f"nav_history.{key}")
+        for key in _NAV_HISTORY_FIELDS
+    }
+
+
 def _parse_chain_liveness(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError("chain_liveness must be an object")
@@ -1387,9 +1568,10 @@ def _parse_policy(
         raise PolicyError("policy must be an object")
     _unknown_fields(data, _TOP_LEVEL_FIELDS, "policy")
     version = data.get("policy_version")
-    if isinstance(version, bool) or not isinstance(version, int) or version != 3:
-        raise PolicyError("policy_version must be 3")
-    missing = set(_TOP_LEVEL_FIELDS - set(data))
+    if isinstance(version, bool) or not isinstance(version, int) or version not in {3, 4}:
+        raise PolicyError("policy_version must be 3 for historical records or 4 for active policy")
+    required_fields = _TOP_LEVEL_FIELDS if version == 4 else _V3_TOP_LEVEL_FIELDS
+    missing = set(required_fields - set(data))
     if missing:
         raise PolicyError(f"policy is missing fields: {', '.join(sorted(missing))}")
 
@@ -1481,6 +1663,11 @@ def _parse_policy(
     parsed_chain_liveness = _parse_chain_liveness(
         data.get("chain_liveness")
     )
+    parsed_confidence = _parse_confidence(data.get("confidence")) if version == 4 else {}
+    parsed_freshness_policy = _parse_freshness_policy(data.get("freshness_policy")) if version == 4 else {}
+    parsed_source_quality = _parse_source_quality(data.get("source_quality")) if version == 4 else {}
+    parsed_event_severity = _parse_event_severity(data.get("event_severity")) if version == 4 else {}
+    parsed_nav_history = _parse_nav_history(data.get("nav_history")) if version == 4 else {}
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -1609,6 +1796,11 @@ def _parse_policy(
         execution_overlay=parsed_execution_overlay,
         events=parsed_events,
         chain_liveness=parsed_chain_liveness,
+        confidence=parsed_confidence,
+        freshness_policy=parsed_freshness_policy,
+        source_quality=parsed_source_quality,
+        event_severity=parsed_event_severity,
+        nav_history=parsed_nav_history,
     )
     return policy
 
@@ -1636,6 +1828,15 @@ def resolve_policy(
     return load_policy(path, overrides)
 
 
+def historical_policy(policy: Policy | None = None) -> Policy:
+    """Return a v3-compatible resolved policy for historical record reads."""
+    value = (policy or load_policy()).as_dict()
+    value["policy_version"] = 3
+    for field_name in ("confidence", "freshness_policy", "source_quality", "event_severity", "nav_history"):
+        value.pop(field_name, None)
+    return _parse_policy(value)
+
+
 
 
 def policy_hash(policy: Policy | Mapping[str, Any]) -> str:
@@ -1652,6 +1853,7 @@ __all__ = [
     "SCORING_FACTORS",
     "load_policy",
     "policy_hash",
+    "historical_policy",
     "policy_from_mapping",
     "resolve_policy",
 ]

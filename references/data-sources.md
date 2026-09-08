@@ -316,3 +316,8 @@ When sources disagree materially:
 3. identify whether one source is stale;
 4. state unresolved discrepancy;
 5. reduce confidence and position size.
+
+Policy v4 defines metric/domain `max_age_seconds` and `half_life_seconds`.
+`observed_at` measures the fact; `fetched_at` measures retrieval. Source
+quality is tiered, cache reuse is not independent redundancy, and unresolved
+material conflicts do not produce a synthetic value.

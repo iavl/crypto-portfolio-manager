@@ -113,7 +113,7 @@ raise a coverage cap.
 
 ## Relative strength versus BTC
 
-Raw 30D, 90D, 180D and (for policy v3) 365D excess returns, relative drawdown,
+Raw 30D, 90D, 180D and (for policy v4) 365D excess returns, relative drawdown,
 pair trend and the normalized signal remain visible for explanation. In v2/v3
 each horizon uses:
 
@@ -138,7 +138,7 @@ materially negative comparison is ineligible for new risk.
 
 ETH keeps the default six-factor weights: trend 20%, valuation 20%,
 fundamentals 25%, on-chain 15%, capital flows 10%, and BTC-relative strength
-10%. Policy v3 enriches the evidence inside those factors with monetary supply
+10%. Policy v4 enriches the evidence inside those factors with monetary supply
 and burn/issuance context, proof-of-stake security and staking flows, Ethereum
 L2 settlement rent, blob/data-availability demand, DeFi/stablecoin economics,
 realized valuation where supported, and ETH ETF flow/AUM ratios.
@@ -149,7 +149,7 @@ automatically bullish; cause, persistence, liquidity, and security context
 remain part of the bounded semantic judgment. Raw ETH ETF USD flow is evidence
 context; normalized ETH flow/AUM owns capital-flow scoring authority.
 
-The ETH/BTC factor remains part of the base score, while policy v3 also applies
+The ETH/BTC factor remains part of the base score, while policy v4 also applies
 it as a separate core-allocation opportunity-cost gate. This gate never mutates
 the base score. ETH FDV/market-cap is `NOT_APPLICABLE` and cannot contribute
 positive valuation evidence.
@@ -211,7 +211,15 @@ Scores do not directly imply `BUY`, `SELL`, or a full deployment. `HOLD`,
 
 ## Supported version
 
-Only policy version 3 is supported. Scoring algorithm version 2 keeps fixed
-profile weights, reliability shrinkage, and the separate event-risk gate.
-Old policy versions and incomplete embedded policies are rejected. Resolved
-policy and hash remain authoritative for current-format records.
+Active policy version 4 keeps scoring algorithm version 2, fixed profile
+weights, reliability shrinkage, and the separate event-risk gate. Historical
+policy v3 records remain readable with their embedded resolved policy; they are
+not silently replayed as v4.
+
+### Data Confidence
+
+Each applicable metric/factor retains fixed-denominator `coverage`, exponential
+`freshness`, `source_quality`, independent-source `redundancy`, and
+`signal_consistency`. Scores are bounded in `[0, 1]` and reported with
+`LOW`/`MEDIUM`/`HIGH` bands. Missing, stale, conflict, fallback, and evidence
+IDs remain explicit. A hard-critical cap cannot be diluted by ordinary metrics.

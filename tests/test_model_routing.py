@@ -26,6 +26,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ModelRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.routing_config_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.routing_config_dir.cleanup)
+
+        config_path = Path(self.routing_config_dir.name) / "model-routing.json"
+        config = json.loads(
+            (ROOT / "config" / "model-routing.json").read_text(encoding="utf-8")
+        )
+        config["default_profile"] = "balanced"
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        self.routing_config_patch = patch.dict(
+            os.environ,
+            {
+                "CRYPTO_PORTFOLIO_MODEL_CONFIG": str(config_path),
+                "CRYPTO_PORTFOLIO_MODEL_PROFILE": "",
+            },
+            clear=False,
+        )
+        self.routing_config_patch.start()
+        self.addCleanup(self.routing_config_patch.stop)
+
     def test_default_and_builtin_profiles(self):
         with patch.dict(os.environ, {"CRYPTO_PORTFOLIO_MODEL_PROFILE": ""}, clear=False):
             routing = load_model_routing()

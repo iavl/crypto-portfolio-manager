@@ -333,6 +333,7 @@ def build_target_allocation(
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
     chain_liveness: Mapping[str, Any] | None = None,
     structural_risk: Mapping[str, Any] | None = None,
+    decision_confidence: Any | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
     if overlays is not None:
@@ -343,6 +344,14 @@ def build_target_allocation(
     if not resolved.stable_symbols:
         raise ValueError("policy must define at least one stable symbol")
     assessments = assessments or {}
+    decision_confidence_factor = 1.0
+    if decision_confidence is not None:
+        score = getattr(decision_confidence, "score", None) if not isinstance(decision_confidence, Mapping) else decision_confidence.get("score", decision_confidence.get("confidence_score"))
+        if score is not None:
+            score = float(score)
+            if not math.isfinite(score) or not 0 <= score <= 1:
+                raise ValueError("decision_confidence score must be finite and in [0, 1]")
+            decision_confidence_factor = 0.0 if score < 0.60 else 0.70 if score < 0.80 else 1.0
     current_weights = current_weights or {}
     normalized_current_weights: dict[str, float] = {}
     for raw_symbol, raw_weight in current_weights.items():
@@ -436,6 +445,7 @@ def build_target_allocation(
                     * risk_multiplier
                     * event_multiplier
                     * _relative_multiplier(relative)
+                    * decision_confidence_factor
                 )
                 if event_multiplier < 1.0:
                     reasons.append(
@@ -443,6 +453,8 @@ def build_target_allocation(
                     )
                 if confidence_multiplier == 0:
                     reasons.append(f"{symbol} receives 0% satellite target because confidence is LOW")
+                if decision_confidence_factor < 1.0:
+                    reasons.append(f"{symbol} new deployment is capped by portfolio decision confidence at {decision_confidence_factor:.0%}")
             else:
                 reasons.append(f"{symbol} receives 0% satellite target because eligibility failed")
         elif asset_type == "core":
@@ -509,10 +521,12 @@ def allocate(
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
     chain_liveness: Mapping[str, Any] | None = None,
     structural_risk: Mapping[str, Any] | None = None,
+    decision_confidence: Any | None = None,
 ) -> AllocationResult:
     return build_target_allocation(
         policy, regime, assessments, current_weights,
         overlays=overlays, chain_liveness=chain_liveness, structural_risk=structural_risk,
+        decision_confidence=decision_confidence,
     )
 
 

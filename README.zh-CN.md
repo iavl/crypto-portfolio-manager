@@ -1,6 +1,6 @@
 [English](README.md) · [简体中文（当前）](README.zh-CN.md)
 
-仅支持当前契约：政策 v3、评分 v2、路由 v2、执行计划 v2。旧版本直接拒绝，不保留旧版回放或自动迁移。旧数据应基于可验证事实升级，无法可靠升级则清理。时间戳必须带时区，执行计划必须使用带时间戳的 SpotPrice。
+当前写入契约使用政策 v4、评分 v2、路由 v2、执行计划 v2。历史政策 v3 记录仍可读取，但不会静默按 v4 回放。Confidence 由 Python 负责，并分为 Data -> Regime -> Decision 三层。时间戳必须带时区，执行计划必须使用带时间戳的 SpotPrice。
 
 # crypto-portfolio-manager
 

@@ -346,3 +346,12 @@ End with one unambiguous sentence such as:
 or:
 
 > 本轮执行建议：NO TRADE，5000U 全部保留为稳定币，等待风险收益比改善。
+
+## 11. Confidence and performance chain
+
+Finalized reports show Data Confidence dimensions, Regime Confidence, Decision
+Confidence, raw/final scores, bands, caps, evidence IDs, and their action
+effects. They also show NAV status, cash-flow-adjusted return, current/max
+drawdown, BTC benchmark/excess return, and EventScanner state. A pending event
+resolution or unresolved historical cash flow keeps the packet
+`PROVISIONAL`/`BLOCKED`; the writer never recomputes these values.

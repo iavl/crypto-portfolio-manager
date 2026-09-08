@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
+from .policy import Policy, historical_policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
 
@@ -181,9 +181,9 @@ class PortfolioSnapshot:
         if self.policy_version is not None and (
             isinstance(self.policy_version, bool)
             or not isinstance(self.policy_version, int)
-            or self.policy_version != 3
+            or self.policy_version not in {3, 4}
         ):
-            raise ValueError("policy_version must be 3")
+            raise ValueError("policy_version must be 3 or 4")
         if self.source is not None and not isinstance(self.source, str):
             raise ValueError("source must be a string or null")
         if self.policy_hash is not None:
@@ -292,12 +292,15 @@ def snapshot_from_mapping(
     unknown = set(data) - allowed
     if unknown:
         raise ValueError(f"snapshot contains unknown fields: {', '.join(sorted(unknown))}")
+    supplied_version = data.get("policy_version")
     if policy is not None:
         resolved_policy = policy
     elif data.get("resolved_policy") is not None:
         resolved_policy = policy_from_mapping(data["resolved_policy"])
     else:
         resolved_policy = resolve_policy(data.get("config"))
+    if supplied_version == 3 and resolved_policy.policy_version == 4 and data.get("resolved_policy") is None and data.get("config") is None:
+        resolved_policy = historical_policy(resolved_policy)
     if "portfolio_peak_value" in data:
         raise ValueError("portfolio_peak_value is unsupported; use cash-flow-aware NAV history")
     raw_positions = data.get("positions")

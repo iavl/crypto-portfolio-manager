@@ -9,7 +9,7 @@ from crypto_portfolio.models.policy import PolicyError, load_policy, policy_from
 class PolicyTests(unittest.TestCase):
     def test_canonical_policy_loads_and_normalizes(self):
         policy = load_policy()
-        self.assertEqual(policy.policy_version, 3)
+        self.assertEqual(policy.policy_version, 4)
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
         self.assertEqual(policy.excluded_symbols, ("LUNC",))
         self.assertTrue(policy.is_excluded(" lunc "))

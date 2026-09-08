@@ -211,7 +211,7 @@ Python 从 MetricObservation 构建 compact Facts 和 metric history。趋势、
 解释、BTC-relative strength 等已有确定性实现；其他需要上下文的 fundamentals、
 valuation、event risk 可由模型在 bounded packet 中判断。
 
-v2/v3 的六个 base scoring factors 来自 canonical policy：
+v4 policy 的六个 base scoring factors 来自 canonical policy：
 
 ```text
 trend
@@ -228,7 +228,7 @@ overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩
 关键 current price、trend、portfolio value 或材料安全事件缺失时，高置信新增
 仓位被阻止。
 
-Policy v3 对 ETH 额外分组展示 monetary economics、staking security、L2/DA
+Policy v4 对 ETH 额外分组展示 monetary economics、staking security、L2/DA
 settlement、DeFi/stablecoin 和 developer/ecosystem 证据；这些只是语义分组，
 数值仍由 Python 的 MetricObservation 和确定性派生函数拥有。ETH 核心门控与
 70/30 BTC/ETH 核心袖套锚点独立于 base score，不能把 core 分类当作目标保证。
@@ -328,6 +328,13 @@ Evidence -> fact meaning -> portfolio constraint -> risk gate
 | Packets | `crypto_portfolio/models/*packet.py`, `crypto_portfolio/engine/report_packet.py` |
 | Providers | `crypto_portfolio/providers/` |
 | Runtime state | `crypto_portfolio/state/` |
+
+## Confidence layers
+
+The deterministic path is `Data Confidence -> Regime Confidence -> Decision
+Confidence`. Every layer retains a bounded score, band, reasons, caps, and
+evidence IDs. Missing data stays missing, and a normal regime label does not
+grant permission to add risk.
 
 运行检查：
 

@@ -324,3 +324,14 @@ python3 -m compileall crypto_portfolio scripts
 
 出现缺失、过期、冲突或来源不可用时，报告必须保留状态和对 confidence、
 交易资格及最终 Action 的影响。未知数据不会被默认为安全，也不会被填成零。
+
+## Confidence 与迁移检查
+
+以下命令只读运行时目录，不抓取数据、不下单：
+
+```bash
+python3 scripts/confidence.py --data-dir "$CRYPTO_PORTFOLIO_DATA_DIR" --json
+python3 scripts/migrate_confidence.py --check --data-dir "$CRYPTO_PORTFOLIO_DATA_DIR"
+```
+
+迁移 `--dry-run` 不改原始 JSONL；`--write` 只追加版本化 sidecar，未解决的现金流仍保持未知。

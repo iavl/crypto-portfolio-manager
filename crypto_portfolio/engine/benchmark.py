@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
 from .ledger import PortfolioSnapshot, build_nav_history, nav_return
+from ..models.performance import NAVHistoryResult
+from ..models.time import normalize_timestamp
 from .metrics import benchmark_70_30, period_returns, portfolio_weighted_return
 from ..models.policy import Policy, resolve_policy
 
@@ -187,6 +190,64 @@ def benchmark_return_from_prices(
     )
 
 
+def build_aligned_benchmark_result(
+    portfolio: NAVHistoryResult | Sequence[PortfolioSnapshot | Mapping[str, Any]],
+    btc_prices: Sequence[float],
+    *,
+    eth_prices: Sequence[float] | None = None,
+    cash_flows: Sequence[float] | None = None,
+    timestamps: Sequence[str] | None = None,
+    policy: Policy | None = None,
+) -> NAVHistoryResult:
+    """Attach buy-and-hold BTC/70-30 benchmark returns to an aligned NAV result."""
+    if isinstance(portfolio, NAVHistoryResult):
+        result = portfolio
+    else:
+        from .ledger import build_nav_history_result
+
+        result = build_nav_history_result(portfolio)
+    if result.status != "AVAILABLE":
+        return replace(result, benchmark_status=result.status, explanations=tuple(result.explanations) + ("benchmark is unavailable until NAV history is finalized",))
+    if not btc_prices:
+        return replace(result, benchmark_status="UNAVAILABLE", explanations=tuple(result.explanations) + ("BTC benchmark anchor is missing",))
+    if timestamps is not None:
+        normalized = tuple(normalize_timestamp(item, "benchmark timestamp") for item in timestamps)
+        if len(normalized) != len(btc_prices):
+            raise ValueError("benchmark timestamps must match BTC price history")
+        if result.states and (
+            normalized[0] != result.states[0].timestamp or normalized[-1] != result.states[-1].timestamp
+        ):
+            raise ValueError("benchmark and portfolio periods must share start and end anchors")
+    flows = list(cash_flows) if cash_flows is not None else [state.external_cash_flow for state in result.states[1:]]
+    if len(flows) != len(btc_prices) - 1:
+        raise ValueError("benchmark cash flows must match price return periods")
+    btc_return = benchmark_return_from_prices(
+        {"BTC": btc_prices},
+        cash_flows=flows,
+        timestamps=timestamps,
+        benchmark="primary",
+        policy=policy,
+    )
+    secondary = None
+    if eth_prices is not None:
+        if len(eth_prices) != len(btc_prices):
+            raise ValueError("BTC and ETH benchmark histories must have equal lengths")
+        secondary = benchmark_return_from_prices(
+            {"BTC": btc_prices, "ETH": eth_prices},
+            cash_flows=flows,
+            timestamps=timestamps,
+            benchmark="secondary",
+            policy=policy,
+        )
+    return replace(
+        result,
+        benchmark_status="AVAILABLE",
+        btc_return=btc_return,
+        btc_excess_return=result.nav_return - btc_return if result.nav_return is not None else None,
+        secondary_benchmark_return=secondary,
+    )
+
+
 __all__ = [
     "benchmark_return",
     "benchmark_return_from_prices",
@@ -196,4 +257,5 @@ __all__ = [
     "require_aligned_period",
     "secondary_benchmark_return",
     "benchmark_70_30",
+    "build_aligned_benchmark_result",
 ]

@@ -230,6 +230,7 @@ def run_risk_gate(
     chain_liveness: Mapping[str, Any] | None = None,
     actions: Iterable[Any] | None = None,
     current_weights: Mapping[str, float] | None = None,
+    decision_confidence: Any | None = None,
 ) -> RiskCheckResult:
     resolved = policy or resolve_policy()
     if hasattr(target_weights, "target_weights"):
@@ -441,6 +442,32 @@ def run_risk_gate(
     liveness_values = _liveness_values(chain_liveness, assessments)
     action_values = tuple(actions or ())
     increase_symbols = _increase_symbols(action_values)
+    if decision_confidence is not None:
+        confidence_score = (
+            getattr(decision_confidence, "score", None)
+            if not isinstance(decision_confidence, Mapping)
+            else decision_confidence.get("score", decision_confidence.get("confidence_score"))
+        )
+        if confidence_score is not None:
+            confidence_score = float(confidence_score)
+            if not math.isfinite(confidence_score) or not 0 <= confidence_score <= 1:
+                raise ValueError("decision_confidence score must be finite and in [0, 1]")
+            if increase_symbols and confidence_score < 0.60:
+                violations.append(
+                    RiskViolation(
+                        "ERROR",
+                        "DECISION_CONFIDENCE_BLOCK",
+                        "decision confidence is LOW; new INCREASE exposure is blocked",
+                    )
+                )
+            elif confidence_score < 0.80:
+                violations.append(
+                    RiskViolation(
+                        "WARNING",
+                        "DECISION_CONFIDENCE_CAP",
+                        "decision confidence is MEDIUM; new deployment must remain reduced",
+                    )
+                )
     current = _weights(current_weights) if current_weights is not None else None
     deployment_caps: dict[str, float] = dict(event_caps)
     blocked_symbols: list[str] = []
