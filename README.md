@@ -179,6 +179,7 @@ Volume Profile results are stored under
 traded-volume concentration proxy, not exact holder cost basis.
 Provider responses and series manifests are cached under `provider-cache/`;
 see [Data Providers](references/data-providers.md) for modes and cleanup.
+Provider or API problems? See [Development and Provider Debugging](docs/DEVELOPMENT_DEBUGGING.md).
 Position P&L is unrealized performance for the remaining position only; this
 feature does not claim realized P&L, fees, tax lots, or lifetime return.
 

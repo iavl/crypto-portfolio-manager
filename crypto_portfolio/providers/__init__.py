@@ -28,6 +28,16 @@ from .cache import ProviderCache
 from .config import provider_runtime_status, provider_status
 from .router import ProviderRouter
 from .probe import probe_provider, probe_providers
+from .health import (
+    contract_providers,
+    diagnostic_exit_code,
+    diagnostic_failed,
+    doctor_providers,
+    smoke_provider,
+    validate_provider_registry,
+)
+from .circuit_breaker import CircuitBreaker, CircuitState
+from .recording import RecordingEnvelope, RecordingTransport, ReplayTransport, load_recording
 from .alternative_me import AlternativeMeProvider
 from .chain_liveness import (
     CHAIN_NATIVE_ASSETS,
@@ -70,8 +80,20 @@ __all__ = [
     "ProviderResponseError",
     "ProviderRuntimeStatus",
     "ProviderRouter",
+    "CircuitBreaker",
+    "CircuitState",
+    "RecordingEnvelope",
+    "RecordingTransport",
+    "ReplayTransport",
+    "contract_providers",
+    "diagnostic_exit_code",
+    "diagnostic_failed",
+    "doctor_providers",
     "probe_provider",
     "probe_providers",
+    "smoke_provider",
+    "load_recording",
+    "validate_provider_registry",
     "provider_runtime_status",
     "provider_status",
     "ProviderUnavailable",

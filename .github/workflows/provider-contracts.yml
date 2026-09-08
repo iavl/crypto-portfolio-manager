@@ -1,0 +1,26 @@
+name: provider-contracts
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+      COINMETRICS_API_KEY: ${{ secrets.COINMETRICS_API_KEY }}
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      L2BEAT_API_KEY: ${{ secrets.L2BEAT_API_KEY }}
+      SOSOVALUE_API_KEY: ${{ secrets.SOSOVALUE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ".[dev]"
+      - name: Run provider contract checks
+        run: python3 scripts/providers.py --contract all

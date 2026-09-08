@@ -27,6 +27,7 @@ class DocumentationTests(unittest.TestCase):
         required_paths = (
             "docs/USAGE.md",
             "docs/HOW_IT_WORKS.md",
+            "docs/DEVELOPMENT_DEBUGGING.md",
             "docs/GLOSSARY.zh-CN.md",
             "README.zh-CN.md",
             "config/policy.json",
@@ -170,6 +171,20 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("script_executions", skill)
         self.assertNotIn("result.event_source_scan_requests", skill)
         self.assertIn("not proof of an exploit, approval, or execution", template)
+
+    def test_provider_debugging_guide_matches_cli_contract(self):
+        guide = (ROOT / "docs" / "DEVELOPMENT_DEBUGGING.md").read_text(encoding="utf-8")
+        for text in (
+            "--status", "--doctor", "--probe", "--contract", "--smoke",
+            "HTTP_403_UNKNOWN", "CONNECT_TIMEOUT", "READ_TIMEOUT",
+            "PROVIDER_SCHEMA_CHANGED", "CIRCUIT_OPEN", "Record / replay",
+            "run_with_debug.py", "credential", "TLS verification",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, guide)
+        self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"))
+        self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8"))
 
     def test_install_script_copies_payload_and_refuses_existing_destination(self):
         script = ROOT / "install.sh"

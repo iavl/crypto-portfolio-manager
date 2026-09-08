@@ -225,6 +225,15 @@ def provider_status(
     return tuple(rows)
 
 
+def validate_provider_registry(
+    config: Mapping[str, Any] | None = None,
+    adapters: Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[ProviderRuntimeStatus, ...]:
+    """Validate configured providers against the adapters actually registered."""
+    return provider_runtime_status(config, adapters=adapters, environ=environ)
+
+
 __all__ = [
     "load_provider_config",
     "provider_api_key",
@@ -232,4 +241,5 @@ __all__ = [
     "provider_runtime_status",
     "provider_settings",
     "provider_status",
+    "validate_provider_registry",
 ]

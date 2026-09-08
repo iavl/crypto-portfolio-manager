@@ -256,6 +256,13 @@ history, credentials, private keys, seeds, tokens, or cookies.
 
 ## Models, schemas, providers, and state
 
+Provider reliability is fail-closed and deterministic: preserve structured
+transport/upstream/cache diagnostics through fallback, never convert a
+provider failure into zero or normal data, and keep live network checks
+separate from the offline unit suite. TLS verification must remain enabled;
+credentials, cookies, raw headers, and sensitive response bodies must never
+enter fixtures, caches, logs, or reports.
+
 Typed models are the source of validation; generated or clearly aligned JSON
 Schemas must match them. When changing a schema, update the model, validation,
 fixtures, tests, and user documentation as needed. Keep input, persistent

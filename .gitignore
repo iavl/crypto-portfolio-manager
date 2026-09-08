@@ -18,6 +18,7 @@ venv/
 .env.*
 
 .crypto-portfolio-manager/
+.data/provider-recordings/
 
 data/portfolio/*
 data/decisions/*

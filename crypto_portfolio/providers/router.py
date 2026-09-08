@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+import time
 import traceback
 from typing import Any, Iterable, Mapping
 
@@ -23,7 +24,8 @@ from .base import (
 )
 from .cache import CacheCorruption, CacheExpired, ProviderCache, merge_ohlcv_series, missing_series_range, request_hash
 from .config import load_provider_config, provider_api_key, provider_enabled
-from .http import HttpClient, classify_transport_error, redact_log, redact_secrets
+from .circuit_breaker import CircuitBreaker
+from .http import HttpClient, classify_transport_error, is_retryable_error_code, redact_log, redact_secrets
 from .routes import BASIS_METHODOLOGY, build_provider_requests, current_delivery_basis, provider_chain
 
 
@@ -50,6 +52,10 @@ class ProviderAttempt:
     retryable: bool | None = None
     status_code: int | None = None
     log: str | None = None
+    latency_ms: int | None = None
+    fallback_from: str | None = None
+    fallback_index: int | None = None
+    circuit_state: str | None = None
 
     @property
     def success(self) -> bool:
@@ -82,6 +88,10 @@ class ProviderAttempt:
             "retryable": self.retryable,
             "status_code": self.status_code,
             "log": self.log,
+            "latency_ms": self.latency_ms,
+            "fallback_from": self.fallback_from,
+            "fallback_index": self.fallback_index,
+            "circuit_state": self.circuit_state,
         }
 
 
@@ -170,6 +180,7 @@ class ProviderRouter:
         self._provider_requests: dict[str, int] = {}
         self._last_network_requests = 0
         self._last_metric_diagnostics: dict[str, Mapping[str, Any]] = {}
+        self.circuit_breakers: dict[str, CircuitBreaker] = {}
 
     def _default_providers(self) -> dict[str, Any]:
         from .alternative_me import AlternativeMeProvider
@@ -384,6 +395,7 @@ class ProviderRouter:
                     mutable=original.mutable,
                     freshness_seconds=original.freshness_seconds,
                 )
+                started = time.perf_counter()
                 try:
                     values, source_mode, hit, network_count = self._collect_one(
                         provider_name, provider, request, selected_mode, as_of=as_of, now=current
@@ -434,6 +446,10 @@ class ProviderRouter:
                         detail=partial_diagnostic.get("detail"),
                         retryable=partial_diagnostic.get("retryable"),
                         status_code=partial_diagnostic.get("status_code"),
+                        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                        fallback_from=first["chain"][0] if first["index"] > 0 else None,
+                        fallback_index=first["index"],
+                        circuit_state=self._circuit(provider_name).state.value,
                     ))
                     cache_hits += int(hit)
                     api_requests += network_count
@@ -454,7 +470,16 @@ class ProviderRouter:
                     secret = provider_api_key(provider_name, self.config)
                     diagnostic = self._diagnostic_for(exc)
                     if not diagnostic:
-                        diagnostic = {"error_code": classify_transport_error(exc), "detail": redact_secrets(str(exc), (secret,) if secret else ())}
+                        error_code = classify_transport_error(exc)
+                        diagnostic = {
+                            "error_code": error_code,
+                            "detail": redact_secrets(str(exc), (secret,) if secret else ()),
+                            "retryable": is_retryable_error_code(error_code),
+                        }
+                    error_code = str(diagnostic.get("error_code", "UNKNOWN_NETWORK_ERROR")).upper()
+                    self._circuit(provider_name).record_failure(
+                        retryable=bool(diagnostic.get("retryable")) or is_retryable_error_code(error_code),
+                    )
                     reason = self._format_diagnostic(diagnostic, fallback=redact_secrets(str(exc), (secret,) if secret else ()) or exc.__class__.__name__)
                     failure_log = redact_log(traceback.format_exc(), (secret,) if secret else ())
                     failed_network_requests = self._last_network_requests
@@ -470,6 +495,10 @@ class ProviderRouter:
                         retryable=diagnostic.get("retryable"),
                         status_code=diagnostic.get("status_code"),
                         log=failure_log or None,
+                        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                        fallback_from=first["chain"][0] if first["index"] > 0 else None,
+                        fallback_index=first["index"],
+                        circuit_state=self._circuit(provider_name).state.value,
                     ))
                     api_requests += failed_network_requests
                     if first["index"] > 0:
@@ -505,6 +534,9 @@ class ProviderRouter:
         if name not in self.config.get("providers", {}):
             return name in self.providers
         return provider_enabled(name, self.config)
+
+    def _circuit(self, provider: str) -> CircuitBreaker:
+        return self.circuit_breakers.setdefault(provider, CircuitBreaker())
 
     def _disabled_error_code(self, name: str, provider: Any | None) -> str:
         settings = self.config.get("providers", {}).get(name)
@@ -598,7 +630,14 @@ class ProviderRouter:
         maximum = int(network.get("max_requests_per_review", 60))
         per_provider = int(network.get("max_requests_per_provider", 30))
         if self._review_requests >= maximum or self._provider_requests.get(provider, 0) >= per_provider:
-            raise ProviderUnavailable("provider request budget exhausted")
+            raise ProviderUnavailable(
+                "provider request budget exhausted",
+                diagnostic=ProviderDiagnostic(
+                    error_code="REQUEST_BUDGET_EXHAUSTED",
+                    detail="provider request budget exhausted",
+                    retryable=False,
+                ),
+            )
 
     def _collect_one(
         self,
@@ -636,6 +675,15 @@ class ProviderRouter:
             raise ProviderUnavailable("CACHE_ONLY has no usable provider cache", diagnostic=ProviderDiagnostic(
                 error_code="CACHE_MISS", detail="CACHE_ONLY has no usable provider cache",
             ))
+        if not self._circuit(provider_name).allow():
+            raise ProviderUnavailable(
+                f"provider circuit is open for {provider_name}",
+                diagnostic=ProviderDiagnostic(
+                    error_code="CIRCUIT_OPEN",
+                    detail=f"provider circuit is open for {provider_name}",
+                    retryable=False,
+                ),
+            )
         self._budget(provider_name)
         self._review_requests += 1
         self._provider_requests[provider_name] = self._provider_requests.get(provider_name, 0) + 1
@@ -650,6 +698,7 @@ class ProviderRouter:
             after = getattr(client, "request_count", None)
             if isinstance(before, int) and isinstance(after, int):
                 self._last_network_requests = max(0, after - before)
+        self._circuit(provider_name).record_success()
         values = _mapping_observations(raw)
         if isinstance(raw, ProviderResponse) and raw.diagnostics:
             self._last_metric_diagnostics = {
@@ -709,6 +758,15 @@ class ProviderRouter:
                 ))
             values = self._series_values(provider, request, existing, as_of=effective_as_of)
             return values, "CACHE_PROVIDER", True, 0
+        if not self._circuit(provider_name).allow():
+            raise ProviderUnavailable(
+                f"provider circuit is open for {provider_name}",
+                diagnostic=ProviderDiagnostic(
+                    error_code="CIRCUIT_OPEN",
+                    detail=f"provider circuit is open for {provider_name}",
+                    retryable=False,
+                ),
+            )
         self._budget(provider_name)
         self._review_requests += 1
         self._provider_requests[provider_name] = self._provider_requests.get(provider_name, 0) + 1
@@ -727,6 +785,7 @@ class ProviderRouter:
             after = getattr(client, "request_count", None)
             if isinstance(before, int) and isinstance(after, int):
                 self._last_network_requests = max(0, after - before)
+        self._circuit(provider_name).record_success()
         if not hasattr(incoming, "candles"):
             incoming = OHLCVSeries.from_mapping(incoming)
         completed = tuple(candle for candle in incoming.candles if candle.completed)

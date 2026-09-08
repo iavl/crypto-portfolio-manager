@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 from typing import Any, Callable, Iterable, Mapping
 
 from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
@@ -33,7 +34,7 @@ _NETWORK_FAILURES = {
     "PROXY_ERROR", "HTTP_5XX", "UNKNOWN_NETWORK_ERROR",
     "HTTP_403_RATE_LIMIT", "HTTP_429",
 }
-_SCHEMA_FAILURES = {"INVALID_JSON", "RESPONSE_TOO_LARGE", "PROVIDER_SCHEMA_ERROR"}
+_SCHEMA_FAILURES = {"INVALID_JSON", "RESPONSE_TOO_LARGE", "PROVIDER_SCHEMA_ERROR", "PROVIDER_SCHEMA_CHANGED"}
 
 
 def _now() -> str:
@@ -76,21 +77,25 @@ def _probe_call(
         "auth": "OK" if authenticated else "NOT_REQUIRED",
         "plan_access": "OK",
         "schema": "OK",
+        "normalization": "NOT_TESTED",
     }
+    started = time.perf_counter()
     try:
         value = call()
         if validate is not None:
             validate(value)
         result["http_status"] = 200
+        result["normalization"] = "OK"
     except Exception as exc:  # probes report failures instead of aborting all providers
         diagnostic = _diagnostic(exc, endpoint)
         code = str(diagnostic["error_code"]).upper()
         detail = str(diagnostic.get("detail", ""))
         result.update({
             "network": "FAILED" if code in _NETWORK_FAILURES else "OK",
-            "auth": "REJECTED" if code in {"HTTP_401", "HTTP_403"} else "NOT_TESTED" if code in _NETWORK_FAILURES else result["auth"],
-            "plan_access": "RESTRICTED" if code == "PROVIDER_PLAN_RESTRICTED" else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403"} else "OK",
-            "schema": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403", "PROVIDER_PLAN_RESTRICTED"} else result["schema"],
+            "auth": "REJECTED" if code in {"HTTP_401", "HTTP_403_AUTH"} else "NOT_TESTED" if code in _NETWORK_FAILURES else result["auth"],
+            "plan_access": "RESTRICTED" if code == "PROVIDER_PLAN_RESTRICTED" else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH"} else "OK",
+            "schema": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH", "PROVIDER_PLAN_RESTRICTED"} else result["schema"],
+            "normalization": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH", "PROVIDER_PLAN_RESTRICTED"} else result["normalization"],
             "error_code": code,
             "exception_class": diagnostic.get("exception_class"),
             "detail": redact_secrets(detail),
@@ -99,7 +104,9 @@ def _probe_call(
             result["http_status"] = diagnostic["status_code"]
         if "history is insufficient" in detail.lower() or "no data at or before" in detail.lower():
             result["history"] = "INSUFFICIENT"
+        result["latency_ms"] = max(0, int((time.perf_counter() - started) * 1000))
         return result
+    result["latency_ms"] = max(0, int((time.perf_counter() - started) * 1000))
     return result
 
 
@@ -312,6 +319,8 @@ def probe_provider(
             "config": "NOT_READY",
             "network": "SKIPPED",
             "reason": status.reason if status else "provider is not registered",
+            "error_code": status.reason if status else "ADAPTER_UNAVAILABLE",
+            "tested": False,
         },)
     provider = router.providers.get(name)
     client = getattr(provider, "client", None)
@@ -319,7 +328,7 @@ def probe_provider(
         assets = (asset.strip().upper(),) if asset is not None else CHAIN_NATIVE_ASSETS
         return tuple(_with_config(_chain_liveness_probe(provider, item), client) for item in assets)
     if client is None or not hasattr(client, "get_json"):
-        return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
+        return ({"provider": name, "config": "READY", "tested": True, "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
         return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
     if name == "l2beat" and isinstance(provider, L2BeatProvider):
@@ -536,11 +545,11 @@ def probe_provider(
                 ) if item.lower() in available
             )
         return (_with_config(result, client),)
-    return ({"provider": name, "config": "READY", "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
+    return ({"provider": name, "config": "READY", "tested": True, "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
 
 
 def _with_config(result: Mapping[str, Any], client: Any | None = None) -> dict[str, Any]:
-    output = {"config": "READY", **dict(result)}
+    output = {"config": "READY", "tested": True, **dict(result)}
     metadata = getattr(client, "transport_metadata", lambda: {})()
     output.update({
         "python_ssl": metadata.get("python_ssl"),

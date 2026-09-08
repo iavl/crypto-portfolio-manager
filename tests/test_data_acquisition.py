@@ -519,11 +519,15 @@ class DataAcquisitionTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.diagnostic.method, "POST")
         self.assertEqual(raised.exception.diagnostic.error_code, "INVALID_JSON")
-        for status in (401, 403):
-            with self.subTest(status=status), self.assertRaises(ProviderAuthenticationError):
-                HttpClient(opener=Client([Response(status)])).post_json(
-                    "https://example.test/etf", json_body={"type": "us-btc-spot"}
-                )
+        with self.assertRaises(ProviderAuthenticationError):
+            HttpClient(opener=Client([Response(401)])).post_json(
+                "https://example.test/etf", json_body={"type": "us-btc-spot"}
+            )
+        with self.assertRaises(ProviderResponseError) as forbidden:
+            HttpClient(opener=Client([Response(403)])).post_json(
+                "https://example.test/etf", json_body={"type": "us-btc-spot"}
+            )
+        self.assertEqual(forbidden.exception.diagnostic.error_code, "HTTP_403_UNKNOWN")
         with self.assertRaises(ProviderRateLimited) as raised:
             HttpClient(
                 opener=Client([Response(403, headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"})]),

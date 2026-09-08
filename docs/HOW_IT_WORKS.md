@@ -173,6 +173,28 @@ fundamentals.tvl / fees / revenue / fee-revenue multiple
     -> DeFiLlama
 ```
 
+### Provider reliability
+
+Provider acquisition keeps the failure boundary visible:
+
+```text
+request
+ -> cache
+ -> provider router
+ -> HttpClient
+ -> normalization
+ -> diagnostics
+ -> fallback
+ -> unresolved evidence
+```
+
+`--status` is an offline readiness check. Explicit `--doctor`, `--probe`,
+`--contract`, and `--smoke` commands diagnose or exercise live acquisition;
+they do not change portfolio calculations. Transport, HTTP, plan, schema,
+normalization, cache, and circuit failures remain structured provider
+diagnostics. Fallback can provide a usable observation, but it never erases
+the original attempt from telemetry.
+
 The report writer never replaces a successful structured observation with Web or
 model inference. Historical valuation requests use only evidence at or before
 the review cutoff.

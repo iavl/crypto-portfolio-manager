@@ -7,6 +7,7 @@ import errno
 import inspect
 import json
 import os
+import random
 import re
 import socket
 import ssl
@@ -50,7 +51,10 @@ def _system_ca_bundle() -> Path | None:
     return None
 
 
-TRANSPORT_ERROR_CODES = (
+PROVIDER_ERROR_CODES = (
+    "CONFIG_DISABLED",
+    "CREDENTIAL_MISSING",
+    "ADAPTER_UNAVAILABLE",
     "TLS_CERTIFICATE_VERIFY_FAILED",
     "TLS_HANDSHAKE_FAILED",
     "DNS_RESOLUTION_FAILED",
@@ -61,8 +65,12 @@ TRANSPORT_ERROR_CODES = (
     "PROXY_ERROR",
     "HTTP_400",
     "HTTP_401",
-    "HTTP_403",
+    "HTTP_403_AUTH",
     "HTTP_403_RATE_LIMIT",
+    "HTTP_403_ACCESS_DENIED",
+    "HTTP_403_REGION_RESTRICTED",
+    "HTTP_403_WAF",
+    "HTTP_403_UNKNOWN",
     "HTTP_404",
     "HTTP_429",
     "HTTP_5XX",
@@ -71,9 +79,24 @@ TRANSPORT_ERROR_CODES = (
     "PROVIDER_PLAN_RESTRICTED",
     "PROVIDER_INSUFFICIENT_HISTORY",
     "PROVIDER_UNSUPPORTED",
+    "PROVIDER_NOT_APPLICABLE",
     "PROVIDER_SCHEMA_ERROR",
+    "PROVIDER_SCHEMA_CHANGED",
+    "CACHE_MISS",
+    "CACHE_EXPIRED",
+    "CACHE_CORRUPT",
+    "CIRCUIT_OPEN",
+    "REQUEST_BUDGET_EXHAUSTED",
     "UNKNOWN_NETWORK_ERROR",
 )
+
+TRANSPORT_ERROR_CODES = PROVIDER_ERROR_CODES
+
+RETRYABLE_ERROR_CODES = frozenset({
+    "HTTP_429", "HTTP_403_RATE_LIMIT", "HTTP_5XX", "DNS_RESOLUTION_FAILED",
+    "CONNECT_TIMEOUT", "READ_TIMEOUT", "CONNECTION_REFUSED", "CONNECTION_RESET",
+    "PROXY_ERROR", "UNKNOWN_NETWORK_ERROR",
+})
 
 
 def _secret_name(value: Any) -> bool:
@@ -194,6 +217,28 @@ def _reason(error: BaseException) -> Any:
     return getattr(error, "reason", None)
 
 
+def _classify_403(headers: Any, reason: Any = None) -> str:
+    """Classify forbidden responses without treating every 403 as auth."""
+    if _rate_limit_signal(headers):
+        return "HTTP_403_RATE_LIMIT"
+    values: list[str] = [str(reason or "").lower()]
+    if headers is not None:
+        try:
+            values.extend(f"{key}: {value}".lower() for key, value in headers.items())
+        except AttributeError:
+            pass
+    text = " ".join(values)
+    if any(value in text for value in ("www-authenticate", "api key", "apikey", "unauthorized", "authentication", "credential")):
+        return "HTTP_403_AUTH"
+    if any(value in text for value in ("region", "geo-block", "geoblock", "country")):
+        return "HTTP_403_REGION_RESTRICTED"
+    if any(value in text for value in ("cloudflare", "waf", "bot", "challenge", "captcha", "akamai")):
+        return "HTTP_403_WAF"
+    if "access denied" in text or "forbidden" in text:
+        return "HTTP_403_ACCESS_DENIED"
+    return "HTTP_403_UNKNOWN"
+
+
 def classify_transport_error(error: BaseException, *, phase: str | None = None) -> str:
     """Return a stable, non-secret error code for a transport/provider failure."""
     diagnostic = getattr(error, "diagnostic", None)
@@ -204,8 +249,8 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
     if isinstance(error, HTTPError):
         if error.code == 429:
             return "HTTP_429"
-        if error.code == 403 and _rate_limit_signal(getattr(error, "headers", None)):
-            return "HTTP_403_RATE_LIMIT"
+        if error.code == 403:
+            return _classify_403(getattr(error, "headers", None), getattr(error, "reason", None))
         if 400 <= error.code <= 499:
             return f"HTTP_{error.code}"
         if 500 <= error.code <= 599:
@@ -223,7 +268,9 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
         return "DNS_RESOLUTION_FAILED"
     if any(value in text for value in ("name or service not known", "nodename nor servname", "temporary failure in name resolution", "getaddrinfo failed")):
         return "DNS_RESOLUTION_FAILED"
-    if phase and phase.strip().lower() in {"read", "response"} and isinstance(error, (TimeoutError, socket.timeout)):
+    if phase and phase.strip().lower() in {"read", "response"} and any(
+        isinstance(item, (TimeoutError, socket.timeout)) for item in candidates
+    ):
         return "READ_TIMEOUT"
     if isinstance(error, (TimeoutError, socket.timeout)) or isinstance(nested, (TimeoutError, socket.timeout)):
         return "CONNECT_TIMEOUT"
@@ -246,6 +293,8 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
             return "INVALID_JSON"
         if "size limit" in text or "too large" in text:
             return "RESPONSE_TOO_LARGE"
+        if "schema changed" in text or "contract changed" in text:
+            return "PROVIDER_SCHEMA_CHANGED"
         return "PROVIDER_SCHEMA_ERROR"
     if isinstance(error, ProviderError):
         return "UNKNOWN_NETWORK_ERROR" if isinstance(error, ProviderUnavailable) else "PROVIDER_SCHEMA_ERROR"
@@ -257,10 +306,12 @@ def classify_transport_error(error: BaseException, *, phase: str | None = None) 
 
 
 def _retryable(error_code: str) -> bool:
-    return error_code in {
-        "HTTP_429", "HTTP_403_RATE_LIMIT", "HTTP_5XX", "DNS_RESOLUTION_FAILED", "CONNECT_TIMEOUT", "READ_TIMEOUT",
-        "CONNECTION_REFUSED", "CONNECTION_RESET", "PROXY_ERROR", "UNKNOWN_NETWORK_ERROR",
-    }
+    return error_code in RETRYABLE_ERROR_CODES
+
+
+def is_retryable_error_code(error_code: str | None) -> bool:
+    """Return whether a diagnostic code represents a bounded transient failure."""
+    return isinstance(error_code, str) and error_code.strip().upper() in RETRYABLE_ERROR_CODES
 
 
 def _detail(error: BaseException, secrets: tuple[str, ...] = ()) -> str:
@@ -366,6 +417,8 @@ class HttpClient:
         user_agent: str = "crypto-portfolio-manager/0.1",
         sleeper: Callable[[float], None] = time.sleep,
         backoff_seconds: float = 0.25,
+        random_fn: Callable[[], float] = random.random,
+        max_backoff_seconds: float = 30.0,
         ssl_context: ssl.SSLContext | None = None,
         ca_bundle: str | Path | None = None,
         environ: Mapping[str, str] | None = None,
@@ -383,6 +436,8 @@ class HttpClient:
         self.user_agent = user_agent
         self.sleeper = sleeper
         self.backoff_seconds = max(0.0, float(backoff_seconds))
+        self.random_fn = random_fn
+        self.max_backoff_seconds = max(0.0, float(max_backoff_seconds))
         self.environ = dict(environ if environ is not None else os.environ)
         self.ssl_context = build_ssl_context(ssl_context, ca_bundle=ca_bundle, environ=self.environ)
         self.ca_source = (
@@ -461,11 +516,13 @@ class HttpClient:
         last_error: Exception | None = None
         for attempt in range(self.max_attempts):
             self.request_count += 1
+            phase = "connect"
             try:
                 response = self._open(request)
                 status = int(getattr(response, "status", response.getcode() if hasattr(response, "getcode") else 200))
                 if status >= 400:
                     raise HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
+                phase = "read"
                 raw = self._read(response)
                 try:
                     return json.loads(raw.decode("utf-8"))
@@ -483,7 +540,8 @@ class HttpClient:
                     ) from exc
             except HTTPError as exc:
                 last_error = exc
-                rate_limited_403 = exc.code == 403 and _rate_limit_signal(getattr(exc, "headers", None))
+                error_code = classify_transport_error(exc)
+                rate_limited_403 = error_code == "HTTP_403_RATE_LIMIT"
                 retry_after = _retry_after(getattr(exc, "headers", None)) if rate_limited_403 else None
                 retryable = retry_allowed and (
                     exc.code == 429
@@ -497,7 +555,7 @@ class HttpClient:
                         method=method,
                         attempt=attempt + 1,
                         status_code=exc.code,
-                        error_code="HTTP_403_RATE_LIMIT" if rate_limited_403 else None,
+                        error_code=error_code,
                         secrets=request_secrets,
                         retryable=retryable,
                     )
@@ -505,7 +563,7 @@ class HttpClient:
                         raise ProviderRateLimited(f"provider rate limited request ({exc.code})", diagnostic=diagnostic) from exc
                     if 500 <= exc.code <= 599:
                         raise ProviderUnavailable(f"provider server error ({exc.code})", diagnostic=diagnostic) from exc
-                    if exc.code in {401, 403}:
+                    if exc.code == 401 or error_code == "HTTP_403_AUTH":
                         raise ProviderAuthenticationError(f"provider authentication rejected ({exc.code})", diagnostic=diagnostic) from exc
                     raise ProviderResponseError(f"provider request failed ({exc.code})", diagnostic=diagnostic) from exc
                 self._sleep(attempt, getattr(exc, "headers", None))
@@ -518,6 +576,7 @@ class HttpClient:
                         endpoint=request.full_url,
                         method=method,
                         attempt=attempt + 1,
+                        phase=phase,
                         secrets=request_secrets,
                         retryable=retry_allowed,
                     )
@@ -533,6 +592,7 @@ class HttpClient:
                         endpoint=request.full_url,
                         method=method,
                         attempt=attempt + 1,
+                        phase=phase,
                         secrets=request_secrets,
                     ) from exc
                 raise
@@ -601,15 +661,23 @@ class HttpClient:
     def _sleep(self, attempt: int, headers: Any) -> None:
         delay = _retry_after(headers)
         if delay is None:
-            delay = self.backoff_seconds * (2**attempt)
-        self.sleeper(min(max(0.0, delay), 30.0))
+            ceiling = min(self.max_backoff_seconds, self.backoff_seconds * (2**attempt))
+            try:
+                sample = float(self.random_fn())
+            except (TypeError, ValueError):
+                sample = 0.0
+            delay = max(0.0, min(1.0, sample)) * ceiling
+        self.sleeper(min(max(0.0, delay), self.max_backoff_seconds))
 
 
 __all__ = [
     "HttpClient",
+    "PROVIDER_ERROR_CODES",
+    "RETRYABLE_ERROR_CODES",
     "TRANSPORT_ERROR_CODES",
     "build_ssl_context",
     "classify_transport_error",
+    "is_retryable_error_code",
     "ProviderAuthenticationError",
     "ProviderRateLimited",
     "ProviderResponseError",

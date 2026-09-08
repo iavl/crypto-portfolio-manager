@@ -267,6 +267,22 @@ v1 只生成 `PULLBACK` 计划。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。
 
 ## 13. Provider 状态与 TLS 排查
 
+完整的开发者决策树、错误码、record/replay、contract 和 smoke 流程见
+[Development and Provider Debugging](DEVELOPMENT_DEBUGGING.md)。快速判断可用：
+
+```bash
+python3 scripts/providers.py --status
+python3 scripts/providers.py --doctor coingecko
+python3 scripts/providers.py --probe coingecko --asset ETH
+python3 scripts/providers.py --contract coingecko
+python3 scripts/providers.py --smoke ETH --metric market.spot_price
+```
+
+`--status` 只检查本地配置；`--doctor` 解释配置、adapter、credential、网络、
+schema 和 normalization 层；`--contract` 检查最小上游契约；`--smoke` 通过真实
+router 以 `REFRESH` 运行一个 metric。被测试的失败返回退出码 `2`；缺少可选
+credential 的 provider 会标记为 `SKIPPED`/`NOT_READY`。
+
 ```bash
 python3 scripts/providers.py --status
 python3 scripts/providers.py --list

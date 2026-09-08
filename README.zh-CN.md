@@ -129,6 +129,7 @@ $crypto-portfolio-manager explain what portfolio reviews you support.
 内容寻址的公共 OHLCV 回放数据存储在同一运行时目录下的 `market-data/sha256/<ohlcv_hash>.json` 中。指标观测和采集事件存储在 `metrics/` 下；缓存的 Volume Profile 结果存储在 `volume-profiles/sha256/<profile_hash>.json` 下。Volume Profile 是历史成交量集中度的代理指标，不是精确的持仓成本基础。
 
 Provider 响应和序列清单缓存在 `provider-cache/` 下；模式和清理方式请参阅[数据 Provider](references/data-providers.md)。仓位盈亏是剩余仓位的未实现表现；此功能不声称提供已实现盈亏、手续费、税务批次或生命周期收益率。
+Provider 或 API 出现问题？请参阅[开发与 Provider 排查指南](docs/DEVELOPMENT_DEBUGGING.md)。
 
 ## 开发
 
