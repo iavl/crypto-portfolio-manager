@@ -4,7 +4,7 @@
 
 # crypto-portfolio-manager
 
-`crypto-portfolio-manager` 是一个 Codex Skill，用于在约 6–12 个月的周期内，以保守均衡、仅现货的方式研究加密货币投资组合。它将当前市场证据与确定性的记账、风险、配置、基准和再平衡计算结合起来。
+`crypto-portfolio-manager` 是一个 Codex Skill，用于在约 3–6 个月的主动配置周期内，以保守均衡、仅现货的方式研究加密货币投资组合。它将当前市场证据与确定性的记账、风险、配置、基准和再平衡计算结合起来。
 
 详细的复盘流程、输入示例、历史数据行为和故障排查请参阅[使用指南](docs/USAGE.md)。
 

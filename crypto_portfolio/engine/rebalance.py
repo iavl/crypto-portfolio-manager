@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from ..models.decision_packet import NoTradeAttribution
 from ..models.policy import Policy, resolve_policy
 
 
@@ -40,6 +41,200 @@ def _truthy_flag(value: Any, field: str) -> bool:
     if value in (1, "TRUE", "true"):
         return True
     raise ValueError(f"{field} values must be boolean")
+
+
+def _value_field(value: Any, name: str, default: Any = None) -> Any:
+    return value.get(name, default) if isinstance(value, Mapping) else getattr(value, name, default)
+
+
+def _decision_score(value: Any) -> float | None:
+    raw = _value_field(value, "score", _value_field(value, "confidence_score"))
+    if raw is None:
+        return None
+    try:
+        score = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return score if math.isfinite(score) and 0 <= score <= 1 else None
+
+
+def build_no_trade_attribution(
+    current_weights: Mapping[str, float],
+    target_weights: Mapping[str, float],
+    actions: Iterable[RebalanceAction | Mapping[str, Any]] = (),
+    *,
+    policy: Policy | None = None,
+    regime: str = "NORMAL",
+    assessments: Mapping[str, Any] | None = None,
+    decision_confidence: Any | None = None,
+    risk_flags: Iterable[str] = (),
+    critical_missing_data: Iterable[str] = (),
+    execution: Any | None = None,
+) -> NoTradeAttribution | None:
+    """Explain a non-executable outcome using only deterministic gate inputs."""
+    resolved = policy or resolve_policy()
+    current = _weights(current_weights, "current_weights")
+    target = _weights(target_weights, "target_weights")
+    action_values = tuple(actions)
+    if any(
+        str(_value_field(item, "action", "")).strip().upper() in {"INCREASE", "REDUCE", "EXIT"}
+        and float(_value_field(item, "amount_usd", 0.0)) > 0
+        for item in action_values
+    ):
+        return None
+
+    reasons: set[str] = set()
+    flags = {str(item).strip().upper() for item in risk_flags}
+    missing = {str(item).strip().upper() for item in critical_missing_data}
+    assessments = {str(key).strip().upper(): value for key, value in (assessments or {}).items()}
+
+    score_gate = "UNKNOWN"
+    scored = False
+    for symbol, assessment in assessments.items():
+        if resolved.classify(symbol) != "satellite":
+            continue
+        score = _value_field(assessment, "weighted_score")
+        if score is None:
+            continue
+        scored = True
+        if float(score) < resolved.allocation["satellite_entry_score"]:
+            score_gate = "BLOCKED"
+            reasons.add("SCORE_BELOW_ENTRY")
+            break
+    if scored and score_gate != "BLOCKED":
+        score_gate = "PASS"
+
+    confidence_gate = "UNKNOWN"
+    confidence_values = []
+    for assessment in assessments.values():
+        confidence = str(_value_field(assessment, "confidence", "")).strip().upper()
+        if confidence in {"HIGH", "MEDIUM", "LOW"}:
+            confidence_values.append(confidence)
+        if confidence == "LOW" or _value_field(assessment, "critical_data_complete", True) is False:
+            confidence_gate = "BLOCKED"
+            reasons.add("CONFIDENCE_TOO_LOW")
+    decision_score = _decision_score(decision_confidence)
+    decision_band = str(_value_field(decision_confidence, "band", "")).strip().upper()
+    if decision_score is not None and decision_score < 0.60 or decision_band == "LOW":
+        confidence_gate = "BLOCKED"
+        reasons.add("CONFIDENCE_TOO_LOW")
+    elif decision_score is not None and decision_score < 0.80 or decision_band == "MEDIUM":
+        if confidence_gate != "BLOCKED":
+            confidence_gate = "WATCH"
+        reasons.add("DECISION_CONFIDENCE_MEDIUM")
+    elif confidence_values:
+        confidence_gate = "PASS" if all(item == "HIGH" for item in confidence_values) else "WATCH"
+    if confidence_gate == "WATCH" and "DECISION_CONFIDENCE_MEDIUM" not in reasons and "CONFIDENCE_TOO_LOW" not in reasons:
+        reasons.add("DECISION_CONFIDENCE_MEDIUM")
+
+    regime_name = str(regime).strip().upper()
+    if regime_name == "CAPITAL_PRESERVATION":
+        regime_gate = "BLOCKED"
+        reasons.add("REGIME_RISK_BUDGET_EXHAUSTED")
+    elif regime_name == "DEFENSIVE":
+        regime_gate = "WATCH"
+    elif regime_name == "NORMAL":
+        regime_gate = "PASS"
+    else:
+        regime_gate = "UNKNOWN"
+
+    event_gate = "PASS"
+    liveness_gate = "NOT_APPLICABLE"
+    btc_relative_gate = "NOT_APPLICABLE"
+    for symbol, assessment in assessments.items():
+        event = _value_field(assessment, "event_risk")
+        event_state = str(_value_field(event, "state", event or "NORMAL")).strip().upper()
+        if event_state in {"SEVERE", "CRITICAL"}:
+            event_gate = "BLOCKED"
+            reasons.add("EVENT_RISK_BLOCK")
+        elif event_state in {"ELEVATED", "HIGH"} and event_gate != "BLOCKED":
+            event_gate = "WATCH"
+        liveness = _value_field(assessment, "chain_liveness")
+        if liveness is not None:
+            liveness_gate = "PASS"
+            liveness_state = str(_value_field(liveness, "status", liveness)).strip().upper()
+            if liveness_state in {"HALTED", "UNKNOWN", "FAILED", "CONFLICT"}:
+                liveness_gate = "BLOCKED"
+                reasons.add("LIVENESS_BLOCK")
+            elif liveness_state == "DEGRADED" and liveness_gate != "BLOCKED":
+                liveness_gate = "WATCH"
+        relative = _value_field(assessment, "relative_strength_vs_btc")
+        if symbol == "ETH" or resolved.classify(symbol) == "satellite":
+            btc_relative_gate = "PASS"
+            relative_state = str(relative or "UNKNOWN").strip().upper()
+            if relative_state in {"", "UNKNOWN", "UNDERPERFORM", "MATERIALLY_WEAK"}:
+                btc_relative_gate = "BLOCKED"
+                reasons.add("BTC_RELATIVE_WEAK")
+    if any("LIVENESS" in flag or "CHAIN_" in flag for flag in flags | missing):
+        liveness_gate = "BLOCKED"
+        reasons.add("LIVENESS_BLOCK")
+    if any("SEVERE_EVENT" in flag or "EVENT_RISK" in flag for flag in flags | missing):
+        event_gate = "BLOCKED"
+        reasons.add("EVENT_RISK_BLOCK")
+    if any("STABLECOIN_FLOOR" in flag for flag in flags):
+        reasons.add("STABLECOIN_FLOOR_CONSTRAINT")
+
+    positive_deltas = [
+        max(0.0, target.get(symbol, 0.0) - current.get(symbol, 0.0)) * 100.0
+        for symbol in set(current) | set(target)
+    ]
+    max_delta = max(positive_deltas, default=0.0)
+    hold = resolved.rebalance["hold_below_pp"]
+    watch = resolved.rebalance["watch_below_pp"]
+    if max_delta < hold:
+        allocation_delta_gate = "BLOCKED"
+        reasons.add("TARGET_DELTA_BELOW_HOLD_BAND")
+    elif max_delta <= watch:
+        allocation_delta_gate = "WATCH"
+        reasons.add("TARGET_DELTA_WATCH_ONLY")
+    else:
+        allocation_delta_gate = "PASS"
+
+    rebalance_gate = "BLOCKED"
+    if any(str(_value_field(item, "action", "")).strip().upper() == "WAIT" for item in action_values):
+        rebalance_gate = "WATCH"
+    elif action_values and all(str(_value_field(item, "action", "")).strip().upper() == "HOLD" for item in action_values):
+        rebalance_gate = "BLOCKED"
+    reasons.add("NO_APPROVED_INCREASE")
+
+    execution_gate = "NOT_APPLICABLE"
+    execution_action = str(_value_field(execution, "action", "")).strip().upper()
+    execution_mode = str(_value_field(execution, "entry_mode", "")).strip().upper()
+    if execution_action or execution_mode:
+        execution_gate = "PASS"
+        if execution_action == "WAIT" or execution_mode == "WAIT":
+            execution_gate = "BLOCKED"
+            reasons.add("EXECUTION_WAIT")
+
+    priority = (
+        "LIVENESS_BLOCK",
+        "EVENT_RISK_BLOCK",
+        "REGIME_RISK_BUDGET_EXHAUSTED",
+        "CONFIDENCE_TOO_LOW",
+        "BTC_RELATIVE_WEAK",
+        "SCORE_BELOW_ENTRY",
+        "STABLECOIN_FLOOR_CONSTRAINT",
+        "EXECUTION_WAIT",
+        "TARGET_DELTA_BELOW_HOLD_BAND",
+        "TARGET_DELTA_WATCH_ONLY",
+        "DECISION_CONFIDENCE_MEDIUM",
+        "NO_APPROVED_INCREASE",
+    )
+    primary = next((reason for reason in priority if reason in reasons), "NO_APPROVED_INCREASE")
+    secondary = tuple(reason for reason in priority if reason in reasons and reason != primary)
+    return NoTradeAttribution(
+        score_gate=score_gate,
+        confidence_gate=confidence_gate,
+        regime_gate=regime_gate,
+        event_gate=event_gate,
+        liveness_gate=liveness_gate,
+        btc_relative_gate=btc_relative_gate,
+        allocation_delta_gate=allocation_delta_gate,
+        rebalance_gate=rebalance_gate,
+        execution_gate=execution_gate,
+        primary_reason=primary,
+        secondary_reasons=secondary,
+    )
 
 
 @dataclass(frozen=True)
@@ -100,6 +295,7 @@ class RebalanceResult:
     decision: str
     post_cash_total: float = 0.0
     reconciliation: Mapping[str, float | bool] | None = None
+    no_trade_attribution: NoTradeAttribution | None = None
 
     @property
     def no_trade(self) -> bool:
@@ -121,6 +317,7 @@ class RebalanceResult:
             "actions": [action.as_dict() for action in self.actions],
             "post_cash_total": self.post_cash_total,
             "reconciliation": dict(self.reconciliation or {}),
+            "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
         }
 
 
@@ -360,6 +557,14 @@ def recommend_rebalance(
         decision,
         post_cash_total,
         reconcile_trade_dollars(actions, new_cash_available, stable_symbols),
+        build_no_trade_attribution(
+            current,
+            target,
+            actions,
+            policy=resolved,
+            regime=regime_name,
+            decision_confidence=decision_confidence,
+        ),
     )
 
 
@@ -391,6 +596,7 @@ def rebalance(
 __all__ = [
     "RebalanceAction",
     "RebalanceResult",
+    "build_no_trade_attribution",
     "rebalance",
     "reconcile_trade_dollars",
     "recommend_rebalance",

@@ -23,12 +23,12 @@ The default profiles share eight canonical factor keys:
 
 | Factor | Weight | Ownership |
 |---|---:|---|
-| `trend` | 20% | market structure, momentum, moving averages, volatility and support |
-| `valuation` | 20% | historical position, market cap, FDV and valuation ratios |
-| `fundamentals` | 25% | adoption, fees/revenue, ecosystem, utility and economic durability |
-| `onchain` | 15% | active usage, settlement, blockspace demand and network activity |
+| `trend` | 30% | market structure, momentum, moving averages, volatility and support |
+| `valuation` | 15% | historical position, market cap, FDV and valuation ratios |
+| `fundamentals` | 20% | adoption, fees/revenue, ecosystem, utility and economic durability |
+| `onchain` | 10% | active usage, settlement, blockspace demand and network activity |
 | `capital_flows` | 10% | ETF, exchange and liquidity migration flows |
-| `relative_strength_btc` | 10% | asset-versus-BTC risk-adjusted performance |
+| `relative_strength_btc` | 15% | asset-versus-BTC risk-adjusted performance |
 | `btc_valuation` | 0% for non-BTC assets | BTC-native realized-cap and holder-cost-basis valuation |
 | `macro_liquidity` | 0% for non-BTC assets | BTC-relevant official macro/liquidity changes |
 
@@ -39,7 +39,7 @@ must contain these eight keys and sum to 1. Assets use `default` unless mapped i
 BTC uses an explicit profile with weights:
 
 ```text
-trend 30%, btc_valuation 30%, capital_flows 20%, macro_liquidity 20%.
+trend 35%, btc_valuation 20%, capital_flows 25%, macro_liquidity 20%.
 Generic valuation, fundamentals, onchain, and relative_strength_btc are 0%.
 ```
 
@@ -67,6 +67,18 @@ Its base valuation uses MVRV, MVRV Z-score, realized price, and
 price-to-realized-price. Generic market-cap/FDV, protocol revenue, TVL,
 developer activity, and generic on-chain activity do not add BTC base-score
 points. Network health remains a separate risk/context overlay.
+
+### Responsive trend scoring
+
+The trend factor is recalibrated for the 3–6 month horizon. MA20/MA50/MA100
+carry the primary moving-average authority (6/8/6 points); MA200 remains a
+2-point long-structure context. The main alignment is `spot > MA20 > MA50 >
+MA100` or its bearish inverse. 30D/90D/180D returns use continuous magnitude
+bands with 20%/40%/40% authority, rather than sign-only points. Trend coverage
+is authority-weighted: missing MA50 or 90D/180D momentum removes more authority
+than missing MA200, while an evaluated but empty support-zone result is not
+treated as missing data. A move more than 2 ATR above support keeps the
+8-point extension penalty.
 
 ## Availability and reliability
 
@@ -116,7 +128,7 @@ raise a coverage cap.
 
 ## Relative strength versus BTC
 
-Raw 30D, 90D, 180D and 365D excess returns, relative drawdown, pair trend and
+Raw 30D, 90D and 180D excess returns, relative drawdown, pair trend and
 the normalized signal remain visible for explanation. Each horizon uses:
 
 ```text
@@ -136,11 +148,17 @@ clamped to 0–100 outside it.
 For non-BTC satellites, missing BTC-relative evidence is `HOLD_ONLY`, while a
 materially negative comparison is ineligible for new risk.
 
+For BTC macro/liquidity interpretation, 90D rate/real-yield/USD changes, the
+13W Fed balance-sheet change, and 6M M2 change are the primary current-horizon
+evidence. The 12M M2 change remains long-structure context unless a future
+factor methodology explicitly assigns it additional authority; this repository
+does not invent a deterministic macro score to force that interpretation.
+
 ### Ethereum-specific interpretation
 
-ETH keeps the default six-factor weights: trend 20%, valuation 20%,
-fundamentals 25%, on-chain 15%, capital flows 10%, and BTC-relative strength
-10%. The current policy enriches the evidence inside those factors with monetary supply
+ETH keeps the default six-factor weights: trend 30%, valuation 15%,
+fundamentals 20%, on-chain 10%, capital flows 10%, and BTC-relative strength
+15%. The current policy enriches the evidence inside those factors with monetary supply
 and burn/issuance context, proof-of-stake security and staking flows, Ethereum
 L2 settlement rent, blob/data-availability demand, DeFi/stablecoin economics,
 realized valuation where supported, and ETH ETF flow/AUM ratios.
@@ -198,10 +216,10 @@ Positioning and BTC cycle overlays can cap immediate staged dollars or produce
 ## Hysteresis and interpretation
 
 Satellite entry uses `satellite_entry_score=67`, existing holdings remain
-`HOLD_ONLY` through `satellite_exit_score=60`, and full score strength is
+`HOLD_ONLY` through `satellite_exit_score=62`, and full score strength is
 reached at `satellite_full_score=85`. A new/non-held satellite below 67 receives
-no new risk. A held satellite from 60 through 66 is held without adding risk;
-below 60 it becomes an ineligible/reduction candidate. Score strength is
+no new risk. A held satellite from 62 through 66 is held without adding risk;
+below 62 it becomes an ineligible/reduction candidate. Score strength is
 monotonic from 67 to 85 and is still multiplied by confidence, risk, event and
 relative-strength gates.
 

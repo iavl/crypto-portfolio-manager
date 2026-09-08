@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from ..metrics_registry import metric_definition
 from .confidence import ConfidenceResult, DecisionConfidence
-from .decision_packet import SolReview
+from .decision_packet import NoTradeAttribution, SolReview
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .time import normalize_timestamp
 
@@ -348,6 +348,7 @@ class ReportPacket:
     nav_performance: Mapping[str, Any] | None = None
     benchmark_performance: Mapping[str, Any] | None = None
     event_scan_summary: Mapping[str, Any] | None = None
+    no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -457,6 +458,13 @@ class ReportPacket:
                 if not isinstance(value, Mapping):
                     raise ValueError(f"{field_name} must be an object or null")
                 object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        if self.no_trade_attribution is not None:
+            value = (
+                self.no_trade_attribution
+                if isinstance(self.no_trade_attribution, NoTradeAttribution)
+                else NoTradeAttribution.from_mapping(self.no_trade_attribution)
+            )
+            object.__setattr__(self, "no_trade_attribution", value)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -490,6 +498,7 @@ class ReportPacket:
             "nav_performance": thaw_packet_value(self.nav_performance) if self.nav_performance is not None else None,
             "benchmark_performance": thaw_packet_value(self.benchmark_performance) if self.benchmark_performance is not None else None,
             "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
+            "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
         }
 
     @classmethod

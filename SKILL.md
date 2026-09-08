@@ -5,7 +5,7 @@ description: Use this skill for medium- to long-term, spot-only crypto portfolio
 
 # Crypto Portfolio Manager
 
-Use this Skill for a 6–12 month portfolio horizon. It supports research and
+Use this Skill for a 3–6 month portfolio horizon. It supports research and
 proposed decisions; it never places trades, requests trading permissions, or
 introduces leverage, futures, perpetuals, or margin.
 
@@ -168,6 +168,9 @@ display data, so the engine uses value ÷ quantity and records a note.
 15. Run the rebalance engine.
 16. Reconcile executable trade dollars.
 17. Evaluate `NO_TRADE` before proposing a transaction.
+    When the result is `NO_TRADE` or `WAIT`, persist deterministic gate outcomes
+    and render the primary reason plus secondary reasons; do not ask the model
+    to infer why the action was not executable.
 18. After a rebalance approves an `INCREASE` amount, apply the positioning and
     cycle deployment cap; overlays may reduce staging or produce a confirmed
     `WAIT`, but cannot increase the approved amount or change target allocation.
@@ -214,6 +217,8 @@ display data, so the engine uses value ÷ quantity and records a note.
     produced the Action; and give the concrete condition that would change it.
     Keep this as concise decision rationale, never private reasoning or a
     hidden scratchpad.
+    For `NO_TRADE`/`WAIT`, include the finalized `NoTradeAttribution` gate
+    states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
     `术语解释与决策影响` entry. Explain only terms used or material to the
     decision. `MATERIAL_EVENT_FOUND` means a relevant proposal or announcement
@@ -301,7 +306,7 @@ At minimum, request and log these applicable metrics:
 - Market context: BTC spot price, MA50/MA100/MA200, 30D/90D trend,
   drawdown, volatility, dominance/breadth, stablecoin liquidity trend,
   relevant ETF or other capital flows, and major current events.
-- Each held or considered risk asset: current price, 30D/90D/180D/365D
+- Each held or considered risk asset: current price, 30D/90D/180D
   relative-return evidence,
   MA50/MA100/MA200, drawdown/historical position, asset-appropriate
   fundamentals, on-chain activity, capital flow, 1M/3M/6M performance versus
@@ -379,7 +384,7 @@ rebalance approved amount -> timestamped SpotPrice + completed daily OHLCV
 -> structural zones -> tranches and estimated quantities -> validated plan
 ```
 
-Use at least 120 completed daily candles, preferably 365, plus a timestamped
+Use at least 200 completed daily candles, preferably 240, plus a timestamped
 spot observation and reliable volume where available. When adequate OHLCV exists, do not
 manually invent moving averages, ATR, swing levels, zone prices, tranche
 arithmetic, or estimated quantities. The technical engine may return `WAIT` or

@@ -22,7 +22,10 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.scoring_profile_name("BTC"), "btc")
         self.assertEqual(policy.scoring_profile("BTC")["relative_strength_btc"], 0.0)
         self.assertEqual(policy.allocation["satellite_entry_score"], 67.0)
-        self.assertEqual(policy.allocation["satellite_exit_score"], 60.0)
+        self.assertEqual(policy.allocation["satellite_exit_score"], 62.0)
+        self.assertEqual(policy.investment_horizon_months, (3, 6))
+        self.assertEqual(policy.min_stablecoin_weight, 0.15)
+        self.assertEqual(policy.max_portfolio_drawdown, 0.15)
 
     def test_removed_policy_version_field_is_rejected(self):
         value = load_policy().as_dict()
@@ -39,7 +42,8 @@ class PolicyTests(unittest.TestCase):
     def test_execution_policy_is_canonical_and_strict(self):
         policy = load_policy()
         self.assertEqual(policy.execution["moving_average_windows"], [20, 50, 100, 200])
-        self.assertEqual(policy.execution["minimum_history_days"], 120)
+        self.assertEqual(policy.execution["preferred_history_days"], 240)
+        self.assertEqual(policy.execution["minimum_history_days"], 200)
         changed = json.loads(json.dumps(policy.as_dict()))
         changed["execution"]["zone_half_width_atr"] = 0.5
         with tempfile.TemporaryDirectory() as directory:
@@ -87,7 +91,8 @@ class PolicyTests(unittest.TestCase):
     def test_volume_profile_policy_is_canonical_and_bounded(self):
         policy = load_policy()
         self.assertEqual(policy.volume_profile["preferred_timeframe"], "4H")
-        self.assertEqual(policy.volume_profile["lookback_days"], [90, 180])
+        self.assertEqual(policy.volume_profile["lookback_days"], [60, 120])
+        self.assertEqual(policy.volume_profile["preferred_lookback_days"], 120)
         invalid = json.loads(json.dumps(policy.as_dict()))
         invalid["volume_profile"]["daily_approximation_confidence_cap"] = "HIGH"
         with tempfile.TemporaryDirectory() as directory:
@@ -201,6 +206,56 @@ class PolicyTests(unittest.TestCase):
                     path.write_text(json.dumps(invalid), encoding="utf-8")
                     with self.assertRaises(PolicyError):
                         load_policy(path)
+
+    def test_recalibrated_scoring_and_trend_rules_are_canonical(self):
+        policy = load_policy()
+        self.assertEqual(
+            policy.scoring_profile("ETH"),
+            {
+                "trend": 0.30,
+                "valuation": 0.15,
+                "fundamentals": 0.20,
+                "onchain": 0.10,
+                "capital_flows": 0.10,
+                "relative_strength_btc": 0.15,
+                "btc_valuation": 0.0,
+                "macro_liquidity": 0.0,
+            },
+        )
+        self.assertEqual(
+            policy.scoring_profile("BTC"),
+            {
+                "trend": 0.35,
+                "valuation": 0.0,
+                "fundamentals": 0.0,
+                "onchain": 0.0,
+                "capital_flows": 0.25,
+                "relative_strength_btc": 0.0,
+                "btc_valuation": 0.20,
+                "macro_liquidity": 0.20,
+            },
+        )
+        self.assertEqual(policy.factor_rules["relative_strength"]["horizon_weights"], {"30d": 0.2, "90d": 0.4, "180d": 0.4})
+        self.assertEqual(policy.rebalance, {"hold_below_pp": 2.0, "watch_below_pp": 4.0, "high_priority_above_pp": 8.0})
+        self.assertEqual(policy.regime("NORMAL").stablecoin_target, 0.15)
+        self.assertEqual(policy.regime("DEFENSIVE").stablecoin_target, 0.30)
+        self.assertEqual(policy.regime("CAPITAL_PRESERVATION").stablecoin_target, 0.50)
+        self.assertEqual(policy.freshness_policy["domain_defaults"]["trend"], {"max_age_seconds": 604800.0, "half_life_seconds": 259200.0})
+        self.assertEqual(policy.freshness_policy["domain_defaults"]["breadth"], {"max_age_seconds": 432000.0, "half_life_seconds": 172800.0})
+        trend = policy.factor_rules["trend"]
+        self.assertEqual(set(trend["ma_points"]), {"20", "50", "100", "200"})
+        self.assertEqual(trend["alignment_windows"], [20, 50, 100])
+        self.assertEqual(trend["momentum"]["horizon_weights"], {"30d": 0.2, "90d": 0.4, "180d": 0.4})
+        self.assertEqual(trend["extension_penalty"], 8.0)
+
+    def test_old_trend_rule_fields_are_rejected(self):
+        invalid = json.loads(json.dumps(load_policy().as_dict()))
+        invalid["factor_rules"]["trend"]["price_ma_points"] = 6
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
 
 
 if __name__ == "__main__":

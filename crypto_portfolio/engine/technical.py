@@ -470,13 +470,13 @@ def _trend_state(
     current_price: float | None = None,
 ) -> str:
     close = closes[-1] if current_price is None else current_price
+    ma20 = moving_averages.get("MA20")
     ma50 = moving_averages.get("MA50")
     ma100 = moving_averages.get("MA100")
-    ma200 = moving_averages.get("MA200")
-    if ma50 is not None and ma100 is not None and ma200 is not None:
-        if close > ma50 > ma100 > ma200:
+    if ma20 is not None and ma50 is not None and ma100 is not None:
+        if close > ma20 > ma50 > ma100:
             return "STRONG_UPTREND"
-        if close < ma50 < ma100 < ma200:
+        if close < ma20 < ma50 < ma100:
             return "STRONG_DOWNTREND"
     if ma50 is not None and close > ma50:
         return "UPTREND"

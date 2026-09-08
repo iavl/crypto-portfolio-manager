@@ -28,7 +28,7 @@ class RegressionFixtureTests(unittest.TestCase):
         self.assertEqual(determine_regime(RegimeInputs(**capital["regime_inputs"])).regime, "CAPITAL_PRESERVATION")
         normal_target = build_target_allocation(regime="NORMAL", assessments=normal["assessments"])
         capital_target = build_target_allocation(regime="CAPITAL_PRESERVATION", assessments=capital["assessments"])
-        self.assertGreaterEqual(normal_target.target_weights["USDT"], 0.10)
+        self.assertGreaterEqual(normal_target.target_weights["USDT"], 0.15)
         self.assertGreaterEqual(capital_target.target_weights["USDT"], 0.50)
         self.assertLessEqual(capital_target.target_weights.get("SOL", 0), 0.05)
 

@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from .evidence import AssetAssessment, Evidence, FactorScore, contains_private_reasoning
 from .confidence import ConfidenceResult, DecisionConfidence
+from .decision_packet import NoTradeAttribution
 from .execution import ExecutionPlan
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .policy import policy_hash
@@ -67,6 +68,7 @@ class Decision:
     nav_performance: Mapping[str, Any] | None = None
     benchmark_performance: Mapping[str, Any] | None = None
     event_scan_summary: Mapping[str, Any] | None = None
+    no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -130,6 +132,13 @@ class Decision:
                 if not isinstance(value, Mapping):
                     raise ValueError(f"{field_name} must be an object or null")
                 object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        if self.no_trade_attribution is not None:
+            value = (
+                self.no_trade_attribution
+                if isinstance(self.no_trade_attribution, NoTradeAttribution)
+                else NoTradeAttribution.from_mapping(self.no_trade_attribution)
+            )
+            object.__setattr__(self, "no_trade_attribution", value)
         if self.config is not None:
             if not isinstance(self.config, Mapping):
                 raise ValueError("config must be an object or null")
@@ -318,6 +327,7 @@ class Decision:
             "based_on_snapshot_id", "execution_plans", "routing_metadata", "market_overlays",
             "regime_confidence", "decision_confidence", "nav_performance",
             "benchmark_performance", "event_scan_summary",
+            "no_trade_attribution",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -360,6 +370,7 @@ class Decision:
             nav_performance=data.get("nav_performance"),
             benchmark_performance=data.get("benchmark_performance"),
             event_scan_summary=data.get("event_scan_summary"),
+            no_trade_attribution=data.get("no_trade_attribution"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -407,6 +418,8 @@ class Decision:
             value = getattr(self, field_name)
             if value is not None:
                 result[field_name] = thaw_packet_value(value)
+        if self.no_trade_attribution is not None:
+            result["no_trade_attribution"] = self.no_trade_attribution.as_dict()
         return result
 
 

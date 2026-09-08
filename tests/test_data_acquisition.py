@@ -1096,7 +1096,7 @@ class DataAcquisitionTests(unittest.TestCase):
             ProviderRouter(providers, config=config),
             persist=False,
         )
-        first = manager.run(plan, mode="REFRESH", as_of="2026-09-06T00:00:00Z", now="2026-09-06T00:00:00Z")
+        first = manager.run(plan, mode="REFRESH", as_of="2026-09-06T00:00:00Z", now="2026-09-06T00:00:00Z", cached_observations=())
         self.assertTrue(first.pending_event_scans)
         self.assertEqual(first.web_fallbacks, ())
         self.assertTrue(any(item.metric_key == "btc_valuation.price_to_realized_price" for item in first.observations))
@@ -1109,6 +1109,7 @@ class DataAcquisitionTests(unittest.TestCase):
             mode="REFRESH",
             as_of="2026-09-06T00:00:00Z",
             now="2026-09-06T00:00:00Z",
+            cached_observations=(),
             event_source_scan_responses=responses,
         )
         self.assertEqual(second.pending_event_scans, ())

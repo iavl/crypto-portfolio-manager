@@ -16,6 +16,21 @@ _REVIEW_TYPES = {"SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"}
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
+_GATE_STATES = {"PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"}
+_NO_TRADE_REASONS = {
+    "SCORE_BELOW_ENTRY",
+    "CONFIDENCE_TOO_LOW",
+    "DECISION_CONFIDENCE_MEDIUM",
+    "REGIME_RISK_BUDGET_EXHAUSTED",
+    "EVENT_RISK_BLOCK",
+    "LIVENESS_BLOCK",
+    "BTC_RELATIVE_WEAK",
+    "TARGET_DELTA_BELOW_HOLD_BAND",
+    "TARGET_DELTA_WATCH_ONLY",
+    "STABLECOIN_FLOOR_CONSTRAINT",
+    "EXECUTION_WAIT",
+    "NO_APPROVED_INCREASE",
+}
 
 
 def _text(value: Any, field: str) -> str:
@@ -57,6 +72,71 @@ def _ids(value: Any, field: str) -> tuple[str, ...]:
     if len(result) != len(set(result)):
         raise ValueError(f"{field} must contain unique values")
     return result
+
+
+@dataclass(frozen=True)
+class NoTradeAttribution:
+    score_gate: str
+    confidence_gate: str
+    regime_gate: str
+    event_gate: str
+    liveness_gate: str
+    btc_relative_gate: str
+    allocation_delta_gate: str
+    rebalance_gate: str
+    execution_gate: str
+    primary_reason: str
+    secondary_reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "score_gate",
+            "confidence_gate",
+            "regime_gate",
+            "event_gate",
+            "liveness_gate",
+            "btc_relative_gate",
+            "allocation_delta_gate",
+            "rebalance_gate",
+            "execution_gate",
+        ):
+            state = _text(getattr(self, field_name), f"no_trade_attribution.{field_name}").upper()
+            if state not in _GATE_STATES:
+                raise ValueError(
+                    f"no_trade_attribution.{field_name} must be one of {sorted(_GATE_STATES)}"
+                )
+            object.__setattr__(self, field_name, state)
+        primary = _text(self.primary_reason, "no_trade_attribution.primary_reason").upper()
+        if primary not in _NO_TRADE_REASONS:
+            raise ValueError("no_trade_attribution.primary_reason is unsupported")
+        secondary = tuple(item.upper() for item in _ids(self.secondary_reasons, "no_trade_attribution.secondary_reasons"))
+        if any(item not in _NO_TRADE_REASONS for item in secondary):
+            raise ValueError("no_trade_attribution.secondary_reasons contains an unsupported code")
+        if primary in secondary:
+            raise ValueError("no_trade_attribution.secondary_reasons must not repeat primary_reason")
+        object.__setattr__(self, "primary_reason", primary)
+        object.__setattr__(self, "secondary_reasons", secondary)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "NoTradeAttribution":
+        if not isinstance(value, Mapping):
+            raise ValueError("no_trade_attribution must be an object")
+        return cls(**dict(value))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "score_gate": self.score_gate,
+            "confidence_gate": self.confidence_gate,
+            "regime_gate": self.regime_gate,
+            "event_gate": self.event_gate,
+            "liveness_gate": self.liveness_gate,
+            "btc_relative_gate": self.btc_relative_gate,
+            "allocation_delta_gate": self.allocation_delta_gate,
+            "rebalance_gate": self.rebalance_gate,
+            "execution_gate": self.execution_gate,
+            "primary_reason": self.primary_reason,
+            "secondary_reasons": list(self.secondary_reasons),
+        }
 
 
 def _scores(value: Any) -> Mapping[str, float | None]:
@@ -253,6 +333,7 @@ class DecisionReviewPacket:
     nav_performance: Mapping[str, Any] | None = None
     benchmark_performance: Mapping[str, Any] | None = None
     event_scan_summary: Mapping[str, Any] | None = None
+    no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -343,6 +424,13 @@ class DecisionReviewPacket:
                 if not isinstance(value, Mapping):
                     raise ValueError(f"{field_name} must be an object or null")
                 object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        if self.no_trade_attribution is not None:
+            value = (
+                self.no_trade_attribution
+                if isinstance(self.no_trade_attribution, NoTradeAttribution)
+                else NoTradeAttribution.from_mapping(self.no_trade_attribution)
+            )
+            object.__setattr__(self, "no_trade_attribution", value)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -374,6 +462,7 @@ class DecisionReviewPacket:
             "nav_performance": thaw_packet_value(self.nav_performance) if self.nav_performance is not None else None,
             "benchmark_performance": thaw_packet_value(self.benchmark_performance) if self.benchmark_performance is not None else None,
             "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
+            "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
         }
 
     @classmethod
@@ -389,4 +478,4 @@ class DecisionReviewPacket:
         return cls(**data)
 
 
-__all__ = ["AssetDecisionSummary", "DecisionReviewPacket", "SolReview"]
+__all__ = ["AssetDecisionSummary", "DecisionReviewPacket", "NoTradeAttribution", "SolReview"]

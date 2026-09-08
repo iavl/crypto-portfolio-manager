@@ -20,7 +20,7 @@ class ScoringAndRegimeTests(unittest.TestCase):
                 "relative_strength_btc": 30,
             }
         )
-        self.assertAlmostEqual(result.score, 59.5)
+        self.assertAlmostEqual(result.score, 60.0)
         self.assertEqual(result.missing_factors, ())
         self.assertAlmostEqual(sum(result.effective_weights.values()), 1.0)
         self.assertEqual(set(result.effective_weights), {
@@ -113,16 +113,16 @@ class ScoringAndRegimeTests(unittest.TestCase):
 
     def test_drawdown_can_force_capital_preservation(self):
         result = determine_regime(
-            RegimeInputs("BEARISH", "ELEVATED", -0.2, "NEUTRAL", "HEALTHY", False)
+            RegimeInputs("BEARISH", "ELEVATED", -0.15, "NEUTRAL", "HEALTHY", False)
         )
         self.assertEqual(result.regime, "CAPITAL_PRESERVATION")
 
     def test_drawdown_floor_matches_policy_bands(self):
         for drawdown, expected in (
-            (-0.07, "NORMAL"),
-            (-0.13, "DEFENSIVE"),
-            (-0.17, "CAPITAL_PRESERVATION"),
-            (-0.21, "CAPITAL_PRESERVATION"),
+            (-0.05, "NORMAL"),
+            (-0.09, "DEFENSIVE"),
+            (-0.12, "CAPITAL_PRESERVATION"),
+            (-0.16, "CAPITAL_PRESERVATION"),
         ):
             with self.subTest(drawdown=drawdown):
                 result = determine_regime(
@@ -158,7 +158,7 @@ class ScoringAndRegimeTests(unittest.TestCase):
             determine_regime(
                 RegimeInputs("HEALTHY", "LOW", drawdown, "NEUTRAL", "HEALTHY", False)
             ).regime
-            for drawdown in (-0.01, -0.08, -0.12, -0.16, -0.20)
+            for drawdown in (-0.01, -0.06, -0.09, -0.12, -0.15)
         ]
         self.assertEqual(regimes, sorted(regimes, key=order.get))
 

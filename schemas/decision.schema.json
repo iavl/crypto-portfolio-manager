@@ -88,9 +88,28 @@
     ,"nav_performance": {"type": ["object", "null"]}
     ,"benchmark_performance": {"type": ["object", "null"]}
     ,"event_scan_summary": {"type": ["object", "null"]}
+    ,"no_trade_attribution": {"oneOf": [{"$ref": "#/$defs/noTradeAttribution"}, {"type": "null"}]}
   },
   "additionalProperties": false,
   "$defs": {
+    "noTradeAttribution": {
+      "type": "object",
+      "required": ["score_gate", "confidence_gate", "regime_gate", "event_gate", "liveness_gate", "btc_relative_gate", "allocation_delta_gate", "rebalance_gate", "execution_gate", "primary_reason", "secondary_reasons"],
+      "properties": {
+        "score_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "confidence_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "regime_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "event_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "liveness_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "btc_relative_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "allocation_delta_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "rebalance_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "execution_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
+        "primary_reason": {"type": "string", "minLength": 1},
+        "secondary_reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
     "eventRisk": {
       "type": "object",
       "required": ["state", "reasons", "evidence_ids", "unresolved"],

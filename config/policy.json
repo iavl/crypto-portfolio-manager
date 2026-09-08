@@ -1,7 +1,7 @@
 {
   "investment_horizon_months": {
-    "min": 6,
-    "max": 12
+    "min": 3,
+    "max": 6
   },
   "universe": {
     "core": ["BTC", "ETH"],
@@ -10,8 +10,8 @@
     "excluded": ["LUNC"]
   },
   "risk": {
-    "min_stablecoin_weight": 0.1,
-    "max_portfolio_drawdown": 0.2
+    "min_stablecoin_weight": 0.15,
+    "max_portfolio_drawdown": 0.15
   },
   "chain_liveness": {
     "degraded_deployment_factor": 0.25,
@@ -48,29 +48,29 @@
     "secondary": {"BTC": 0.7, "ETH": 0.3}
   },
   "rebalance": {
-    "hold_below_pp": 3,
-    "watch_below_pp": 5,
-    "high_priority_above_pp": 10
+    "hold_below_pp": 2,
+    "watch_below_pp": 4,
+    "high_priority_above_pp": 8
   },
   "scoring_profiles": {
     "default": {
-      "trend": 0.2,
-      "valuation": 0.2,
-      "fundamentals": 0.25,
-      "onchain": 0.15,
+      "trend": 0.3,
+      "valuation": 0.15,
+      "fundamentals": 0.2,
+      "onchain": 0.1,
       "capital_flows": 0.1,
-      "relative_strength_btc": 0.1,
+      "relative_strength_btc": 0.15,
       "btc_valuation": 0.0,
       "macro_liquidity": 0.0
     },
     "btc": {
-      "trend": 0.3,
+      "trend": 0.35,
       "valuation": 0.0,
       "fundamentals": 0.0,
       "onchain": 0.0,
-      "capital_flows": 0.2,
+      "capital_flows": 0.25,
       "relative_strength_btc": 0.0,
-      "btc_valuation": 0.3,
+      "btc_valuation": 0.2,
       "macro_liquidity": 0.2
     }
   },
@@ -85,20 +85,42 @@
   "factor_rules": {
     "trend": {
       "base_score": 50,
-      "price_ma_points": 6,
-      "alignment_points": 12,
-      "return_points": 6,
-      "support_points": 5,
+      "ma_points": {
+        "20": 6,
+        "50": 8,
+        "100": 6,
+        "200": 2
+      },
+      "alignment_windows": [20, 50, 100],
+      "alignment_points": 10,
+      "momentum": {
+        "horizon_weights": {
+          "30d": 0.2,
+          "90d": 0.4,
+          "180d": 0.4
+        },
+        "neutral_abs": {
+          "30d": 0.02,
+          "90d": 0.05,
+          "180d": 0.1
+        },
+        "saturation_abs": {
+          "30d": 0.15,
+          "90d": 0.3,
+          "180d": 0.5
+        },
+        "max_points": 24
+      },
+      "support_points": 4,
       "volume_points": 5,
       "extension_threshold_atr": 2,
-      "extension_penalty": 10
+      "extension_penalty": 8
     },
     "relative_strength": {
       "horizon_weights": {
-        "30d": 0.1,
-        "90d": 0.25,
-        "180d": 0.35,
-        "365d": 0.3
+        "30d": 0.2,
+        "90d": 0.4,
+        "180d": 0.4
       },
       "risk_adjusted_neutral_band": 0.1,
       "risk_adjusted_saturation": 1.0
@@ -117,13 +139,13 @@
   },
   "regimes": {
     "NORMAL": {
-      "stablecoin_target": 0.1,
+      "stablecoin_target": 0.15,
       "satellite_max": 0.25,
       "core_risky_min": 0.5,
       "single_asset_max": 0.5
     },
     "DEFENSIVE": {
-      "stablecoin_target": 0.25,
+      "stablecoin_target": 0.3,
       "satellite_max": 0.15,
       "core_risky_min": 0.5,
       "single_asset_max": 0.5
@@ -137,7 +159,7 @@
   },
   "allocation": {
     "satellite_entry_score": 67,
-    "satellite_exit_score": 60,
+    "satellite_exit_score": 62,
     "satellite_full_score": 85,
     "low_confidence_satellite_weight": 0.0,
     "confidence_multipliers": {
@@ -179,8 +201,8 @@
     "enabled": true,
     "preferred_timeframe": "4H",
     "fallback_timeframe": "1D",
-    "lookback_days": [90, 180],
-    "preferred_lookback_days": 180,
+    "lookback_days": [60, 120],
+    "preferred_lookback_days": 120,
     "price_bins": 64,
     "value_area_fraction": 0.7,
     "hvn_percentile": 0.75,
@@ -287,8 +309,8 @@
   },
   "execution": {
     "timeframe": "1D",
-    "preferred_history_days": 430,
-    "minimum_history_days": 120,
+    "preferred_history_days": 240,
+    "minimum_history_days": 200,
     "max_fetched_age_days": 7,
     "maximum_daily_candle_lag_days": 1,
     "minimum_daily_coverage_ratio": 0.9,
@@ -377,10 +399,10 @@
   },
   "freshness_policy": {
     "domain_defaults": {
-      "trend": {"max_age_seconds": 1209600, "half_life_seconds": 604800},
-      "volatility": {"max_age_seconds": 1209600, "half_life_seconds": 604800},
-      "breadth": {"max_age_seconds": 604800, "half_life_seconds": 259200},
-      "flows": {"max_age_seconds": 1209600, "half_life_seconds": 604800},
+      "trend": {"max_age_seconds": 604800, "half_life_seconds": 259200},
+      "volatility": {"max_age_seconds": 604800, "half_life_seconds": 259200},
+      "breadth": {"max_age_seconds": 432000, "half_life_seconds": 172800},
+      "flows": {"max_age_seconds": 604800, "half_life_seconds": 259200},
       "portfolio_drawdown": {"max_age_seconds": 2592000, "half_life_seconds": 1209600},
       "systemic_risk": {"max_age_seconds": 259200, "half_life_seconds": 86400}
     },

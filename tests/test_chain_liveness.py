@@ -387,7 +387,7 @@ class ChainLivenessAcquisitionTests(unittest.TestCase):
 
 class ChainLivenessRiskTests(unittest.TestCase):
     def test_risk_gate_consequences(self):
-        target = {"ETH": 0.5, "BTC": 0.4, "USDT": 0.1}
+        target = {"ETH": 0.5, "BTC": 0.35, "USDT": 0.15}
         healthy = run_risk_gate(target, chain_liveness={"ETH": "HEALTHY"})
         self.assertTrue(healthy.ok)
 

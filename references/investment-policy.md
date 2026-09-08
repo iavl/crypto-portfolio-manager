@@ -5,11 +5,11 @@ owns eligibility, universe, and portfolio constraints.
 
 ## Objective
 
-Manage a crypto portfolio over approximately 6–12 months with three simultaneous objectives:
+Manage a crypto portfolio over approximately 3–6 months with three simultaneous objectives:
 
 1. Seek to outperform BTC over comparable periods.
 2. Increase long-term absolute return.
-3. Avoid large portfolio drawdowns, using the configured portfolio drawdown risk budget (20% by default).
+3. Avoid large portfolio drawdowns, using the configured portfolio drawdown risk budget (15% by default).
 
 These objectives can conflict. Capital preservation has priority when the risk model enters `CAPITAL_PRESERVATION`.
 
@@ -54,7 +54,7 @@ values remain unavailable.
 
 ## Stablecoins and cash
 
-- Minimum allocation: the configured `min_stablecoin_weight` floor, 10% by default.
+- Minimum allocation: the configured `min_stablecoin_weight` floor, 15% by default.
 - No fixed maximum.
 - Cash allocation should rise as aggregate risk/reward deteriorates.
 - Stablecoin issuer, depeg, custody, venue, and smart-contract risks must be considered; “stablecoin” does not mean risk-free.

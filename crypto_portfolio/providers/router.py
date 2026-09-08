@@ -278,7 +278,7 @@ class ProviderRouter:
         *,
         as_of: str | datetime | None = None,
         now: str | datetime | None = None,
-        history_days: int = 430,
+        history_days: int = 240,
     ) -> tuple[ProviderRequest, ...]:
         ttl = self.config.get("cache_ttl_seconds", {})
         return build_provider_requests(

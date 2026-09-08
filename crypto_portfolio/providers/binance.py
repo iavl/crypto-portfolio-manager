@@ -171,7 +171,6 @@ def observations_from_ohlcv(
         "market.return_30d": (calendar_lookback_return(candles, 30), "30d"),
         "market.return_90d": (calendar_lookback_return(candles, 90), "90d"),
         "market.return_180d": (calendar_lookback_return(candles, 180), "180d"),
-        "market.return_365d": (calendar_lookback_return(candles, 365), "365d"),
         "market.ma20": (moving_average(closes, 20) if len(closes) >= 20 else None, None),
         "market.ma50": (moving_average(closes, 50) if len(closes) >= 50 else None, None),
         "market.ma100": (moving_average(closes, 100) if len(closes) >= 100 else None, None),
@@ -182,9 +181,9 @@ def observations_from_ohlcv(
         "market.relative_volume": (relative_volume(volumes, 20), None),
         "market.drawdown": (history_position(candles)[2], None),
         "market.btc_trend": (_trend_state(closes, {
+            "MA20": moving_average(closes, 20) if len(closes) >= 20 else None,
             "MA50": moving_average(closes, 50) if len(closes) >= 50 else None,
             "MA100": moving_average(closes, 100) if len(closes) >= 100 else None,
-            "MA200": moving_average(closes, 200) if len(closes) >= 200 else None,
         }), None),
     }
     atr_value = values["market.atr14"][0]
@@ -214,7 +213,7 @@ class BinanceProvider:
         self.capabilities = ProviderCapabilities(
             provider=self.name,
             metric_keys=(
-                "market.spot_price", "market.return_30d", "market.return_90d", "market.return_180d", "market.return_365d",
+                "market.spot_price", "market.return_30d", "market.return_90d", "market.return_180d",
                 "market.ma20", "market.ma50", "market.ma100", "market.ma200", "market.atr14",
                 "market.realized_vol_30d", "market.realized_vol_90d", "market.relative_volume", "market.drawdown",
                 "market.btc_trend", "market.volatility_state",
@@ -225,7 +224,7 @@ class BinanceProvider:
                 "derivatives.futures_basis_annualized",
             ),
             historical_series=(
-                "market.return_30d", "market.return_90d", "market.return_180d", "market.return_365d",
+                "market.return_30d", "market.return_90d", "market.return_180d",
                 "derivatives.funding_rate", "derivatives.open_interest_usd",
             ),
             supports_batching=True,

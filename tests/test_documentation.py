@@ -374,6 +374,8 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Policy weight / effective weight", template)
         self.assertIn("NO_TRADE", template)
         self.assertIn("Data Collection Summary", template)
+        self.assertIn("Primary reason", template)
+        self.assertIn("secondary_reasons", template)
 
     def test_investment_strategy_documentation_contract(self):
         strategy_path = ROOT / "references" / "investment-strategy.md"
@@ -403,7 +405,7 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(heading=heading):
                 self.assertIn(heading, strategy)
         for marker in (
-            "6–12 month",
+            "3–6 month",
             "BTC-benchmarked",
             "BTC",
             "ETH",
@@ -411,12 +413,12 @@ class DocumentationTests(unittest.TestCase):
             "U",
             "USD1",
             "67",
-            "60",
+            "62",
             "85",
             "70% BTC / 30% ETH",
-            "3pp",
-            "5pp",
-            "10pp",
+            "2pp",
+            "4pp",
+            "8pp",
             "NORMAL",
             "DEFENSIVE",
             "CAPITAL_PRESERVATION",

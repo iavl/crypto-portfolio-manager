@@ -17,13 +17,13 @@ class BTCSpecificTests(unittest.TestCase):
     def test_btc_profile_and_collection_scope(self):
         policy = load_policy()
         self.assertEqual(policy.scoring_profile("BTC"), {
-            "trend": 0.3,
+            "trend": 0.35,
             "valuation": 0.0,
             "fundamentals": 0.0,
             "onchain": 0.0,
-            "capital_flows": 0.2,
+            "capital_flows": 0.25,
             "relative_strength_btc": 0.0,
-            "btc_valuation": 0.3,
+            "btc_valuation": 0.2,
             "macro_liquidity": 0.2,
         })
         self.assertEqual(policy.scoring_profile("ETH")["btc_valuation"], 0.0)
@@ -40,7 +40,7 @@ class BTCSpecificTests(unittest.TestCase):
             {"trend": FactorScore("trend", 80)},
             symbol="BTC",
         )
-        self.assertAlmostEqual(result.coverage, 0.3)
+        self.assertAlmostEqual(result.coverage, 0.35)
         self.assertEqual(result.factor_availability["fundamentals"], "NOT_APPLICABLE")
         self.assertEqual(result.factor_availability["btc_valuation"], "MISSING")
 

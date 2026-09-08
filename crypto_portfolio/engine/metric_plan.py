@@ -173,7 +173,6 @@ RELATIVE_RETURN_DEPENDENCIES: Mapping[str, str] = {
     "relative.return_vs_btc_30d": "market.return_30d",
     "relative.return_vs_btc_90d": "market.return_90d",
     "relative.return_vs_btc_180d": "market.return_180d",
-    "relative.return_vs_btc_365d": "market.return_365d",
 }
 
 # The complete derived graph is kept beside the collection plan so CI can

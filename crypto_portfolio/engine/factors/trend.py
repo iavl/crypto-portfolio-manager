@@ -96,6 +96,15 @@ def _rules(policy: Policy) -> Mapping[str, float]:
     return policy.factor_rules["trend"]
 
 
+def _momentum_score(value: float, neutral: float, saturation: float) -> float:
+    if abs(value) <= neutral:
+        return 50.0
+    span = saturation - neutral
+    if value > 0:
+        return min(100.0, 50.0 + 50.0 * (min(value, saturation) - neutral) / span)
+    return max(0.0, 50.0 + 50.0 * (max(value, -saturation) + neutral) / span)
+
+
 def _confidence(coverage: float, data_confidence: str) -> str:
     index = 2 if coverage >= 0.9 else 1 if coverage >= 0.7 else 0
     data = str(data_confidence).upper()
@@ -117,64 +126,98 @@ def calculate_trend_factor(
     snapshot = _snapshot(value, spot=spot, policy=resolved, as_of=as_of)
     rules = _rules(resolved)
     score = rules["base_score"]
-    available = 0
-    total = 0
+    available_authority = 0.0
+    total_authority = 0.0
     reasons: list[str] = []
 
-    for name in ("ma20", "ma50", "ma100", "ma200"):
-        total += 1
+    for window in ("20", "50", "100", "200"):
+        name = f"ma{window}"
+        authority = rules["ma_points"][window]
+        total_authority += authority
         moving_average = getattr(snapshot, name)
         if moving_average is None:
             continue
-        available += 1
+        available_authority += authority
         if snapshot.current_spot_price >= moving_average:
-            score += rules["price_ma_points"]
+            score += authority
             reasons.append(f"price is above {name.upper()}")
         else:
-            score -= rules["price_ma_points"]
+            score -= authority
             reasons.append(f"price is below {name.upper()}")
 
-    total += 1
-    alignment = (snapshot.ma50, snapshot.ma100, snapshot.ma200)
+    alignment_authority = rules["alignment_points"]
+    total_authority += alignment_authority
+    alignment = tuple(
+        getattr(snapshot, f"ma{window}")
+        for window in rules["alignment_windows"]
+    )
     if all(item is not None for item in alignment):
-        available += 1
-        if snapshot.current_spot_price > snapshot.ma50 > snapshot.ma100 > snapshot.ma200:
-            score += rules["alignment_points"]
+        available_authority += alignment_authority
+        bullish = snapshot.current_spot_price > alignment[0] > alignment[1] > alignment[2]
+        bearish = snapshot.current_spot_price < alignment[0] < alignment[1] < alignment[2]
+        if bullish:
+            score += alignment_authority
             reasons.append("moving averages are bullishly aligned")
-        elif snapshot.current_spot_price < snapshot.ma50 < snapshot.ma100 < snapshot.ma200:
-            score -= rules["alignment_points"]
+        elif bearish:
+            score -= alignment_authority
             reasons.append("moving averages are bearishly aligned")
 
-    for name in ("return_30d", "return_90d", "return_180d"):
-        total += 1
+    momentum = rules["momentum"]
+    momentum_weights = momentum["horizon_weights"]
+    momentum_scores: dict[str, float] = {}
+    available_momentum_weight = 0.0
+    for horizon in ("30d", "90d", "180d"):
+        authority = momentum["max_points"] * momentum_weights[horizon]
+        total_authority += authority
+        name = f"return_{horizon}"
         period_return = getattr(snapshot, name)
         if period_return is None:
             continue
-        available += 1
-        if period_return > 0:
-            score += rules["return_points"]
-            reasons.append(f"{name} return is positive")
-        elif period_return < 0:
-            score -= rules["return_points"]
-            reasons.append(f"{name} return is negative")
+        available_authority += authority
+        available_momentum_weight += momentum_weights[horizon]
+        momentum_scores[horizon] = _momentum_score(
+            period_return,
+            momentum["neutral_abs"][horizon],
+            momentum["saturation_abs"][horizon],
+        )
+        reasons.append(f"{name} momentum score is {momentum_scores[horizon]:.1f}")
+    if momentum_scores:
+        aggregate = sum(
+            momentum_scores[horizon] * momentum_weights[horizon]
+            for horizon in momentum_scores
+        ) / available_momentum_weight
+        score += (aggregate - 50.0) / 50.0 * momentum["max_points"]
 
-    # Drawdown belongs to valuation in v2; retain it only as trend context.
+    # An empty support set is an evaluated, neutral structural result. It is
+    # not missing data; only an unavailable technical snapshot removes this
+    # authority from coverage.
+    support_authority = rules["support_points"]
+    total_authority += support_authority
+    support_available = bool(
+        getattr(snapshot, "market_data_fresh", True)
+        and getattr(snapshot, "history_sufficient", True)
+        and "INSUFFICIENT_HISTORY" not in getattr(snapshot, "data_quality_flags", ())
+    )
+    if support_available:
+        available_authority += support_authority
+        if snapshot.support_zones:
+            score += support_authority
+            reasons.append("confirmed support structure is available")
+        else:
+            reasons.append("support structure was evaluated but no confirmed zone is present")
 
-    total += 1
-    if snapshot.support_zones:
-        available += 1
-        score += rules["support_points"]
-        reasons.append("confirmed support structure is available")
-
-    total += 1
+    volume_authority = rules["volume_points"]
+    total_authority += volume_authority
     if snapshot.volume_state != "UNKNOWN":
-        available += 1
+        available_authority += volume_authority
         if snapshot.volume_state == "SUPPORTIVE":
-            score += rules["volume_points"]
+            score += volume_authority
             reasons.append("volume confirms the move")
         elif snapshot.volume_state == "WEAK":
-            score -= rules["volume_points"]
+            score -= volume_authority
             reasons.append("volume confirmation is weak")
+
+    # Drawdown belongs to valuation in v2; retain it only as trend context.
 
     if snapshot.atr14 and snapshot.support_zones:
         nearest = max(snapshot.support_zones, key=lambda zone: zone.midpoint)
@@ -183,7 +226,7 @@ def calculate_trend_factor(
             score -= rules["extension_penalty"]
             reasons.append("spot is extended above the nearest support")
 
-    coverage = available / total if total else 0.0
+    coverage = available_authority / total_authority if total_authority else 0.0
     score = min(100.0, max(0.0, score))
     source_values = list(evidence_ids)
     if snapshot.ohlcv_hash:

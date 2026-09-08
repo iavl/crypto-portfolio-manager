@@ -109,14 +109,23 @@ _SCORING_FIELDS = {
 _FACTOR_RULE_FIELDS = {"trend", "relative_strength", "flows"}
 _TREND_RULE_FIELDS = {
     "base_score",
-    "price_ma_points",
+    "ma_points",
+    "alignment_windows",
     "alignment_points",
-    "return_points",
+    "momentum",
     "support_points",
     "volume_points",
     "extension_threshold_atr",
     "extension_penalty",
 }
+_TREND_MA_FIELDS = {"20", "50", "100", "200"}
+_TREND_MOMENTUM_FIELDS = {
+    "horizon_weights",
+    "neutral_abs",
+    "saturation_abs",
+    "max_points",
+}
+_TREND_HORIZONS = ("30d", "90d", "180d")
 _RELATIVE_RULE_FIELDS = {
     "horizon_weights",
     "risk_adjusted_neutral_band",
@@ -969,15 +978,93 @@ def _parse_factor_rules(
     _unknown_fields(trend, _TREND_RULE_FIELDS, "factor_rules.trend")
     if set(trend) != _TREND_RULE_FIELDS:
         raise PolicyError("factor_rules.trend fields are incomplete")
-    parsed_trend = {
-        key: _number(item, f"factor_rules.trend.{key}", minimum=0.0)
-        for key, item in trend.items()
-    }
-    parsed_trend["base_score"] = _number(
+    base_score = _number(
         trend["base_score"], "factor_rules.trend.base_score", minimum=0.0, maximum=100.0
     )
-    if parsed_trend["extension_threshold_atr"] <= 0:
+    raw_ma_points = trend["ma_points"]
+    if not isinstance(raw_ma_points, dict):
+        raise PolicyError("factor_rules.trend.ma_points must be an object")
+    _unknown_fields(raw_ma_points, _TREND_MA_FIELDS, "factor_rules.trend.ma_points")
+    if set(raw_ma_points) != _TREND_MA_FIELDS:
+        raise PolicyError("factor_rules.trend.ma_points must contain 20, 50, 100, and 200")
+    ma_points = {
+        key: _number(raw_ma_points[key], f"factor_rules.trend.ma_points.{key}", minimum=0.0)
+        for key in _TREND_MA_FIELDS
+    }
+    if sum(ma_points[key] for key in ("20", "50", "100")) <= ma_points["200"]:
+        raise PolicyError("factor_rules.trend short-term MA points must exceed MA200 authority")
+    alignment_windows = _integer_list(
+        trend["alignment_windows"],
+        "factor_rules.trend.alignment_windows",
+        exact=(20, 50, 100),
+    )
+    alignment_points = _number(
+        trend["alignment_points"], "factor_rules.trend.alignment_points", minimum=0.0
+    )
+    momentum = trend["momentum"]
+    if not isinstance(momentum, dict):
+        raise PolicyError("factor_rules.trend.momentum must be an object")
+    _unknown_fields(momentum, _TREND_MOMENTUM_FIELDS, "factor_rules.trend.momentum")
+    if set(momentum) != _TREND_MOMENTUM_FIELDS:
+        raise PolicyError("factor_rules.trend.momentum fields are incomplete")
+    momentum_weights = _weighted_map(
+        momentum["horizon_weights"], "factor_rules.trend.momentum.horizon_weights"
+    )
+    if set(momentum_weights) != set(_TREND_HORIZONS):
+        raise PolicyError("factor_rules.trend.momentum.horizon_weights must contain 30d, 90d, and 180d")
+
+    def horizon_map(raw: Any, name: str) -> dict[str, float]:
+        if not isinstance(raw, dict) or set(raw) != set(_TREND_HORIZONS):
+            raise PolicyError(f"{name} must contain 30d, 90d, and 180d")
+        return {
+            key: _number(raw[key], f"{name}.{key}", minimum=0.0)
+            for key in _TREND_HORIZONS
+        }
+
+    neutral_abs = horizon_map(momentum["neutral_abs"], "factor_rules.trend.momentum.neutral_abs")
+    saturation_abs = horizon_map(momentum["saturation_abs"], "factor_rules.trend.momentum.saturation_abs")
+    for horizon in _TREND_HORIZONS:
+        if saturation_abs[horizon] <= neutral_abs[horizon]:
+            raise PolicyError(
+                f"factor_rules.trend.momentum.saturation_abs.{horizon} must exceed neutral_abs"
+            )
+    max_points = _number(
+        momentum["max_points"], "factor_rules.trend.momentum.max_points", minimum=0.0
+    )
+    if max_points <= 0:
+        raise PolicyError("factor_rules.trend.momentum.max_points must be > 0")
+    support_points = _number(
+        trend["support_points"], "factor_rules.trend.support_points", minimum=0.0
+    )
+    volume_points = _number(
+        trend["volume_points"], "factor_rules.trend.volume_points", minimum=0.0
+    )
+    extension_threshold = _number(
+        trend["extension_threshold_atr"],
+        "factor_rules.trend.extension_threshold_atr",
+        minimum=0.0,
+    )
+    extension_penalty = _number(
+        trend["extension_penalty"], "factor_rules.trend.extension_penalty", minimum=0.0
+    )
+    if extension_threshold <= 0:
         raise PolicyError("factor_rules.trend.extension_threshold_atr must be > 0")
+    parsed_trend = {
+        "base_score": base_score,
+        "ma_points": ma_points,
+        "alignment_windows": alignment_windows,
+        "alignment_points": alignment_points,
+        "momentum": {
+            "horizon_weights": momentum_weights,
+            "neutral_abs": neutral_abs,
+            "saturation_abs": saturation_abs,
+            "max_points": max_points,
+        },
+        "support_points": support_points,
+        "volume_points": volume_points,
+        "extension_threshold_atr": extension_threshold,
+        "extension_penalty": extension_penalty,
+    }
 
     relative = value["relative_strength"]
     if not isinstance(relative, dict):
@@ -988,7 +1075,6 @@ def _parse_factor_rules(
         raise PolicyError("factor_rules.relative_strength fields are incomplete")
     horizon_weights = _weighted_map(relative["horizon_weights"], "factor_rules.relative_strength.horizon_weights")
     expected_horizons = {"30d", "90d", "180d"}
-    expected_horizons.add("365d")
     if set(horizon_weights) != expected_horizons:
         names = ", ".join(sorted(expected_horizons))
         raise PolicyError(f"factor_rules.relative_strength.horizon_weights must contain {names}")

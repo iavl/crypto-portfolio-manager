@@ -19,7 +19,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         second = build_target_allocation(regime="NORMAL", assessments=assessments)
         self.assertEqual(dict(first.target_weights), dict(second.target_weights))
         self.assertAlmostEqual(sum(first.target_weights.values()), 1.0)
-        self.assertGreaterEqual(first.target_weights["USDT"], 0.10)
+        self.assertGreaterEqual(first.target_weights["USDT"], 0.15)
         satellite_weight = sum(first.target_weights.get(symbol, 0) for symbol in ("SOL", "AAVE", "BNB", "LINK"))
         self.assertLessEqual(satellite_weight, 0.25)
 
@@ -50,7 +50,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
 
     def test_u_and_usd1_count_toward_stablecoin_floor(self):
         policy = resolve_policy()
-        weights = {"BTC": 0.9, "U": 0.05, "USD1": 0.05}
+        weights = {"BTC": 0.85, "U": 0.05, "USD1": 0.10}
         risk = run_risk_gate(weights, policy=policy)
         self.assertNotIn("STABLECOIN_FLOOR", {item.code for item in risk.violations})
         allocation = build_target_allocation(policy=policy, current_weights=weights)
@@ -104,8 +104,8 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         self.assertIn("CORE_MINIMUM", {item.code for item in core.violations})
 
     def test_rebalance_thresholds_and_no_trade(self):
-        hold = recommend_rebalance({"BTC": 0.48, "USDT": 0.52}, {"BTC": 0.50, "USDT": 0.50}, 1000)
-        watch = recommend_rebalance({"BTC": 0.45, "USDT": 0.55}, {"BTC": 0.49, "USDT": 0.51}, 1000)
+        hold = recommend_rebalance({"BTC": 0.49, "USDT": 0.51}, {"BTC": 0.50, "USDT": 0.50}, 1000)
+        watch = recommend_rebalance({"BTC": 0.45, "USDT": 0.55}, {"BTC": 0.48, "USDT": 0.52}, 1000)
         active = recommend_rebalance({"BTC": 0.39, "USDT": 0.61}, {"BTC": 0.50, "USDT": 0.50}, 1000)
         self.assertTrue(hold.no_trade)
         self.assertEqual(hold[0].action, "HOLD")
@@ -145,21 +145,21 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
             )
         with self.assertRaises(ValueError):
             recommend_rebalance(
-                {"BTC": 0.8, "USDT": 0.2},
-                {"BTC": 0.8, "USDT": 0.2},
+                {"BTC": 0.75, "USDT": 0.25},
+                {"BTC": 0.75, "USDT": 0.25},
                 1000,
                 regime="DEFENSIVE",
             )
         # At the global floor and above the regime target the call succeeds.
         result = recommend_rebalance(
-            {"BTC": 0.9, "USDT": 0.1},
-            {"BTC": 0.9, "USDT": 0.1},
+            {"BTC": 0.85, "USDT": 0.15},
+            {"BTC": 0.85, "USDT": 0.15},
             1000,
         )
         self.assertTrue(result.no_trade)
         defensive = recommend_rebalance(
-            {"BTC": 0.75, "USDT": 0.25},
-            {"BTC": 0.75, "USDT": 0.25},
+            {"BTC": 0.70, "USDT": 0.30},
+            {"BTC": 0.70, "USDT": 0.30},
             1000,
             regime="DEFENSIVE",
         )
@@ -189,7 +189,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         assessment = {"weighted_score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         self.assertEqual(satellite_eligibility(assessment), "INELIGIBLE")
         self.assertEqual(satellite_eligibility(assessment, current_weight=0.05), "HOLD_ONLY")
-        below_exit = {**assessment, "weighted_score": 59}
+        below_exit = {**assessment, "weighted_score": 61}
         self.assertEqual(satellite_eligibility(below_exit, current_weight=0.05), "INELIGIBLE")
         result = build_target_allocation(assessments={"SOL": assessment}, current_weights={"SOL": 0.05, "USDT": 0.1, "BTC": 0.85})
         self.assertAlmostEqual(result.target_weights.get("SOL", 0), 0.05)
@@ -216,8 +216,8 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         self.assertEqual(critical.target_weights.get("SOL", 0), 0)
 
     def test_stablecoins_are_one_sleeve(self):
-        current = {"BTC": 0.9, "USDT": 0.05, "USDC": 0.05}
-        target = {"BTC": 0.9, "USDT": 0.10}
+        current = {"BTC": 0.85, "USDT": 0.075, "USDC": 0.075}
+        target = {"BTC": 0.85, "USDT": 0.15}
         result = recommend_rebalance(current, target, 1000)
         self.assertEqual(
             {action.symbol: action.action for action in result if action.symbol in {"USDT", "USDC"}},

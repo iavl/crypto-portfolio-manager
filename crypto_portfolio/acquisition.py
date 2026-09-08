@@ -458,7 +458,12 @@ class AcquisitionManager:
             pending.append(request)
 
         self._synchronize_relative_dependencies(model, reusable, pending)
-        provider_requests = self.router.build_requests(pending, as_of=as_of, now=current)
+        provider_requests = self.router.build_requests(
+            pending,
+            as_of=as_of,
+            now=current,
+            history_days=self.policy.execution["preferred_history_days"],
+        )
         routed = self.router.collect(provider_requests, mode=selected_mode, as_of=as_of, now=current)
         routed_values = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item

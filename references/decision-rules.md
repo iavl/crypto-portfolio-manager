@@ -34,10 +34,10 @@ applied immediately before that snapshot valuation. The primary benchmark is
 
 Use absolute portfolio-weight deviation:
 
-- <3 percentage points: normally `HOLD`.
-- 3–5 pp: `WATCH`; trade only with strong supporting evidence or when using new cash to rebalance naturally.
-- >5 pp: eligible for active rebalance.
-- >10 pp: high-priority rebalance unless a deliberate temporary tactical deviation is documented.
+- <2 percentage points: normally `HOLD`.
+- 2–4 pp: `WATCH`; trade only with strong supporting evidence or when using new cash to rebalance naturally.
+- >4 pp: eligible for active rebalance.
+- >8 pp: high-priority rebalance unless a deliberate temporary tactical deviation is documented.
 
 For a very small target position, also consider relative deviation so that a 2 pp error on a 4% target is not ignored blindly.
 

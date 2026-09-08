@@ -30,7 +30,7 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(METRIC_REGISTRY["derivatives.funding_rate"].decision_role, "POSITIONING_OVERLAY")
         self.assertEqual(METRIC_REGISTRY["derivatives.funding_rate"].context_group, "positioning")
         self.assertEqual(METRIC_REGISTRY["onchain.btc.mvrv"].decision_role, "CYCLE_CONTEXT")
-        self.assertEqual(load_policy().scoring_profile("ETH")["trend"], 0.2)
+        self.assertEqual(load_policy().scoring_profile("ETH")["trend"], 0.3)
 
     def test_positioning_scenarios(self):
         building = build_positioning_facts(
@@ -167,12 +167,12 @@ class OverlayTests(unittest.TestCase):
         )
         cycle = build_btc_cycle_context(as_of=AS_OF)
         overlays = MarketOverlays({"BTC": positioning}, cycle)
-        risk = run_risk_gate({"BTC": 0.5, "ETH": 0.4, "USDT": 0.1}, overlays=overlays)
+        risk = run_risk_gate({"BTC": 0.5, "ETH": 0.35, "USDT": 0.15}, overlays=overlays)
         self.assertTrue(risk.ok)
         self.assertIn("POSITIONING_CROWDED_LONG", {item.code for item in risk.violations})
         packet = build_decision_review_packet(
-            current_weights={"BTC": 0.5, "ETH": 0.4, "USDT": 0.1},
-            target_weights={"BTC": 0.5, "ETH": 0.4, "USDT": 0.1},
+            current_weights={"BTC": 0.5, "ETH": 0.35, "USDT": 0.15},
+            target_weights={"BTC": 0.5, "ETH": 0.35, "USDT": 0.15},
             overlays=overlays,
         )
         report = build_report_packet(packet)

@@ -10,7 +10,7 @@ may replace the portfolio-level risk authority.
 
 ## Core principle
 
-The configured maximum-loss preference applies to the **whole portfolio**, not each individual asset. The default `max_portfolio_drawdown` is 20%.
+The configured maximum-loss preference applies to the **whole portfolio**, not each individual asset. The default `max_portfolio_drawdown` is 15%.
 
 It is a risk budget / drawdown objective, not a guarantee. Crypto can gap, correlate toward 1 during stress, and exceed modeled losses.
 
@@ -30,7 +30,7 @@ Typical characteristics:
 
 Indicative allocation envelope, not a fixed target:
 
-- Stablecoin: 10–20% by default, never below the configured minimum
+- Stablecoin: 15–25% by default, never below the configured minimum
 - BTC: 35–50% (default core allocation)
 - ETH: 20–35% (default core allocation)
 - Satellites combined: 10–25%
@@ -45,6 +45,10 @@ mandatory holdings. In every regime, the stablecoin lower bound is the larger
 of the regime default and `min_stablecoin_weight`; if the configured floor
 exceeds the default upper bound, raise that upper bound to the floor because
 stablecoins have no fixed maximum.
+
+The current policy regime stablecoin targets are `NORMAL` 15%, `DEFENSIVE`
+30%, and `CAPITAL_PRESERVATION` 50%; the effective floor is the larger of the
+global 15% minimum and the selected regime target.
 
 For ETH, `ELIGIBLE_INCREASE`, `HOLD_ONLY`, `UNDERWEIGHT`, `REDUCE`, and
 `INELIGIBLE` are deterministic states. Missing ETH/BTC evidence and LOW
@@ -68,7 +72,7 @@ Typical triggers include several of:
 
 Indicative envelope:
 
-- Stablecoin: 20–40% by default, never below the configured minimum
+- Stablecoin: 30–45% by default, never below the configured minimum
 - BTC: 35–50%
 - ETH: 15–30%
 - Satellites combined: 0–15%
@@ -126,7 +130,7 @@ When reliable historical portfolio values exist, calculate peak-to-current drawd
 - `-0.80D` to `-D`: capital preservation becomes primary; reduce avoidable high-beta risk.
 - below `-D`: treat as risk-budget breach; do not attempt to “win it back” with more beta.
 
-With the default `D = 0.20`, these bands are 0%, -8%, -12%, -16%, and -20%.
+With the default `D = 0.15`, these bands are 0%, -6%, -9%, -12%, and -15%.
 
 These are portfolio-level bands and should be interpreted alongside regime and volatility.
 

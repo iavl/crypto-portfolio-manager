@@ -5,7 +5,7 @@ The repository supports only the current internal contract. Generated local stat
 # crypto-portfolio-manager
 
 `crypto-portfolio-manager` is a Codex Skill for conservative-balanced,
-spot-only crypto portfolio research over an approximately 6–12 month horizon.
+spot-only crypto portfolio research over an approximately 3–6 month horizon.
 It combines current market evidence with deterministic accounting, risk,
 allocation, benchmark, and rebalance calculations.
 

@@ -211,7 +211,7 @@ reachable=false 和有界错误），pass 2 重新运行 acquisition，随后调
 require_scoring_ready()，最后才进入 scoring。BNB 使用固定的官方
 security/governance source catalog，监管仍复用共享 MARKET source。
 
-BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d/365d
+BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d
 作为一个依赖 cohort 处理。缓存日期不一致时两侧一起刷新/重建；Python
 只在同一 venue、quote、completed daily candle 和共同 calendar anchor 上
 相减，不接受错位标量。
@@ -285,13 +285,13 @@ regime -> score -> confidence -> risk tier -> volatility/correlation
 
 Risk gate 检查 target sum、stablecoin floor、core minimum、satellite envelope、
 single-asset cap、chain liveness 和 overlays。Rebalance 使用 post-new-cash
-经济金额，按 3pp/5pp/10pp 阈值决定 HOLD、WATCH 或交易优先级。交易金额必须
+经济金额，按 2pp/4pp/8pp 阈值决定 HOLD、WATCH 或交易优先级。交易金额必须
 大于零；HOLD/WAIT/NO_TRADE 的金额必须为零。
 
 ## 9. Technical execution
 
 只有 rebalance 先批准 `INCREASE`，才进入技术层。技术层使用带 timestamp 的
-`SpotPrice` 和 completed `1D` OHLCV，优先至少 120 根日线、最好 430 天，
+`SpotPrice` 和 completed `1D` OHLCV，优先至少 200 根日线、最好 240 天，
 并检查 freshness、cadence、calendar coverage 和 provenance。
 
 技术 snapshot 计算 MA20/50/100/200、execution-specific calendar

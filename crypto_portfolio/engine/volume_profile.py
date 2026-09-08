@@ -195,7 +195,7 @@ def _nodes(
 def build_volume_profile(
     series: OHLCVSeries | Mapping[str, Any],
     *,
-    lookback_days: int = 180,
+    lookback_days: int = 120,
     price_bins: int = 64,
     value_area_fraction: float = 0.70,
     hvn_percentile: float = 0.75,
@@ -354,7 +354,7 @@ def build_volume_profile(
 def build_multi_horizon_profiles(
     series: OHLCVSeries | Mapping[str, Any],
     *,
-    lookback_days: Iterable[int] = (90, 180),
+    lookback_days: Iterable[int] = (60, 120),
     policy: Policy | None = None,
     atr_value: float | None = None,
     as_of: str | datetime | None = None,

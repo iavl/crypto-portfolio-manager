@@ -171,12 +171,12 @@ Confidence: HIGH
 
 | Factor | Policy weight / effective weight | Score | Key evidence | Effect |
 |---|---:|---:|---|---|
-| trend | 20% / 20% | 82 | evidence ID, source, observed time, concise fact | ++ |
-| valuation | 20% / 20% | 61 | ... | + |
-| fundamentals | 25% / 25% | 78 | ... | ++ |
-| onchain | 15% / 15% | 70 | ... | + |
+| trend | 30% / 30% | 82 | evidence ID, source, observed time, concise fact | ++ |
+| valuation | 15% / 15% | 61 | ... | + |
+| fundamentals | 20% / 20% | 78 | ... | ++ |
+| onchain | 10% / 10% | 70 | ... | + |
 | capital_flows | 10% / 10% | 66 | ... | + |
-| relative_strength_btc | 10% / 10% | 54 | ... | - |
+| relative_strength_btc | 15% / 15% | 54 | ... | - |
 
 Use the canonical factor names from `config/policy.json`. Show the fixed
 profile weight, effective factor score after reliability shrinkage, availability,
@@ -244,6 +244,16 @@ at portfolio level, including regime, stablecoin, risk-gate, threshold, and
 funding reasons. Stablecoin/cash rows use the stable-sleeve evidence and
 constraints instead of fabricated asset-specific factors.
 
+For `NO_TRADE` or `WAIT`, render the deterministic attribution from the packet:
+
+```text
+Primary reason: <primary_reason>
+Secondary reasons: <secondary_reasons>
+Gates: score=<...>, confidence=<...>, regime=<...>, event=<...>, liveness=<...>, BTC-relative=<...>, allocation-delta=<...>, rebalance=<...>, execution=<...>
+```
+
+Do not replace these reason codes with model judgment.
+
 ## 5. 当前仓位 vs 目标仓位
 
 | Asset | Current | Target | Deviation | Action | Priority |
@@ -269,11 +279,11 @@ For staged buys, use the validated execution plan:
 When available, add:
 
 ```text
-Volume Profile：4H / 180D / MEDIUM
+Volume Profile：4H / 120D / MEDIUM
 POC：$...
 VAL / VAH：$... / $...
 重要 HVN：$...
-依据：MA50 + confirmed swing + 90D POC + 180D HVN
+依据：MA50 + confirmed swing + 60D POC + 120D HVN
 说明：历史成交密集区代理，不是所有持币者真实成本；LVN 仅作过渡区背景。
 ```
 
@@ -302,7 +312,7 @@ State:
 - stablecoin floor after recommendation;
 - whether portfolio risk is rising or falling;
 - key concentration/beta risk;
-- whether the portfolio appears consistent with the configured drawdown risk budget (20% by default);
+- whether the portfolio appears consistent with the configured drawdown risk budget (15% by default);
 - note that the risk budget cannot guarantee a loss ceiling.
 
 ## 8. 什么情况会改变建议

@@ -60,7 +60,7 @@ class BybitProvider:
         self.capabilities = ProviderCapabilities(
             provider=self.name,
             metric_keys=(
-                "market.return_30d", "market.return_90d", "market.return_180d", "market.return_365d",
+                "market.return_30d", "market.return_90d", "market.return_180d",
                 "market.ma20", "market.ma50", "market.ma100", "market.ma200", "market.atr14",
                 "market.realized_vol_30d", "market.realized_vol_90d", "market.relative_volume", "market.drawdown",
                 "market.btc_trend", "market.volatility_state",
@@ -68,7 +68,7 @@ class BybitProvider:
                 "derivatives.open_interest_usd", "derivatives.open_interest_change_1d", "derivatives.open_interest_change_7d",
                 "derivatives.long_short_account_ratio",
             ),
-            historical_series=("market.return_30d", "market.return_90d", "market.return_180d", "market.return_365d", "derivatives.funding_rate"),
+            historical_series=("market.return_30d", "market.return_90d", "market.return_180d", "derivatives.funding_rate"),
             supports_batching=True,
             requires_api_key=False,
         )

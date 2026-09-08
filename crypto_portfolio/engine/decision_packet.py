@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable, Mapping
 
-from ..models.decision_packet import AssetDecisionSummary, DecisionReviewPacket
+from ..models.decision_packet import AssetDecisionSummary, DecisionReviewPacket, NoTradeAttribution
 from ..models.confidence import ConfidenceCap
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
@@ -13,6 +13,7 @@ from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 from ..model_routing import ModelRouting, validate_model_routing
 from .confidence import calculate_decision_confidence, calculate_regime_confidence
+from .rebalance import build_no_trade_attribution
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
@@ -283,6 +284,7 @@ def build_decision_review_packet(
     nav_performance: Mapping[str, Any] | None = None,
     benchmark_performance: Mapping[str, Any] | None = None,
     event_scan_summary: Mapping[str, Any] | None = None,
+    no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
@@ -393,6 +395,20 @@ def build_decision_review_packet(
             },
             caps=caps,
         )
+    attribution = no_trade_attribution
+    if attribution is None:
+        attribution = build_no_trade_attribution(
+            current,
+            target,
+            action_by_symbol.values(),
+            policy=resolve_policy(),
+            regime=regime,
+            assessments=raw_assessments,
+            decision_confidence=decision_confidence_value,
+            risk_flags=risk_flags or source.get("risk_flags", ()),
+            critical_missing_data=critical_missing_data or source.get("critical_missing_data", ()),
+            execution=execution_summary,
+        )
     return DecisionReviewPacket(
         review_type=review,
         market_regime=regime,
@@ -419,6 +435,7 @@ def build_decision_review_packet(
         nav_performance=nav_value,
         benchmark_performance=benchmark_performance if benchmark_performance is not None else source.get("benchmark_performance"),
         event_scan_summary=event_scan_summary if event_scan_summary is not None else source.get("event_scan_summary"),
+        no_trade_attribution=attribution,
     )
 
 

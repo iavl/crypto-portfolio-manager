@@ -9,7 +9,7 @@ change with a documented policy update.
 ## 1. Strategy in One Paragraph
 
 This is a BTC-benchmarked, risk-budgeted, multi-factor Core–Satellite strategy
-for approximately 6–12 month, spot-only crypto allocation. It combines
+for approximately 3–6 month, spot-only crypto allocation. It combines
 confidence-aware asset evaluation, regime switching, portfolio-level risk
 limits, hard event and chain-liveness gates, and staged execution. It seeks
 additional return only when the evidence justifies the asset-specific risk;
@@ -24,9 +24,9 @@ The current strategy has three objectives, in order of practical priority:
 2. Seek a positive absolute return.
 3. Avoid unacceptable portfolio drawdowns.
 
-The working horizon is approximately 6–12 months. These are medium-term
+The working horizon is approximately 3–6 months. These are active-allocation
 portfolio decisions, not intraday signals. The default portfolio drawdown
-risk budget is 20%; it is an objective and risk budget, not a guaranteed loss
+risk budget is 15%; it is an objective and risk budget, not a guaranteed loss
 ceiling. When aggregate risk deteriorates, capital preservation can override
 the pursuit of BTC outperformance. See the [investment policy](investment-policy.md)
 and [risk model](risk-model.md).
@@ -124,9 +124,9 @@ Under the current/default BTC profile, the positive-weight factors are:
 
 | Factor | Weight | Strategic meaning |
 |---|---:|---|
-| `trend` | 30% | BTC market structure and trend. |
-| `btc_valuation` | 30% | BTC-native realized-cap and holder-cost-basis valuation. |
-| `capital_flows` | 20% | BTC-relevant ETF, exchange, and liquidity flows. |
+| `trend` | 35% | BTC market structure and trend. |
+| `btc_valuation` | 20% | BTC-native realized-cap and holder-cost-basis valuation. |
+| `capital_flows` | 25% | BTC-relevant ETF, exchange, and liquidity flows. |
 | `macro_liquidity` | 20% | Official macro/liquidity conditions relevant to BTC. |
 
 The generic `valuation`, `fundamentals`, `onchain`, and
@@ -147,12 +147,12 @@ The default non-BTC profile has six positive-weight factors:
 
 | Factor | Weight | Strategic meaning |
 |---|---:|---|
-| `trend` | 20% | Market structure, momentum, moving averages, volatility, and support. |
-| `valuation` | 20% | Historical position, market cap, FDV, and valuation ratios. |
-| `fundamentals` | 25% | Adoption, fees/revenue, ecosystem, utility, and economic durability. |
-| `onchain` | 15% | Active usage, settlement, blockspace demand, and network activity. |
+| `trend` | 30% | Market structure, momentum, moving averages, volatility, and support. |
+| `valuation` | 15% | Historical position, market cap, FDV, and valuation ratios. |
+| `fundamentals` | 20% | Adoption, fees/revenue, ecosystem, utility, and economic durability. |
+| `onchain` | 10% | Active usage, settlement, blockspace demand, and network activity. |
 | `capital_flows` | 10% | ETF, exchange, and liquidity migration flows. |
-| `relative_strength_btc` | 10% | Risk-adjusted performance relative to BTC. |
+| `relative_strength_btc` | 15% | Risk-adjusted performance relative to BTC. |
 
 The complete canonical factor namespace is:
 
@@ -167,8 +167,8 @@ btc_valuation
 macro_liquidity
 ```
 
-Relative-strength evidence uses the configured `30D`, `90D`, `180D`, and
-`365D` horizons when complete history exists; missing horizons reduce
+Relative-strength evidence uses the configured `30D`, `90D`, and `180D`
+horizons when complete history exists; missing horizons reduce
 reliability rather than being silently filled.
 
 For the default non-BTC profile, `btc_valuation` and `macro_liquidity` have
@@ -185,6 +185,12 @@ Available factors do not receive the missing weight, and missing evidence is
 never treated as bullish evidence. See the [scoring model](scoring-model.md)
 for the exact calculation.
 
+The responsive trend factor gives MA20/MA50/MA100 more authority than MA200,
+uses `spot > MA20 > MA50 > MA100` for the primary alignment, and scores 30D,
+90D, and 180D momentum continuously with 20%/40%/40% authority. This increases
+recent-market responsiveness without allowing a one-month spike to override
+weak 90D/180D confirmation.
+
 ## 9. Satellite Burden of Proof and Hysteresis
 
 A satellite normally needs an adequate score, `MEDIUM` or `HIGH` confidence,
@@ -196,13 +202,13 @@ long way.
 The current/default satellite thresholds are:
 
 - `67`: entry threshold;
-- `60`: exit threshold for the hysteresis decision;
+- `62`: exit threshold for the hysteresis decision;
 - `85`: full score strength.
 
 This creates a deliberate separation between “do not add”, “hold only”,
-“reduction candidate”, and “full conviction”. A held satellite in the 60–66
-band can remain `HOLD_ONLY`; a score below 60 is an ineligible/reduction
-candidate. A score below 60 is not by itself an automatic sell: thesis,
+“reduction candidate”, and “full conviction”. A held satellite in the 62–66
+band can remain `HOLD_ONLY`; a score below 62 is an ineligible/reduction
+candidate. A score below 62 is not by itself an automatic sell: thesis,
 current exposure, event risk, portfolio risk, and rebalance rules still apply.
 
 ## 10. BTC / ETH Core Allocation
@@ -230,14 +236,14 @@ The strategy uses three portfolio regimes:
   satellite risk, and allow a large stablecoin/cash sleeve.
 
 Stablecoins and cash are one intentional sleeve. The current/default minimum
-is 10%, with no fixed maximum; the active regime target can require more. New
+is 15%, with no fixed maximum; the active regime target can require more. New
 cash does not have to be fully invested. Existing safe stable composition is
 preserved where possible, and the system does not create stablecoin-to-
 stablecoin trades merely to select a preferred symbol.
 
 ## 12. Portfolio Drawdown and Risk Budget
 
-The default 20% drawdown budget applies to the whole portfolio, not as a 20%
+The default 15% drawdown budget applies to the whole portfolio, not as a 15%
 stop-loss for every asset. Conceptually, the response ladder is:
 
 ```text
@@ -246,8 +252,8 @@ monitor → reassess concentration → defensive bias → capital preservation
 ```
 
 With the current default budget, the deterministic floors are at approximately
-12% drawdown for at least `DEFENSIVE`, 16% for `CAPITAL_PRESERVATION`, and a
-drawdown beyond 20% is a breach. The detailed bands are defined by the
+9% drawdown for at least `DEFENSIVE`, 12% for `CAPITAL_PRESERVATION`, and a
+drawdown beyond 15% is a breach. The detailed bands are defined by the
 [risk model](risk-model.md).
 
 High asset conviction cannot override the stablecoin floor, single-asset cap,
@@ -318,10 +324,10 @@ The current/default rebalance bands are:
 
 | Absolute deviation | Default interpretation |
 |---:|---|
-| `<3pp` | Normally `HOLD`. |
-| `3–5pp` | `WATCH`; act only with strong evidence or sensible new cash. |
-| `>5pp` | Eligible for active rebalance after all risk gates. |
-| `>10pp` | High-priority rebalance unless a deliberate deviation is documented. |
+| `<2pp` | Normally `HOLD`. |
+| `2–4pp` | `WATCH`; act only with strong evidence or sensible new cash. |
+| `>4pp` | Eligible for active rebalance after all risk gates. |
+| `>8pp` | High-priority rebalance unless a deliberate deviation is documented. |
 
 Deviation alone does not override regime, event, liveness, stablecoin, or
 confidence constraints. When the thesis remains sound, new cash should repair
@@ -354,6 +360,10 @@ The question “what should I buy?” does not imply that capital must be
 deployed. Preserving stablecoin optionality is often the correct action when
 the deviation is small, evidence is incomplete, a regime is defensive, event
 risk is unresolved, or execution would chase an extended move.
+
+For `NO_TRADE` and `WAIT`, Python persists deterministic gate outcomes and
+renders a primary reason plus secondary reason codes. The report does not infer
+or replace that attribution with model judgment.
 
 ## 19. Illustrative Strategy Examples
 

@@ -146,6 +146,7 @@ def build_report_packet(
         nav_performance=packet.nav_performance,
         benchmark_performance=packet.benchmark_performance,
         event_scan_summary=packet.event_scan_summary,
+        no_trade_attribution=packet.no_trade_attribution,
     )
 
 
@@ -200,6 +201,7 @@ def build_final_review_output(
         "rebalance": {
             "actions": packet_value["actions"],
             "approved_amounts": packet_value["approved_amounts"],
+            "no_trade_attribution": packet_value["no_trade_attribution"],
         },
         "overlays": {
             "positioning": packet_value["positioning_summaries"],
@@ -216,6 +218,7 @@ def build_final_review_output(
             "benchmark": packet_value["benchmark_performance"],
         },
         "event_scans": acquisition_value.get("event_scans", []),
+        "no_trade_attribution": packet_value["no_trade_attribution"],
         "report_packet": packet_value,
     }
     try:

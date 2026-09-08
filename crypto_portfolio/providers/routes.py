@@ -308,7 +308,7 @@ def build_provider_requests(
     *,
     as_of: str | datetime | None = None,
     now: str | datetime | None = None,
-    history_days: int = 430,
+    history_days: int = 240,
     ttl_seconds: dict[str, Any] | None = None,
 ) -> tuple[ProviderRequest, ...]:
     """Group metric requests by primary provider and fetchable dataset."""

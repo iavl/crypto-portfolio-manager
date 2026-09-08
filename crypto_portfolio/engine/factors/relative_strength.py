@@ -14,7 +14,7 @@ from ..metrics import simple_return
 from ..technical import completed_candles, expected_latest_completed_date
 
 
-_HORIZONS = (30, 90, 180, 365)
+_HORIZONS = (30, 90, 180)
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,6 @@ class RelativeStrengthFactorResult:
     volatility_adjusted_excess_return: float | None = None
     pair_trend: str = "UNKNOWN"
     risk_adjusted_excess_returns: Mapping[str, float | None] | None = None
-    relative_365d: float | None = None
 
     def __post_init__(self) -> None:
         score = float(self.score)
@@ -45,7 +44,7 @@ class RelativeStrengthFactorResult:
         confidence = str(self.confidence).strip().upper()
         if confidence not in {"HIGH", "MEDIUM", "LOW"}:
             raise ValueError("relative-strength confidence is unsupported")
-        for field in ("relative_30d", "relative_90d", "relative_180d", "relative_365d"):
+        for field in ("relative_30d", "relative_90d", "relative_180d"):
             value = getattr(self, field)
             if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(float(value))):
                 raise ValueError(f"{field} must be finite or null")
@@ -85,7 +84,6 @@ class RelativeStrengthFactorResult:
             "relative_30d": self.relative_30d,
             "relative_90d": self.relative_90d,
             "relative_180d": self.relative_180d,
-            "relative_365d": self.relative_365d,
             "state": self.state,
             "confidence": self.confidence,
             "facts": self.facts.as_dict(),
@@ -262,7 +260,6 @@ def calculate_relative_strength(
             relative_30d=None,
             relative_90d=None,
             relative_180d=None,
-            relative_365d=None,
             state="NOT_APPLICABLE",
             confidence="LOW",
             facts=facts,
@@ -301,7 +298,6 @@ def calculate_relative_strength(
 
     rules = _rules(resolved)
     weights = rules["horizon_weights"]
-    signal = None
     available = [days for days in horizons if adjusted[days] is not None and weights[f"{days}d"] > 0]
     neutral = float(rules["risk_adjusted_neutral_band"])
     saturation = float(rules["risk_adjusted_saturation"])
@@ -311,7 +307,6 @@ def calculate_relative_strength(
             days: _horizon_score(adjusted[days], neutral, saturation) for days in available
         }
         weighted_score = sum(scores[days] * float(weights[f"{days}d"]) for days in available) / total_weight
-        signal = sum(adjusted[days] * float(weights[f"{days}d"]) for days in available) / total_weight
         states = [
             "UNKNOWN" if adjusted[days] is None else
             "OUTPERFORM" if adjusted[days] > neutral else
@@ -320,19 +315,14 @@ def calculate_relative_strength(
         ]
     else:
         weighted_score = 50.0
-        signal = None
         states = ["UNKNOWN"] * len(horizons)
 
     non_unknown = [state for state in states if state != "UNKNOWN"]
     if not non_unknown:
         state = "UNKNOWN"
-    elif signal is not None:
-        state = "OUTPERFORM" if signal > float(rules["risk_adjusted_neutral_band"]) else (
-            "UNDERPERFORM" if signal < -float(rules["risk_adjusted_neutral_band"]) else "NEUTRAL"
-        )
-    elif non_unknown.count("OUTPERFORM") > non_unknown.count("UNDERPERFORM"):
+    elif weighted_score > 50.0:
         state = "OUTPERFORM"
-    elif non_unknown.count("UNDERPERFORM") > non_unknown.count("OUTPERFORM"):
+    elif weighted_score < 50.0:
         state = "UNDERPERFORM"
     else:
         state = "NEUTRAL"
@@ -394,7 +384,6 @@ def calculate_relative_strength(
         relative_30d=relative[30],
         relative_90d=relative[90],
         relative_180d=relative[180],
-        relative_365d=relative[365] if 365 in relative else None,
         state=state,
         confidence=confidence,
         facts=facts,

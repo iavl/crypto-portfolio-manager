@@ -55,8 +55,8 @@ class MetricHistoryTests(unittest.TestCase):
         ]
         summary = collection_summary(events)
         self.assertAlmostEqual(summary["per_request_coverage"], 0.55)
-        self.assertAlmostEqual(summary["policy_weighted_coverage"], 0.55)
-        self.assertEqual(summary["per_request_coverage"], summary["policy_weighted_coverage"])
+        self.assertAlmostEqual(summary["policy_weighted_coverage"], 0.70)
+        self.assertNotEqual(summary["per_request_coverage"], summary["policy_weighted_coverage"])
 
     def test_model_validation_and_stable_identity(self):
         first_id = stable_observation_id("eth", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100)

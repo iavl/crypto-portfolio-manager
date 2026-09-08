@@ -60,18 +60,19 @@ class EthMetricsTests(unittest.TestCase):
         eth = {item.metric_key for item in plan.for_asset("ETH")}
         aave = {item.metric_key for item in plan.for_asset("AAVE")}
         self.assertIn("eth.l2.rent_paid_30d_usd", eth)
-        self.assertIn("relative.return_vs_btc_365d", eth)
+        self.assertIn("relative.return_vs_btc_180d", eth)
+        self.assertNotIn("relative.return_vs_btc_365d", eth)
         self.assertIn("flows.eth_etf_net_to_aum_30d", eth)
         self.assertNotIn("valuation.fdv_market_cap_ratio", eth)
         self.assertNotIn("eth.l2.rent_paid_30d_usd", aave)
         self.assertNotIn("relative.return_vs_btc_365d", {item.metric_key for item in plan.for_asset("BTC")})
 
-    def test_relative_strength_includes_365d(self):
-        asset = [100.0 * 1.001**index for index in range(366)]
-        btc = [100.0] * 366
+    def test_relative_strength_uses_only_active_horizons(self):
+        asset = [100.0 * 1.001**index for index in range(181)]
+        btc = [100.0] * 181
         result = calculate_relative_strength(asset, btc, symbol="ETH")
-        self.assertIsNotNone(result.relative_365d)
-        self.assertIn("365d", result.risk_adjusted_excess_returns)
+        self.assertIsNone(getattr(result, "relative_365d", None))
+        self.assertEqual(set(result.risk_adjusted_excess_returns), {"30d", "90d", "180d"})
         self.assertEqual(result.coverage, 1.0)
 
     def test_coinmetrics_eth_catalog_and_derived_realized_price(self):

@@ -78,7 +78,7 @@ class ExecutionEngineTests(unittest.TestCase):
         capital = build_entry_plan("ETH", 2000, self.snapshot, "CAPITAL_PRESERVATION", "HIGH")
         self.assertEqual(capital.action, "WAIT")
         self.assertEqual(capital.planned_amount_usd, 0)
-        short_snapshot = build_technical_snapshot(series(119), test_spot(series(119), 160))
+        short_snapshot = build_technical_snapshot(series(199), test_spot(series(199), 199))
         short = build_entry_plan("ETH", 2000, short_snapshot, "NORMAL", "HIGH")
         self.assertEqual(short.action, "WAIT")
 

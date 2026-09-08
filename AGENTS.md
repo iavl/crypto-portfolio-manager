@@ -3,7 +3,7 @@
 This repository implements a conservative-balanced, medium-term crypto
 portfolio management system and Agent Skill. It analyzes allocation, market
 conditions, risk, rebalancing, staged entries/exits, history, and benchmarks
-over an approximately 6–12 month horizon. It is not a short-term trading bot.
+over an approximately 3–6 month active-allocation horizon. It is not a short-term trading bot.
 
 ## Non-negotiable investment policy
 
@@ -13,7 +13,7 @@ The default strategy is:
 - BTC is the primary benchmark; BTC and ETH are default core holdings;
 - selected large-cap assets may be satellites;
 - stablecoin/cash stays at or above the configured minimum;
-- the default portfolio drawdown risk budget is approximately 20%;
+- the default portfolio drawdown risk budget is approximately 15%;
 - risk is managed at portfolio level, not independently per asset;
 - capital preservation overrides outperformance during severe regimes;
 - `NO TRADE` is a valid recommendation and new capital need not be fully
@@ -207,8 +207,8 @@ target_amount  = target_weight * post_total
 ```
 
 Undeployed cash belongs to the stable sleeve. Use thresholds of normally HOLD
-below 3 percentage points, WATCH from 3–5, eligible above 5, and high priority
-above 10. Prefer new cash before forced selling when the thesis remains sound;
+below 2 percentage points, WATCH from 2–4, eligible above 4, and high priority
+above 8. Prefer new cash before forced selling when the thesis remains sound;
 do not preserve a failed thesis. Do not trade merely to make weights exact.
 
 Every executable `INCREASE`, `REDUCE`, or `EXIT` has a strictly positive
@@ -422,3 +422,17 @@ that is easiest to verify, reproduce, explain, test, and maintain. Prefer
 boring, explicit, well-factored code over cleverness. If two approaches are
 otherwise equivalent, choose the one with fewer hidden assumptions, clearer
 ownership, and lower long-term maintenance cost.
+
+
+## Git commits and attribution
+
+- Preserve the repository user's existing Git author and committer identity.
+- Do not modify `git config user.name` or `git config user.email`.
+- Do not use `--author` to change commit authorship to Codex.
+- Every commit created by Codex MUST include the following Git trailer:
+
+  `Co-authored-by: Codex <codex@openai.com>`
+
+- Add the trailer exactly once, separated from the commit body by a blank line.
+- If the commit already contains this Codex co-author trailer, do not add a duplicate.
+- When amending a commit created by Codex, preserve the trailer.

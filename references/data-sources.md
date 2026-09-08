@@ -60,15 +60,15 @@ Social posts, anonymous claims, and influencer commentary are leads, not suffici
 Need:
 
 - current spot price;
-- at least several months of daily history for medium-term trend;
-- preferably 1Y history for cycle/historical context;
+- at least 200 calendar days of daily history for the active trend horizon;
+- preferably 240 days for MA200, 180D momentum, and context;
 - volume and volatility when reliable.
 
 The execution layer consumes normalized `OHLCVSeries` data on the `1D`
 timeframe plus a typed `SpotPrice` with `observed_at` and `source`. Indicators
 use only completed candles; the spot observation is never inferred from the
-last candle for historical replay. The preferred minimum is 120 completed
-candles and the preferred coverage is 365 calendar days. Preserve source,
+last candle for historical replay. The preferred minimum is 200 completed
+candles and the preferred coverage is 240 calendar days. Preserve source,
 venue/market/quote metadata, fetched time, range, candle count, calendar
 coverage, and the canonical SHA-256 OHLCV hash for replay.
 

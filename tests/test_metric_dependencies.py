@@ -140,7 +140,7 @@ class MetricDependencyTests(unittest.TestCase):
         self.assertEqual(plan.for_asset("LUNC"), ())
         self.assertNotIn("LUNC", plan.discovery_required_assets)
 
-    def test_realistic_portfolio_expands_365d_dependencies(self):
+    def test_realistic_portfolio_expands_only_active_relative_dependencies(self):
         portfolio = {
             "timestamp": NOW,
             "total_value": 1000,
@@ -165,16 +165,18 @@ class MetricDependencyTests(unittest.TestCase):
         expanded = _expand_derived_dependencies(plan)
         identities = {(request.asset, request.metric_key) for request in expanded.requests}
         for asset in ("ETH", "AAVE"):
-            self.assertIn((asset, "relative.return_vs_btc_365d"), identities)
-            self.assertIn((asset, "market.return_365d"), identities)
-        self.assertIn(("BTC", "market.return_365d"), identities)
+            for horizon in ("30d", "90d", "180d"):
+                self.assertIn((asset, f"relative.return_vs_btc_{horizon}"), identities)
+                self.assertIn((asset, f"market.return_{horizon}"), identities)
+        self.assertIn(("BTC", "market.return_180d"), identities)
+        self.assertNotIn("market.return_365d", {item.metric_key for item in expanded.requests})
 
         provider_plan = MetricCollectionPlan(
             expanded.review_type,
             tuple(
                 request
                 for request in expanded.requests
-                if request.metric_key in {"market.return_365d", "relative.return_vs_btc_365d"}
+                if request.metric_key in {"market.return_30d", "market.return_90d", "market.return_180d"}
             ),
             assets=expanded.assets,
         )
@@ -191,11 +193,11 @@ class MetricDependencyTests(unittest.TestCase):
         self.assertGreater(provider.calls, 0)
         self.assertTrue(all(item.status == "SUCCESS" for item in result.results))
 
-    def test_365d_dependency_reaches_provider_without_registry_error(self):
+    def test_active_relative_dependency_reaches_provider_without_registry_error(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
-            MetricRequest("BTC", "market.return_365d"),
-            MetricRequest("ETH", "market.return_365d"),
-            MetricRequest("ETH", "relative.return_vs_btc_365d"),
+            MetricRequest("BTC", "market.return_180d"),
+            MetricRequest("ETH", "market.return_180d"),
+            MetricRequest("ETH", "relative.return_vs_btc_180d"),
         ))
         provider = _MarketHistoryProvider()
         with TemporaryDirectory() as directory:
@@ -209,28 +211,27 @@ class MetricDependencyTests(unittest.TestCase):
             ).run(plan, mode="REFRESH", as_of=NOW, now=NOW, cached_observations=())
         self.assertGreater(provider.calls, 0)
         self.assertEqual(result.results[-1].status, "SUCCESS")
-        self.assertEqual(result.observations[-1].metric_key, "relative.return_vs_btc_365d")
+        self.assertEqual(result.observations[-1].metric_key, "relative.return_vs_btc_180d")
         self.assertEqual(result.observations[-1].value, 0.0)
 
-    def test_365d_provider_history_uses_existing_buffered_window(self):
+    def test_active_provider_history_uses_recalibrated_window(self):
         requests = build_provider_requests(
-            (MetricRequest("ETH", "market.return_365d"),),
+            (MetricRequest("ETH", "market.return_180d"),),
             as_of=NOW,
             now=NOW,
-            history_days=430,
         )
         self.assertEqual(len(requests), 1)
         request = requests[0]
         self.assertEqual(request.dataset, "ohlcv")
         start = datetime.fromisoformat(request.parameters["start"].replace("Z", "+00:00"))
         end = datetime.fromisoformat(request.parameters["end"].replace("Z", "+00:00"))
-        self.assertEqual((end - start).days, 430)
+        self.assertEqual((end - start).days, 240)
 
-    def test_insufficient_365d_history_is_structured_unavailability(self):
+    def test_insufficient_active_history_is_structured_unavailability(self):
         provider = _EmptyMarketHistoryProvider()
         plan = MetricCollectionPlan(
             "SNAPSHOT_REVIEW",
-            (MetricRequest("ETH", "market.return_365d"),),
+            (MetricRequest("ETH", "market.return_180d"),),
         )
         with TemporaryDirectory() as directory:
             result = AcquisitionManager(
@@ -245,9 +246,16 @@ class MetricDependencyTests(unittest.TestCase):
         self.assertEqual(result.results[0].status, "FAILED")
         self.assertNotIn("unknown metric key", result.results[0].event.reason.lower())
 
-    def test_binance_and_bybit_advertise_365d_history_metric(self):
-        self.assertIn("market.return_365d", BinanceProvider().capabilities.metric_keys)
-        self.assertIn("market.return_365d", BybitProvider().capabilities.metric_keys)
+    def test_binance_and_bybit_advertise_only_active_return_metrics(self):
+        for provider in (BinanceProvider(), BybitProvider()):
+            self.assertTrue({"market.return_30d", "market.return_90d", "market.return_180d"}.issubset(provider.capabilities.metric_keys))
+            self.assertNotIn("market.return_365d", provider.capabilities.metric_keys)
+
+    def test_removed_365d_metric_is_not_a_current_contract(self):
+        with self.assertRaises(ValueError):
+            metric_definition("market.return_365d")
+        with self.assertRaises(ValueError):
+            metric_definition("relative.return_vs_btc_365d")
 
 
 if __name__ == "__main__":

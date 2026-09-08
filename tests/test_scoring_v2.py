@@ -72,7 +72,7 @@ class ScoringTests(unittest.TestCase):
             replace(series("ETH", 24), fetched_at="2025-08-01T00:00:00Z"),
             replace(series("BTC", 24), fetched_at="2025-08-01T00:00:00Z"), symbol="ETH", policy=policy)
         self.assertEqual(stale.facts.freshness, "STALE")
-        self.assertAlmostEqual(score_factors({"relative_strength_btc": stale}, {"relative_strength_btc": 1.0}, policy=policy).coverage, 0.35)
+        self.assertAlmostEqual(score_factors({"relative_strength_btc": stale}, {"relative_strength_btc": 1.0}, policy=policy).coverage, 0.5)
 
     def test_normalized_flow_representation_and_denominator_order(self):
         result = calculate_flow_factor({"aum_30d": 1000, "flow_30d": 5})

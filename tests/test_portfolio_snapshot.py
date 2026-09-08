@@ -54,8 +54,8 @@ class PortfolioSnapshotTests(unittest.TestCase):
             types,
             {"BTC": "core", "AAVE": "satellite", "ARB": "other", "USDC": "stablecoin"},
         )
-        self.assertEqual(result["config"]["risk"]["min_stablecoin_weight"], 0.10)
-        self.assertEqual(result["config"]["risk"]["max_portfolio_drawdown"], 0.20)
+        self.assertEqual(result["config"]["risk"]["min_stablecoin_weight"], 0.15)
+        self.assertEqual(result["config"]["risk"]["max_portfolio_drawdown"], 0.15)
 
     def test_u_and_usd1_are_stablecoins_in_the_stable_sleeve(self):
         result = normalize(
