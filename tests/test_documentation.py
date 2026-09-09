@@ -94,7 +94,7 @@ class DocumentationTests(unittest.TestCase):
         provider_policy = (ROOT / "references/data-providers.md").read_text(encoding="utf-8")
         for provider in (
             "Binance", "Bybit", "CoinGecko", "DeFiLlama", "Alternative.me",
-            "Chain liveness", "Coin Metrics", "BGeometrics", "LunarCrush",
+            "Chain liveness", "Coin Metrics", "Blockchair", "BGeometrics", "LunarCrush",
             "Rated", "Ethereum Beacon API", "Ethereum protocol", "GitHub", "SoSoValue", "EventScanner",
         ):
             with self.subTest(provider=provider):
@@ -108,6 +108,7 @@ class DocumentationTests(unittest.TestCase):
             "ETHEREUM_RPC_URL", "eth_getBlockByNumber(\"latest\", false)",
             "RATED_API_KEY", "ETH_BEACON_API_URL", "export/tvl.json",
             "latest common completed UTC day", "only active structured route",
+            "volume_24h_approximate", "market_price_usd", "ethereum/stats",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)

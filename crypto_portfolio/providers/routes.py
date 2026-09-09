@@ -157,7 +157,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         if symbol == "ETH" and key == "onchain.blockspace_fees":
             return ("growthepie", "coinmetrics_community")
         if symbol == "ETH" and key == "onchain.transfer_volume":
-            return ("coinmetrics_community",)
+            return ("blockchair",)
         return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH", "BNB"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)

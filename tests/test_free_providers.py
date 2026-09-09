@@ -271,7 +271,7 @@ class FreeProviderTests(unittest.TestCase):
         self.assertEqual(provider_chain("onchain.blockspace_fees", "ETH")[0], "growthepie")
         self.assertEqual(provider_chain("eth.l2.activity_30d", "ETH")[0], "growthepie")
         self.assertEqual(provider_chain("eth.l2.tvs_usd", "ETH"), ("growthepie",))
-        self.assertEqual(provider_chain("onchain.transfer_volume", "ETH"), ("coinmetrics_community",))
+        self.assertEqual(provider_chain("onchain.transfer_volume", "ETH"), ("blockchair",))
 
     def test_rated_uses_effective_balance_and_declares_reward_components(self):
         rows = []

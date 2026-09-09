@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
 from .bgeometrics import BASE_URL as BGEOMETRICS_BASE_URL, MVRV_ZSCORE_PATH, BGeometricsProvider
+from .blockchair import BASE_URL as BLOCKCHAIR_BASE_URL, ETHEREUM_STATS_PATH, BlockchairProvider
 from .ethereum_beacon import EthereumBeaconProvider, NODE_VERSION_PATH
 from .rated import DAILY_REWARDS_PATH, RatedProvider
 from .base import ProviderRequest, ProviderResponseError
@@ -343,6 +344,35 @@ def probe_provider(
         return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
     if name == "lunarcrush" and isinstance(provider, LunarCrushProvider):
         return (_with_config(_lunarcrush_probe(provider, asset or "BTC"), client),)
+    if name == "blockchair" and isinstance(provider, BlockchairProvider):
+        target = (asset or "ETH").strip().upper()
+        if target != "ETH":
+            raise ValueError("Blockchair probe asset must be ETH")
+        endpoint = BLOCKCHAIR_BASE_URL + ETHEREUM_STATS_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "blockchair", "onchain", "ETH", {"as_of": _now()},
+                ("onchain.transfer_volume",),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call("blockchair", endpoint, call, validate=_require_observations)
+        if "error_code" not in result:
+            observations = tuple(getattr(captured["value"], "observations", ()))
+            observation = observations[0] if observations else {}
+            result.update({
+                "asset": "ETH",
+                "metric": "onchain.transfer_volume",
+                "source": observation.get("source"),
+                "unit": observation.get("unit"),
+                "period": observation.get("period"),
+                "observed_at": observation.get("observed_at"),
+                "endpoint_name": "ethereum/stats",
+            })
+        return (_with_config(result, client),)
     if name == "bgeometrics" and isinstance(provider, BGeometricsProvider):
         target = (asset or "BTC").strip().upper()
         if target != "BTC":

@@ -193,6 +193,7 @@ class ProviderRouter:
         from .github_activity import GitHubActivityProvider
         from .sosovalue import SoSoValueProvider
         from .blobscan import BlobscanProvider
+        from .blockchair import BlockchairProvider
         from .growthepie import GrowthepieProvider
         from .rated import RatedProvider
         from .ethereum_beacon import DEFAULT_BASE_URL, EthereumBeaconProvider
@@ -209,6 +210,7 @@ class ProviderRouter:
             "alternative_me": AlternativeMeProvider(client=client),
             "defillama": DeFiLlamaProvider(client=client),
             "coinmetrics_community": CoinMetricsProvider(client=client),
+            "blockchair": BlockchairProvider(client=client),
             "bgeometrics": BGeometricsProvider(client=client),
             "chain_liveness": ChainLivenessProvider(client=client),
             "blobscan": BlobscanProvider(client=client),

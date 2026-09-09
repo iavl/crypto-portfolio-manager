@@ -30,8 +30,9 @@ Current portfolio recommendations require current data. Prefer authoritative pri
 
 For acquisition, use structured public exchange APIs for market and
 derivatives data, CoinGecko for broad market valuation, DeFiLlama for protocol
-fundamentals, Coin Metrics Community first for BTC realized-cap/holder-cost-basis
-valuation and catalog-checked on-chain context, FRED for official U.S.
+fundamentals, Blockchair for ETH's rolling native transfer volume, Coin Metrics
+Community first for BTC realized-cap/holder-cost-basis valuation and
+catalog-checked on-chain context, FRED for official U.S.
 macro/liquidity data, and current official/Web
 scans for security, governance, and regulatory events. Optional API-key
 providers may fill advanced ETF, liquidation, social, or exchange-attribution
@@ -196,10 +197,24 @@ source is available.
 
 ### Ethereum metric methodologies
 
-`onchain.transfer_volume` uses the catalog-checked Coin Metrics Community
-`TxTfrValAdjUSD` daily primitive. Provider failure or missing 1D catalog support
-leaves the USD observation unavailable; it is never reconstructed from an
-unbounded transaction/trace scan or filled with zero.
+`ETH onchain.transfer_volume` uses Blockchair's current `/ethereum/stats`
+response. It treats `volume_24h_approximate` as wei and converts it to USD with
+the same response's `market_price_usd`:
+
+```text
+volume_24h_approximate / 1e18 * market_price_usd
+```
+
+This is a rolling 24-hour approximate native ETH monetary transaction volume,
+not adjusted transfer value. One structured request supplies both inputs;
+provider failure or malformed fields leaves the observation unavailable rather
+than filling it with zero. The endpoint is current-only and cannot provide an
+arbitrary historical `as_of`; cached observations may be reused only when the
+existing router considers them eligible. ERC-20 transfer volume is not assumed
+to be included, and remains separate from Ethereum L2 statistics.
+
+BTC/BNB transfer volume remains the catalog-checked Coin Metrics
+`TxTfrValAdjUSD` route where supported; that methodology is not used for ETH.
 
 `eth.staking.active_effective_stake_pct` is
 `active_effective_stake_eth / current_supply_eth`, with time-aligned inputs.

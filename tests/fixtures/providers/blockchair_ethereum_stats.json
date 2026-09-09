@@ -1,0 +1,24 @@
+{
+  "data": {
+    "blocks": 25000001,
+    "transactions": 3000000000,
+    "blocks_24h": 7200,
+    "transactions_24h": 1400000,
+    "volume_24h_approximate": "2500000000000000000000000",
+    "best_block_height": 25000000,
+    "best_block_hash": "0xabc123",
+    "best_block_time": "2026-09-09 10:00:00",
+    "market_price_usd": 4000.0
+  },
+  "context": {
+    "code": 200,
+    "state": 25000000,
+    "request_cost": 1,
+    "cache": {
+      "live": true
+    },
+    "api": {
+      "version": "2.x"
+    }
+  }
+}

@@ -28,6 +28,7 @@ from crypto_portfolio.providers.base import (
 )
 from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.providers.binance import BinanceProvider
+from crypto_portfolio.providers.blockchair import BlockchairProvider
 from crypto_portfolio.providers.bybit import BybitProvider
 from crypto_portfolio.providers.cache import CacheExpired, ProviderCache, request_hash
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider, catalog_metrics, parse_timeseries
@@ -50,7 +51,7 @@ from crypto_portfolio.providers.growthepie import (
 from crypto_portfolio.providers.http import HttpClient, build_ssl_context, classify_transport_error, redact_secrets
 from crypto_portfolio.providers.probe import probe_provider
 from crypto_portfolio.providers.router import ProviderRouter
-from crypto_portfolio.providers.routes import provider_chain
+from crypto_portfolio.providers.routes import dataset_for_metric, provider_chain
 
 
 def config_for(*providers):
@@ -63,6 +64,10 @@ def config_for(*providers):
 
 
 def growthepie_fixture(name):
+    return json.loads((Path(__file__).parent / "fixtures/providers" / name).read_text())
+
+
+def provider_fixture(name):
     return json.loads((Path(__file__).parent / "fixtures/providers" / name).read_text())
 
 
@@ -129,6 +134,180 @@ class StructuredProvider:
 
 
 class DataAcquisitionTests(unittest.TestCase):
+    def test_eth_transfer_volume_routes_only_to_blockchair(self):
+        self.assertEqual(provider_chain("onchain.transfer_volume", "ETH"), ("blockchair",))
+        self.assertEqual(provider_chain("onchain.transfer_volume", "BTC"), ("coinmetrics_community",))
+        self.assertEqual(provider_chain("onchain.transfer_volume", "BNB"), ("coinmetrics_community",))
+        self.assertEqual(dataset_for_metric("onchain.transfer_volume"), "onchain")
+
+    def test_eth_transfer_volume_does_not_fallback_to_coinmetrics(self):
+        class BlockchairClient:
+            def __init__(self, response=None, error=None):
+                self.response = response
+                self.error = error
+                self.calls = 0
+
+            def get_json(self, _url, **_kwargs):
+                self.calls += 1
+                if self.error:
+                    raise self.error
+                return self.response
+
+        class CoinMetrics:
+            def __init__(self):
+                self.calls = 0
+
+            def collect(self, _request):
+                self.calls += 1
+                raise AssertionError("Coin Metrics must not be an ETH transfer-volume fallback")
+
+        blockchair = BlockchairClient(provider_fixture("blockchair_ethereum_stats.json"))
+        config = config_for("blockchair", "coinmetrics_community")
+        config["cache_ttl_seconds"]["onchain"] = 86400
+        with TemporaryDirectory() as directory:
+            router = ProviderRouter(
+                {
+                    "blockchair": BlockchairProvider(
+                        client=blockchair,
+                        clock=lambda: datetime(2026, 9, 9, 12, tzinfo=timezone.utc),
+                    ),
+                    "coinmetrics_community": CoinMetrics(),
+                },
+                config=config,
+                cache=ProviderCache(Path(directory) / "cache"),
+            )
+            request = router.build_requests(
+                (MetricRequest("ETH", "onchain.transfer_volume"),),
+                as_of="2026-09-09T12:00:00Z",
+                now="2026-09-09T12:00:00Z",
+            )[0]
+            result = router.collect(
+                (request,),
+                mode=FetchMode.REFRESH,
+                as_of="2026-09-09T12:00:00Z",
+                now="2026-09-09T12:00:00Z",
+            )
+        self.assertEqual(blockchair.calls, 1)
+        self.assertEqual(result.unresolved, ())
+        self.assertEqual(result.api_requests, 1)
+        self.assertEqual(result.observations[0]["source"], "blockchair")
+        self.assertEqual([item.provider for item in result.attempts], ["blockchair"])
+
+    def test_eth_transfer_volume_failure_keeps_blockchair_diagnostic_without_fallback(self):
+        class FailingClient:
+            def __init__(self):
+                self.calls = 0
+
+            def get_json(self, _url, **_kwargs):
+                self.calls += 1
+                raise ProviderUnavailable(
+                    "Blockchair unavailable",
+                    diagnostic=ProviderDiagnostic(
+                        endpoint="https://api.blockchair.com/ethereum/stats",
+                        error_code="DNS_RESOLUTION_FAILED",
+                        detail="DNS resolution failed",
+                    ),
+                )
+
+        class CoinMetrics:
+            calls = 0
+
+            def collect(self, _request):
+                self.calls += 1
+                raise AssertionError("Coin Metrics must not be attempted")
+
+        blockchair = FailingClient()
+        coinmetrics = CoinMetrics()
+        config = config_for("blockchair", "coinmetrics_community")
+        with TemporaryDirectory() as directory:
+            router = ProviderRouter(
+                {
+                    "blockchair": BlockchairProvider(client=blockchair),
+                    "coinmetrics_community": coinmetrics,
+                },
+                config=config,
+                cache=ProviderCache(Path(directory) / "cache"),
+            )
+            result = router.collect((ProviderRequest(
+                "blockchair", "onchain", "ETH", {}, ("onchain.transfer_volume",),
+            ),), mode=FetchMode.REFRESH)
+        self.assertEqual(result.observations, ())
+        self.assertEqual(result.unresolved, (("ETH", "onchain.transfer_volume"),))
+        self.assertEqual(result.unresolved_details[0]["error_code"], "DNS_RESOLUTION_FAILED")
+        self.assertEqual(result.unresolved_details[0]["providers_attempted"], ["blockchair"])
+        self.assertEqual(blockchair.calls, 1)
+        self.assertEqual(coinmetrics.calls, 0)
+
+    def test_eth_transfer_volume_cache_ttl_and_cache_only_mode(self):
+        class Client:
+            def __init__(self):
+                self.calls = 0
+
+            def get_json(self, _url, **_kwargs):
+                self.calls += 1
+                return provider_fixture("blockchair_ethereum_stats.json")
+
+        client = Client()
+        config = config_for("blockchair")
+        config["cache_ttl_seconds"]["onchain"] = 86400
+        with TemporaryDirectory() as directory:
+            router = ProviderRouter(
+                {"blockchair": BlockchairProvider(
+                    client=client,
+                    clock=lambda: datetime(2026, 9, 9, 12, tzinfo=timezone.utc),
+                )},
+                config=config,
+                cache=ProviderCache(Path(directory) / "cache"),
+            )
+            request = router.build_requests(
+                (MetricRequest("ETH", "onchain.transfer_volume"),),
+                as_of="2026-09-09T12:00:00Z",
+                now="2026-09-09T12:00:00Z",
+            )[0]
+            first = router.collect((request,), mode="REFRESH", as_of="2026-09-09T12:00:00Z", now="2026-09-09T12:00:00Z")
+            cached = router.collect((request,), mode="AUTO", as_of="2026-09-09T12:00:00Z", now="2026-09-09T12:00:00Z")
+            refreshed = router.collect((request,), mode="AUTO", as_of="2026-09-09T12:00:00Z", now="2026-09-10T12:00:01Z")
+            cache_only = router.collect((request,), mode="CACHE_ONLY", as_of="2026-09-09T12:00:00Z", now="2026-09-11T12:00:02Z")
+        self.assertEqual(first.api_requests, 1)
+        self.assertEqual(cached.api_requests, 0)
+        self.assertEqual(cached.provider_cache_hits, 1)
+        self.assertEqual(refreshed.api_requests, 1)
+        self.assertEqual(cache_only.api_requests, 0)
+        self.assertEqual(cache_only.attempts[0].error_code, "CACHE_MISS")
+        self.assertEqual(client.calls, 2)
+
+    def test_blockchair_probe_and_runtime_status(self):
+        client = type(
+            "ProbeClient",
+            (),
+            {"get_json": lambda self, _url, **_kwargs: provider_fixture("blockchair_ethereum_stats.json")},
+        )()
+        config = config_for("blockchair")
+        router = ProviderRouter(
+            {"blockchair": BlockchairProvider(
+                client=client,
+                clock=lambda: datetime(2026, 9, 9, 12, tzinfo=timezone.utc),
+            )},
+            config=config,
+        )
+        status = {item.provider: item for item in router.provider_runtime_status()}["blockchair"]
+        self.assertTrue(status.configured)
+        self.assertTrue(status.config_enabled)
+        self.assertTrue(status.adapter_available)
+        self.assertFalse(status.credential_required)
+        self.assertFalse(status.credential_present)
+        self.assertTrue(status.runtime_ready)
+        with patch("crypto_portfolio.providers.probe._now", return_value="2026-09-09T12:00:00Z"):
+            result = probe_provider(router, "blockchair")[0]
+        self.assertEqual(result["config"], "READY")
+        self.assertEqual(result["network"], "OK")
+        self.assertEqual(result["schema"], "OK")
+        self.assertEqual(result["normalization"], "OK")
+        self.assertEqual(result["http_status"], 200)
+        self.assertEqual(result["asset"], "ETH")
+        self.assertEqual(result["metric"], "onchain.transfer_volume")
+        self.assertEqual(result["observed_at"], "2026-09-09T10:00:00Z")
+
     def test_macos_missing_default_ca_uses_system_bundle_without_weakening_tls(self):
         paths = ssl.get_default_verify_paths()._replace(cafile=None, capath=None)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

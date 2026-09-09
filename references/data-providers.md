@@ -22,6 +22,7 @@ those contracts; it is not a second schema or routing implementation.
 | Alternative.me | market sentiment context | None | Fear & Greed | market-context route; registered |
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
+| Blockchair | ETH rolling 24h native transfer volume | None | `/ethereum/stats`: `volume_24h_approximate` × `market_price_usd` → USD | ETH `onchain.transfer_volume`; current snapshot only |
 | FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
 | GitHub | bounded developer activity | optional `GITHUB_TOKEN` | fixed ETH/AAVE repository commit counts | optional and allowlisted |
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
@@ -52,8 +53,9 @@ can be redirected with `CRYPTO_PORTFOLIO_DATA_DIR`.
 Provider priority is deterministic: Binance then Bybit for spot/OHLCV and
 derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
 Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
-DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Coin Metrics for
-supported exchange attribution and network data; and
+DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Blockchair for
+ETH rolling transfer volume; Coin Metrics for supported exchange attribution
+and BTC/BNB network data; and
 the fixed EventScanner catalog for events. BGeometrics is the no-key BTC MVRV Z
 route; ETH monetary/realized valuation routes
 use catalog-aware Coin Metrics with Ultrasound and optional Etherscan fallbacks;
@@ -223,6 +225,28 @@ only when aligned `CapMrktCurUSD` and `CapRealUSD` history is present; otherwise
 it is optional and is never replaced by Web snippets. `SOPR` and `NUPL` are
 context-only holder/cycle inputs, not BTC base-score factors. Community is the
 only active Coin Metrics provider.
+
+## Blockchair
+
+Blockchair uses one structured request without authentication:
+
+```text
+GET https://api.blockchair.com/ethereum/stats
+```
+
+The adapter normalizes the response as:
+
+```text
+volume_24h_approximate / 1e18 * market_price_usd = USD transfer volume
+```
+
+Both inputs come from the same response. The output is
+`ETH onchain.transfer_volume` with `period = 1d`, `source = blockchair`, and
+medium confidence. `best_block_time` supplies the observation timestamp when
+valid; a missing timestamp uses the current fetch timestamp rather than
+inventing a historical timestamp. The endpoint is a current rolling snapshot,
+so it is not used to fabricate historical `as_of` values. BTC/BNB transfer
+volume remains on the catalog-checked Coin Metrics route where supported.
 
 ## FRED
 
