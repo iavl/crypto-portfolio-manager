@@ -58,6 +58,7 @@ class DocumentationTests(unittest.TestCase):
             "schemas/event-scan-result.schema.json",
             "schemas/event-source-scan-request.schema.json",
             "schemas/event-source-scan-response.schema.json",
+            "schemas/event-classification-exchange.schema.json",
             "schemas/provider-runtime-status.schema.json",
             "references/model-routing.md",
             "schemas/metric-collection-plan.schema.json",
@@ -67,6 +68,7 @@ class DocumentationTests(unittest.TestCase):
             "schemas/factor-judgment.schema.json",
             "scripts",
             "scripts/run_with_debug.py",
+            "scripts/events.py",
         )
         for relative_path in required_paths:
             with self.subTest(relative_path=relative_path):
@@ -107,6 +109,22 @@ class DocumentationTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)
+
+    def test_event_debugging_documents_fail_closed_exchange(self):
+        guide = (ROOT / "docs" / "DEVELOPMENT_DEBUGGING.md").read_text(encoding="utf-8")
+        usage = (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8")
+        for text in (
+            "scripts/events.py --plan",
+            "scripts/events.py --fetch",
+            "scripts/events.py --resolve",
+            "CLASSIFICATION_PENDING",
+            "INSUFFICIENT_SOURCE_COVERAGE",
+            "pending_responses",
+            "EVENT_CLASSIFIER_API_KEY",
+            "不会默认",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(text in guide or text in usage)
 
     def test_no_obsolete_data_source_layer_references(self):
         obsolete = "data-source-" + "inventory.md"

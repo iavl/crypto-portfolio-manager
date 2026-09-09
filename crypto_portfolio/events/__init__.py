@@ -10,6 +10,24 @@ from .transports import (
     StructuredEventTransport,
     structured_event_source_fetcher,
 )
+from .classifier import (
+    ApiEventMaterialityClassifier,
+    EVENT_CLASSIFIER_ERROR_CODES,
+    EventClassificationError,
+    EventMaterialityClassifier,
+    UnavailableEventMaterialityClassifier,
+    classifier_from_environment,
+    validate_classified_response,
+)
+from .resolver import (
+    EXCHANGE_SCHEMA_VERSION,
+    EVENT_RESOLUTION_ERROR_CODES,
+    EventResolutionDiagnostic,
+    EventResolver,
+    build_exchange_document,
+    parse_exchange_document,
+    validate_exchange_responses,
+)
 
 __all__ = [
     "EVENT_CATEGORIES",
@@ -27,4 +45,18 @@ __all__ = [
     "EventTransportSpec",
     "StructuredEventTransport",
     "structured_event_source_fetcher",
+    "ApiEventMaterialityClassifier",
+    "EVENT_CLASSIFIER_ERROR_CODES",
+    "EventClassificationError",
+    "EventMaterialityClassifier",
+    "UnavailableEventMaterialityClassifier",
+    "classifier_from_environment",
+    "validate_classified_response",
+    "EXCHANGE_SCHEMA_VERSION",
+    "EVENT_RESOLUTION_ERROR_CODES",
+    "EventResolutionDiagnostic",
+    "EventResolver",
+    "build_exchange_document",
+    "parse_exchange_document",
+    "validate_exchange_responses",
 ]

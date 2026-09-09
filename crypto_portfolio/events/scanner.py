@@ -146,6 +146,42 @@ class EventSourceScanRequest:
             "instructions": self.instructions,
         }
 
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "EventSourceScanRequest":
+        if not isinstance(value, Mapping):
+            raise ValueError("event scan request must be an object")
+        allowed = {
+            "asset", "category", "source_id", "source_name", "source_url", "source_urls",
+            "authority", "source_group", "transport_kind", "lookback_start", "as_of",
+            "tier", "required_for_full_coverage", "instructions",
+        }
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError("event scan request contains unknown fields: " + ", ".join(sorted(unknown)))
+        required = {
+            "asset", "category", "source_id", "source_name", "source_url", "source_urls",
+            "authority", "source_group", "lookback_start", "as_of", "tier", "required_for_full_coverage", "instructions",
+        }
+        missing = required - set(value)
+        if missing:
+            raise ValueError("event scan request is missing fields: " + ", ".join(sorted(missing)))
+        return cls(
+            asset=value["asset"],
+            category=value["category"],
+            source_id=value["source_id"],
+            source_name=value["source_name"],
+            source_url=value["source_url"],
+            source_urls=tuple(value["source_urls"]),
+            authority=value["authority"],
+            source_group=value.get("source_group"),
+            transport_kind=value.get("transport_kind"),
+            lookback_start=value["lookback_start"],
+            as_of=value["as_of"],
+            tier=value["tier"],
+            required_for_full_coverage=value["required_for_full_coverage"],
+            instructions=value["instructions"],
+        )
+
 
 def _normalize_item(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
@@ -297,10 +333,23 @@ class EventScanner:
         *,
         sources: Iterable[EventSource] = EVENT_SOURCE_CATALOG,
         transport: Any | None = None,
+        classifier: Any | None = None,
+        resolver: Any | None = None,
     ) -> None:
         self.policy = policy or resolve_policy()
         self.sources = tuple(sources)
         self.transport = transport
+        if resolver is not None and not callable(getattr(resolver, "resolve", None)):
+            raise ValueError("event scanner resolver must provide resolve(request)")
+        if resolver is None and transport is not None:
+            from .resolver import EventResolver
+
+            resolver = transport if callable(getattr(transport, "resolve", None)) else EventResolver(
+                transport=transport,
+                classifier=classifier,
+            )
+        self.resolver = resolver
+        self.last_resolution_diagnostics: tuple[Any, ...] = ()
         if not self.sources:
             raise ValueError("event scanner requires a non-empty source catalog")
         if len({source.id for source in self.sources}) != len(self.sources):
@@ -551,14 +600,23 @@ class EventScanner:
     ) -> EventScanResult:
         mode = FetchMode.parse(fetch_mode)
         requests = self.build_requests(asset, category, as_of, lookback_days=lookback_days, review_type=review_type)
+        self.last_resolution_diagnostics = ()
+        if self.resolver is not None:
+            reset = getattr(self.resolver, "reset_diagnostics", None)
+            if callable(reset):
+                reset()
         if responses is None:
             if mode == FetchMode.CACHE_ONLY:
                 raise ValueError("CACHE_ONLY has no cached event scan result")
+            if source_fetcher is None and self.resolver is not None:
+                source_fetcher = self.resolver.resolve
             if source_fetcher is None and self.transport is not None:
                 source_fetcher = self.transport.fetch
             if source_fetcher is None:
                 raise ValueError("event scan responses or a source_fetcher are required")
             responses = tuple(source_fetcher(request) for request in requests)
+            if self.resolver is not None:
+                self.last_resolution_diagnostics = tuple(getattr(self.resolver, "diagnostics", ()))
         return self.build_result(asset, category, as_of, responses, lookback_days=lookback_days, review_type=review_type)
 
     def scan_shared_regulatory(

@@ -8,6 +8,20 @@ with source and timestamps. Python validates units, timestamps, freshness,
 conflicts, and history. Downstream semantic stages consume the normalized
 records/Facts rather than repeatedly reading raw webpages.
 
+Event metrics are a separate event-source path, not ordinary provider metrics:
+
+```text
+provider metric  -> structured provider router -> normalized observation
+event-source metric -> fixed source catalog -> transport candidate
+                     -> bounded classifier -> EventScanner observation
+derived metric   -> Python dependency calculation
+web fallback     -> only the explicitly allowed qualitative fallback path
+```
+
+Event transport failure, classification pending, and insufficient source coverage
+remain distinct from provider failure. A missing classifier never becomes a clean
+event result.
+
 ## Principle
 
 Current portfolio recommendations require current data. Prefer authoritative primary sources and triangulate material claims.

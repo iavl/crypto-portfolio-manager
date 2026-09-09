@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/event-classification-exchange.schema.json",
+  "title": "Host-assisted event classification exchange",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "requests", "pending_requests", "responses", "pending_responses"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "requests": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/request"},
+      "minItems": 1
+    },
+    "pending_requests": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/request"},
+      "minItems": 1
+    },
+    "responses": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/response"},
+      "minItems": 1
+    },
+    "pending_responses": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/response"},
+      "minItems": 1
+    },
+    "classification_mode": {"type": "string", "minLength": 1},
+    "classifier_backend": {"type": ["string", "null"]},
+    "classifier_model": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["asset", "category", "source_id", "source_name", "source_url", "source_urls", "authority", "source_group", "lookback_start", "as_of", "tier", "required_for_full_coverage", "instructions"],
+      "properties": {
+        "asset": {"type": "string", "minLength": 1},
+        "category": {"enum": ["security", "governance", "regulatory"]},
+        "source_id": {"type": "string", "minLength": 1},
+        "source_name": {"type": "string", "minLength": 1},
+        "source_url": {"type": "string", "format": "uri"},
+        "source_urls": {"type": "array", "items": {"type": "string", "format": "uri"}, "minItems": 1},
+        "authority": {"type": "string", "minLength": 1},
+        "source_group": {"type": "string", "minLength": 1},
+        "transport_kind": {"type": ["string", "null"], "enum": ["GITHUB_RELEASES", "GITHUB_SECURITY_ADVISORIES", "GITHUB_COMMITS", "RSS_ATOM", "DISCOURSE_JSON", "RPC_LOGS", "WEB", null]},
+        "lookback_start": {"type": "string", "format": "date-time"},
+        "as_of": {"type": "string", "format": "date-time"},
+        "tier": {"enum": [1, 2, 3]},
+        "required_for_full_coverage": {"type": "boolean"},
+        "instructions": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["source_id", "reachable", "checked_at", "items", "error", "conflict", "complete_for_source"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "reachable": {"type": "boolean"},
+        "checked_at": {"type": "string", "format": "date-time"},
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "external_id": {"type": "string", "minLength": 1},
+              "title": {"type": "string", "minLength": 1},
+              "published_at": {"type": "string", "format": "date-time"},
+              "canonical_url": {"type": "string", "format": "uri"},
+              "summary": {"type": "string", "minLength": 1},
+              "materiality": {"oneOf": [{"type": "boolean"}, {"type": "string"}]},
+              "affected_assets": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "severity": {"enum": ["CLEAR", "WATCH", "ELEVATED", "CRITICAL"]},
+              "relevance": {"enum": ["RELEVANT", "IRRELEVANT", "UNKNOWN"]},
+              "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+              "source_group": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "error": {"type": ["string", "null"]},
+        "conflict": {"type": "boolean"},
+        "complete_for_source": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

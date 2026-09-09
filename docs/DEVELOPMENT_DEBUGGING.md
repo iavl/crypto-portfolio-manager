@@ -47,6 +47,38 @@ metric request
 `HttpClient` 负责已验证的 TLS、有限重试、响应大小限制、安全脱敏和传输分类。
 Router 负责请求预算、缓存行为、fallback 以及进程内 Provider 断路器。
 
+## Event-only acquisition
+
+事件指标不走普通 Provider router。使用固定 source catalog 和结构化 transport，
+先取 bounded candidates，再由 host 或显式配置的 classifier 做 materiality 判断；
+未分类候选保持 `CLASSIFICATION_PENDING`，不会被当作 `CLEAR`。
+
+```bash
+python3 scripts/events.py --plan --asset BTC --asset ETH
+python3 scripts/events.py --fetch --asset BTC --asset ETH --output pending-events.json
+python3 scripts/events.py --resolve classified-events.json --asset BTC --asset ETH
+python3 scripts/events.py --smoke --asset BTC --asset ETH
+```
+
+`--fetch` 只获取候选，不评分、不生成组合决策。host-assisted 流程应保留
+`pending_responses`，在 `responses` 中为每个候选补充分类后再运行 `--resolve`；
+程序会拒绝未知字段、source/时间戳/URL/候选身份变化。`--smoke` 只显示事件状态、
+覆盖率、confidence、候选数和脱敏诊断。
+
+事件阶段状态和错误边界如下：
+
+```text
+FETCHED -> CLASSIFICATION_PENDING -> CLASSIFIED -> SUCCESS
+FETCH_FAILED | CLASSIFICATION_FAILED | INSUFFICIENT_SOURCE_COVERAGE | CONFLICT
+```
+
+`CACHE_ONLY` 只读 event transport cache，cache miss 保持不可达；它不会发 HTTP
+或调用 classifier API。可选 API classifier 使用环境变量：
+`EVENT_CLASSIFIER_MODE=api`、`EVENT_CLASSIFIER_API_KEY`、
+`EVENT_CLASSIFIER_API_URL`、`EVENT_CLASSIFIER_PROVIDER`、`EVENT_CLASSIFIER_MODEL`。
+缺少 key 或 API 失败会保持 pending，并不会产生 `CLEAR`。GitHub source 若无
+`GITHUB_TOKEN`，smoke 输出应明确是 unauthenticated mode。
+
 ## 决策树
 
 ```text

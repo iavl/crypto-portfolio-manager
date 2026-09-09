@@ -326,6 +326,19 @@ schema 和 normalization 层；`--contract` 检查最小上游契约；`--smoke`
 router 以 `REFRESH` 运行一个 metric。被测试的失败返回退出码 `2`；缺少可选
 credential 的 provider 会标记为 `SKIPPED`/`NOT_READY`。
 
+事件源有独立的只读调试命令，不经过普通 Provider router：
+
+```bash
+python3 scripts/events.py --plan --asset BTC --asset ETH
+python3 scripts/events.py --fetch --asset BTC --asset ETH --output pending-events.json
+python3 scripts/events.py --smoke --asset BTC --asset ETH
+```
+
+`--fetch` 只导出 bounded candidates；host 完成分类后，用
+`python3 scripts/events.py --resolve classified-events.json --asset BTC --asset ETH`
+校验并合成事件结果。分类缺失、来源不可达或覆盖不足都保持 unresolved，不会默认
+为 `CLEAR`，也不会触发评分、配置或交易。
+
 ```bash
 python3 scripts/providers.py --status
 python3 scripts/providers.py --list

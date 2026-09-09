@@ -104,6 +104,7 @@ class AcquisitionResult:
     attempts: tuple[Mapping[str, Any], ...] = ()
     event_scan_requests: tuple[EventSourceScanRequest, ...] = ()
     event_scans: tuple[EventScanResult, ...] = ()
+    event_diagnostics: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def observations(self) -> tuple[MetricObservation, ...]:
@@ -201,6 +202,7 @@ class AcquisitionResult:
             "attempts": [dict(item) for item in self.attempts],
             "event_scan_requests": [item.as_dict() for item in self.event_scan_requests],
             "event_scans": [item.as_dict() for item in self.event_scans],
+            "event_diagnostics": [dict(item) for item in self.event_diagnostics],
             "requires_external_resolution": self.requires_external_resolution,
             "pending_event_scans": [item.as_dict() for item in self.pending_event_scans],
             "pending_web_fallbacks": [item.as_dict() for item in self.pending_web_fallbacks],
@@ -523,6 +525,14 @@ class AcquisitionManager:
         event_scans = self._coerce_event_scans(event_scan_results)
         source_responses = self._coerce_event_source_responses(event_source_scan_responses)
         event_errors: dict[tuple[str, str], str] = {}
+        event_diagnostics: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+        def capture_event_diagnostics() -> None:
+            for diagnostic in getattr(scanner, "last_resolution_diagnostics", ()):
+                value = diagnostic.as_dict() if hasattr(diagnostic, "as_dict") else dict(diagnostic)
+                key = (str(value.get("asset", "")), str(value.get("category", "")), str(value.get("source_id", "")))
+                event_diagnostics[key] = value
+
         missing_event_identities = [
             (request.asset, request.metric_key)
             for request in model.requests
@@ -579,7 +589,10 @@ class AcquisitionManager:
                     except Exception as exc:
                         reason = f"shared regulatory event response rejected: {redact_secrets(str(exc))}"
                         event_errors.update({(asset, "regulatory"): reason for asset in regulatory_assets})
-        if event_source_fetcher is not None and selected_mode != FetchMode.CACHE_ONLY:
+        if (
+            (event_source_fetcher is not None or scanner.resolver is not None or scanner.transport is not None)
+            and selected_mode != FetchMode.CACHE_ONLY
+        ):
             for asset, category in event_groups:
                 try:
                     event_scans[(asset, category)] = scanner.scan(
@@ -589,7 +602,10 @@ class AcquisitionManager:
                         fetch_mode=selected_mode,
                     )
                 except Exception as exc:
+                    capture_event_diagnostics()
                     event_errors[(asset, category)] = f"event source scan failed: {redact_secrets(str(exc))}"
+                else:
+                    capture_event_diagnostics()
             if regulatory_assets:
                 try:
                     event_scans.update({
@@ -602,8 +618,11 @@ class AcquisitionManager:
                         ).items()
                     })
                 except Exception as exc:
+                    capture_event_diagnostics()
                     reason = f"shared regulatory event scan failed: {redact_secrets(str(exc))}"
                     event_errors.update({(asset, "regulatory"): reason for asset in regulatory_assets})
+                else:
+                    capture_event_diagnostics()
         event_scan_requests: list[EventSourceScanRequest] = []
         request_identities = {(request.asset, request.metric_key) for request in model.requests}
         for asset, category in event_groups:
@@ -622,6 +641,28 @@ class AcquisitionManager:
             (item.asset, item.category, item.source_id): item for item in event_scan_requests
         }
         event_scan_requests = list(unique_event_requests.values())
+        for request in event_scan_requests:
+            event_diagnostics.setdefault((request.asset, request.category, request.source_id), {
+                "asset": request.asset,
+                "category": request.category,
+                "source_id": request.source_id,
+                "source_group": request.source_group,
+                "transport_kind": request.transport_kind or "WEB",
+                "endpoint": request.source_url,
+                "reachable": False,
+                "complete_for_source": False,
+                "candidate_count": 0,
+                "classified_count": 0,
+                "classification_mode": "host",
+                "classifier_backend": None,
+                "classifier_model": None,
+                "coverage_ratio": 0.0,
+                "confidence": "LOW",
+                "event_state": "UNRESOLVED",
+                "status": "CLASSIFICATION_PENDING",
+                "error_code": "EVENT_CLASSIFICATION_REQUIRED",
+                "reason": "event source response is required before scanner synthesis",
+            })
         pending_event_groups = {(item.asset, item.category) for item in event_scan_requests}
         pending_event_identities = {
             (request.asset, request.metric_key)
@@ -645,6 +686,21 @@ class AcquisitionManager:
                 routed_values[(asset, key)] = scanner.observation(scan, key, fetched_at=current)
             except ValueError as exc:
                 event_errors[(asset, category)] = f"event scan result rejected: {exc}"
+            for diagnostic_key, diagnostic in tuple(event_diagnostics.items()):
+                if diagnostic.get("asset") != asset or diagnostic.get("category") != category:
+                    continue
+                updated = dict(diagnostic)
+                updated.update({
+                    "coverage_ratio": scan.coverage,
+                    "confidence": scan.confidence,
+                    "event_state": scan.state,
+                })
+                if scan.status == "INSUFFICIENT_SOURCE_COVERAGE":
+                    updated["status"] = "INSUFFICIENT_SOURCE_COVERAGE"
+                    updated["error_code"] = "EVENT_INSUFFICIENT_SOURCE_COVERAGE"
+                elif updated.get("status") in {"FETCHED", "CLASSIFIED"}:
+                    updated["status"] = "SUCCESS"
+                event_diagnostics[diagnostic_key] = updated
         results: list[NormalizedMetricResult] = []
         web_fallbacks: list[WebFallbackRequest] = []
         should_persist = self.persist if persist is None else persist
@@ -899,6 +955,7 @@ class AcquisitionManager:
             tuple(attempt.as_dict() for attempt in routed.attempts),
             tuple(event_scan_requests),
             tuple(event_scans.values()),
+            tuple(event_diagnostics.values()),
         )
 
     @staticmethod

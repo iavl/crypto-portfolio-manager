@@ -561,7 +561,12 @@ class StructuredEventTransport:
             return EventTransportResult(spec.source_id, spec.kind, endpoint, True, True, checked_at, _rpc_candidates(response["result"], spec))
         raise ProviderResponseError(f"unsupported event transport {spec.kind}")
 
-    def fetch_result(self, request: EventSourceScanRequest) -> EventTransportResult:
+    def fetch_result(
+        self,
+        request: EventSourceScanRequest,
+        *,
+        allow_network: bool = True,
+    ) -> EventTransportResult:
         endpoints = tuple(dict.fromkeys(getattr(request, "source_urls", ()) or (request.source_url,)))
         results: list[EventTransportResult] = []
         for endpoint in endpoints:
@@ -569,6 +574,17 @@ class StructuredEventTransport:
             cached = self.cache.load(spec) if self.cache is not None else None
             if cached is not None:
                 results.append(cached)
+                continue
+            if not allow_network:
+                results.append(EventTransportResult(
+                    request.source_id,
+                    spec.kind,
+                    spec.endpoint,
+                    False,
+                    False,
+                    request.as_of,
+                    error="EVENT_SOURCE_CACHE_MISS",
+                ))
                 continue
             try:
                 result = self._fetch_one(spec)
@@ -611,6 +627,10 @@ class StructuredEventTransport:
 
     def fetch(self, request: EventSourceScanRequest) -> EventSourceScanResponse:
         return self.fetch_result(request).as_response()
+
+    def fetch_cached(self, request: EventSourceScanRequest) -> EventSourceScanResponse:
+        """Return only cached normalized transport data; never use the network."""
+        return self.fetch_result(request, allow_network=False).as_response()
 
     __call__ = fetch
 

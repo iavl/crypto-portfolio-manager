@@ -442,6 +442,15 @@ Pass 1 must stop before scoring when a hard-critical event group is unresolved.
 Pass 2 consumes exactly one response per request, including bounded
 `reachable=false` errors.
 
+For event-only debugging use `scripts/events.py`; it supports fixed request plans,
+candidate export, validated host-assisted response import, and an event-only smoke
+without scoring or allocation. `EventResolver` distinguishes `FETCHED`,
+`FETCH_FAILED`, `CLASSIFICATION_PENDING`, `CLASSIFICATION_FAILED`, `CLASSIFIED`,
+`INSUFFICIENT_SOURCE_COVERAGE`, `CONFLICT`, and `SUCCESS`. The host exchange file
+retains the original `pending_responses` so candidate identity, canonical URL and
+timestamp changes are rejected. Optional API classification is OpenAI-compatible,
+bounded, explicitly configured, and fail-closed when its key or endpoint is absent.
+
 ## Availability and collection status
 
 Every requested attempt remains visible as one of:

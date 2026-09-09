@@ -216,8 +216,10 @@ BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d
 ```text
 Python source catalog
     -> EventSourceScanRequest
-    -> runtime 访问 allowlisted source
-    -> EventSourceScanResponse
+    -> StructuredEventTransport
+    -> candidate EventSourceScanResponse
+    -> EventResolver / host classifier
+    -> classified EventSourceScanResponse
     -> Python coverage/materiality/status
 ```
 
@@ -225,6 +227,18 @@ Python source catalog
 approval 或 execution。完整覆盖无事件使用
 `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`；部分来源不可达使用
 `INSUFFICIENT_SOURCE_COVERAGE`，不代表绝对安全。
+
+事件调试不经过普通 Provider router，可单独运行：
+
+```bash
+python3 scripts/events.py --plan --asset BTC --asset ETH
+python3 scripts/events.py --smoke --asset BTC --asset ETH
+```
+
+Transport 只发现 bounded candidates；没有 classifier、分类失败或覆盖不足时，
+结果保持 `CLASSIFICATION_PENDING`、`FETCH_FAILED` 或
+`INSUFFICIENT_SOURCE_COVERAGE`，绝不默认成 `CLEAR`。监管源在 `MARKET` 只抓取一次，
+再按 `affected_assets` 映射到 BTC/ETH。
 
 ## 8. 确定性决策流程
 
