@@ -10,16 +10,7 @@
     "bgeometrics": {"enabled": true},
     "defillama": {"enabled": true},
     "growthepie": {"enabled": true},
-    "google_blockchain_analytics": {
-      "enabled": "AUTO",
-      "project_env": "GOOGLE_CLOUD_PROJECT",
-      "maximum_bytes_billed": 10000000000
-    },
     "blobscan": {"enabled": true},
-    "l2beat": {
-      "enabled": "AUTO",
-      "api_key_env": "L2BEAT_API_KEY"
-    },
     "rated": {
       "enabled": "AUTO",
       "api_key_env": "RATED_API_KEY"
@@ -28,6 +19,11 @@
       "enabled": true,
       "base_url_env": "ETH_BEACON_API_URL",
       "base_url_default": "https://ethereum-beacon-api.publicnode.com"
+    },
+    "ethereum_protocol": {
+      "enabled": true,
+      "base_url_env": "ETHEREUM_RPC_URL",
+      "base_url_default": "https://ethereum-rpc.publicnode.com"
     },
     "ultrasound_money": {"enabled": true},
     "etherscan": {
@@ -47,10 +43,6 @@
     "lunarcrush": {
       "enabled": "AUTO",
       "api_key_env": "LUNARCRUSH_API_KEY"
-    },
-    "coinmetrics_pro": {
-      "enabled": "AUTO",
-      "api_key_env": "COINMETRICS_API_KEY"
     },
     "fred": {
       "enabled": "AUTO",

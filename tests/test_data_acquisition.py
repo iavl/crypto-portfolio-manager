@@ -1411,8 +1411,9 @@ class DataAcquisitionTests(unittest.TestCase):
 
     def test_optional_credentials_and_catalog_filtering(self):
         config = load_provider_config()
-        self.assertFalse(provider_enabled("coinmetrics_pro", config, {}))
-        self.assertTrue(provider_enabled("coinmetrics_pro", config, {"COINMETRICS_API_KEY": "configured"}))
+        self.assertFalse(provider_enabled("lunarcrush", config, {}))
+        self.assertTrue(provider_enabled("lunarcrush", config, {"LUNARCRUSH_API_KEY": "configured"}))
+        self.assertTrue(provider_enabled("ethereum_protocol", config, {}))
         self.assertFalse(provider_enabled("github", config, {}))
         self.assertTrue(provider_enabled("github", config, {"GITHUB_TOKEN": "configured"}))
         with patch.dict("os.environ", {}, clear=True):
@@ -1485,33 +1486,6 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertTrue(status.credential_present)
         self.assertTrue(status.adapter_available)
         self.assertTrue(status.runtime_ready)
-
-    def test_optional_coinmetrics_pro_does_not_hide_community_unsupported_reason(self):
-        class CommunityProvider:
-            capabilities = type("Capabilities", (), {"supports": lambda self, _key: True})()
-
-            def collect(self, _request):
-                raise ProviderUnsupportedMetric("Community catalog has no required metric")
-
-        config = config_for("coinmetrics_community")
-        config["providers"]["coinmetrics_community"] = {"enabled": True}
-        result = AcquisitionManager(
-            ProviderRouter(
-                {"coinmetrics_community": CommunityProvider()},
-                config=config,
-            ),
-            persist=False,
-        ).run(
-            MetricCollectionPlan("SNAPSHOT_REVIEW", (
-                MetricRequest("BTC", "onchain.active_addresses"),
-            )),
-            mode="REFRESH",
-            cached_observations=(),
-            now="2026-09-06T00:00:00Z",
-        )
-        self.assertEqual(result.results[0].status, "FAILED")
-        self.assertIn("PROVIDER_UNSUPPORTED", result.results[0].event.reason)
-        self.assertIn("optional Coin Metrics Pro fallback is not configured", result.results[0].event.reason)
 
     def test_provider_preflight_uses_specific_unready_reason_codes(self):
         config = config_for("sosovalue", "fred")

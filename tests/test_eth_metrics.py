@@ -20,7 +20,6 @@ from crypto_portfolio.providers.base import ProviderRequest
 from crypto_portfolio.providers.blobscan import parse_timeseries as parse_blobscan
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider
 from crypto_portfolio.providers.growthepie import parse_da_payload, parse_fundamentals_payload, parse_rent_payload
-from crypto_portfolio.providers.l2beat import ethereum_project_ids, parse_tvs_payload
 from crypto_portfolio.providers.ethereum_protocol import block_burn_eth, execution_base_fee_burn
 from crypto_portfolio.providers.sosovalue import parse_etf_flow_history
 
@@ -156,15 +155,6 @@ class EthMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(share, 10 / 15)
         blob = json.loads((Path(__file__).parent / "fixtures/providers/blobscan_timeseries.json").read_text())
         self.assertEqual(parse_blobscan(blob, ("eth.blobs.count_1d",), fetched_at="2026-09-01T00:00:00Z")[0]["value"], 42000)
-        l2beat_fixture = Path(__file__).parent / "fixtures/providers"
-        ids = ethereum_project_ids(json.loads((l2beat_fixture / "l2beat_projects.json").read_text()))
-        tvs = parse_tvs_payload(
-            json.loads((l2beat_fixture / "l2beat_tvs.json").read_text()),
-            ids,
-            fetched_at="2026-09-01T00:00:00Z",
-        )
-        self.assertEqual(tvs["value"], 123456789.0)
-
     def test_growthepie_current_master_and_fundamentals_contract(self):
         master = {
             "chains": {

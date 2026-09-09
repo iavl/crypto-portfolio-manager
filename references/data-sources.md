@@ -39,8 +39,8 @@ gaps; they are never required for a normal review. See
 `references/data-providers.md` for routing and cache details.
 
 BTC MVRV Z uses the no-key BGeometrics latest-value endpoint when available.
-Ethereum L2 activity and Ethereum blockspace fees use growthepie's structured
-aggregate data; L2 TVS is not inferred from an unrelated metric. The
+Ethereum L2 activity, TVS, and Ethereum blockspace fees use growthepie's
+structured aggregate data; L2 TVS is not inferred from an unrelated metric. The
 `eth.l2.tvs_usd` stock metric is derived from growthepie's TVL/TVS data: the
 runtime selects the growthepie-defined production L2 universe, excludes
 Ethereum L1, aggregate keys, and documented non-L2 sidechains, selects one
@@ -196,13 +196,10 @@ source is available.
 
 ### Ethereum metric methodologies
 
-`onchain.transfer_volume` for ETH is the sum, for one completed UTC day, of
-successful non-zero native ETH value transfers in top-level transactions and
-successful internal EVM calls with a non-empty trace path. Self-transfers,
-failed/reverted calls, issuance, burn accounting, gas fees, and ERC-20
-transfers are excluded. Root traces are not counted as a second copy of their
-top-level transaction. The resulting ETH amount is multiplied by that same
-day's completed ETH/USD daily close.
+`onchain.transfer_volume` uses the catalog-checked Coin Metrics Community
+`TxTfrValAdjUSD` daily primitive. Provider failure or missing 1D catalog support
+leaves the USD observation unavailable; it is never reconstructed from an
+unbounded transaction/trace scan or filled with zero.
 
 `eth.staking.active_effective_stake_pct` is
 `active_effective_stake_eth / current_supply_eth`, with time-aligned inputs.
@@ -319,6 +316,17 @@ counts, engagement quality, sample size, and methodology. Social bullish share,
 mention counts/changes, and market fear/greed are lower-authority context.
 Unstructured posts may support a short low-confidence narrative, but never
 become a fabricated numeric metric or a standalone trade trigger.
+
+LunarCrush v4 supplies the active structured social route when
+`LUNARCRUSH_API_KEY` has endpoint entitlement. `posts_active` is the explicit
+operational proxy for social volume/mentions. Sentiment and attention
+percentiles are empirical midranks inside each asset's trailing 90 completed
+daily observations, not cross-sectional cryptocurrency ranks.
+
+Ethereum protocol readiness is separate from historical metric availability.
+The default `ethereum_protocol` RPC probe reads one latest block; exact burn
+math still requires a bounded caller-supplied block batch, and normal reviews
+do not fan out over every block in a 30D or 365D window.
 
 ### BTC cycle and on-chain context
 

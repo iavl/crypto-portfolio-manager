@@ -38,7 +38,7 @@ def series(count=365, *, last_volume=200):
     return OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic", fetched_at="2026-01-01T00:00:00Z")
 
 
-def test_spot(candles, price):
+def make_spot(candles, price):
     from datetime import datetime
     observed = (datetime.fromisoformat(candles.candles[-1].timestamp.replace("Z", "+00:00")) + timedelta(days=1)).isoformat()
     return SpotPrice(candles.symbol, price, observed, candles.source, observed)
@@ -69,7 +69,7 @@ class ExecutionEngineTests(unittest.TestCase):
     def test_wait_cases_do_not_manufacture_orders(self):
         extended = build_entry_plan("ETH", 2000, self.snapshot, "DEFENSIVE", "HIGH", entry_mode="PULLBACK")
         self.assertEqual(extended.action, "INCREASE")
-        far = build_technical_snapshot(series(), test_spot(series(), 500), policy=None)
+        far = build_technical_snapshot(series(), make_spot(series(), 500), policy=None)
         wait = build_entry_plan("ETH", 2000, far, "NORMAL", "HIGH")
         self.assertEqual(wait.action, "WAIT")
         self.assertEqual(wait.entry_mode, "WAIT")
@@ -78,7 +78,7 @@ class ExecutionEngineTests(unittest.TestCase):
         capital = build_entry_plan("ETH", 2000, self.snapshot, "CAPITAL_PRESERVATION", "HIGH")
         self.assertEqual(capital.action, "WAIT")
         self.assertEqual(capital.planned_amount_usd, 0)
-        short_snapshot = build_technical_snapshot(series(199), test_spot(series(199), 199))
+        short_snapshot = build_technical_snapshot(series(199), make_spot(series(199), 199))
         short = build_entry_plan("ETH", 2000, short_snapshot, "NORMAL", "HIGH")
         self.assertEqual(short.action, "WAIT")
 
@@ -105,7 +105,7 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertLessEqual(medium.planned_amount_usd, normal.planned_amount_usd)
 
     def test_missing_volume_reduces_deployment(self):
-        missing = build_technical_snapshot(series(), test_spot(series(), 282), volume_reliable=False)
+        missing = build_technical_snapshot(series(), make_spot(series(), 282), volume_reliable=False)
         plan = build_entry_plan("ETH", 2000, missing, "NORMAL", "HIGH")
         regular = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
         self.assertLessEqual(plan.planned_amount_usd, regular.planned_amount_usd)

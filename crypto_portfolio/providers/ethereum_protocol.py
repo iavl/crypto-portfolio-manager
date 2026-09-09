@@ -21,6 +21,7 @@ BASE_URLS = (
     "https://ethereum-rpc.publicnode.com",
     "https://rpc.flashbots.net",
 )
+DEFAULT_RPC_URL = BASE_URLS[0]
 MIN_BLOB_BASE_FEE = 1
 BLOB_BASE_FEE_UPDATE_FRACTION = 3_338_477
 WEI_PER_ETH = 10**18
@@ -116,7 +117,7 @@ class EthereumProtocolProvider:
 
     name = "ethereum_protocol"
 
-    def __init__(self, *, client: HttpClient | Any | None = None, rpc_url: str = BASE_URLS[0]) -> None:
+    def __init__(self, *, client: HttpClient | Any | None = None, rpc_url: str = DEFAULT_RPC_URL) -> None:
         self.client = client or HttpClient()
         self.rpc_url = rpc_url
         self.capabilities = ProviderCapabilities(
@@ -126,6 +127,43 @@ class EthereumProtocolProvider:
             supports_batching=True,
             requires_api_key=False,
         )
+
+    def probe(self) -> Mapping[str, Any]:
+        """Read and normalize one latest execution block without history fan-out."""
+        payload = self.client.post_json(
+            self.rpc_url,
+            json_body={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_getBlockByNumber",
+                "params": ["latest", False],
+            },
+            idempotent=True,
+        )
+        if not isinstance(payload, Mapping) or not isinstance(payload.get("result"), Mapping):
+            raise ProviderDataError("Ethereum RPC latest-block response has no block result")
+        block = payload["result"]
+        block_number = _number(block.get("number"), "number")
+        timestamp = _number(block.get("timestamp"), "timestamp")
+        _number(block.get("baseFeePerGas"), "baseFeePerGas")
+        _number(block.get("gasUsed"), "gasUsed")
+        blob_fields_present = "blobGasUsed" in block and "excessBlobGas" in block
+        if "blobGasUsed" in block:
+            _number(block.get("blobGasUsed"), "blobGasUsed")
+        if "excessBlobGas" in block:
+            _number(block.get("excessBlobGas"), "excessBlobGas")
+        return {
+            "provider": self.name,
+            "rpc_method": "eth_getBlockByNumber",
+            "latest_block_number": block_number,
+            "latest_block_timestamp": normalize_timestamp(
+                datetime.fromtimestamp(timestamp, timezone.utc).isoformat(),
+                "latest_block_timestamp",
+            ),
+            "required_execution_fields": True,
+            "blob_fields_present": blob_fields_present,
+            "normalization": "OK",
+        }
 
     def collect(self, request: ProviderRequest) -> ProviderResponse:
         blocks = request.parameters.get("blocks")
@@ -143,6 +181,7 @@ class EthereumProtocolProvider:
 
 __all__ = [
     "BASE_URLS",
+    "DEFAULT_RPC_URL",
     "BLOB_BASE_FEE_UPDATE_FRACTION",
     "EthereumProtocolProvider",
     "blob_base_fee",

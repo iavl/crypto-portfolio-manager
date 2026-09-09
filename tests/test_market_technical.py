@@ -40,7 +40,7 @@ def make_series(count=365, *, last_volume=100, source="synthetic"):
     return OHLCVSeries("ETH", "1D", tuple(candles), source=source)
 
 
-def test_spot(candles, price):
+def make_spot(candles, price):
     from datetime import datetime
     observed = (datetime.fromisoformat(candles.candles[-1].timestamp.replace("Z", "+00:00")) + timedelta(days=1)).isoformat()
     return SpotPrice(candles.symbol, price, observed, candles.source, observed)
@@ -272,18 +272,18 @@ class TechnicalMetricTests(unittest.TestCase):
         self.assertEqual(average_true_range(candles, 14), 10.0)
 
     def test_ma_coverage_and_missing_volume(self):
-        full = build_technical_snapshot(make_series(240), test_spot(make_series(240), 219.5))
+        full = build_technical_snapshot(make_series(240), make_spot(make_series(240), 219.5))
         self.assertIsNotNone(full.ma20)
         self.assertIsNotNone(full.ma50)
         self.assertIsNotNone(full.ma100)
         self.assertIsNotNone(full.ma200)
         self.assertEqual(full.data_quality, "FULL")
         self.assertEqual(full.technical_confidence, "HIGH")
-        missing_volume = build_technical_snapshot(make_series(240, last_volume=100), test_spot(make_series(240, last_volume=100), 219.5), volume_reliable=False)
+        missing_volume = build_technical_snapshot(make_series(240, last_volume=100), make_spot(make_series(240, last_volume=100), 219.5), volume_reliable=False)
         self.assertIsNone(missing_volume.relative_volume)
         self.assertEqual(missing_volume.volume_state, "UNKNOWN")
         self.assertEqual(missing_volume.technical_confidence, "MEDIUM")
-        short = build_technical_snapshot(make_series(199), test_spot(make_series(199), 199))
+        short = build_technical_snapshot(make_series(199), make_spot(make_series(199), 199))
         self.assertIsNone(short.ma200)
         self.assertEqual(short.data_quality, "INSUFFICIENT_HISTORY")
         self.assertEqual(short.technical_confidence, "LOW")

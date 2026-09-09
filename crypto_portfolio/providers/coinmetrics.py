@@ -1,4 +1,4 @@
-"""Catalog-aware Coin Metrics Community and optional authenticated provider."""
+"""Catalog-aware Coin Metrics Community provider."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Any, Iterable, Mapping
 from ..metrics_registry import metric_definition
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import (
-    ProviderAuthenticationError,
     ProviderCapabilities,
     ProviderDataError,
     ProviderError,
@@ -23,7 +22,6 @@ from .http import HttpClient, redact_secrets
 
 
 COMMUNITY_BASE_URL = "https://community-api.coinmetrics.io"
-AUTHENTICATED_BASE_URL = "https://api.coinmetrics.io"
 COINMETRICS_ASSETS = {
     "BTC": "btc",
     "ETH": "eth",
@@ -243,7 +241,7 @@ def _append_history_pages(
     next_url = payload.get("next_page_url")
     requests = 1
     while next_url is not None:
-        if requests >= MAX_HISTORY_PAGES or not isinstance(next_url, str) or not next_url.startswith((COMMUNITY_BASE_URL, AUTHENTICATED_BASE_URL)):
+        if requests >= MAX_HISTORY_PAGES or not isinstance(next_url, str) or not next_url.startswith(COMMUNITY_BASE_URL):
             raise ProviderResponseError("Coin Metrics full-history pagination exceeded the bounded contract")
         page = client.get_json(next_url, headers=headers)
         rows.extend(_rows(page))
@@ -680,15 +678,10 @@ class CoinMetricsProvider:
         *,
         client: HttpClient | Any | None = None,
         clock: Any | None = None,
-        authenticated: bool = False,
-        api_key: str | None = None,
     ) -> None:
         self.client = client or HttpClient()
         self.clock = clock
-        self.authenticated = authenticated
-        self.api_key = api_key
-        self.name = "coinmetrics_pro" if authenticated else "coinmetrics_community"
-        self.base_url = AUTHENTICATED_BASE_URL if authenticated else COMMUNITY_BASE_URL
+        self.base_url = COMMUNITY_BASE_URL
         self._catalog: frozenset[str] | None = None
         self._catalog_by_asset: dict[str, frozenset[str]] | None = None
         self._catalog_fetched_at: datetime | None = None
@@ -702,14 +695,10 @@ class CoinMetricsProvider:
                 "flows.exchange_netflow",
             ))),
             supports_batching=True,
-            requires_api_key=authenticated,
+            requires_api_key=False,
         )
 
     def _headers(self) -> Mapping[str, str]:
-        if self.authenticated:
-            if not self.api_key:
-                raise ProviderAuthenticationError("Coin Metrics API key is not configured")
-            return {"X-API-Key": self.api_key}
         return {}
 
     def catalog(self) -> frozenset[str]:
@@ -801,7 +790,7 @@ class CoinMetricsProvider:
                 else:
                     raise ProviderUnsupportedMetric(f"cached full-history payload does not support {key}")
             except (ProviderError, ValueError) as exc:
-                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+                diagnostics[key] = _metric_diagnostic(exc)
         return ProviderResponse(tuple(values), payload=payload, diagnostics=diagnostics, network_requests=0)
 
     def collect(self, request: ProviderRequest) -> ProviderResponse | list[Mapping[str, Any]]:
@@ -946,7 +935,7 @@ class CoinMetricsProvider:
                     as_of=request.parameters.get("as_of"),
                 ))
             except (ProviderError, ValueError) as exc:
-                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+                diagnostics[key] = _metric_diagnostic(exc)
         btc_valuation = tuple(key for key in available_requested if key in COINMETRICS_BTC_VALUATION_INPUTS)
         for key in btc_valuation:
             try:
@@ -960,7 +949,7 @@ class CoinMetricsProvider:
                     source=self.name,
                 ))
             except (ProviderError, ValueError) as exc:
-                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+                diagnostics[key] = _metric_diagnostic(exc)
         tokenomics = tuple(key for key in available_requested if key in COINMETRICS_TOKENOMICS_INPUTS)
         for key in tokenomics:
             try:
@@ -973,7 +962,7 @@ class CoinMetricsProvider:
                     as_of=request.parameters.get("as_of"),
                 ))
             except (ProviderError, ValueError) as exc:
-                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+                diagnostics[key] = _metric_diagnostic(exc)
         eth_metrics = tuple(key for key in available_requested if key in COINMETRICS_ETH_INPUTS)
         for key in eth_metrics:
             try:
@@ -998,7 +987,7 @@ class CoinMetricsProvider:
                     as_of=request.parameters.get("as_of"),
                 ))
             except (ProviderError, ValueError) as exc:
-                diagnostics["flows.exchange_netflow"] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+                diagnostics["flows.exchange_netflow"] = _metric_diagnostic(exc)
         return ProviderResponse(
             observations=tuple(dict(item) for item in result),
             payload=payload,
@@ -1006,16 +995,7 @@ class CoinMetricsProvider:
             network_requests=network_requests,
         )
 
-
-class CoinMetricsAuthenticatedProvider(CoinMetricsProvider):
-    name = "coinmetrics_pro"
-
-    def __init__(self, *, client: HttpClient | Any | None = None, clock: Any | None = None, api_key: str | None = None) -> None:
-        super().__init__(client=client, clock=clock, authenticated=True, api_key=api_key)
-
-
 __all__ = [
-    "AUTHENTICATED_BASE_URL",
     "CATALOG_TTL_SECONDS",
     "COINMETRICS_ASSETS",
     "COINMETRICS_BTC_CYCLE_METRICS",
@@ -1030,7 +1010,6 @@ __all__ = [
     "COINMETRICS_SUPPORTED_METRICS",
     "COMMUNITY_BASE_URL",
     "MAX_HISTORY_PAGES",
-    "CoinMetricsAuthenticatedProvider",
     "CoinMetricsProvider",
     "catalog_metrics",
     "catalog_metrics_by_asset",

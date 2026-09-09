@@ -134,7 +134,7 @@ class PlanRepairTests(unittest.TestCase):
         self.assertEqual(response.observations[0]["metadata"]["source_mode"], "DIRECT")
 
     def test_bnb_routes_to_catalog_aware_coinmetrics(self):
-        self.assertEqual(provider_chain("onchain.active_addresses", "BNB"), ("coinmetrics_community", "coinmetrics_pro"))
+        self.assertEqual(provider_chain("onchain.active_addresses", "BNB"), ("coinmetrics_community",))
         self.assertEqual(provider_chain("fundamentals.active_users", "BNB"), ())
         self.assertEqual(metric_availability("BNB", "fundamentals.active_users").requirement, "OPTIONAL")
         self.assertEqual(metric_availability("BNB", "onchain.transfer_volume").requirement, "OPTIONAL")
@@ -186,40 +186,6 @@ class PlanRepairTests(unittest.TestCase):
                 "etherscan", "etherscan", "ETH", {}, ("eth.monetary.current_supply_eth",),
             ))
         self.assertNotIn("fake-key", str(raised.exception))
-
-    def test_l2beat_openapi_is_probeable_before_credentials(self):
-        from unittest.mock import patch
-        from crypto_portfolio.providers.l2beat import L2BeatProvider, BASE_URL, OPENAPI_PATH
-        from crypto_portfolio.providers.probe import probe_provider
-        from crypto_portfolio.providers.router import ProviderRouter
-
-        class Client:
-            def get_json(self, url, **_kwargs):
-                self.url = url
-                return {
-                    "openapi": "3.1.0",
-                    "servers": [{"url": BASE_URL}],
-                    "components": {"securitySchemes": {"apiKeyAuth": {"in": "query", "name": "apiKey", "type": "apiKey"}}},
-                    "security": [{"apiKeyAuth": []}],
-                    "paths": {
-                        "/v1/projects": {"get": {"parameters": []}},
-                        "/v1/tvs": {"get": {"parameters": [{"in": "query", "name": "range", "schema": {"enum": ["7d", "30d", "90d", "180d", "1y", "max"]}}]}},
-                        "/v1/activity": {"get": {"parameters": [{"in": "query", "name": "range", "schema": {"enum": ["30d", "90d", "180d", "1y", "max"]}}]}},
-                    },
-                }
-
-        client = Client()
-        config = {
-            "providers": {"l2beat": {"enabled": "AUTO", "api_key_env": "L2BEAT_API_KEY"}},
-            "cache_ttl_seconds": {"default": 3600},
-            "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
-            "fallback": {"allow_web": False},
-        }
-        with patch.dict("os.environ", {}, clear=True):
-            rows = probe_provider(ProviderRouter({"l2beat": L2BeatProvider(client=client)}, config=config), "l2beat")
-        self.assertEqual(rows[0]["auth_scheme"], "apiKey query parameter")
-        self.assertEqual(rows[0]["error_code"], "CREDENTIAL_MISSING")
-        self.assertEqual(client.url, BASE_URL + OPENAPI_PATH)
 
     def test_optional_failures_are_not_final_required_failures(self):
         event = CollectionEvent(

@@ -94,19 +94,20 @@ class DocumentationTests(unittest.TestCase):
         provider_policy = (ROOT / "references/data-providers.md").read_text(encoding="utf-8")
         for provider in (
             "Binance", "Bybit", "CoinGecko", "DeFiLlama", "Alternative.me",
-            "Chain liveness", "Coin Metrics", "BGeometrics", "Google Blockchain Analytics",
-            "Rated", "Ethereum Beacon API", "GitHub", "SoSoValue", "EventScanner",
+            "Chain liveness", "Coin Metrics", "BGeometrics", "LunarCrush",
+            "Rated", "Ethereum Beacon API", "Ethereum protocol", "GitHub", "SoSoValue", "EventScanner",
         ):
             with self.subTest(provider=provider):
                 self.assertIn(provider, provider_policy)
         for text in (
             "COINGECKO_API_KEY", "GITHUB_TOKEN", "SOSOVALUE_API_KEY",
             "CapMrktEstUSD", "historicalInflowChart", "PROVIDER_INSUFFICIENT_HISTORY",
-            "L2BEAT_API_KEY", "query parameter `apiKey`", "OpenAPI `3.1.0`",
-            "`SKIPPED`", "`NOT_APPLICABLE`", "bitcoin-data.com", "landing_page.json",
-            "sumEffectiveBalance", "QUERY_BUDGET_EXCEEDED", "GOOGLE_CLOUD_PROJECT",
+            "`SKIPPED`", "`NOT_APPLICABLE`", "bitcoin-data.com",
+            "sumEffectiveBalance", "LUNARCRUSH_API_KEY", "Authorization: Bearer",
+            "/public/coins/:coin/time-series/v2", "posts_active", "same-asset",
+            "ETHEREUM_RPC_URL", "eth_getBlockByNumber(\"latest\", false)",
             "RATED_API_KEY", "ETH_BEACON_API_URL", "export/tvl.json",
-            "latest common completed UTC day", "no-key primary for ETH L2 TVS",
+            "latest common completed UTC day", "only active structured route",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)

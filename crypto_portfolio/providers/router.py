@@ -30,9 +30,6 @@ from .http import HttpClient, classify_transport_error, is_retryable_error_code,
 from .routes import BASIS_METHODOLOGY, build_provider_requests, current_delivery_basis, provider_chain
 
 
-_OPTIONAL_FALLBACK_PROVIDERS = {"coinmetrics_pro"}
-
-
 @dataclass(frozen=True)
 class ProviderAttempt:
     provider: str
@@ -197,12 +194,12 @@ class ProviderRouter:
         from .sosovalue import SoSoValueProvider
         from .blobscan import BlobscanProvider
         from .growthepie import GrowthepieProvider
-        from .l2beat import L2BeatProvider
         from .rated import RatedProvider
         from .ethereum_beacon import DEFAULT_BASE_URL, EthereumBeaconProvider
-        from .ethereum_protocol import EthereumProtocolProvider
+        from .ethereum_protocol import DEFAULT_RPC_URL, EthereumProtocolProvider
         from .ultrasound_money import UltrasoundMoneyProvider
         from .etherscan import EtherscanProvider
+        from .lunarcrush import LunarCrushProvider
 
         client = self.http_client or HttpClient()
         self.http_client = client
@@ -211,14 +208,23 @@ class ProviderRouter:
             "bybit": BybitProvider(client=client),
             "alternative_me": AlternativeMeProvider(client=client),
             "defillama": DeFiLlamaProvider(client=client),
-            "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
+            "coinmetrics_community": CoinMetricsProvider(client=client),
             "bgeometrics": BGeometricsProvider(client=client),
             "chain_liveness": ChainLivenessProvider(client=client),
             "blobscan": BlobscanProvider(client=client),
             "growthepie": GrowthepieProvider(client=client),
-            "ethereum_protocol": EthereumProtocolProvider(client=client),
             "ultrasound_money": UltrasoundMoneyProvider(client=client),
         }
+        if provider_enabled("ethereum_protocol", self.config):
+            settings = self.config.get("providers", {}).get("ethereum_protocol", {})
+            base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
+            rpc_url = os.environ.get(base_url_env) if base_url_env else None
+            providers["ethereum_protocol"] = EthereumProtocolProvider(
+                client=client,
+                rpc_url=rpc_url or (
+                    settings.get("base_url_default") if isinstance(settings, Mapping) else None
+                ) or DEFAULT_RPC_URL,
+            )
         if provider_enabled("ethereum_beacon", self.config):
             settings = self.config.get("providers", {}).get("ethereum_beacon", {})
             base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
@@ -242,29 +248,6 @@ class ProviderRouter:
                 client=client,
                 api_key=provider_api_key("coingecko", self.config),
             )
-        if provider_enabled("google_blockchain_analytics", self.config):
-            from .google_blockchain_analytics import GoogleBlockchainAnalyticsProvider
-
-            settings = self.config.get("providers", {}).get("google_blockchain_analytics", {})
-            project_env = settings.get("project_env") if isinstance(settings, Mapping) else None
-            try:
-                providers["google_blockchain_analytics"] = GoogleBlockchainAnalyticsProvider.from_environment(
-                    os.environ.get(project_env, "") if project_env else "",
-                    http_client=client,
-                    maximum_bytes_billed=(
-                        settings.get("maximum_bytes_billed", 10_000_000_000)
-                        if isinstance(settings, Mapping) else 10_000_000_000
-                    ),
-                )
-            except ProviderUnavailable:
-                pass
-        if provider_enabled("coinmetrics_pro", self.config):
-            from .coinmetrics import CoinMetricsAuthenticatedProvider
-
-            providers["coinmetrics_pro"] = CoinMetricsAuthenticatedProvider(
-                client=client,
-                api_key=provider_api_key("coinmetrics_pro", self.config),
-            )
         if provider_enabled("sosovalue", self.config):
             providers["sosovalue"] = SoSoValueProvider(
                 client=client,
@@ -275,10 +258,10 @@ class ProviderRouter:
                 client=client,
                 api_key=provider_api_key("rated", self.config),
             )
-        if provider_enabled("l2beat", self.config):
-            providers["l2beat"] = L2BeatProvider(
+        if provider_enabled("lunarcrush", self.config):
+            providers["lunarcrush"] = LunarCrushProvider(
                 client=client,
-                api_key=provider_api_key("l2beat", self.config),
+                api_key=provider_api_key("lunarcrush", self.config),
             )
         if provider_enabled("etherscan", self.config):
             providers["etherscan"] = EtherscanProvider(
@@ -617,8 +600,6 @@ class ProviderRouter:
     ) -> dict[str, Any]:
         attempted = tuple(dict.fromkeys(str(provider) for provider in item.get("attempted", ())))
         final_reason = str(item.get("root_reason") or reason)
-        if item.get("optional_fallback_missing") and "optional fallback" not in final_reason.lower():
-            final_reason += "; optional Coin Metrics Pro fallback is not configured"
         result = {
             "asset": identity[0],
             "metric_key": identity[1],
@@ -652,16 +633,9 @@ class ProviderRouter:
                 continue
             attempted = item.setdefault("attempted", [])
             attempted.append(provider)
-            previous_reason = item.get("last_reason")
-            previous_diagnostic = item.get("last_diagnostic")
             item["last_status"] = status
             item["last_reason"] = reason
             item["last_diagnostic"] = dict(diagnostic or {})
-            if provider in _OPTIONAL_FALLBACK_PROVIDERS and status == "DISABLED":
-                item["optional_fallback_missing"] = True
-                if previous_reason:
-                    item["root_reason"] = previous_reason
-                    item["root_diagnostic"] = dict(previous_diagnostic or {})
             item["index"] += 1
             if item["index"] >= len(item["chain"]):
                 pending.pop(identity, None)

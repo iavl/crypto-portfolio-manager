@@ -114,12 +114,11 @@ class ReportFailureTests(unittest.TestCase):
         } for provider, status, code, reason in (
             ("coingecko", "FAILED", "HTTP_429", "rate limited"),
             ("coinmetrics_community", "UNSUPPORTED", "PROVIDER_UNSUPPORTED", "not in catalog"),
-            ("coinmetrics_pro", "DISABLED", "PROVIDER_DISABLED", "provider disabled"),
         ))
         rows = build_failed_data_fetches(acquisition((failed,), attempts=attempts))
         self.assertEqual(len(rows), 1)
         self.assertEqual([item["provider"] for item in rows[0]["attempts"]], [
-            "coingecko", "coinmetrics_community", "coinmetrics_pro",
+            "coingecko", "coinmetrics_community",
         ])
 
     def test_stale_refresh_failure_preserves_last_observation(self):

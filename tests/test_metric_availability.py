@@ -143,7 +143,7 @@ class MetricAvailabilityTests(unittest.TestCase):
         self.assertEqual(client.calls[1][1]["params"]["assets"], "eth")
         self.assertEqual(client.calls[1][1]["params"]["metrics"], "AdrActCnt")
 
-    def test_configured_premium_provider_failure_remains_failed(self):
+    def test_community_provider_failure_remains_failed(self):
         class FailingProvider:
             def collect(self, _request):
                 raise ProviderUnavailable("premium provider unavailable")
@@ -151,7 +151,6 @@ class MetricAvailabilityTests(unittest.TestCase):
         config = {
             "providers": {
                 "coinmetrics_community": {"enabled": True},
-                "coinmetrics_pro": {"enabled": True},
             },
             "cache_ttl_seconds": {"default": 3600, "onchain": 86400},
             "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
@@ -159,7 +158,7 @@ class MetricAvailabilityTests(unittest.TestCase):
         }
         result = AcquisitionManager(
             ProviderRouter(
-                {"coinmetrics_community": FailingProvider(), "coinmetrics_pro": FailingProvider()},
+                {"coinmetrics_community": FailingProvider()},
                 config=config,
             ),
             persist=False,

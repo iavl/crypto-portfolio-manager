@@ -123,7 +123,7 @@ class ValuationProviderTests(unittest.TestCase):
         self.assertEqual(provider_chain("market.stablecoin_supply", "MARKET"), ("defillama",))
         self.assertEqual(provider_chain("market.breadth_state", "MARKET"), ())
         self.assertEqual(provider_chain("valuation.market_cap", "BTC"), (
-            "coingecko", "coinmetrics_community", "coinmetrics_pro",
+            "coingecko", "coinmetrics_community",
         ))
         self.assertEqual(provider_chain("valuation.fdv", "AAVE"), ("coingecko",))
         self.assertEqual(provider_chain("valuation.fdv_market_cap_ratio", "AAVE"), ())

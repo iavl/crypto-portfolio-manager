@@ -1,0 +1,8 @@
+{
+  "data": [
+    {"time": 1788912000, "sentiment": 75, "posts_active": 140},
+    {"time": 1788825600, "sentiment": 60, "posts_active": 100},
+    {"time": 1788739200, "sentiment": 50, "posts_active": 80},
+    {"time": 1788652800, "sentiment": 40, "posts_active": 70}
+  ]
+}

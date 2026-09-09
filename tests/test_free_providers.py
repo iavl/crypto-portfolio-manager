@@ -9,14 +9,9 @@ from crypto_portfolio.providers.base import (
     ProviderInsufficientHistory,
     ProviderRequest,
     ProviderResponseError,
-    ProviderUnavailable,
     ProviderUnsupportedMetric,
 )
 from crypto_portfolio.providers.bgeometrics import BGeometricsProvider, parse_mvrv_zscore
-from crypto_portfolio.providers.google_blockchain_analytics import (
-    GoogleBlockchainAnalyticsProvider,
-    native_transfer_volume_wei,
-)
 from crypto_portfolio.providers.growthepie import (
     EXPORT_TVL_PATH,
     FUNDAMENTALS_PATH,
@@ -28,7 +23,6 @@ from crypto_portfolio.providers.growthepie import (
 )
 from crypto_portfolio.providers.ethereum_beacon import EthereumBeaconProvider
 from crypto_portfolio.providers.rated import RatedProvider, parse_daily_rewards, parse_queues
-from crypto_portfolio.providers.config import provider_enabled
 from crypto_portfolio.providers.routes import build_provider_requests, provider_chain
 from crypto_portfolio.providers.cache import ProviderCache
 from crypto_portfolio.providers.router import ProviderRouter
@@ -276,91 +270,8 @@ class FreeProviderTests(unittest.TestCase):
         self.assertEqual(provider_chain("btc_valuation.mvrv_zscore", "BTC")[0], "bgeometrics")
         self.assertEqual(provider_chain("onchain.blockspace_fees", "ETH")[0], "growthepie")
         self.assertEqual(provider_chain("eth.l2.activity_30d", "ETH")[0], "growthepie")
-        self.assertEqual(provider_chain("eth.l2.tvs_usd", "ETH"), ("growthepie", "l2beat"))
-        self.assertEqual(provider_chain("onchain.transfer_volume", "ETH")[0], "google_blockchain_analytics")
-
-    def test_optional_project_env_controls_google_provider(self):
-        config = {"providers": {"google_blockchain_analytics": {
-            "enabled": "AUTO", "project_env": "GOOGLE_CLOUD_PROJECT",
-        }}}
-        self.assertFalse(provider_enabled("google_blockchain_analytics", config, {}))
-        self.assertTrue(provider_enabled(
-            "google_blockchain_analytics", config, {"GOOGLE_CLOUD_PROJECT": "project"},
-        ))
-
-    def test_native_transfer_volume_excludes_failed_self_zero_and_root_transfers(self):
-        top_level = [
-            {"hash": "tx-1", "value_wei": "100", "from_address": "0xa", "to_address": "0xb", "receipt_success": True},
-            {"hash": "tx-1", "value_wei": "100", "from_address": "0xa", "to_address": "0xb", "receipt_success": True},
-            {"hash": "tx-2", "value_wei": "200", "from_address": "0xa", "to_address": "0xc", "receipt_success": False},
-            {"hash": "tx-3", "value_wei": "300", "from_address": "0xa", "to_address": "0xa", "receipt_success": True},
-        ]
-        internal = [
-            {"hash": "tx-1", "trace_address": [], "value_wei": "999", "from_address": "0xa", "to_address": "0xb", "success": True},
-            {"hash": "tx-1", "trace_address": [0], "value_wei": "50", "from_address": "0xb", "to_address": "0xc", "success": True},
-            {"hash": "tx-2", "trace_address": [0], "value_wei": "70", "from_address": "0xb", "to_address": "0xc", "success": False},
-            {"hash": "tx-3", "trace_address": [0], "value_wei": "80", "from_address": "0xb", "to_address": "0xb", "success": True},
-        ]
-        self.assertEqual(native_transfer_volume_wei(top_level, internal), 150)
-
-    def test_bigquery_transfer_volume_has_partition_guard_and_same_day_price(self):
-        class Job:
-            def __init__(self, rows=(), bytes_processed=100):
-                self.rows = rows
-                self.total_bytes_processed = bytes_processed
-
-            def result(self):
-                return iter(self.rows)
-
-        class BigQueryClient:
-            def __init__(self):
-                self.calls = []
-
-            def query(self, query, *, job_config):
-                self.calls.append((query, job_config))
-                dry_run = job_config["dry_run"] if isinstance(job_config, dict) else job_config.dry_run
-                return Job(bytes_processed=100) if dry_run else Job([{"transfer_volume_wei": "2000000000000000000"}])
-
-        class PriceProvider:
-            def daily_close(self, target_day):
-                self.target_day = target_day
-                return 2000
-
-        client = BigQueryClient()
-        price = PriceProvider()
-        provider = GoogleBlockchainAnalyticsProvider(
-            client=client,
-            project="test-project",
-            price_provider=price,
-            maximum_bytes_billed=1000,
-        )
-        result = provider.collect(ProviderRequest(
-            "google_blockchain_analytics", "onchain", "ETH", {"target_day": "2026-09-08"},
-            ("onchain.transfer_volume",),
-        ))
-        self.assertEqual(result.observations[0]["value"], 4000)
-        self.assertEqual(price.target_day, date(2026, 9, 8))
-        self.assertEqual(len(client.calls), 2)
-        self.assertIn("DATE(t.block_timestamp) = @target_day", client.calls[0][0])
-        self.assertIn("ARRAY_LENGTH(tr.trace_address) > 0", client.calls[0][0])
-
-    def test_bigquery_transfer_volume_rejects_estimate_over_budget(self):
-        class Job:
-            total_bytes_processed = 1001
-
-        class Client:
-            def query(self, *_args, **_kwargs):
-                return Job()
-
-        provider = GoogleBlockchainAnalyticsProvider(
-            client=Client(), project="test-project", price_provider=object(), maximum_bytes_billed=1000,
-        )
-        with self.assertRaises(ProviderUnavailable) as raised:
-            provider.collect(ProviderRequest(
-                "google_blockchain_analytics", "onchain", "ETH", {"target_day": "2026-09-08"},
-                ("onchain.transfer_volume",),
-            ))
-        self.assertEqual(raised.exception.diagnostic.error_code, "QUERY_BUDGET_EXCEEDED")
+        self.assertEqual(provider_chain("eth.l2.tvs_usd", "ETH"), ("growthepie",))
+        self.assertEqual(provider_chain("onchain.transfer_volume", "ETH"), ("coinmetrics_community",))
 
     def test_rated_uses_effective_balance_and_declares_reward_components(self):
         rows = []

@@ -471,9 +471,10 @@ Events are structured-first. An injected `StructuredEventTransport` may use
 bounded GitHub, RSS/Atom, Discourse JSON, and allowlisted RPC transports;
 Python filters and deduplicates candidates, while `LUNA_MAX` only classifies
 their materiality. A complete reachable source with zero candidates returns a
-valid empty scan; same-authority URLs share a source group. L2BEAT's verified
-OpenAPI requires `L2BEAT_API_KEY` in query `apiKey`, so missing credentials
-remain fail-closed.
+valid empty scan; same-authority URLs share a source group. LunarCrush is an
+optional API v4 social-context provider, and Ethereum protocol readiness uses
+one bounded latest-block RPC probe; missing credentials or history remain
+fail-closed.
 
 ## Confidence workflow
 

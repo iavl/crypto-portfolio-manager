@@ -22,22 +22,19 @@ those contracts; it is not a second schema or routing implementation.
 | Alternative.me | market sentiment context | None | Fear & Greed | market-context route; registered |
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
-| Coin Metrics Pro | authenticated Coin Metrics fallback | `COINMETRICS_API_KEY` | same catalog-aware datasets at the authenticated tier | optional, credential-gated |
-| Google Blockchain Analytics | bounded native ETH transfer volume | GCP project + ADC | successful top-level and internal ETH value transfers | optional BigQuery route; one UTC day and maximum-bytes guard |
 | FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
 | GitHub | bounded developer activity | optional `GITHUB_TOKEN` | fixed ETH/AAVE repository commit counts | optional and allowlisted |
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
 | growthepie | Ethereum L2 TVS, activity, fees, rent and DA economics | None | `eth.l2.tvs_usd` from `master.json` + `export/tvl.json`, `all_l2s` activity, Ethereum fees, L2 rent, DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
 | Blobscan | Ethereum blob demand history | None | blob count, bytes, blob transactions, utilization | ETH-specific public route; RPC is a protocol cross-check |
-| L2BEAT | Ethereum-secured L2 context | `L2BEAT_API_KEY` via official `apiKey` query parameter | filtered L2 TVS and activity | ETH-specific route; current OpenAPI contract and host-chain classification are required |
 | Rated | Ethereum staking network aggregates | `RATED_API_KEY` via Bearer header | effective balance, daily rewards/APR, queue balances | optional Free-tier route; cache daily primitives; no count×32 conversion |
 | Ethereum Beacon API | bounded Beacon node health/fallback | None | node version, genesis and finality checks | configurable `ETH_BEACON_API_URL`; no validator-registry scan |
-| Ethereum JSON-RPC | canonical execution fields | None | `baseFeePerGas`, `gasUsed`, `blobGasUsed`, `excessBlobGas` | bounded protocol cross-check; no per-block review fan-out |
+| Ethereum protocol | canonical execution fields and bounded burn parser | None | `baseFeePerGas`, `gasUsed`, `blobGasUsed`, `excessBlobGas` | enabled by default; one latest-block probe; no per-block review fan-out |
 | Ultrasound Money | ETH burn-rate history | None | public `d30.rate.eth_per_minute` | structured 30D burn route; medium confidence unless methodology changes |
 | Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` current fields | optional; not historical burn authority |
 | Beaconchain | not registered | N/A | no stable aggregate contract verified | intentionally omitted; staking metrics remain optional |
 | EventScanner | current security/governance/regulatory scans | None | event status and source coverage | fixed source catalog; no generic fallback |
-| LunarCrush | social context | `LUNARCRUSH_API_KEY` | no active adapter | unavailable/optional; remains skipped |
+| LunarCrush | social positioning context | `LUNARCRUSH_API_KEY` via Bearer header | completed daily social sentiment and attention metrics | optional API v4 route; credential and plan gated |
 
 ## Fetch modes and routing
 
@@ -61,10 +58,10 @@ the fixed EventScanner catalog for events. BGeometrics is the no-key BTC MVRV Z
 route; ETH monetary/realized valuation routes
 use catalog-aware Coin Metrics with Ultrasound and optional Etherscan fallbacks;
 staking routes require an exact aggregate source and are currently optional;
-growthepie is the no-key primary for ETH L2 TVS and activity, and also supplies
-Ethereum fees and L2 rent/DA; L2BEAT remains an optional authenticated fallback
-or cross-check where configured. Blobscan owns blob history, and SoSoValue owns
-structured ETH ETF flow/AUM. Derived metrics such as
+growthepie is the only active route for ETH L2 TVS and activity, and also
+supplies Ethereum fees and L2 rent/DA. Blobscan owns blob history, and
+SoSoValue owns structured ETH ETF flow/AUM. LunarCrush supplies lower-authority
+social context only. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
 ETH/BTC opportunity ratios, ETH staking/exchange-flow normalization, market
 flow state, and BTC-relative returns are computed by Python and have no
@@ -199,9 +196,9 @@ credentials.
 
 ## Coin Metrics
 
-Community uses `https://community-api.coinmetrics.io`; the authenticated tier
-uses `https://api.coinmetrics.io` and `COINMETRICS_API_KEY`. The provider checks
-the official asset-metric catalog and 1D availability before requesting data.
+Coin Metrics Community uses `https://community-api.coinmetrics.io`. The provider
+checks the official asset-metric catalog and 1D availability before requesting
+data; no authenticated Coin Metrics tier is part of the current contract.
 
 Current approved asset IDs include `btc`, `eth`, `bnb`, and `aave`. Catalog
 support, not this document, decides whether a particular asset/metric is usable.
@@ -224,8 +221,8 @@ For BTC-native valuation, the provider checks the Community catalog for
 from free primitives when the exact metric is unavailable. MVRV Z is derived
 only when aligned `CapMrktCurUSD` and `CapRealUSD` history is present; otherwise
 it is optional and is never replaced by Web snippets. `SOPR` and `NUPL` are
-context-only holder/cycle inputs, not BTC base-score factors. Community is
-no-key first and authenticated Pro remains optional.
+context-only holder/cycle inputs, not BTC base-score factors. Community is the
+only active Coin Metrics provider.
 
 ## FRED
 
@@ -310,17 +307,14 @@ the current contract permits them; a 403 remains a bounded provider failure.
 Blobscan uses `https://api.blobscan.com/stats/timeseries` with
 `timeFrame`, `metrics`, and `sort`, then parses
 `data.timestamps` plus `data.series[].metrics`; no guessed `data[]` wrapper is
-accepted. L2BEAT uses `https://api.l2beat.com/openapi` as the contract,
-requires the declared `apiKey` query credential, fetches current project
-details, and aggregates only `hostChain=Ethereum` projects from the documented
-`TvsChartDataPoint` and `ActivityChartDataPoint` arrays.
+accepted. Growthepie is the only active structured route for the supported
+Ethereum L2 TVS and activity metrics; no unrelated metric is substituted.
 
-Coin Metrics Community is checked first for catalog-supported ETH `SplyCur`,
-`IssTotNtv`, MVRV, realized-cap, and realized-price primitives; Pro is the
-configured fallback. The current Community catalog does not provide the
-staking primitives required to name a value "active effective stake", so
-staking quantity/change/APR/participation metrics are optional until an exact
-aggregate source is configured. Python derives supply growth,
+Coin Metrics Community is checked for catalog-supported ETH `SplyCur`,
+`IssTotNtv`, MVRV, realized-cap, and realized-price primitives. The current
+Community catalog does not provide the staking primitives required to name a
+value "active effective stake", so staking quantity/change/APR/participation
+metrics are optional until an exact aggregate source is configured. Python derives supply growth,
 exchange-flow/market-cap, active-stake-change/supply, and ETH flow/AUM ratios.
 Provider failure, unsupported catalog metrics, missing denominators, and
 conflicting rows remain unavailable; they never become zero or neutral
@@ -339,19 +333,29 @@ request per refresh, uses a cache TTL of at least 24 hours, and marks values
 older than the seven-day metric freshness window unavailable. It does not
 download the full history during a normal review.
 
-## Google Blockchain Analytics
+## LunarCrush
 
-This optional route requires `GOOGLE_CLOUD_PROJECT` and Google Application
-Default Credentials. The BigQuery client is loaded lazily, and the provider
-uses a one-UTC-day partition filter plus `maximum_bytes_billed`; a dry-run
-estimate above the configured limit returns `QUERY_BUDGET_EXCEEDED` without
-executing the query. The query unions successful top-level transaction values
-with successful internal trace values where `trace_address` is non-empty,
-excluding zero-value, failed, and self transfers. It does not count root traces
-twice. ETH is converted to USD with the same completed daily ETH/USD close,
-not the current spot price. The 2026-09-09 live probe could not run because no
-GCP project/ADC was configured, so no live schema or billing estimate is
-claimed here.
+The active adapter uses API v4 at `https://lunarcrush.com/api4` with
+`LUNARCRUSH_API_KEY` in `Authorization: Bearer <key>`. It requests
+`GET /public/coins/:coin/time-series/v2` with `bucket=day`, `start`, and `end`.
+Only `BTC`, `ETH`, `SOL`, `BNB`, `LINK`, and `AAVE` are allowlisted. The
+normalized metrics are:
+
+| Local metric | LunarCrush source and deterministic method |
+|---|---|
+| `sentiment.social_bullish_share` | completed daily `sentiment / 100` |
+| `sentiment.social_mentions_24h` | completed daily `posts_active` |
+| `sentiment.social_mentions_change_7d` | exactly aligned `posts_active` 7D change |
+| `sentiment.social_sentiment_percentile` | same-asset trailing 90-day `sentiment` empirical midrank |
+| `sentiment.social_attention_percentile` | same-asset trailing 90-day `posts_active` empirical midrank |
+
+`posts_active` is the project's operational social-volume/mention proxy: unique
+social posts with interactions for the bucket, not a literal textual token
+mention count. Percentiles are same-asset trailing-history ranks, not
+cross-sectional ranks across cryptocurrencies. Social metrics are lower-authority
+positioning context and cannot by themselves produce a strong allocation change.
+The endpoint may require a LunarCrush subscription plan; credential presence is
+not entitlement proof. Missing or malformed rows remain unavailable evidence.
 
 ## Rated Free tier
 
@@ -377,6 +381,19 @@ provider is registered for diagnostics and future exact fallbacks, but it does
 not scan the validator registry during a normal review and does not expose a
 staking aggregate without a bounded, semantically exact source.
 
+## Ethereum protocol
+
+`EthereumProtocolProvider` is enabled by default and uses
+`https://ethereum-rpc.publicnode.com`; `ETHEREUM_RPC_URL` is an optional local
+override and no API key is required. `--probe ethereum_protocol` performs one
+`POST` request using `eth_getBlockByNumber("latest", false)` and validates the
+execution fields `number`, `timestamp`, `baseFeePerGas`, and `gasUsed`.
+`blobGasUsed` and `excessBlobGas` are validated when present. Exact burn
+calculations still consume caller-supplied bounded block batches and retain the
+EIP-1559 plus EIP-4844 formula. A READY provider or a successful latest-block
+probe does not mean that a normal review has a 30D/365D historical block index;
+the project does not perform an unbounded per-block scan.
+
 ### ETH monetary providers
 
 `UltrasoundMoneyProvider` uses the public
@@ -397,31 +414,6 @@ metadata candidates. Python filters lookback and deduplicates; `LUNA_MAX`
 classifies bounded candidates for materiality. A complete reachable source with
 zero candidates is a valid empty response. Same-authority URLs share a
 `source_group`; independent security domains do not.
-
-### L2BEAT authentication contract
-
-The verified contract is the current OpenAPI document at
-`https://api.l2beat.com/openapi` (also linked from
-`https://api.l2beat.com/docs/`): OpenAPI `3.1.0`, server
-`https://api.l2beat.com`, and `components.securitySchemes.apiKeyAuth` as an
-API key in the query parameter `apiKey`. Top-level security requires
-`apiKeyAuth`; the GET operations inherit it because they do not override
-operation-level security. `/v1/projects` has no extra parameter;
-`/v1/tvs` accepts `range=7d|30d|90d|180d|1y|max`; and `/v1/activity` accepts
-`range=30d|90d|180d|1y|max`. A 2026-09-09 live probe returned HTTP 401 for
-the public projects, TVS, and activity operations, so the current adapter
-requires `L2BEAT_API_KEY` when used. With a key it uses the aggregate `/v1/tvs`
-and `/v1/activity` operations and does not fan out over project details.
-The credential-free baseline is growthepie `master.json` plus
-`export/tvl.json` for TVS; its `landing_page.json` supplies `all_l2s`
-transaction activity and Ethereum fees. If growthepie is unavailable or its
-TVS contract has insufficient history, configured L2BEAT may remain the
-authenticated fallback; no unrelated metric is substituted.
-
-The opt-in provider probe checks the OpenAPI document and then probes the
-aggregate TVS and activity operations with redacted diagnostics. Missing
-credentials remain `CREDENTIAL_MISSING`; a credential-present 401 is reported
-as an authentication rejection.
 
 ## EventScanner
 

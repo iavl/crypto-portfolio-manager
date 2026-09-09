@@ -156,12 +156,12 @@ python3 scripts/run_with_debug.py \
 - fred
 - coinmetrics_community
 - sosovalue
-- l2beat
+- lunarcrush
 - growthepie
 - bgeometrics
-- google_blockchain_analytics
 - rated
 - ethereum_beacon
+- ethereum_protocol
 - blobscan
 - defillama
 - github
@@ -370,12 +370,12 @@ API key 只通过环境变量提供，绝不写入配置、cache、JSONL、日�
 
 ```bash
 export SOSOVALUE_API_KEY='...'
-export COINMETRICS_API_KEY='...'
 export COINGECKO_API_KEY='...'
 export GITHUB_TOKEN='...'
 export RATED_API_KEY='...'
-export GOOGLE_CLOUD_PROJECT='your-project-id'
+export LUNARCRUSH_API_KEY='...'
 export ETH_BEACON_API_URL='https://ethereum-beacon-api.publicnode.com'
+export ETHEREUM_RPC_URL='https://ethereum-rpc.publicnode.com'
 ```
 
 配置存在不代表 provider 一定可用；应同时检查 adapter、credential、runtime
@@ -390,9 +390,11 @@ python3 scripts/providers.py --probe github --asset AAVE
 python3 scripts/providers.py --probe sosovalue --asset BTC
 python3 scripts/providers.py --probe sosovalue --asset ETH
 python3 scripts/providers.py --probe bgeometrics --asset BTC
-python3 scripts/providers.py --probe google_blockchain_analytics --asset ETH
+python3 scripts/providers.py --probe lunarcrush --asset BTC
+python3 scripts/providers.py --probe lunarcrush --asset ETH
 python3 scripts/providers.py --probe rated --asset ETH
 python3 scripts/providers.py --probe ethereum_beacon --asset ETH
+python3 scripts/providers.py --probe ethereum_protocol --asset ETH
 
 ## 15. 开发检查
 

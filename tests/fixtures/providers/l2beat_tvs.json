@@ -1,8 +1,0 @@
-[
-  {
-    "timestamp": 1788134400,
-    "totalTvs": 123456789.0,
-    "bySource": {"native": 1000000, "canonical": 120000000, "external": 1456789},
-    "byCategory": {"stablecoins": 50000000, "eth": 60000000, "btc": 1000000, "other": 9000000, "publicRwa": 500000, "restrictedRwa": 0}
-  }
-]

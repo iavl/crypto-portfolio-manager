@@ -40,7 +40,6 @@ from .circuit_breaker import CircuitBreaker, CircuitState
 from .recording import RecordingEnvelope, RecordingTransport, ReplayTransport, load_recording
 from .alternative_me import AlternativeMeProvider
 from .bgeometrics import BGeometricsProvider
-from .google_blockchain_analytics import GoogleBlockchainAnalyticsProvider
 from .ethereum_beacon import EthereumBeaconProvider
 from .rated import RatedProvider
 from .chain_liveness import (
@@ -52,14 +51,14 @@ from .chain_liveness import (
 )
 from .binance import BinanceProvider
 from .bybit import BybitProvider
-from .coinmetrics import CoinMetricsAuthenticatedProvider, CoinMetricsProvider
+from .coinmetrics import CoinMetricsProvider
 from .coingecko import CoinGeckoProvider
 from .defillama import DeFiLlamaProvider
 from .github_activity import GitHubActivityProvider
 from .sosovalue import SoSoValueProvider
 from .blobscan import BlobscanProvider
 from .growthepie import GrowthepieProvider
-from .l2beat import L2BeatProvider
+from .lunarcrush import LunarCrushProvider
 from .ethereum_protocol import EthereumProtocolProvider
 from .ultrasound_money import UltrasoundMoneyProvider
 from .etherscan import EtherscanProvider
@@ -108,7 +107,6 @@ __all__ = [
     "SocialDataProvider",
     "AlternativeMeProvider",
     "BGeometricsProvider",
-    "GoogleBlockchainAnalyticsProvider",
     "EthereumBeaconProvider",
     "RatedProvider",
     "CHAIN_NATIVE_ASSETS",
@@ -118,7 +116,6 @@ __all__ = [
     "chain_liveness_sources",
     "BinanceProvider",
     "BybitProvider",
-    "CoinMetricsAuthenticatedProvider",
     "CoinMetricsProvider",
     "CoinGeckoProvider",
     "DeFiLlamaProvider",
@@ -126,7 +123,7 @@ __all__ = [
     "SoSoValueProvider",
     "BlobscanProvider",
     "GrowthepieProvider",
-    "L2BeatProvider",
+    "LunarCrushProvider",
     "EthereumProtocolProvider",
     "UltrasoundMoneyProvider",
     "EtherscanProvider",

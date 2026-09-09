@@ -57,8 +57,8 @@ python3 scripts/providers.py \
 
 健康结果应满足：growthepie 不需要 credential；TVS 使用
 `master.json + export/tvl.json`；规范化结果的 `source=growthepie`；
-`observed_at` 是已完成的 UTC 日期；chain count 非零；growthepie 成功时
-不应回退到 L2BEAT。缺失链数据不能按零处理，DeFiLlama protocol TVL 也不是
+`observed_at` 是已完成的 UTC 日期；chain count 非零；growthepie 是当前
+L2 TVS/activity 路由。缺失链数据不能按零处理，DeFiLlama protocol TVL 也不是
 该 L2 TVS 指标的替代品。
 
 ## Provider 架构
@@ -291,22 +291,23 @@ secret 脱敏以及文档。
 python3 scripts/providers.py --probe coinmetrics_community --asset BTC
 python3 scripts/providers.py --probe coinmetrics_community --asset ETH
 python3 scripts/providers.py --probe coinmetrics_community --asset BNB
-python3 scripts/providers.py --probe l2beat --asset ETH
 python3 scripts/providers.py --probe bgeometrics --asset BTC
-python3 scripts/providers.py --probe google_blockchain_analytics --asset ETH
+python3 scripts/providers.py --probe lunarcrush --asset BTC
+python3 scripts/providers.py --probe ethereum_protocol --asset ETH
 python3 scripts/providers.py --probe rated --asset ETH
 python3 scripts/providers.py --probe ethereum_beacon --asset ETH
 python3 scripts/providers.py --probe ultrasound_money --asset ETH
 python3 scripts/providers.py --probe etherscan --asset ETH
 ```
 
-Coin Metrics 输出按 asset 显示真实 1D catalog；L2BEAT 无 key 仍可检查
-OpenAPI，但端点认证失败必须显示 `CREDENTIAL_MISSING`/`HTTP_401`。数值
-历史缺失保持 `PROVIDER_INSUFFICIENT_HISTORY`，不会生成 Web 请求。
+Coin Metrics 输出按 asset 显示真实 1D catalog；LunarCrush 使用 API v4
+Bearer credential，且 social endpoint 的 plan entitlement 仍需 live probe
+确认。Ethereum protocol probe 只读取一个 latest block。数值历史缺失保持
+`PROVIDER_INSUFFICIENT_HISTORY`，不会生成 Web 请求。
 
-BGeometrics 不需要 key；Google Blockchain Analytics 需要
-`GOOGLE_CLOUD_PROJECT`、ADC 和可选 BigQuery client 依赖；Rated 需要
-`RATED_API_KEY`；Beacon 使用 `ETH_BEACON_API_URL` 或 PublicNode 候选地址。
+BGeometrics 不需要 key；LunarCrush 需要 `LUNARCRUSH_API_KEY`；Rated 需要
+`RATED_API_KEY`；Beacon 使用 `ETH_BEACON_API_URL`，Ethereum protocol 使用
+`ETHEREUM_RPC_URL` 或默认 PublicNode 地址。
 缺少这些可选配置时，`--status`/`--doctor` 会显示未准备状态，不会将
 provider failure 变成零值。
 

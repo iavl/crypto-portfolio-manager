@@ -58,7 +58,7 @@ PROVIDER_ROUTES = {
     "liquidations": (),
     "sentiment.market": ("alternative_me",),
     "sentiment.social": ("lunarcrush",),
-    "btc_cycle": ("coinmetrics_community", "coinmetrics_pro"),
+    "btc_cycle": ("coinmetrics_community",),
     "chain_liveness": ("chain_liveness",),
     "fred": ("fred",),
 }
@@ -82,7 +82,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key == "derivatives.open_interest_to_market_cap":
         return ()
     if key == "valuation.market_cap":
-        return ("coingecko", "coinmetrics_community", "coinmetrics_pro")
+        return ("coingecko", "coinmetrics_community")
     if key == "valuation.fdv":
         return ("coingecko",)
     if key == "valuation.fdv_market_cap_ratio":
@@ -90,11 +90,11 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key == "eth_valuation.price_to_realized_price":
         return ()
     if key.startswith("eth_valuation."):
-        return ("coinmetrics_community", "coinmetrics_pro")
+        return ("coinmetrics_community",)
     if key.startswith("eth.l2.rent_paid") or key.startswith("eth.da."):
         return ("growthepie",)
     if key.startswith("eth.l2."):
-        return ("growthepie", "l2beat")
+        return ("growthepie",)
     if key.startswith("eth.blobs."):
         return ("blobscan",)
     if key == "eth.monetary.burn_30d_eth":
@@ -104,7 +104,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key == "eth.monetary.cumulative_burn_eth":
         return ("etherscan",)
     if key.startswith("eth.monetary."):
-        return ("coinmetrics_community", "etherscan", "coinmetrics_pro")
+        return ("coinmetrics_community", "etherscan")
     if key.startswith("eth.staking."):
         if key in {
             "eth.staking.active_effective_stake_eth",
@@ -121,7 +121,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key == "btc_valuation.price_to_realized_price":
         return ()
     if key.startswith("btc_valuation."):
-        return ("bgeometrics", "coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
+        return ("bgeometrics", "coinmetrics_community") if symbol in {None, "BTC"} else ()
     if key == "valuation.fee_revenue_multiple":
         return ("defillama",)
     if key.startswith(("flows.etf_", "flows.btc_etf_")):
@@ -137,7 +137,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key.startswith("derivatives."):
         return ("binance", "bybit")
     if key == "flows.exchange_netflow":
-        return ("coinmetrics_community", "coinmetrics_pro")
+        return ("coinmetrics_community",)
     if key == "sentiment.market_fear_greed":
         return ("alternative_me",)
     if key.startswith("sentiment.social_"):
@@ -149,22 +149,22 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key == "fundamentals.active_users" and symbol in {"AAVE", "BNB"}:
         return ()
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"}:
-        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH"} else ()
+        return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH"} else ()
     if key in {
         "onchain.active_addresses", "onchain.transfer_volume",
         "onchain.blockspace_fees", "onchain.transaction_count",
     }:
         if symbol == "ETH" and key == "onchain.blockspace_fees":
-            return ("growthepie", "coinmetrics_community", "coinmetrics_pro")
+            return ("growthepie", "coinmetrics_community")
         if symbol == "ETH" and key == "onchain.transfer_volume":
-            return ("google_blockchain_analytics", "coinmetrics_community", "coinmetrics_pro")
-        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH", "BNB"} else ()
+            return ("coinmetrics_community",)
+        return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH", "BNB"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)
     if key.startswith("onchain.btc."):
-        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
+        return ("coinmetrics_community",) if symbol in {None, "BTC"} else ()
     if key.startswith("btc_network."):
-        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
+        return ("coinmetrics_community",) if symbol in {None, "BTC"} else ()
     if key.startswith("macro."):
         return PROVIDER_ROUTES["fred"] if symbol in {None, "BTC"} else ()
     # Exchange netflow requires on-chain attribution and event metrics require
@@ -330,7 +330,7 @@ def _parameters(
         result.update({"timeframe": "1D", "interval": "1d"})
     if dataset in {
         "ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain",
-        "github", "macro", "ethereum_protocol", "ethereum_staking", "ethereum_l2", "ethereum_da",
+        "github", "macro", "sentiment", "ethereum_protocol", "ethereum_staking", "ethereum_l2", "ethereum_da",
         "ethereum_valuation",
     } or (
         dataset == "valuation" and as_of is not None
