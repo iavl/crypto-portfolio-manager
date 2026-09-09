@@ -342,9 +342,10 @@ Python HTTPS 始终启用证书和主机名校验。信任库不完整时可指�
 export CRYPTO_PORTFOLIO_CA_BUNDLE=/path/to/trusted-ca-bundle.pem
 ```
 
-在 macOS 上，如果 OpenSSL 没有默认 CA 文件或目录，客户端会使用存在的
-`/etc/ssl/cert.pem`。不要使用 `verify=False`、未验证 SSL context 或
-`curl -k`。
+如果 Python/OpenSSL 没有默认 CA 文件或目录，客户端会优先使用已安装的
+`certifi` CA bundle，再回退到 macOS 存在的 `/etc/ssl/cert.pem`。也可以用
+`CRYPTO_PORTFOLIO_CA_BUNDLE` 显式指定可信 bundle。不要使用 `verify=False`、
+未验证 SSL context 或 `curl -k`。
 
 ## 14. 可选 API key
 

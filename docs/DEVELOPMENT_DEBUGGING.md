@@ -122,6 +122,10 @@ export CRYPTO_PORTFOLIO_CA_BUNDLE=/path/to/trusted-ca-bundle.pem
 python3 scripts/providers.py --doctor binance
 ```
 
+当 Python/OpenSSL 没有默认 CA 路径时，客户端会优先使用已安装的 `certifi`
+CA bundle；如果环境没有 `certifi`，再使用 macOS 的 `/etc/ssl/cert.pem`（如存在）。
+也可以用 `CRYPTO_PORTFOLIO_CA_BUNDLE` 显式指定可信 bundle。
+
 不要使用 `verify=False`、未验证的 SSL context 或 `curl -k`。TLS 失败代表证据
 不可用，不代表链或 Provider 已停止。
 

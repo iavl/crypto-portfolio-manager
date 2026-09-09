@@ -42,6 +42,16 @@ _MACOS_CA_BUNDLE = Path("/etc/ssl/cert.pem")
 _MAX_LOG_CHARS = 12_000
 
 
+def _certifi_ca_bundle() -> Path | None:
+    """Return certifi's maintained CA bundle when it is installed."""
+    try:
+        import certifi
+        bundle = Path(certifi.where()).expanduser()
+    except (ImportError, AttributeError, OSError, TypeError):
+        return None
+    return bundle if bundle.is_file() and os.access(bundle, os.R_OK) else None
+
+
 def _system_ca_bundle() -> Path | None:
     # python.org macOS installs can have no OpenSSL CA files until their
     # certificate installer runs. Reuse the OS bundle, never an unverified TLS context.
@@ -49,6 +59,18 @@ def _system_ca_bundle() -> Path | None:
     if sys.platform == "darwin" and not paths.cafile and not paths.capath and _MACOS_CA_BUNDLE.is_file():
         return _MACOS_CA_BUNDLE
     return None
+
+
+def _default_ca_bundle() -> tuple[Path | None, str]:
+    """Select a verified fallback only when Python has no default CA paths."""
+    paths = ssl.get_default_verify_paths()
+    if paths.cafile or paths.capath:
+        return None, "default"
+    bundle = _certifi_ca_bundle()
+    if bundle is not None:
+        return bundle, "certifi"
+    bundle = _system_ca_bundle()
+    return (bundle, "system") if bundle is not None else (None, "default")
 
 
 PROVIDER_ERROR_CODES = (
@@ -205,8 +227,8 @@ def build_ssl_context(
                 capath=str(dir_path) if dir_path else None,
             )
         else:
-            system_bundle = _system_ca_bundle()
-            context = ssl.create_default_context(cafile=str(system_bundle)) if system_bundle else ssl.create_default_context()
+            fallback_bundle, _ = _default_ca_bundle()
+            context = ssl.create_default_context(cafile=str(fallback_bundle)) if fallback_bundle else ssl.create_default_context()
     except (OSError, ssl.SSLError) as exc:
         source = "CRYPTO_PORTFOLIO_CA_BUNDLE" if configured_bundle else "SSL_CERT_FILE/SSL_CERT_DIR"
         raise ValueError(f"invalid {source} trust configuration: {redact_secrets(str(exc))}") from exc
@@ -440,12 +462,12 @@ class HttpClient:
         self.max_backoff_seconds = max(0.0, float(max_backoff_seconds))
         self.environ = dict(environ if environ is not None else os.environ)
         self.ssl_context = build_ssl_context(ssl_context, ca_bundle=ca_bundle, environ=self.environ)
+        _, default_ca_source = _default_ca_bundle()
         self.ca_source = (
             "explicit_context" if ssl_context is not None else
             "configured" if ca_bundle or self.environ.get("CRYPTO_PORTFOLIO_CA_BUNDLE") else
             "environment" if self.environ.get("SSL_CERT_FILE") or self.environ.get("SSL_CERT_DIR") else
-            "system" if _system_ca_bundle() else
-            "default"
+            default_ca_source
         )
         self.request_count = 0
 

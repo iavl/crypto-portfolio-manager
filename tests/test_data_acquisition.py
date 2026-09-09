@@ -109,6 +109,8 @@ class DataAcquisitionTests(unittest.TestCase):
             bundle.touch()
             with patch("crypto_portfolio.providers.http.sys.platform", "darwin"), patch(
                 "crypto_portfolio.providers.http._MACOS_CA_BUNDLE", bundle,
+            ), patch(
+                "crypto_portfolio.providers.http._certifi_ca_bundle", return_value=None,
             ), patch("ssl.get_default_verify_paths", return_value=paths), patch(
                 "ssl.create_default_context", return_value=context,
             ) as create:
@@ -126,6 +128,23 @@ class DataAcquisitionTests(unittest.TestCase):
                 with patch("ssl.get_default_verify_paths", return_value=paths._replace(cafile="configured.pem")):
                     self.assertEqual(HttpClient(environ={}).ca_source, "default")
                     create.assert_called_once_with()
+
+    def test_certifi_fallback_keeps_tls_verification_when_default_ca_is_missing(self):
+        paths = ssl.get_default_verify_paths()._replace(cafile=None, capath=None)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory) / "certifi.pem"
+            bundle.touch()
+            with patch(
+                "crypto_portfolio.providers.http._certifi_ca_bundle", return_value=bundle,
+            ), patch("ssl.get_default_verify_paths", return_value=paths), patch(
+                "ssl.create_default_context", return_value=context,
+            ) as create:
+                client = HttpClient(environ={})
+                create.assert_called_once_with(cafile=str(bundle))
+                self.assertEqual(client.ca_source, "certifi")
+                self.assertEqual(client.ssl_context.verify_mode, ssl.CERT_REQUIRED)
+                self.assertTrue(client.ssl_context.check_hostname)
 
     def test_sosovalue_probe_failure_does_not_crash_or_claim_schema_success(self):
         class ProbeClient:

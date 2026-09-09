@@ -447,7 +447,9 @@ python3 scripts/providers.py --probe chain_liveness --asset BTC
 network access; it is not endpoint health. `--probe` is opt-in network,
 authentication, entitlement, schema, and history diagnostics. TLS certificate
 and hostname verification remain enabled. `CRYPTO_PORTFOLIO_CA_BUNDLE` may point
-at a trusted bundle; credentials and response bodies are not printed.
+at a trusted bundle. When Python has no default CA paths, an installed `certifi`
+bundle is used before the macOS `/etc/ssl/cert.pem` fallback. Credentials and
+response bodies are not printed.
 
 Fallback success preserves the primary failed attempt and applies the configured
 quality penalty. A partial EventScanner response is `WATCH`, never `CLEAR`;
