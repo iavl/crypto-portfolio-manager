@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from ..models.cash_flow import CASH_FLOW_RESOLUTION_STATUSES
 from ..models.time import normalize_timestamp, parse_timestamp
 from ..models.performance import NAVHistoryResult
 
@@ -25,7 +26,9 @@ def _finite(value: Any, field: str, *, minimum: float | None = None) -> float:
 class PortfolioSnapshot:
     timestamp: str
     portfolio_value: float
-    external_cash_flow: float | ExternalCashFlow = 0.0
+    external_cash_flow: float | ExternalCashFlow | None = 0.0
+    cash_flow_resolution_status: str | None = None
+    snapshot_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -34,16 +37,42 @@ class PortfolioSnapshot:
             "portfolio_value",
             _finite(self.portfolio_value, "portfolio_value", minimum=0),
         )
+        status = self.cash_flow_resolution_status
+        if status is not None:
+            status = str(status).strip().upper()
+            if status not in CASH_FLOW_RESOLUTION_STATUSES:
+                raise ValueError("cash_flow_resolution_status is unsupported")
+        flow_amount = None
         if isinstance(self.external_cash_flow, ExternalCashFlow):
             if parse_timestamp(self.external_cash_flow.timestamp) > parse_timestamp(self.timestamp):
                 raise ValueError("cash flow timestamp must be <= its snapshot timestamp")
             object.__setattr__(self, "external_cash_flow", self.external_cash_flow)
+            flow_amount = self.external_cash_flow.amount
         else:
-            object.__setattr__(
-                self,
-                "external_cash_flow",
-                _finite(self.external_cash_flow, "external_cash_flow"),
-            )
+            if self.external_cash_flow is not None:
+                flow_amount = _finite(self.external_cash_flow, "external_cash_flow")
+            object.__setattr__(self, "external_cash_flow", flow_amount)
+        if status is None:
+            # Internal benchmark/ledger callers pass an explicit numeric flow;
+            # persisted portfolio snapshots use the stricter model contract.
+            status = "CONFIRMED_NONE" if flow_amount in (None, 0) else "CONFIRMED_AMOUNT"
+        if status == "UNRESOLVED":
+            if flow_amount is not None:
+                raise ValueError("UNRESOLVED cash flow requires null amount")
+        elif status in {"CONFIRMED_NONE", "BASELINE_RESET"}:
+            if flow_amount != 0:
+                raise ValueError(f"{status} requires zero external_cash_flow")
+        elif status == "CONFIRMED_AMOUNT" and (flow_amount is None or flow_amount == 0):
+            raise ValueError("CONFIRMED_AMOUNT requires a non-zero external_cash_flow")
+        if self.snapshot_id is not None and (
+            not isinstance(self.snapshot_id, str) or not self.snapshot_id.strip()
+        ):
+            raise ValueError("snapshot_id must be a non-empty string or null")
+        object.__setattr__(self, "cash_flow_resolution_status", status)
+        if self.snapshot_id is not None:
+            object.__setattr__(self, "snapshot_id", self.snapshot_id.strip())
+        if status == "BASELINE_RESET" and self.snapshot_id is None:
+            raise ValueError("BASELINE_RESET requires snapshot_id")
 
 
 @dataclass(frozen=True)
@@ -68,6 +97,7 @@ class NAVState:
     nav_per_unit: float
     current_drawdown: float = 0.0
     max_drawdown: float = 0.0
+    cash_flow_resolution_status: str = "CONFIRMED_NONE"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -78,6 +108,10 @@ class NAVState:
         max_drawdown = _finite(self.max_drawdown, "max_drawdown")
         if current_drawdown > 0 or max_drawdown > 0:
             raise ValueError("drawdown values must be <= 0")
+        status = str(self.cash_flow_resolution_status).strip().upper()
+        if status not in CASH_FLOW_RESOLUTION_STATUSES:
+            raise ValueError("cash_flow_resolution_status is unsupported")
+        object.__setattr__(self, "cash_flow_resolution_status", status)
 
 
 def _coerce_snapshot(value: PortfolioSnapshot | Mapping[str, Any] | Any) -> PortfolioSnapshot:
@@ -92,19 +126,25 @@ def _coerce_snapshot(value: PortfolioSnapshot | Mapping[str, Any] | Any) -> Port
             portfolio_value = value["total_value"]
         else:
             raise ValueError("snapshot is missing portfolio_value")
-        cash_flow = value.get("external_cash_flow", 0.0)
+        if str(value.get("external_cash_flow_type", "")).strip().upper() == "UNRESOLVED":
+            raise ValueError("external_cash_flow_type UNRESOLVED is unsupported; use cash_flow_resolution_status")
+        cash_flow = value.get("external_cash_flow")
         if isinstance(cash_flow, Mapping):
             cash_flow = ExternalCashFlow(**cash_flow)
         return PortfolioSnapshot(
             timestamp=value.get("timestamp", ""),
             portfolio_value=portfolio_value,
             external_cash_flow=cash_flow,
+            cash_flow_resolution_status=value.get("cash_flow_resolution_status"),
+            snapshot_id=value.get("snapshot_id"),
         )
     if hasattr(value, "timestamp") and hasattr(value, "total_value_usd"):
         return PortfolioSnapshot(
             timestamp=value.timestamp,
             portfolio_value=value.total_value_usd,
             external_cash_flow=getattr(value, "external_cash_flow", 0.0),
+            cash_flow_resolution_status=getattr(value, "cash_flow_resolution_status", None),
+            snapshot_id=getattr(value, "snapshot_id", None),
         )
     raise ValueError("snapshots must contain PortfolioSnapshot objects or mappings")
 
@@ -126,6 +166,8 @@ def build_nav_history(
 
     first_flow = values[0].external_cash_flow
     first_amount = first_flow.amount if isinstance(first_flow, ExternalCashFlow) else first_flow
+    if first_amount is None:
+        first_amount = 0.0
     if first_amount != 0:
         raise ValueError("initial snapshot external_cash_flow must be 0")
 
@@ -142,11 +184,34 @@ def build_nav_history(
             nav_per_unit=nav,
             current_drawdown=0.0,
             max_drawdown=0.0,
+            cash_flow_resolution_status=values[0].cash_flow_resolution_status,
         )
     ]
     for snapshot in values[1:]:
+        if snapshot.cash_flow_resolution_status == "UNRESOLVED":
+            raise ValueError("cash-flow resolution is required before building NAV history")
         flow = snapshot.external_cash_flow
         flow_amount = flow.amount if isinstance(flow, ExternalCashFlow) else flow
+        if flow_amount is None:
+            raise ValueError("resolved cash flow must include an amount")
+        if snapshot.cash_flow_resolution_status == "BASELINE_RESET":
+            units = snapshot.portfolio_value
+            nav = 1.0
+            peak_nav = nav
+            worst_drawdown = 0.0
+            result.append(
+                NAVState(
+                    timestamp=snapshot.timestamp,
+                    portfolio_value=snapshot.portfolio_value,
+                    external_cash_flow=0.0,
+                    units=units,
+                    nav_per_unit=nav,
+                    current_drawdown=0.0,
+                    max_drawdown=0.0,
+                    cash_flow_resolution_status=snapshot.cash_flow_resolution_status,
+                )
+            )
+            continue
         if isinstance(flow, ExternalCashFlow):
             if parse_timestamp(flow.timestamp) > parse_timestamp(snapshot.timestamp):
                 raise ValueError("cash flow timestamp must be <= its snapshot timestamp")
@@ -176,6 +241,7 @@ def build_nav_history(
                 nav_per_unit=nav,
                 current_drawdown=drawdown,
                 max_drawdown=worst_drawdown,
+                cash_flow_resolution_status=snapshot.cash_flow_resolution_status,
             )
         )
     return result
@@ -205,16 +271,60 @@ def cash_flow_adjusted_return(
     return nav_return(build_nav_history(snapshots))
 
 
-def _unresolved_flow(value: Any, index: int) -> bool:
-    if index == 0:
-        return False
+def _status(value: Any) -> str:
     if isinstance(value, Mapping):
-        flow_type = value.get("external_cash_flow_type")
-        if flow_type is not None:
-            return str(flow_type).strip().upper() == "UNRESOLVED"
-        return "external_cash_flow" not in value
-    flow_type = getattr(value, "external_cash_flow_type", None)
-    return flow_type is not None and str(flow_type).strip().upper() == "UNRESOLVED"
+        raw = value.get("cash_flow_resolution_status")
+        if raw is None:
+            amount = value.get("external_cash_flow")
+        else:
+            return str(raw).strip().upper()
+    else:
+        raw = getattr(value, "cash_flow_resolution_status", None)
+        if raw is not None:
+            return str(raw).strip().upper()
+        amount = getattr(value, "external_cash_flow", 0.0)
+    if isinstance(amount, ExternalCashFlow):
+        amount = amount.amount
+    return "UNRESOLVED" if amount is None else "CONFIRMED_NONE" if amount == 0 else "CONFIRMED_AMOUNT"
+
+
+def _unresolved_flow(value: Any, index: int) -> bool:
+    return _status(value) == "UNRESOLVED"
+
+
+def _snapshot_id(value: Any) -> str | None:
+    return value.get("snapshot_id") if isinstance(value, Mapping) else getattr(value, "snapshot_id", None)
+
+
+def _segment_result(values: Sequence[PortfolioSnapshot | Mapping[str, Any] | Any]) -> tuple[tuple[NAVState, ...], tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+    """Return confirmed states, segment metadata, and unresolved current gaps."""
+    unresolved_indices = [index for index, value in enumerate(values) if _unresolved_flow(value, index)]
+    first_gap = unresolved_indices[0] if unresolved_indices else len(values)
+    confirmed = values[:first_gap]
+    states = tuple(build_nav_history(confirmed)) if confirmed else ()
+    gaps = tuple(
+        {
+            "index": index,
+            "snapshot_id": _snapshot_id(values[index]),
+            "amount": None,
+            "cash_flow_resolution_status": "UNRESOLVED",
+            "timestamp": (
+                values[index].get("timestamp")
+                if isinstance(values[index], Mapping)
+                else getattr(values[index], "timestamp", None)
+            ),
+            "reason": "cash_flow_resolution_status is UNRESOLVED",
+        }
+        for index in unresolved_indices
+    )
+    status = "PROVISIONAL" if gaps else "FINAL"
+    segment = ({
+        "status": "AVAILABLE" if states else "UNAVAILABLE",
+        "performance_finality": status,
+        "start": states[0].timestamp if states else None,
+        "end": states[-1].timestamp if states else None,
+    },)
+    return states, segment, gaps
 
 
 def build_nav_history_result(
@@ -223,51 +333,40 @@ def build_nav_history_result(
     """Build a status-bearing NAV history without guessing unresolved flows."""
     if not snapshots:
         return NAVHistoryResult("UNAVAILABLE", explanations=("no portfolio snapshots are available",))
-    unresolved = tuple(
-        {
-            "index": index,
-            "timestamp": getattr(value, "timestamp", value.get("timestamp") if isinstance(value, Mapping) else None),
-            "amount": value.get("external_cash_flow") if isinstance(value, Mapping) else getattr(value, "external_cash_flow", 0.0),
-            "reason": "external cash-flow classification is required",
-        }
-        for index, value in enumerate(snapshots)
-        if _unresolved_flow(value, index)
-    )
+    values = tuple(_coerce_snapshot(snapshot) for snapshot in snapshots)
+    reset_indices = [index for index, value in enumerate(values) if index > 0 and value.cash_flow_resolution_status == "BASELINE_RESET"]
+    current_start = reset_indices[-1] if reset_indices else 0
+    prior_segments: list[dict[str, Any]] = []
+    for start, end in zip((0, *reset_indices), (*reset_indices, len(values))):
+        segment_values = values[start:end]
+        if not segment_values:
+            continue
+        segment_states, segment_meta, segment_gaps = _segment_result(segment_values)
+        if start != current_start:
+            prior_segments.append({**segment_meta[0], "archived": True, "unresolved_count": len(segment_gaps)})
+    current_values = values[current_start:]
+    states, current_segment, unresolved = _segment_result(current_values)
     if unresolved:
-        first_gap = int(unresolved[0]["index"])
-        prefix = snapshots[:first_gap]
-        states = tuple(build_nav_history(prefix)) if prefix else ()
-        segments = (
-            {
-                "status": "AVAILABLE" if states else "UNAVAILABLE",
-                "start": states[0].timestamp if states else None,
-                "end": states[-1].timestamp if states else None,
-            },
-            {"status": "PROVISIONAL", "start": unresolved[0]["timestamp"], "end": None},
-        )
         return NAVHistoryResult(
             "PROVISIONAL",
             states=states,
-            segments=segments,
+            segments=tuple(prior_segments) + current_segment,
             unresolved_cash_flows=unresolved,
             benchmark_status="PROVISIONAL",
-            explanations=("unresolved historical cash flow blocks cross-gap NAV and benchmark performance",),
+            performance_finality="PROVISIONAL",
+            explanations=("unresolved cash-flow resolution blocks current NAV and benchmark performance",),
         )
-    states = tuple(build_nav_history(snapshots))
     result = nav_return(states)
     return NAVHistoryResult(
         "AVAILABLE",
         states=states,
-        segments=({
-            "status": "AVAILABLE",
-            "start": states[0].timestamp,
-            "end": states[-1].timestamp,
-        },),
+        segments=tuple(prior_segments) + current_segment,
         cash_flow_adjusted_return=result,
         nav_return=result,
         current_drawdown=states[-1].current_drawdown,
         max_drawdown=min(state.max_drawdown for state in states),
         benchmark_status="UNAVAILABLE",
+        performance_finality="FINAL",
     )
 
 

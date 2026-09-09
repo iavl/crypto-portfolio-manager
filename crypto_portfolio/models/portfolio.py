@@ -6,12 +6,13 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .cash_flow import CASH_FLOW_RESOLUTION_STATUSES
 from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
 
 ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
-EXTERNAL_CASH_FLOW_TYPES = {"NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"}
+EXTERNAL_CASH_FLOW_TYPES = {"NONE", "DEPOSIT", "WITHDRAWAL"}
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
@@ -127,13 +128,14 @@ class PortfolioSnapshot:
     timestamp: str
     base_currency: str = "USD"
     positions: tuple[Position, ...] = ()
-    external_cash_flow: float = 0.0
+    external_cash_flow: float | None = None
     external_cash_flow_type: str | None = None
     total_value: float | None = None
     source: str | None = None
     policy_hash: str | None = None
     resolved_policy: Mapping[str, Any] | None = None
     snapshot_id: str | None = None
+    cash_flow_resolution_status: str = "UNRESOLVED"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -150,28 +152,35 @@ class PortfolioSnapshot:
         if not isinstance(self.base_currency, str) or not self.base_currency.strip():
             raise ValueError("base_currency must be a non-empty string")
         object.__setattr__(self, "base_currency", self.base_currency.strip().upper())
-        object.__setattr__(
-            self,
-            "external_cash_flow",
-            _number(self.external_cash_flow, "external_cash_flow"),
-        )
+        status = str(self.cash_flow_resolution_status).strip().upper()
+        if status not in CASH_FLOW_RESOLUTION_STATUSES:
+            raise ValueError("cash_flow_resolution_status is unsupported")
+        object.__setattr__(self, "cash_flow_resolution_status", status)
+        amount = self.external_cash_flow
+        if amount is not None:
+            amount = _number(amount, "external_cash_flow")
+        object.__setattr__(self, "external_cash_flow", amount)
         flow_type = self.external_cash_flow_type
-        if flow_type is None:
-            flow_type = (
-                "DEPOSIT" if self.external_cash_flow > 0 else
-                "WITHDRAWAL" if self.external_cash_flow < 0 else
-                "UNRESOLVED"
-            )
-        if not isinstance(flow_type, str) or flow_type.strip().upper() not in EXTERNAL_CASH_FLOW_TYPES:
-            raise ValueError(f"external_cash_flow_type must be one of {sorted(EXTERNAL_CASH_FLOW_TYPES)}")
-        flow_type = flow_type.strip().upper()
-        if flow_type == "NONE" and self.external_cash_flow != 0:
-            raise ValueError("external_cash_flow_type NONE requires external_cash_flow 0")
-        if flow_type == "DEPOSIT" and self.external_cash_flow <= 0:
-            raise ValueError("external_cash_flow_type DEPOSIT requires a positive external_cash_flow")
-        if flow_type == "WITHDRAWAL" and self.external_cash_flow >= 0:
-            raise ValueError("external_cash_flow_type WITHDRAWAL requires a negative external_cash_flow")
+        if flow_type is not None:
+            if not isinstance(flow_type, str) or flow_type.strip().upper() not in EXTERNAL_CASH_FLOW_TYPES:
+                raise ValueError(f"external_cash_flow_type must be one of {sorted(EXTERNAL_CASH_FLOW_TYPES)}")
+            flow_type = flow_type.strip().upper()
         object.__setattr__(self, "external_cash_flow_type", flow_type)
+        if status == "UNRESOLVED":
+            if amount is not None or flow_type is not None:
+                raise ValueError("UNRESOLVED cash flow requires null amount and type")
+        elif status in {"CONFIRMED_NONE", "BASELINE_RESET"}:
+            if amount != 0 or flow_type != "NONE":
+                raise ValueError(f"{status} requires external_cash_flow 0 and type NONE")
+        elif status == "CONFIRMED_AMOUNT":
+            if amount is None or amount == 0 or flow_type not in {"DEPOSIT", "WITHDRAWAL"}:
+                raise ValueError("CONFIRMED_AMOUNT requires a non-zero amount and a flow type")
+            if flow_type == "DEPOSIT" and amount <= 0:
+                raise ValueError("DEPOSIT external_cash_flow must be positive")
+            if flow_type == "WITHDRAWAL" and amount >= 0:
+                raise ValueError("WITHDRAWAL external_cash_flow must be negative")
+        if status == "BASELINE_RESET" and not self.snapshot_id:
+            raise ValueError("BASELINE_RESET requires snapshot_id")
         object.__setattr__(
             self,
             "total_value",
@@ -215,6 +224,7 @@ class PortfolioSnapshot:
             "base_currency": self.base_currency,
             "external_cash_flow": self.external_cash_flow,
             "external_cash_flow_type": self.external_cash_flow_type,
+            "cash_flow_resolution_status": self.cash_flow_resolution_status,
             "total_value": self.total_value,
             "policy_hash": self.policy_hash,
             "resolved_policy": self.resolved_policy,
@@ -276,7 +286,7 @@ def snapshot_from_mapping(
         raise ValueError("snapshot must be an object")
     allowed = {
         "timestamp", "source", "base_currency", "positions", "external_cash_flow",
-        "external_cash_flow_type", "total_value", "config", "policy_hash", "resolved_policy", "snapshot_id",
+        "external_cash_flow_type", "cash_flow_resolution_status", "total_value", "config", "policy_hash", "resolved_policy", "snapshot_id",
         "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio",
     }
     unknown = set(data) - allowed
@@ -303,16 +313,16 @@ def snapshot_from_mapping(
     if supplied_policy_hash != expected_policy_hash:
         raise ValueError("snapshot policy_hash does not match resolved policy")
     reported_total_value = data.get("total_value")
-    flow_value = data.get("external_cash_flow", 0.0)
+    flow_value = data.get("external_cash_flow")
     flow_type = data.get("external_cash_flow_type")
-    if flow_type is None and "external_cash_flow" in data and isinstance(flow_value, (int, float)) and not isinstance(flow_value, bool):
-        flow_type = "DEPOSIT" if flow_value > 0 else "WITHDRAWAL" if flow_value < 0 else "NONE"
+    flow_status = data.get("cash_flow_resolution_status", "UNRESOLVED")
     snapshot = PortfolioSnapshot(
         timestamp=timestamp,
         positions=positions,
         base_currency=data.get("base_currency", "USD"),
         external_cash_flow=flow_value,
         external_cash_flow_type=flow_type,
+        cash_flow_resolution_status=flow_status,
         total_value=reported_total_value,
         source=data.get("source"),
         policy_hash=expected_policy_hash,
@@ -412,6 +422,7 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
     return {
         "config": resolved_policy.as_dict(),
         "timestamp": snapshot.timestamp,
+        "snapshot_id": snapshot.snapshot_id,
         "source": snapshot.source,
         "base_currency": snapshot.base_currency,
         "total_value_usd": total,
@@ -424,6 +435,7 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
         "portfolio_drawdown": drawdown,
         "external_cash_flow": snapshot.external_cash_flow,
         "external_cash_flow_type": snapshot.external_cash_flow_type,
+        "cash_flow_resolution_status": snapshot.cash_flow_resolution_status,
         "cost_known_current_value_usd": performance.cost_known_current_value_usd,
         "cost_known_cost_basis_usd": performance.cost_known_cost_basis_usd,
         "total_unrealized_pnl_known_usd": performance.total_unrealized_pnl_known_usd,

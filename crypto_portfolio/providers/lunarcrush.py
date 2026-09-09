@@ -75,13 +75,28 @@ def _number(value: Any, field: str, *, minimum: float | None = None, maximum: fl
 def _diagnostic(error: ProviderError) -> Mapping[str, Any]:
     diagnostic = getattr(error, "diagnostic", None)
     if hasattr(diagnostic, "as_dict"):
-        return dict(redact_secrets(diagnostic.as_dict()))
-    code = (
-        "PROVIDER_INSUFFICIENT_HISTORY" if isinstance(error, ProviderInsufficientHistory)
-        else "PROVIDER_UNSUPPORTED" if isinstance(error, ProviderUnsupportedMetric)
-        else "PROVIDER_SCHEMA_ERROR"
-    )
-    return {"error_code": code, "detail": redact_secrets(str(error)) or error.__class__.__name__}
+        result = dict(redact_secrets(diagnostic.as_dict()))
+    elif isinstance(diagnostic, Mapping):
+        result = dict(redact_secrets(dict(diagnostic)))
+    else:
+        code = (
+            "PROVIDER_INSUFFICIENT_HISTORY" if isinstance(error, ProviderInsufficientHistory)
+            else "PROVIDER_UNSUPPORTED" if isinstance(error, ProviderUnsupportedMetric)
+            else "PROVIDER_SCHEMA_ERROR"
+        )
+        result = {"error_code": code, "detail": redact_secrets(str(error)) or error.__class__.__name__}
+    raw_code = str(result.get("error_code", "")).strip().upper()
+    detail = str(result.get("detail", "")).lower()
+    status_code = result.get("status_code")
+    if raw_code in {"HTTP_402", "PROVIDER_PLAN_RESTRICTED"} or status_code == 402 or any(
+        marker in detail for marker in ("entitlement", "subscription", "upgrade", "plan")
+    ) and status_code in {402, 403}:
+        result["error_code"] = "ENTITLEMENT_REQUIRED"
+        result["retryable"] = False
+    elif raw_code in {"HTTP_429", "HTTP_403_RATE_LIMIT", "RATE_LIMITED"} or status_code == 429:
+        result["error_code"] = "RATE_LIMITED"
+        result["retryable"] = True
+    return result
 
 
 def _completed_rows(
@@ -282,15 +297,19 @@ class LunarCrushProvider:
         start_value = request.parameters.get("start")
         start = parse_timestamp(start_value) if start_value is not None else end - timedelta(days=2)
         endpoint = f"{BASE_URL}/public/coins/{scope.lower()}/time-series/v2"
-        payload = self.client.get_json(
-            endpoint,
-            params={
-                "bucket": "day",
-                "start": int(start.timestamp()),
-                "end": int(end.timestamp()),
-            },
-            headers=headers,
-        )
+        try:
+            payload = self.client.get_json(
+                endpoint,
+                params={
+                    "bucket": "day",
+                    "start": int(start.timestamp()),
+                    "end": int(end.timestamp()),
+                },
+                headers=headers,
+            )
+        except ProviderError as exc:
+            diagnostic = _diagnostic(exc)
+            raise exc.__class__(str(exc), diagnostic=diagnostic) from exc
         fetched_at = _now(self.clock)
         observations: list[Mapping[str, Any]] = []
         diagnostics: dict[str, Mapping[str, Any]] = {}

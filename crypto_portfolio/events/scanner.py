@@ -550,6 +550,32 @@ class EventScanner:
             for source in self.sources
             if source.category == category and source.applies_to(asset)
         }
+        source_coverage = {
+            "required": len(required_groups),
+            "reachable": reachable_required,
+            "ratio": coverage,
+            "by_source": {
+                source_id: {
+                    "reachable": responses_by_id[source_id].reachable,
+                    "complete_for_source": responses_by_id[source_id].complete_for_source,
+                }
+                for source_id in sorted(responses_by_id)
+            },
+            "by_group": {
+                group: group in reachable_groups
+                for group in sorted(required_groups)
+            },
+        }
+        if asset == "AAVE" and category == "governance":
+            source_coverage.update({
+                "coverage_rule": "ONCHAIN_AND_ONE_OFFCHAIN",
+                "coverage_state": (
+                    "SUFFICIENT"
+                    if source_coverage["by_group"].get("aave-governance-onchain", False)
+                    and source_coverage["by_group"].get("aave-governance-offchain", False)
+                    else "INSUFFICIENT_SOURCE_COVERAGE"
+                ),
+            })
         source_quality = sum({1: 1.0, 2: 0.75, 3: 0.5}[source.tier] for source in required_groups.values()) / len(required_groups) if required_groups else 0.0
         return EventScanResult(
             asset=asset,
@@ -562,22 +588,7 @@ class EventScanner:
             confidence=confidence,
             state=state,
             confidence_score=coverage * (0.5 if conflict else 1.0),
-            source_coverage={
-                "required": len(required_groups),
-                "reachable": reachable_required,
-                "ratio": coverage,
-                "by_source": {
-                    source_id: {
-                        "reachable": responses_by_id[source_id].reachable,
-                        "complete_for_source": responses_by_id[source_id].complete_for_source,
-                    }
-                    for source_id in sorted(responses_by_id)
-                },
-                "by_group": {
-                    group: group in reachable_groups
-                    for group in sorted(required_groups)
-                },
-            },
+            source_coverage=source_coverage,
             source_quality={"mean": source_quality},
             source_redundancy={"independent_groups": len(source_groups)},
             signal_consistency={"score": 0.0 if conflict else 1.0},

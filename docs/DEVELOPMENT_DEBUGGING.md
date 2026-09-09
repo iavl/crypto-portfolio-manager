@@ -95,9 +95,13 @@ python3 scripts/events.py --smoke --asset BTC --asset ETH
 程序会拒绝未知字段、source/时间戳/URL/候选身份变化。`--smoke` 只显示事件状态、
 覆盖率、confidence、候选数和脱敏诊断。
 
-当前四个结构化 source 映射为：Ethereum Foundation security 使用 Blog RSS，
+当前结构化 source 映射为：Ethereum Foundation security 使用 Blog RSS，
 Ethereum EIPs 使用 `ethereum/EIPs` GitHub commits，Aave security 使用
-Governance Risk Discourse JSON，ESMA/MiCA 使用 ESMA RSS。GitHub commits 使用
+Governance Risk Discourse JSON，AAVE governance 同时使用 Governance V3
+Ethereum contract `0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7` 的
+allowlisted `RPC_LOGS` 和官方 forum/proposals。AAVE governance 只有
+`ONCHAIN_AND_ONE_OFFCHAIN` 两组都满足时才是 `SUFFICIENT`；ESMA/MiCA 使用
+ESMA RSS。GitHub commits 使用
 请求的 `lookback_start`/`as_of` 作为 `since`/`until`；Discourse 只跟随同源的
 `more_topics_url`，达到有界分页上限时保持 incomplete。`NO_STRUCTURED_TRANSPORT`
 表示固定 source 没有配置受支持的结构化 endpoint，与
@@ -138,8 +142,17 @@ HTTP_403_RATE_LIMIT / HTTP_429
 HTTP_5XX / CONNECTION_RESET
   -> 临时上游/网络故障
 
-PROVIDER_PLAN_RESTRICTED
-  -> 订阅或 Provider 权限不足
+HTTP_402 / ENTITLEMENT_REQUIRED / PROVIDER_PLAN_RESTRICTED
+  -> 订阅或 Provider 权限不足；只有明确 optional/premium social metric 才可 SKIPPED
+
+RATED_SUBSCRIPTION_INACTIVE
+  -> Rated 返回 401 Subscription is not active；仍是 FAILED，须由用户激活后再 probe
+
+RATE_LIMITED / HTTP_429
+  -> provider rate limit；保留 retryable，不填零、不当作成功
+
+UNAVAILABLE_BY_METHODOLOGY
+  -> 输入不足以证明所需计算方法；不是 transport failure
 
 INVALID_JSON / PROVIDER_SCHEMA_ERROR / PROVIDER_SCHEMA_CHANGED
   -> 上游契约或规范化回归
@@ -159,10 +172,11 @@ CIRCUIT_OPEN / REQUEST_BUDGET_EXHAUSTED
 
 传输错误码包括 `DNS_RESOLUTION_FAILED`、`CONNECT_TIMEOUT`、`READ_TIMEOUT`、
 `CONNECTION_REFUSED`、`CONNECTION_RESET`、`TLS_*` 和 `PROXY_ERROR`。HTTP 错误码
-包括 `HTTP_400`、`HTTP_401`、分类后的 `HTTP_403_*` 系列、`HTTP_404`、
+包括 `HTTP_400`、`HTTP_401`、`HTTP_402`、分类后的 `HTTP_403_*` 系列、`HTTP_404`、
 `HTTP_429` 和 `HTTP_5XX`。
 
-Provider 错误码包括 `PROVIDER_PLAN_RESTRICTED`、
+Provider 错误码包括 `PROVIDER_PLAN_RESTRICTED`、`RATED_SUBSCRIPTION_INACTIVE`、
+`ENTITLEMENT_REQUIRED`、`RATE_LIMITED`、`UNAVAILABLE_BY_METHODOLOGY`、
 `PROVIDER_INSUFFICIENT_HISTORY`、`PROVIDER_UNSUPPORTED`、
 `PROVIDER_NOT_APPLICABLE`、`PROVIDER_SCHEMA_ERROR` 和
 `PROVIDER_SCHEMA_CHANGED`、`SOURCE_METHOD_MISMATCH`、
@@ -309,8 +323,10 @@ python3 scripts/providers.py --probe etherscan --asset ETH
 ```
 
 Coin Metrics 输出按 asset 显示真实 1D catalog；LunarCrush 使用 API v4
-Bearer credential，且 social endpoint 的 plan entitlement 仍需 live probe
-确认。Ethereum protocol probe 只读取一个 latest block。数值历史缺失保持
+Bearer credential，同一 asset 的 social metrics 共用一次 time-series request，
+并把 402/429/circuit 分别记录为 `ENTITLEMENT_REQUIRED`/`RATE_LIMITED`/`CIRCUIT_OPEN`。
+Rated 401 body `{"detail":"Subscription is not active."}` 记录为
+`RATED_SUBSCRIPTION_INACTIVE`，不会伪造成 `SKIPPED_PREMIUM`。Ethereum protocol probe 只读取一个 latest block。数值历史缺失保持
 `PROVIDER_INSUFFICIENT_HISTORY`，不会生成 Web 请求。
 
 BGeometrics 不需要 key；LunarCrush 需要 `LUNARCRUSH_API_KEY`；Rated 需要

@@ -1,29 +1,38 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/crypto-portfolio-manager/cash-flow-resolution.schema.json",
-  "title": "Confirmed historical cash-flow resolution",
+  "title": "Historical cash-flow resolution",
   "type": "object",
-  "required": ["resolution_id", "snapshot_id", "timestamp", "cash_flow_type", "amount", "rationale"],
+  "required": ["resolution_id", "snapshot_id", "timestamp", "cash_flow_resolution_status", "external_cash_flow", "external_cash_flow_type", "rationale"],
   "properties": {
     "resolution_id": {"type": "string", "minLength": 1},
     "snapshot_id": {"type": "string", "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
-    "cash_flow_type": {"enum": ["DEPOSIT", "WITHDRAWAL", "NONE"]},
-    "amount": {"type": "number"},
+    "cash_flow_resolution_status": {"enum": ["CONFIRMED_NONE", "CONFIRMED_AMOUNT", "UNRESOLVED", "BASELINE_RESET"]},
+    "external_cash_flow": {"type": ["number", "null"]},
+    "external_cash_flow_type": {"type": ["string", "null"], "enum": ["DEPOSIT", "WITHDRAWAL", "NONE", null]},
     "rationale": {"type": "string", "minLength": 1}
   },
   "allOf": [
     {
-      "if": {"properties": {"cash_flow_type": {"const": "NONE"}}, "required": ["cash_flow_type"]},
-      "then": {"properties": {"amount": {"const": 0}}}
+      "if": {"properties": {"cash_flow_resolution_status": {"enum": ["CONFIRMED_NONE", "BASELINE_RESET"]}}, "required": ["cash_flow_resolution_status"]},
+      "then": {"properties": {"external_cash_flow": {"const": 0}, "external_cash_flow_type": {"const": "NONE"}}}
     },
     {
-      "if": {"properties": {"cash_flow_type": {"const": "DEPOSIT"}}, "required": ["cash_flow_type"]},
-      "then": {"properties": {"amount": {"exclusiveMinimum": 0}}}
+      "if": {"properties": {"cash_flow_resolution_status": {"const": "CONFIRMED_AMOUNT"}}, "required": ["cash_flow_resolution_status"]},
+      "then": {"required": ["external_cash_flow", "external_cash_flow_type"], "properties": {"external_cash_flow": {"type": "number", "not": {"const": 0}}, "external_cash_flow_type": {"enum": ["DEPOSIT", "WITHDRAWAL"]}}}
     },
     {
-      "if": {"properties": {"cash_flow_type": {"const": "WITHDRAWAL"}}, "required": ["cash_flow_type"]},
-      "then": {"properties": {"amount": {"exclusiveMaximum": 0}}}
+      "if": {"properties": {"cash_flow_resolution_status": {"const": "UNRESOLVED"}}, "required": ["cash_flow_resolution_status"]},
+      "then": {"properties": {"external_cash_flow": {"type": "null"}, "external_cash_flow_type": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"cash_flow_resolution_status": {"const": "CONFIRMED_AMOUNT"}, "external_cash_flow_type": {"const": "DEPOSIT"}}, "required": ["cash_flow_resolution_status", "external_cash_flow_type"]},
+      "then": {"properties": {"external_cash_flow": {"exclusiveMinimum": 0}}}
+    },
+    {
+      "if": {"properties": {"cash_flow_resolution_status": {"const": "CONFIRMED_AMOUNT"}, "external_cash_flow_type": {"const": "WITHDRAWAL"}}, "required": ["cash_flow_resolution_status", "external_cash_flow_type"]},
+      "then": {"properties": {"external_cash_flow": {"exclusiveMaximum": 0}}}
     }
   ],
   "additionalProperties": false

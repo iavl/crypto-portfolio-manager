@@ -101,9 +101,12 @@ candles and the preferred coverage is 240 calendar days. Preserve source,
 venue/market/quote metadata, fetched time, range, candle count, calendar
 coverage, and the canonical SHA-256 OHLCV hash for replay.
 
-Freshness is based on the latest observed completed UTC date versus the
-decision `as_of`. `fetched_at` is retrieval metadata and may be after a
-historical `as_of`; a recent download does not make old candles current.
+Freshness for daily OHLCV-derived metrics is based on
+`freshness_reference_at`, which must equal `metadata.completed_through`: the
+close boundary of the latest completed UTC candle versus the decision `as_of`.
+`observed_at` remains the metric data anchor and `fetched_at` is retrieval
+metadata; a recent download does not make old candles current. An old
+observation without the completed boundary is not an AUTO fresh hit.
 Duplicate UTC dates are invalid. Small gaps lower confidence; large gaps or
 observation lag produce low confidence and `WAIT`. Calendar lookbacks never
 substitute an arbitrary number of candles when their date window is missing.
@@ -277,8 +280,10 @@ Foundation Blog RSS, go-ethereum advisories, and consensus-spec advisories;
 Ethereum security is not represented by one client. ETH governance sources
 are EIPs (via `ethereum/EIPs` GitHub commits), AllCoreDevs coordination, and
 Ethereum Foundation protocol notices. AAVE security uses Aave Governance Risk
-Discourse JSON plus the Aave V3 repository advisories; AAVE governance uses
-the official governance forum and proposal scope.
+Discourse JSON plus the Aave V3 repository advisories. AAVE governance is
+sufficient only when the on-chain Governance V3 source and at least one
+reachable, complete official off-chain source (forum/proposals) are both
+covered; general news does not satisfy either group.
 BNB security uses the BNB Smart Chain security-advisory repository and official
 release notes; BNB governance uses the BNB Evolution Proposals repository and
 the official BNB Chain governance page. Regulatory collection remains one
@@ -424,6 +429,16 @@ truncate issuance, tokenomics, or full-history valuation inputs.
 
 Missing numeric history is unavailable evidence. It is never converted into a
 generic Web task or a zero.
+
+## Cash-flow finality
+
+Portfolio performance uses the unitized NAV ledger. Each snapshot carries the
+single `cash_flow_resolution_status`: `CONFIRMED_NONE`, `CONFIRMED_AMOUNT`,
+`UNRESOLVED`, or `BASELINE_RESET`. Only explicit confirmation or a baseline
+reset can make `performance_finality=FINAL`; an unresolved amount stays
+`PROVISIONAL` and does not produce a NAV or benchmark return. User resolutions
+are append-only records in `cash-flow-resolutions.jsonl`; balance changes are
+never inferred as deposits, withdrawals, or zero flow.
 
 ## Structured event transport
 

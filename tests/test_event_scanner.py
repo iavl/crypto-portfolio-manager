@@ -57,6 +57,22 @@ class EventScannerTests(unittest.TestCase):
         self.assertTrue(all(source.required_for_full_coverage for source in btc + eth + regulatory))
         self.assertTrue(all(source.tier == 1 for source in regulatory))
 
+    def test_aave_governance_requires_onchain_and_one_offchain_group(self):
+        scanner = EventScanner()
+        requests = scanner.build_requests("AAVE", "governance", AS_OF)
+        offchain_only = tuple(
+            EventSourceScanResponse(request.source_id, request.source_group == "aave-governance-offchain", AS_OF, (), None if request.source_group == "aave-governance-offchain" else "unavailable")
+            for request in requests
+        )
+        incomplete = scanner.scan("AAVE", "governance", AS_OF, responses=offchain_only)
+        self.assertEqual(incomplete.source_coverage["coverage_state"], "INSUFFICIENT_SOURCE_COVERAGE")
+        complete = scanner.scan(
+            "AAVE", "governance", AS_OF,
+            responses=tuple(EventSourceScanResponse(request.source_id, True, AS_OF, (), None) for request in requests),
+        )
+        self.assertEqual(complete.source_coverage["coverage_rule"], "ONCHAIN_AND_ONE_OFFCHAIN")
+        self.assertEqual(complete.source_coverage["coverage_state"], "SUFFICIENT")
+
     def test_excluded_asset_has_no_event_source_requests(self):
         scanner = EventScanner()
         self.assertEqual(scanner.build_requests("LUNC", "security", AS_OF), ())

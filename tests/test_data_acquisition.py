@@ -11,6 +11,7 @@ from unittest.mock import patch
 from crypto_portfolio.acquisition import AcquisitionManager, FetchMode
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest, build_metric_collection_plan
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
+from crypto_portfolio.engine.metric_normalization import normalize_metric_observation
 from crypto_portfolio.models.events import EventScanResult
 from crypto_portfolio.models.market import Candle, OHLCVSeries
 from crypto_portfolio.models.portfolio import normalize_snapshot
@@ -28,6 +29,7 @@ from crypto_portfolio.providers.base import (
 )
 from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.providers.binance import BinanceProvider
+from crypto_portfolio.providers.binance import observations_from_ohlcv
 from crypto_portfolio.providers.blockchair import BlockchairProvider
 from crypto_portfolio.providers.bybit import BybitProvider
 from crypto_portfolio.providers.cache import CacheExpired, ProviderCache, request_hash
@@ -52,6 +54,7 @@ from crypto_portfolio.providers.http import HttpClient, build_ssl_context, class
 from crypto_portfolio.providers.probe import probe_provider
 from crypto_portfolio.providers.router import ProviderRouter
 from crypto_portfolio.providers.routes import dataset_for_metric, provider_chain
+from crypto_portfolio.state.metrics import observation_is_fresh
 
 
 def config_for(*providers):
@@ -1704,6 +1707,60 @@ class DataAcquisitionTests(unittest.TestCase):
 
         with self.assertRaises(ProviderUnsupportedMetric):
             BinanceProvider(client=FakeClient()).spot_price("LUNC")
+
+    def test_daily_ohlcv_freshness_uses_completed_through_for_all_six_metrics(self):
+        candles = tuple(
+            Candle(
+                (datetime(2026, 8, 16, tzinfo=timezone.utc) + timedelta(days=index)).isoformat().replace("+00:00", "Z"),
+                100 + index,
+                102 + index,
+                99 + index,
+                101 + index,
+                100,
+            )
+            for index in range(25)
+        )
+        checks = (
+            ("BTC", ("market.btc_trend", "market.volatility_state", "market.relative_volume")),
+            ("ETH", ("market.relative_volume",)),
+            ("AAVE", ("market.relative_volume",)),
+            ("BNB", ("market.relative_volume",)),
+        )
+        for asset, keys in checks:
+            with self.subTest(asset=asset):
+                series = OHLCVSeries(asset, "1D", candles, source="binance", venue="BINANCE", market="spot", quote_currency="USDT")
+                values = observations_from_ohlcv(series, keys, as_of="2026-09-10T00:00:00Z", fetched_at="2026-09-10T00:00:01Z")
+                self.assertTrue(values)
+                for raw in values:
+                    observation = normalize_metric_observation(raw, as_of="2026-09-10T00:00:00Z")
+                    self.assertEqual(observation.freshness, "CURRENT")
+                    self.assertEqual(observation.freshness_reference_at, "2026-09-10T00:00:00Z")
+                    self.assertEqual(observation.metadata["completed_through"], observation.freshness_reference_at)
+                    self.assertTrue(observation_is_fresh(observation, as_of="2026-09-10T00:00:00Z"))
+
+        incomplete = OHLCVSeries(
+            "BTC", "1D", (*candles[:-1], Candle(candles[-1].timestamp, 125, 127, 124, 126, 100, completed=False)),
+            source="binance", venue="BINANCE", market="spot", quote_currency="USDT",
+        )
+        value = observations_from_ohlcv(incomplete, ("market.relative_volume",), as_of="2026-09-10T00:00:00Z", fetched_at="2026-09-10T00:00:01Z")[0]
+        self.assertEqual(value["freshness_reference_at"], "2026-09-09T00:00:00Z")
+
+    def test_old_ohlcv_observation_without_completed_reference_is_not_fresh(self):
+        observation = normalize_metric_observation({
+            "asset": "BTC",
+            "metric_key": "market.relative_volume",
+            "value": 1.0,
+            "unit": "ratio",
+            "period": None,
+            "observed_at": "2026-09-09T00:00:00Z",
+            "fetched_at": "2026-09-09T00:00:00Z",
+            "source": "binance",
+            "freshness": "CURRENT",
+            "confidence": "HIGH",
+            "metadata": {"source_dataset": "spot_klines", "ohlcv_hash": "a" * 64},
+        }, as_of="2026-09-10T00:00:00Z")
+        self.assertEqual(observation.freshness, "STALE")
+        self.assertFalse(observation_is_fresh(observation, as_of="2026-09-10T00:00:00Z"))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from .ledger import PortfolioSnapshot as LedgerSnapshot
 from .ledger import build_nav_history, nav_return
+from ..models.cash_flow import CASH_FLOW_RESOLUTION_STATUSES
 from ..models.portfolio import PortfolioSnapshot
 from ..models.cash_flow import CashFlowResolution
 
@@ -32,31 +33,39 @@ def _total_value(value: PortfolioSnapshot | Mapping[str, Any]) -> float:
 
 def _flow(value: PortfolioSnapshot | Mapping[str, Any]) -> tuple[float, str, bool]:
     if isinstance(value, PortfolioSnapshot):
-        amount = float(value.external_cash_flow)
+        amount = value.external_cash_flow
         kind = value.external_cash_flow_type
-        return amount, kind, kind != "UNRESOLVED"
+        return (0.0 if amount is None else float(amount)), value.cash_flow_resolution_status, value.cash_flow_resolution_status != "UNRESOLVED"
     if not isinstance(value, Mapping):
         raise ValueError("snapshot must be a PortfolioSnapshot or mapping")
-    amount_supplied = "external_cash_flow" in value
-    raw_amount = value.get("external_cash_flow", 0.0)
-    if isinstance(raw_amount, bool) or not isinstance(raw_amount, (int, float)) or not math.isfinite(float(raw_amount)):
-        raise ValueError("external cash flow must be finite numeric")
-    amount = float(raw_amount)
+    status = str(value.get("cash_flow_resolution_status", "UNRESOLVED")).strip().upper()
+    if status not in CASH_FLOW_RESOLUTION_STATUSES:
+        raise ValueError("cash_flow_resolution_status is unsupported")
+    raw_amount = value.get("external_cash_flow")
     raw_kind = value.get("external_cash_flow_type")
-    if raw_kind is None:
-        if not amount_supplied:
-            return amount, "UNRESOLVED", False
-        raw_kind = "DEPOSIT" if amount > 0 else "WITHDRAWAL" if amount < 0 else "NONE"
-    kind = str(raw_kind).strip().upper()
-    if kind not in {"NONE", "DEPOSIT", "WITHDRAWAL", "UNRESOLVED"}:
-        raise ValueError("external_cash_flow_type is unsupported")
-    if kind == "NONE" and amount != 0:
-        raise ValueError("external_cash_flow_type NONE requires zero flow")
+    if raw_amount is not None and (
+        isinstance(raw_amount, bool)
+        or not isinstance(raw_amount, (int, float))
+        or not math.isfinite(float(raw_amount))
+    ):
+        raise ValueError("external cash flow must be finite numeric or null")
+    amount = None if raw_amount is None else float(raw_amount)
+    kind = None if raw_kind is None else str(raw_kind).strip().upper()
+    if status == "UNRESOLVED":
+        if amount is not None or kind is not None:
+            raise ValueError("UNRESOLVED cash flow requires null amount and type")
+        return 0.0, status, False
+    if status in {"CONFIRMED_NONE", "BASELINE_RESET"}:
+        if amount != 0 or kind != "NONE":
+            raise ValueError(f"{status} requires zero flow and type NONE")
+        return 0.0, status, True
+    if amount is None or amount == 0 or kind not in {"DEPOSIT", "WITHDRAWAL"}:
+        raise ValueError("CONFIRMED_AMOUNT requires a non-zero amount and flow type")
     if kind == "DEPOSIT" and amount <= 0:
-        raise ValueError("external cash flow DEPOSIT requires a positive amount")
+        raise ValueError("DEPOSIT external cash flow must be positive")
     if kind == "WITHDRAWAL" and amount >= 0:
-        raise ValueError("external cash flow WITHDRAWAL requires a negative amount")
-    return amount, kind, kind != "UNRESOLVED"
+        raise ValueError("WITHDRAWAL external cash flow must be negative")
+    return amount, status, True
 
 
 def detect_external_cash_flow(
@@ -75,8 +84,29 @@ def detect_external_cash_flow(
     if isinstance(material_fraction, bool) or not isinstance(material_fraction, (int, float)) or not math.isfinite(float(material_fraction)) or not 0 <= material_fraction <= 1:
         raise ValueError("material_fraction must be a fraction in [0, 1]")
     threshold = max(float(material_usd), max(previous_total, current_total) * float(material_fraction))
-    amount, kind, confirmed = _flow(current)
+    amount, status, confirmed = _flow(current)
     material = abs(delta) >= threshold and threshold > 0
+    if status == "UNRESOLVED":
+        return {
+            "status": "UNRESOLVED",
+            "performance_status": "PROVISIONAL",
+            "requires_confirmation": True,
+            "delta_usd": delta,
+            "external_cash_flow": None,
+            "external_cash_flow_type": None,
+            "cash_flow_resolution_status": status,
+            "reason": "cash_flow_resolution_status is UNRESOLVED",
+        }
+    if status == "BASELINE_RESET":
+        return {
+            "status": "BASELINE_RESET",
+            "performance_status": "AVAILABLE",
+            "requires_confirmation": False,
+            "delta_usd": delta,
+            "external_cash_flow": 0.0,
+            "external_cash_flow_type": "NONE",
+            "cash_flow_resolution_status": status,
+        }
     if not material:
         return {
             "status": "NO_MATERIAL_CHANGE",
@@ -84,7 +114,8 @@ def detect_external_cash_flow(
             "requires_confirmation": False,
             "delta_usd": delta,
             "external_cash_flow": amount,
-            "external_cash_flow_type": kind,
+            "external_cash_flow_type": "DEPOSIT" if amount > 0 else "WITHDRAWAL" if amount < 0 else "NONE",
+            "cash_flow_resolution_status": status,
         }
     if confirmed:
         return {
@@ -93,17 +124,10 @@ def detect_external_cash_flow(
             "requires_confirmation": False,
             "delta_usd": delta,
             "external_cash_flow": amount,
-            "external_cash_flow_type": kind,
+            "external_cash_flow_type": "DEPOSIT" if amount > 0 else "WITHDRAWAL",
+            "cash_flow_resolution_status": status,
         }
-    return {
-        "status": "UNRESOLVED",
-        "performance_status": "PROVISIONAL",
-        "requires_confirmation": True,
-        "delta_usd": delta,
-        "external_cash_flow": amount,
-        "external_cash_flow_type": "UNRESOLVED",
-        "reason": "material snapshot change has no explicit external cash-flow classification",
-    }
+    raise ValueError("unsupported cash-flow resolution state")
 
 
 def cash_flow_adjusted_performance(
@@ -117,9 +141,12 @@ def cash_flow_adjusted_performance(
         detect_external_cash_flow(previous, current)
         for previous, current in zip(values, values[1:])
     ]
-    if any(item["requires_confirmation"] for item in unresolved):
+    if any(item["requires_confirmation"] for item in unresolved) or any(
+        _flow(value)[1] == "UNRESOLVED" for value in values
+    ):
         return {
             "status": "PROVISIONAL",
+            "performance_finality": "PROVISIONAL",
             "return": None,
             "transitions": unresolved,
             "reason": "external cash-flow classification is required before reporting NAV performance",
@@ -134,10 +161,19 @@ def cash_flow_adjusted_performance(
             timestamp = value["timestamp"]
             total = _total_value(value)
             amount, _, _ = _flow(value)
-        ledger.append(LedgerSnapshot(timestamp, total, amount))
+        ledger.append(
+            LedgerSnapshot(
+                timestamp,
+                total,
+                amount,
+                value.cash_flow_resolution_status if isinstance(value, PortfolioSnapshot) else value.get("cash_flow_resolution_status"),
+                value.snapshot_id if isinstance(value, PortfolioSnapshot) else value.get("snapshot_id"),
+            )
+        )
     states = build_nav_history(ledger)
     return {
         "status": "AVAILABLE",
+        "performance_finality": "FINAL",
         "return": nav_return(states),
         "transitions": unresolved,
         "states": [state.__dict__.copy() for state in states],
@@ -149,8 +185,9 @@ def resolve_cash_flow_issue(
     resolution_id: str,
     snapshot_id: str,
     timestamp: str,
-    cash_flow_type: str,
-    amount: float,
+    cash_flow_resolution_status: str,
+    external_cash_flow: float | None,
+    external_cash_flow_type: str | None,
     rationale: str,
 ) -> CashFlowResolution:
     """Validate an explicit user resolution; never infer amount or type."""
@@ -158,8 +195,9 @@ def resolve_cash_flow_issue(
         resolution_id=resolution_id,
         snapshot_id=snapshot_id,
         timestamp=timestamp,
-        cash_flow_type=cash_flow_type,
-        amount=amount,
+        cash_flow_resolution_status=cash_flow_resolution_status,
+        external_cash_flow=external_cash_flow,
+        external_cash_flow_type=external_cash_flow_type,
         rationale=rationale,
     )
 

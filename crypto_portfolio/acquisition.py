@@ -24,7 +24,7 @@ from .engine.technical import derive_aligned_relative_return
 from .events import EventScanner, EventSourceScanRequest, EventSourceScanResponse, event_metric_category
 from .metrics_registry import metric_definition
 from .models.events import EventScanResult
-from .models.metrics_history import MetricObservation
+from .models.metrics_history import MetricObservation, observation_freshness_reference
 from .models.policy import Policy, resolve_policy
 from .models.time import normalize_timestamp, parse_timestamp
 from .providers.base import FetchMode
@@ -55,6 +55,7 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "CONFIG_DISABLED",
     "CREDENTIAL_MISSING",
     "ADAPTER_UNAVAILABLE",
+    "UNAVAILABLE_BY_METHODOLOGY",
 }
 _OPTIONAL_NONBLOCKING_ERROR_CODES = _PROVIDER_SKIP_ERROR_CODES | {
     "DERIVED_INPUT_UNAVAILABLE",
@@ -453,7 +454,13 @@ class AcquisitionManager:
                     )
                 ]
                 if candidates:
-                    stale[identity] = max(candidates, key=lambda item: (item.observed_at, item.observation_id))
+                    stale[identity] = max(
+                        candidates,
+                        key=lambda item: (
+                            observation_freshness_reference(item) or item.observed_at,
+                            item.observation_id,
+                        ),
+                    )
             if (
                 request.metric_key == "risk.chain_liveness_status"
                 and as_of is not None
@@ -802,13 +809,17 @@ class AcquisitionManager:
                     reason = f"last observation is stale as of {cutoff}"
                     if refresh_reason:
                         reason += f"; refresh failed: {refresh_reason}"
-                if diagnostic and diagnostic.get("error_code") == "PROVIDER_NOT_APPLICABLE":
+                if diagnostic and diagnostic.get("error_code") in {"PROVIDER_NOT_APPLICABLE", "UNAVAILABLE_BY_METHODOLOGY"}:
                     normalized = normalize_metric_result({
                         "timestamp": current,
                         "asset": request.asset,
                         "metric_key": request.metric_key,
                         "status": "NOT_APPLICABLE",
-                        "reason": reason,
+                        "reason": (
+                            reason
+                            if reason.upper().startswith(str(diagnostic.get("error_code", "")).upper())
+                            else f"{diagnostic.get('error_code')}: {reason}"
+                        ),
                         "source": "provider-router",
                     }, now=current)
                 else:
@@ -821,7 +832,14 @@ class AcquisitionManager:
                         )
                     )
                     diagnostic_code = str((diagnostic or {}).get("error_code", "")).upper()
-                    if availability.is_skippable and provider_failed and diagnostic_code not in _OPTIONAL_NONBLOCKING_ERROR_CODES:
+                    entitlement_skip = (
+                        diagnostic_code == "ENTITLEMENT_REQUIRED"
+                        and request.metric_key.startswith("sentiment.social_")
+                    )
+                    if availability.is_skippable and provider_failed and (
+                        diagnostic_code not in _OPTIONAL_NONBLOCKING_ERROR_CODES
+                        and not entitlement_skip
+                    ):
                         normalized = self._failure(
                             request,
                             current,

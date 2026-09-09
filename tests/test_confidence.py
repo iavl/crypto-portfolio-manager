@@ -95,10 +95,11 @@ class ConfidenceTests(unittest.TestCase):
 
     def test_unresolved_nav_is_provisional_and_benchmark_stays_unavailable(self):
         result = build_nav_history_result([
-            {"timestamp": "2026-09-01T00:00:00Z", "portfolio_value": 100, "external_cash_flow": 0, "external_cash_flow_type": "NONE"},
-            {"timestamp": "2026-09-02T00:00:00Z", "portfolio_value": 150, "external_cash_flow": 0, "external_cash_flow_type": "UNRESOLVED"},
+            {"timestamp": "2026-09-01T00:00:00Z", "portfolio_value": 100, "external_cash_flow": 0, "external_cash_flow_type": "NONE", "cash_flow_resolution_status": "CONFIRMED_NONE"},
+            {"timestamp": "2026-09-02T00:00:00Z", "portfolio_value": 150, "external_cash_flow": None, "external_cash_flow_type": None, "cash_flow_resolution_status": "UNRESOLVED"},
         ])
         self.assertEqual(result.status, "PROVISIONAL")
+        self.assertEqual(result.performance_finality, "PROVISIONAL")
         self.assertIsNone(result.nav_return)
         self.assertEqual(build_aligned_benchmark_result(result, [100, 110]).benchmark_status, "PROVISIONAL")
 
@@ -107,20 +108,37 @@ class ConfidenceTests(unittest.TestCase):
             resolution_id="resolution-1",
             snapshot_id="snapshot-1",
             timestamp="2026-09-03T00:00:00Z",
-            cash_flow_type="DEPOSIT",
-            amount=50,
+            cash_flow_resolution_status="CONFIRMED_AMOUNT",
+            external_cash_flow=50,
+            external_cash_flow_type="DEPOSIT",
             rationale="confirmed external transfer",
         )
-        self.assertEqual(resolution.cash_flow_type, "DEPOSIT")
+        self.assertEqual(resolution.external_cash_flow_type, "DEPOSIT")
         with self.assertRaises(ValueError):
             resolve_cash_flow_issue(
                 resolution_id="resolution-2",
                 snapshot_id="snapshot-2",
                 timestamp="2026-09-03T00:00:00Z",
-                cash_flow_type="DEPOSIT",
-                amount=0,
+                cash_flow_resolution_status="CONFIRMED_AMOUNT",
+                external_cash_flow=0,
+                external_cash_flow_type="DEPOSIT",
                 rationale="not enough evidence",
             )
+
+    def test_confirmed_cash_flow_and_baseline_reset_are_final(self):
+        confirmed = build_nav_history_result([
+            {"timestamp": "2026-09-01T00:00:00Z", "portfolio_value": 100, "external_cash_flow": 0, "external_cash_flow_type": "NONE", "cash_flow_resolution_status": "CONFIRMED_NONE"},
+            {"timestamp": "2026-09-02T00:00:00Z", "portfolio_value": 150, "external_cash_flow": 50, "external_cash_flow_type": "DEPOSIT", "cash_flow_resolution_status": "CONFIRMED_AMOUNT"},
+        ])
+        self.assertEqual((confirmed.status, confirmed.performance_finality), ("AVAILABLE", "FINAL"))
+        self.assertAlmostEqual(confirmed.nav_return, 0.0)
+        reset = build_nav_history_result([
+            {"timestamp": "2026-09-01T00:00:00Z", "portfolio_value": 100, "external_cash_flow": 0, "external_cash_flow_type": "NONE", "cash_flow_resolution_status": "CONFIRMED_NONE"},
+            {"timestamp": "2026-09-02T00:00:00Z", "portfolio_value": 200, "external_cash_flow": 0, "external_cash_flow_type": "NONE", "cash_flow_resolution_status": "BASELINE_RESET", "snapshot_id": "snapshot-2"},
+            {"timestamp": "2026-09-03T00:00:00Z", "portfolio_value": 220, "external_cash_flow": 0, "external_cash_flow_type": "NONE", "cash_flow_resolution_status": "CONFIRMED_NONE"},
+        ])
+        self.assertEqual(reset.performance_finality, "FINAL")
+        self.assertAlmostEqual(reset.nav_return, 0.1)
 
 
 if __name__ == "__main__":

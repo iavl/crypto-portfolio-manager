@@ -6,8 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from ..engine.ledger import PortfolioSnapshot as LedgerSnapshot
-from ..engine.ledger import build_nav_history, build_nav_history_result
+from ..engine.ledger import build_nav_history_result
 from ..engine.cash_flow import detect_external_cash_flow
 from ..engine.position_pnl import calculate_portfolio_position_performance
 from ..models.performance import PositionPerformance
@@ -15,6 +14,7 @@ from ..models.decision import Decision
 from ..models.portfolio import snapshot_from_mapping
 from ..models.time import parse_timestamp
 from .decisions import read_decisions
+from .cash_flows import read_cash_flow_resolutions
 from .metrics import metric_history_context, read_metric_observations
 from .snapshots import read_snapshots
 
@@ -34,10 +34,36 @@ def latest_decision(path: str | Path | None = None) -> dict[str, Any] | None:
     return _latest(read_decisions(path))
 
 
-def portfolio_nav_history(path: str | Path | None = None):
+def _cash_flow_snapshots(
+    path: str | Path | None = None,
+    resolution_path: str | Path | None = None,
+) -> list[Any]:
+    resolutions = {item.snapshot_id: item for item in read_cash_flow_resolutions(resolution_path)}
     snapshots = []
-    for index, record in enumerate(read_snapshots(path)):
+    for record in read_snapshots(path):
         snapshot, _, _ = snapshot_from_mapping(record)
+        resolution = resolutions.get(snapshot.snapshot_id)
+        if resolution is not None:
+            updated = snapshot.as_dict()
+            updated.update(
+                {
+                    "cash_flow_resolution_status": resolution.cash_flow_resolution_status,
+                    "external_cash_flow": resolution.external_cash_flow,
+                    "external_cash_flow_type": resolution.external_cash_flow_type,
+                }
+            )
+            snapshot = snapshot_from_mapping(updated)[0]
+        snapshots.append(snapshot)
+    return snapshots
+
+
+def portfolio_nav_history(
+    path: str | Path | None = None,
+    *,
+    resolution_path: str | Path | None = None,
+):
+    snapshots = []
+    for index, snapshot in enumerate(_cash_flow_snapshots(path, resolution_path)):
         snapshots.append((index, snapshot))
     # Append order is not guaranteed to be chronological; NAV history requires
     # strictly increasing timestamps, so sort by timestamp with append-order
@@ -45,49 +71,51 @@ def portfolio_nav_history(path: str | Path | None = None):
     snapshots.sort(
         key=lambda item: (parse_timestamp(item[1].timestamp), item[0])
     )
-    if any(
-        detect_external_cash_flow(previous[1], current[1])["requires_confirmation"]
-        for previous, current in zip(snapshots, snapshots[1:])
-    ):
+    if not snapshots:
         return []
-    return build_nav_history(
-        [
-            LedgerSnapshot(
-                snapshot.timestamp,
-                snapshot.total_value_usd,
-                snapshot.external_cash_flow,
-            )
-            for _, snapshot in snapshots
-        ]
-    ) if snapshots else []
+    result = build_nav_history_result([
+        {
+            "timestamp": snapshot.timestamp,
+            "portfolio_value": snapshot.total_value_usd,
+            "external_cash_flow": snapshot.external_cash_flow,
+            "external_cash_flow_type": snapshot.external_cash_flow_type,
+            "cash_flow_resolution_status": snapshot.cash_flow_resolution_status,
+            "snapshot_id": snapshot.snapshot_id,
+        }
+        for _, snapshot in snapshots
+    ])
+    return list(result.states) if result.performance_finality == "FINAL" else []
 
 
-def portfolio_nav_history_result(path: str | Path | None = None):
+def portfolio_nav_history_result(
+    path: str | Path | None = None,
+    *,
+    resolution_path: str | Path | None = None,
+):
     records = []
-    for index, record in enumerate(read_snapshots(path)):
-        snapshot, _, _ = snapshot_from_mapping(record)
+    for index, snapshot in enumerate(_cash_flow_snapshots(path, resolution_path)):
         records.append((index, snapshot))
     records.sort(key=lambda item: (parse_timestamp(item[1].timestamp), item[0]))
     ledger = []
     for index, (_, snapshot) in enumerate(records):
-        flow_type = snapshot.external_cash_flow_type
-        if index and flow_type == "UNRESOLVED":
-            transition = detect_external_cash_flow(records[index - 1][1], snapshot)
-            if not transition["requires_confirmation"]:
-                flow_type = "NONE"
         ledger.append({
             "timestamp": snapshot.timestamp,
             "portfolio_value": snapshot.total_value_usd,
             "external_cash_flow": snapshot.external_cash_flow,
-            "external_cash_flow_type": flow_type,
+            "external_cash_flow_type": snapshot.external_cash_flow_type,
+            "cash_flow_resolution_status": snapshot.cash_flow_resolution_status,
+            "snapshot_id": snapshot.snapshot_id,
         })
     return build_nav_history_result(ledger)
 
 
-def external_cash_flow_review(path: str | Path | None = None) -> dict[str, Any]:
+def external_cash_flow_review(
+    path: str | Path | None = None,
+    *,
+    resolution_path: str | Path | None = None,
+) -> dict[str, Any]:
     records = []
-    for index, record in enumerate(read_snapshots(path)):
-        snapshot, _, _ = snapshot_from_mapping(record)
+    for index, snapshot in enumerate(_cash_flow_snapshots(path, resolution_path)):
         records.append((parse_timestamp(snapshot.timestamp), index, snapshot))
     records.sort(key=lambda item: (item[0], item[1]))
     transitions = [
@@ -95,8 +123,30 @@ def external_cash_flow_review(path: str | Path | None = None) -> dict[str, Any]:
         for previous, current in zip(records, records[1:])
     ]
     unresolved = next((item for item in transitions if item["requires_confirmation"]), None)
+    if unresolved is None:
+        first_unresolved = next(
+            (snapshot for _, _, snapshot in records if snapshot.cash_flow_resolution_status == "UNRESOLVED"),
+            None,
+        )
+        if first_unresolved is not None:
+            unresolved = {
+                "status": "UNRESOLVED",
+                "requires_confirmation": True,
+                "cash_flow_resolution_status": "UNRESOLVED",
+                "snapshot_id": first_unresolved.snapshot_id,
+                "reason": "cash_flow_resolution_status is UNRESOLVED",
+            }
+    if not records:
+        return {
+            "status": "UNAVAILABLE",
+            "performance_finality": "UNAVAILABLE",
+            "requires_confirmation": False,
+            "transitions": [],
+            "reason": "no portfolio snapshots are available",
+        }
     return {
         "status": "PROVISIONAL" if unresolved else "AVAILABLE",
+        "performance_finality": "PROVISIONAL" if unresolved else "FINAL",
         "requires_confirmation": unresolved is not None,
         "transitions": transitions,
         "reason": unresolved.get("reason") if unresolved else None,
@@ -198,11 +248,15 @@ def build_history_context(
     *,
     as_of: str | None = None,
     metric_keys: tuple[str, ...] | list[str] | None = None,
+    cash_flow_resolution_path: str | Path | None = None,
 ) -> dict[str, Any]:
     snapshot = latest_snapshot(snapshot_path)
+    applied_snapshots = _cash_flow_snapshots(snapshot_path, cash_flow_resolution_path)
+    if applied_snapshots:
+        snapshot = max(applied_snapshots, key=lambda item: parse_timestamp(item.timestamp)).as_dict()
     decision = latest_decision(decision_path)
-    nav = portfolio_nav_history(snapshot_path)
-    nav_result = portfolio_nav_history_result(snapshot_path)
+    nav = portfolio_nav_history(snapshot_path, resolution_path=cash_flow_resolution_path)
+    nav_result = portfolio_nav_history_result(snapshot_path, resolution_path=cash_flow_resolution_path)
     full_review = last_full_review(decision_path)
     reference = as_of or (snapshot or decision or {}).get("timestamp")
     full_review_due = False
@@ -216,7 +270,7 @@ def build_history_context(
         parsed_decision = Decision.from_mapping(decision)
         previous_assessments = dict(parsed_decision.factor_scores)
     position_pnl = build_position_pnl_context(snapshot_path)
-    cash_flow_review = external_cash_flow_review(snapshot_path)
+    cash_flow_review = external_cash_flow_review(snapshot_path, resolution_path=cash_flow_resolution_path)
     observations = read_metric_observations(metrics_path)
     assets = {
         position.get("symbol", "").strip().upper()
@@ -254,6 +308,8 @@ def build_history_context(
         "nav_history": nav,
         "external_cash_flow_review": cash_flow_review,
         "performance_status": nav_result.status,
+        "performance_finality": nav_result.performance_finality,
+        "cash_flow_resolution_status": (snapshot or {}).get("cash_flow_resolution_status"),
         "nav_history_result": nav_result.as_dict(),
         "current_drawdown": nav[-1].current_drawdown if nav else None,
         "max_drawdown": nav[-1].max_drawdown if nav else None,

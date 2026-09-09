@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping
 
 from ..metric_history_requirements import MetricHistoryRequirement, history_requirement
 from ..metrics_registry import METRIC_REGISTRY, REVIEW_TYPES, MetricDefinition, metric_definition
-from ..models.metrics_history import MetricObservation
+from ..models.metrics_history import MetricObservation, observation_freshness_reference
 from ..models.portfolio import PortfolioSnapshot
 from ..models.time import parse_timestamp
 from ..models.policy import Policy, resolve_policy
@@ -604,7 +604,10 @@ def _fresh_enough(observation: MetricObservation, definition: MetricDefinition, 
         cutoff = datetime.now(timezone.utc)
     else:
         cutoff = parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of)
-    age = (cutoff - parse_timestamp(observation.observed_at)).total_seconds()
+    reference_at = observation_freshness_reference(observation)
+    if reference_at is None:
+        return False
+    age = (cutoff - parse_timestamp(reference_at)).total_seconds()
     if age < 0:
         return False
     window = definition.freshness
@@ -625,7 +628,10 @@ def _latest_cached(
         for item in observations
         if item.asset == asset and item.metric_key == metric_key and _fresh_enough(item, definition, as_of)
     ]
-    return max(candidates, key=lambda item: (parse_timestamp(item.observed_at), item.observation_id)) if candidates else None
+    return max(
+        candidates,
+        key=lambda item: (parse_timestamp(observation_freshness_reference(item) or item.observed_at), item.observation_id),
+    ) if candidates else None
 
 
 def build_metric_collection_plan(

@@ -12,6 +12,7 @@ from .base import (
     ProviderAuthenticationError,
     ProviderCapabilities,
     ProviderDataError,
+    ProviderDiagnostic,
     ProviderInsufficientHistory,
     ProviderRequest,
     ProviderResponse,
@@ -236,10 +237,28 @@ def parse_queues(
 def _diagnostic(error: Exception) -> Mapping[str, Any]:
     value = getattr(error, "diagnostic", None)
     if hasattr(value, "as_dict"):
-        return dict(value.as_dict())
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {"error_code": classify_transport_error(error), "detail": str(error) or error.__class__.__name__}
+        result = dict(value.as_dict())
+    elif isinstance(value, Mapping):
+        result = dict(value)
+    else:
+        result = {"error_code": classify_transport_error(error), "detail": str(error) or error.__class__.__name__}
+    if (
+        result.get("status_code") == 401
+        and "subscription is not active" in str(result.get("detail", "")).lower()
+    ):
+        result["error_code"] = "RATED_SUBSCRIPTION_INACTIVE"
+        result["detail"] = "Subscription is not active."
+    return result
+
+
+def _subscription_inactive(payload: Any) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    return any(
+        isinstance(payload.get(key), str)
+        and "subscription is not active" in payload[key].lower()
+        for key in ("detail", "message", "error")
+    )
 
 
 class RatedProvider:
@@ -283,6 +302,15 @@ class RatedProvider:
                     headers=self._headers(),
                 )
                 network_requests += 1
+                if _subscription_inactive(payload):
+                    raise ProviderAuthenticationError(
+                        "Rated subscription is not active",
+                        diagnostic=ProviderDiagnostic(
+                            error_code="RATED_SUBSCRIPTION_INACTIVE",
+                            detail="Subscription is not active.",
+                            retryable=False,
+                        ),
+                    )
                 values.extend(parse_daily_rewards(payload, daily_keys, fetched_at=fetched_at, as_of=request.parameters.get("as_of")))
             except Exception as exc:
                 for key in daily_keys:
@@ -295,6 +323,15 @@ class RatedProvider:
                     headers=self._headers(),
                 )
                 network_requests += 1
+                if _subscription_inactive(payload):
+                    raise ProviderAuthenticationError(
+                        "Rated subscription is not active",
+                        diagnostic=ProviderDiagnostic(
+                            error_code="RATED_SUBSCRIPTION_INACTIVE",
+                            detail="Subscription is not active.",
+                            retryable=False,
+                        ),
+                    )
                 values.extend(parse_queues(payload, queue_keys, fetched_at=fetched_at))
             except Exception as exc:
                 for key in queue_keys:

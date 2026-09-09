@@ -40,6 +40,9 @@ _ERROR_CODE_DESCRIPTIONS = {
     "PROXY_ERROR": "provider proxy or tunnel failed",
     "HTTP_400": "provider rejected the request",
     "HTTP_401": "provider authentication failed",
+    "HTTP_402": "provider requires an active subscription or plan",
+    "RATED_SUBSCRIPTION_INACTIVE": "Rated subscription is not active",
+    "ENTITLEMENT_REQUIRED": "provider plan does not include this metric",
     "HTTP_403": "provider rejected the request",
     "HTTP_403_AUTH": "provider authentication was rejected",
     "HTTP_403_RATE_LIMIT": "provider rate limit was exceeded",
@@ -60,6 +63,7 @@ _ERROR_CODE_DESCRIPTIONS = {
     "PROVIDER_INSUFFICIENT_HISTORY": "provider returned insufficient history",
     "PROVIDER_NOT_APPLICABLE": "provider does not apply to this metric",
     "PROVIDER_PLAN_RESTRICTED": "provider plan does not permit this metric",
+    "UNAVAILABLE_BY_METHODOLOGY": "provider data cannot support the required methodology",
     "PROVIDER_UNSUPPORTED": "provider does not support this metric",
     "OPTIONAL_PROVIDER_UNSUPPORTED": "optional provider does not support this metric",
     "OPTIONAL_SOURCE_UNAVAILABLE": "no exact optional source is available",
@@ -613,6 +617,7 @@ def format_collection_event(
         f"[DATA] {event.asset} {event.metric_key} {event.status} {summary}",
         f"       source: {event.source or (observation.source if observation else 'N/A')}",
         f"       observed_at: {event.observed_at or (observation.observed_at if observation else 'N/A')}",
+        f"       freshness_reference_at: {observation.freshness_reference_at if observation else 'N/A'}",
         f"       fetched_at: {event.fetched_at or (observation.fetched_at if observation else event.timestamp)}",
     ]
     if event.refresh_provider:

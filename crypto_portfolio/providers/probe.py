@@ -105,10 +105,10 @@ def _probe_call(
         detail = str(diagnostic.get("detail", ""))
         result.update({
             "network": "FAILED" if code in _NETWORK_FAILURES else "OK",
-            "auth": "REJECTED" if code in {"HTTP_401", "HTTP_403_AUTH"} else "NOT_TESTED" if code in _NETWORK_FAILURES else result["auth"],
-            "plan_access": "RESTRICTED" if code == "PROVIDER_PLAN_RESTRICTED" else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH"} else "OK",
-            "schema": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH", "PROVIDER_PLAN_RESTRICTED"} else result["schema"],
-            "normalization": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH", "PROVIDER_PLAN_RESTRICTED"} else result["normalization"],
+            "auth": "REJECTED" if code in {"HTTP_401", "HTTP_403_AUTH", "RATED_SUBSCRIPTION_INACTIVE"} else "NOT_TESTED" if code in _NETWORK_FAILURES else result["auth"],
+            "plan_access": "RESTRICTED" if code in {"PROVIDER_PLAN_RESTRICTED", "RATED_SUBSCRIPTION_INACTIVE", "ENTITLEMENT_REQUIRED"} else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH"} else "OK",
+            "schema": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH", "PROVIDER_PLAN_RESTRICTED", "RATED_SUBSCRIPTION_INACTIVE", "ENTITLEMENT_REQUIRED"} else result["schema"],
+            "normalization": "ERROR" if code in _SCHEMA_FAILURES else "NOT_TESTED" if code in _NETWORK_FAILURES or code in {"HTTP_401", "HTTP_403_AUTH", "PROVIDER_PLAN_RESTRICTED", "RATED_SUBSCRIPTION_INACTIVE", "ENTITLEMENT_REQUIRED"} else result["normalization"],
             "error_code": code,
             "exception_class": diagnostic.get("exception_class"),
             "detail": redact_secrets(detail),
@@ -150,6 +150,14 @@ def _require_number(value: Any) -> None:
 def _require_observations(value: Any) -> None:
     observations = getattr(value, "observations", value)
     if isinstance(observations, (str, bytes)) or not isinstance(observations, Iterable) or not tuple(observations):
+        diagnostics = getattr(value, "diagnostics", None)
+        if isinstance(diagnostics, Mapping) and diagnostics:
+            diagnostic = next((item for item in diagnostics.values() if isinstance(item, Mapping)), None)
+            if diagnostic is not None:
+                raise ProviderResponseError(
+                    str(diagnostic.get("detail", "provider returned no normalized observations")),
+                    diagnostic=dict(diagnostic),
+                )
         raise ProviderResponseError("probe response schema has no normalized observations")
 
 
@@ -595,12 +603,21 @@ def probe_provider(
         )
         if "error_code" not in result:
             observations = tuple(getattr(captured["value"], "observations", ()))
+            response_diagnostics = getattr(captured["value"], "diagnostics", {})
+            fdv_diagnostic = response_diagnostics.get("valuation.fdv", {}) if isinstance(response_diagnostics, Mapping) else {}
             result.update({
                 "asset": target,
                 "market_cap": "present" if any(item.get("metric_key") == "valuation.market_cap" for item in observations) else "missing",
-                "fdv": "present" if any(item.get("metric_key") == "valuation.fdv" for item in observations) else "missing",
+                "fdv": (
+                    "not_applicable" if target == "ETH"
+                    else "present" if any(item.get("metric_key") == "valuation.fdv" for item in observations)
+                    else "unavailable_by_methodology" if fdv_diagnostic.get("error_code") == "UNAVAILABLE_BY_METHODOLOGY"
+                    else "missing"
+                ),
                 "last_updated": next((item.get("observed_at") for item in observations if item.get("observed_at")), None),
             })
+            if fdv_diagnostic.get("error_code"):
+                result["fdv_error_code"] = fdv_diagnostic["error_code"]
         result["endpoint_name"] = "coins/markets"
         return (_with_config(result, client),)
     if name == "github" and isinstance(provider, GitHubActivityProvider):

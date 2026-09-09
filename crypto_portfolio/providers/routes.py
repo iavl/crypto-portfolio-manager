@@ -84,7 +84,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key == "valuation.market_cap":
         return ("coingecko", "coinmetrics_community")
     if key == "valuation.fdv":
-        return ("coingecko",)
+        return ("coingecko",) if symbol != "ETH" else ()
     if key == "valuation.fdv_market_cap_ratio":
         return ()
     if key == "eth_valuation.price_to_realized_price":

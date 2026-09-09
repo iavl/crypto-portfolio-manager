@@ -40,6 +40,7 @@ class _CoinMetricsClient:
 class EthMetricsTests(unittest.TestCase):
     def test_registry_scope_and_fdv_not_applicable(self):
         self.assertEqual(metric_definition("eth.monetary.current_supply_eth").asset_scope, ("ETH",))
+        self.assertFalse(metric_definition("valuation.fdv").applies_to("ETH"))
         self.assertFalse(metric_definition("valuation.fdv_market_cap_ratio").applies_to("ETH"))
         self.assertEqual(metric_definition("eth.structural.builder_largest_share").decision_role, "STRUCTURAL_RISK")
 

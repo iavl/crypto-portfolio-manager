@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import metric_definition
-from ..models.metrics_history import MetricObservation
+from ..models.metrics_history import MetricObservation, observation_freshness_reference
 from ..models.time import parse_timestamp
 from .metric_plan import MetricRequest
 
@@ -225,6 +225,7 @@ def _fresh_input(
         source = value.source
         metadata = dict(value.metadata or {})
         freshness = value.freshness
+        freshness_reference_at = observation_freshness_reference(value)
     elif isinstance(value, Mapping):
         raw_value = value.get("value")
         observed_at = value.get("observed_at")
@@ -232,6 +233,7 @@ def _fresh_input(
         source = value.get("source")
         metadata = dict(value.get("metadata") or {})
         freshness = str(value.get("freshness", "CURRENT")).upper()
+        freshness_reference_at = value.get("freshness_reference_at") or metadata.get("completed_through")
     else:
         return None
     if (
@@ -245,14 +247,22 @@ def _fresh_input(
         return None
     try:
         observed = parse_timestamp(observed_at)
+        reference = parse_timestamp(freshness_reference_at) if freshness_reference_at is not None else observed
     except ValueError:
+        return None
+    timeframe = str(metadata.get("timeframe", "")).strip().upper()
+    is_ohlcv = (
+        "completed_through" in metadata
+        or str(metadata.get("source_dataset", "")).strip().lower() in {"ohlcv", "spot_klines"}
+    )
+    if freshness_reference_at is None and (timeframe == "1D" or (is_ohlcv and timeframe == "")):
         return None
     if as_of is not None:
         cutoff = parse_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of)
-        if observed > cutoff:
+        if observed > cutoff or reference > cutoff:
             return None
         definition = metric_definition(metric_key)
-        if definition.freshness_days is not None and (cutoff - observed).total_seconds() > definition.freshness_days * 86400:
+        if definition.freshness_days is not None and (cutoff - reference).total_seconds() > definition.freshness_days * 86400:
             return None
     if asset.strip().upper() != str(value.asset if isinstance(value, MetricObservation) else value.get("asset", asset)).strip().upper():
         return None

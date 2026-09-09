@@ -1,7 +1,7 @@
 """Typed portfolio and execution domain models."""
 
 from .execution import ExecutionPlan, ExecutionTranche, Invalidation, PriceZone
-from .cash_flow import CashFlowResolution
+from .cash_flow import CASH_FLOW_RESOLUTION_STATUSES, CashFlowResolution
 from .events import EventItem, EventScanResult, build_event_scan_result, event_scan_observation
 from ..facts.models import EventFacts, FactBase, FlowFacts, FundamentalFacts, OnchainFacts, RelativeStrengthFacts, TrendFacts, ValuationFacts
 from .decision_packet import AssetDecisionSummary, DecisionReviewPacket, NoTradeAttribution, SolReview
@@ -16,7 +16,7 @@ from .cycle import (
 from .factor_packet import AssetFactorPacket, FactorJudgment
 from .market import Candle, OHLCVSeries, SpotPrice, SwingPoint, TechnicalSnapshot
 from .market_overlays import MarketOverlays
-from .metrics_history import CollectionEvent, MetricObservation
+from .metrics_history import CollectionEvent, MetricObservation, observation_freshness_reference
 from .positioning import (
     PositioningBias,
     PositioningFacts,
@@ -41,6 +41,7 @@ from .structural_risk import StructuralRiskContext
 __all__ = [
     "Candle",
     "CashFlowResolution",
+    "CASH_FLOW_RESOLUTION_STATUSES",
     "EXTERNAL_CASH_FLOW_TYPES",
     "AssetDecisionSummary",
     "BTCCycleContext",
@@ -84,6 +85,7 @@ __all__ = [
     "TrendFacts",
     "ValuationFacts",
     "MetricObservation",
+    "observation_freshness_reference",
     "HalvingContext",
     "HolderBehaviorState",
     "MarketCycleState",

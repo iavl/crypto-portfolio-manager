@@ -40,6 +40,7 @@ _SECRET_NAMES = {
 }
 _MACOS_CA_BUNDLE = Path("/etc/ssl/cert.pem")
 _MAX_LOG_CHARS = 12_000
+_MAX_ERROR_DETAIL_BYTES = 8_192
 
 
 def _certifi_ca_bundle() -> Path | None:
@@ -87,6 +88,7 @@ PROVIDER_ERROR_CODES = (
     "PROXY_ERROR",
     "HTTP_400",
     "HTTP_401",
+    "HTTP_402",
     "HTTP_403_AUTH",
     "HTTP_403_RATE_LIMIT",
     "HTTP_403_ACCESS_DENIED",
@@ -99,6 +101,10 @@ PROVIDER_ERROR_CODES = (
     "INVALID_JSON",
     "RESPONSE_TOO_LARGE",
     "PROVIDER_PLAN_RESTRICTED",
+    "RATED_SUBSCRIPTION_INACTIVE",
+    "ENTITLEMENT_REQUIRED",
+    "RATE_LIMITED",
+    "UNAVAILABLE_BY_METHODOLOGY",
     "PROVIDER_INSUFFICIENT_HISTORY",
     "PROVIDER_UNSUPPORTED",
     "PROVIDER_NOT_APPLICABLE",
@@ -340,8 +346,56 @@ def is_retryable_error_code(error_code: str | None) -> bool:
     return isinstance(error_code, str) and error_code.strip().upper() in RETRYABLE_ERROR_CODES
 
 
+def _upstream_error_detail(error: BaseException, secrets: tuple[str, ...] = ()) -> str | None:
+    """Extract one bounded safe detail string from an upstream error body."""
+    cached = getattr(error, "_safe_upstream_detail", None)
+    if cached is not None:
+        return cached
+    raw: bytes | bytearray | str | None = None
+    if isinstance(error, HTTPError):
+        stream = getattr(error, "fp", None)
+        if stream is not None and hasattr(stream, "read"):
+            try:
+                raw = stream.read(_MAX_ERROR_DETAIL_BYTES + 1)
+            except (OSError, TypeError, ValueError):
+                raw = None
+    if raw is None or raw == b"" or raw == "":
+        raw = getattr(error, "body", None)
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw[:_MAX_ERROR_DETAIL_BYTES])
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+    elif isinstance(raw, str):
+        text = raw[:_MAX_ERROR_DETAIL_BYTES]
+    else:
+        text = None
+    detail: str | None = None
+    if text:
+        try:
+            decoded = json.loads(text)
+        except (TypeError, ValueError):
+            decoded = None
+        if isinstance(decoded, Mapping):
+            for key in ("detail", "message", "error"):
+                candidate = decoded.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    detail = candidate.strip()
+                    break
+        elif not text.lstrip().startswith(("{", "[")) and text.strip():
+            detail = text.strip()
+    if detail is not None:
+        detail = str(redact_secrets(detail, secrets)).replace("\x00", "").strip()[:512]
+    try:
+        setattr(error, "_safe_upstream_detail", detail)
+    except Exception:
+        pass
+    return detail
+
+
 def _detail(error: BaseException, secrets: tuple[str, ...] = ()) -> str:
-    return redact_secrets(str(error), secrets).strip() or error.__class__.__name__
+    return _upstream_error_detail(error, secrets) or redact_secrets(str(error), secrets).strip() or error.__class__.__name__
 
 
 def _diagnostic(
@@ -552,7 +606,12 @@ class HttpClient:
                 response = self._open(request)
                 status = int(getattr(response, "status", response.getcode() if hasattr(response, "getcode") else 200))
                 if status >= 400:
-                    raise HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
+                    error = HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
+                    try:
+                        error.body = response.read(_MAX_ERROR_DETAIL_BYTES + 1)
+                    except (AttributeError, OSError, TypeError, ValueError):
+                        pass
+                    raise error
                 phase = "read"
                 raw = self._read(response, max_response_bytes=max_response_bytes)
                 try:
@@ -668,7 +727,12 @@ class HttpClient:
                 response = self._open(request)
                 status = int(getattr(response, "status", response.getcode() if hasattr(response, "getcode") else 200))
                 if status >= 400:
-                    raise HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
+                    error = HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
+                    try:
+                        error.body = response.read(_MAX_ERROR_DETAIL_BYTES + 1)
+                    except (AttributeError, OSError, TypeError, ValueError):
+                        pass
+                    raise error
                 phase = "read"
                 return self._read(response).decode("utf-8")
             except HTTPError as exc:

@@ -120,7 +120,7 @@ def _observation(
     source: str = "binance",
 ) -> dict[str, Any]:
     definition = metric_definition(key)
-    return {
+    result = {
         "asset": asset,
         "metric_key": key,
         "value": value,
@@ -137,6 +137,9 @@ def _observation(
             **dict(metadata or {}),
         },
     }
+    if result["metadata"].get("completed_through") is not None:
+        result["freshness_reference_at"] = result["metadata"]["completed_through"]
+    return result
 
 
 def observations_from_ohlcv(
@@ -163,10 +166,16 @@ def observations_from_ohlcv(
         "market": series.market or "spot",
         "quote_currency": series.quote_currency or "USDT",
         "source_dataset": "spot_klines",
+        "timeframe": series.timeframe,
         "observed_range": {"start": candles[0].timestamp, "end": candles[-1].timestamp},
         "ohlcv_hash": series.ohlcv_hash,
         "calculation": "crypto_portfolio.engine.technical",
     }
+    if series.timeframe == "1D":
+        metadata["completed_through"] = normalize_timestamp(
+            (parse_timestamp(observed_at) + timedelta(seconds=series.interval_seconds)).isoformat(),
+            "completed_through",
+        )
     values: dict[str, tuple[Any, str | None]] = {
         "market.return_30d": (calendar_lookback_return(candles, 30), "30d"),
         "market.return_90d": (calendar_lookback_return(candles, 90), "90d"),
@@ -314,7 +323,13 @@ class BinanceProvider:
                 raise ProviderDataError(f"Binance kline row {index} is malformed")
             open_time = _timestamp(row[0], f"kline[{index}].open_time")
             close_time = _timestamp(row[6], f"kline[{index}].close_time")
-            if parse_timestamp(close_time) < parse_timestamp(open_time):
+            open_timestamp = parse_timestamp(open_time)
+            close_timestamp = parse_timestamp(close_time)
+            interval_seconds = {"1H": 3600, "4H": 14400, "1D": 86400}[frame]
+            expected_close = open_timestamp + timedelta(seconds=interval_seconds, milliseconds=-1)
+            if close_timestamp != expected_close:
+                raise ProviderDataError(f"Binance kline row {index} close boundary does not match {frame} interval")
+            if close_timestamp < open_timestamp:
                 raise ProviderDataError(f"Binance kline row {index} has invalid time range")
             candles.append(Candle(
                 timestamp=open_time,
@@ -323,7 +338,7 @@ class BinanceProvider:
                 low=_number(row[3], f"kline[{index}].low", positive=True),
                 close=_number(row[4], f"kline[{index}].close", positive=True),
                 volume=_number(row[5], f"kline[{index}].volume"),
-                completed=parse_timestamp(close_time) <= current,
+                completed=close_timestamp <= current,
             ))
         if not candles:
             raise ProviderDataError("Binance returned no klines")

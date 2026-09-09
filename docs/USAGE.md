@@ -269,7 +269,15 @@ Position P&L 是剩余仓位的未实现表现，不是已实现收益或组合�
 
 外部存款和取款必须使用现金流调整后的 NAV 处理。若两个快照之间出现了
 未分类的明显余额变化，NAV、回撤和基准表现标记为 `PROVISIONAL`，不会把
-余额变化误认为投资收益。
+余额变化误认为投资收益。每个 snapshot 的唯一现金流状态是
+`CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、`UNRESOLVED` 或 `BASELINE_RESET`：
+只有用户确认金额/方向或明确执行 baseline reset，`performance_finality`
+才会变成 `FINAL`。确认结果作为 append-only `CashFlowResolution` 写入
+`cash-flow-resolutions.jsonl`；未知状态使用 `external_cash_flow=null` 和
+`external_cash_flow_type=null`，不能填 0。
+
+`BASELINE_RESET` 必须带有该 snapshot 的 `snapshot_id`，它只建立新的记账
+基线；此前的 performance segment 保留为 archived history，不会重写旧记录。
 
 截图中的 `$0.00` 成本若精度不足，按未知成本处理；稳定币和现金仍计入组合
 总值及 stable sleeve。
@@ -347,7 +355,10 @@ python3 scripts/providers.py --probe binance
 python3 scripts/providers.py --probe coingecko
 python3 scripts/providers.py --probe defillama
 python3 scripts/providers.py --probe alternative_me
-python3 scripts/providers.py --probe sosovalue
+python3 scripts/providers.py --probe sosovalue --asset ETH
+python3 scripts/providers.py --probe rated --asset ETH
+python3 scripts/providers.py --probe lunarcrush --asset BTC
+python3 scripts/providers.py --probe coingecko --asset ETH
 ```
 
 `--status` 是离线配置检查；`--probe` 才会发网络请求，并且不会输出响应

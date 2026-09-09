@@ -22,11 +22,19 @@ def build_output(data_dir: str | None = None) -> dict:
     policy = resolve_policy()
     history = build_history_context()
     decision = history.get("latest_decision") or {}
+    nav = history.get("nav_history_result") or {}
     return {
         "policy_hash": policy.canonical_hash,
         "history": {
             "performance_status": history.get("performance_status"),
-            "nav_history": history.get("nav_history_result"),
+            "performance_finality": history.get("performance_finality"),
+            "cash_flow_resolution_status": history.get("cash_flow_resolution_status"),
+            "nav_history": nav,
+            "baseline_boundary": next(
+                (item.get("start") for item in nav.get("segments", ()) if item.get("archived") is not True),
+                None,
+            ),
+            "unresolved_reason": (nav.get("explanations") or [None])[0],
             "last_full_review": history.get("last_full_review"),
             "full_review_due": history.get("full_review_due"),
         },

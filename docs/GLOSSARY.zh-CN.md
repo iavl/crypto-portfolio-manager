@@ -64,6 +64,7 @@
 | **NAV** | 净资产值（Net Asset Value） | 某个时间点组合全部资产的总价值。 | 用来比较组合随时间的真实变化。 |
 | **unitized NAV** | 单位化净值 | 把外部存取款转换为单位数变化，从而把资金流与投资表现分开。 | 避免把“新存入的钱”误判成投资收益。 |
 | **external cash flow** | 外部现金流 | 存入组合或从组合取出的资金，而不是资产价格变化。 | 必须明确标记为 DEPOSIT、WITHDRAWAL 或 NONE。 |
+| **cash_flow_resolution_status** | 现金流解析状态 | `CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、`UNRESOLVED` 或 `BASELINE_RESET`，是现金流是否可用于记账的唯一状态字段。 | 只有明确确认或重置基线才允许 `FINAL`；未知状态保持 `PROVISIONAL`。 |
 | **cash-flow timing** | 现金流时点 | 本项目把附着在 snapshot 上的现金流视为发生在该 snapshot 估值之前。 | 影响 NAV、基准和回撤计算；时点不能被忽略。 |
 | **cost basis** | 成本基础 / 持仓成本 | 购买剩余仓位所对应的已知成本金额。 | 成本未知时保持未知，不会伪造为零。 |
 | **P&L** | 盈亏（Profit and Loss） | 当前价值与成本基础之间的差额或比例。 | 需要区分仓位盈亏与组合层面的 NAV Return。 |
@@ -72,6 +73,7 @@
 | **return** | 收益率 | 某资产、组合或基准在匹配期间的价格/净值变化比例。 | 组合收益必须使用现金流调整后的方法，不能用余额变化代替。 |
 | **coverage** | 覆盖率 | 依上下文表示成本数据覆盖率或证据覆盖率。 | 覆盖率低会降低信心；关键数据缺失可直接阻止高置信度新增仓位。 |
 | **PROVISIONAL** | 暂定 | 存在未分类的重大余额变化，无法确认 NAV 表现是否为真实投资表现。 | 只能作为暂定结果，不应称为可靠收益或回撤。 |
+| **performance_finality** | 表现最终性 | `FINAL`、`PROVISIONAL` 或 `UNAVAILABLE`，描述 NAV/benchmark 是否已经过现金流边界确认。 | 报告只能格式化该字段，不能自行把暂定结果改成最终结果。 |
 | **-- / unknown** | 未知 | 截图或来源没有足够信息，例如成本或盈亏显示为 --。 | 保持未知；未知不是零，也不是默认安全。 |
 
 ## 4. 市场数据与指标
@@ -81,6 +83,8 @@
 | **OHLCV** | 开高低收量 | Open、High、Low、Close、Volume，即开盘价、最高价、最低价、收盘价和成交量。 | 是趋势、ATR、波动率和 Volume Profile 的基础历史数据。 |
 | **spot price / SpotPrice** | 现货价格 | 某资产在现货市场上的当前价格；SpotPrice 还必须带观察时间和来源。 | 执行计划不能使用没有时间戳的价格。 |
 | **completed candle** | 已完成 K 线 | 已经结束的完整时间周期蜡烛线。 | 指标只使用已完成 K 线，避免把未来或未收盘数据带入结果。 |
+| **freshness_reference_at** | freshness 参考时间 | 日线 OHLCV 指标使用的最新完整 K 线收盘边界。 | 必须与 `metadata.completed_through` 相同；旧数据缺失该字段时不能作为 fresh hit。 |
+| **completed_through** | 已完成至 | Provider metadata 中记录的最新完整 K 线收盘边界。 | 用于 freshness 和 cache reuse，不使用 candle open time 代替。 |
 | **no-lookahead** | 无前视 | 计算时只使用决策时点已经可用的数据。 | 防止回放结果看到了当时尚不存在的价格或事件。 |
 | **MA / MA20 / MA50 / MA100 / MA200** | 移动平均线 | 指定窗口内价格的平均值，用于观察中长期趋势。 | 只是趋势证据之一，不是单独的买卖信号。 |
 | **ATR / ATR14** | 平均真实波幅 | 反映价格波动范围；当前 ATR14 使用 14 个完整真实波幅的简单平均。 | 用于设置波动感知的区间和判断价格是否过度延伸。 |
@@ -126,6 +130,7 @@
 | **reliability** | 可靠性 | 某条数据或因子在当前决策中可被信任和使用的程度。 | 缺失因子保留原政策权重，但其分数向中性 50 收缩。 |
 | **evidence coverage** | 证据覆盖率 | 适用且可用的证据在政策权重下的覆盖程度。 | NOT_APPLICABLE、可选 SKIPPED 和 overlay 不进入适用评分分母；必要失败会降低覆盖率。 |
 | **event-risk gate** | 事件风险门 | 独立于六个基础因子的安全、治理、监管和重大事件限制。 | SEVERE/CRITICAL 可以阻止新增风险，但不会把事件风险伪装成第七个基础分数。 |
+| **AAVE governance coverage** | AAVE 治理覆盖 | Governance V3 on-chain 与至少一个官方 forum/proposals off-chain source 的组合覆盖。 | 缺任一 source group 都是 `INSUFFICIENT_SOURCE_COVERAGE`，泛新闻不能替代。 |
 | **overlay** | 覆盖层 | positioning、BTC cycle、execution context 或 structural risk 等额外背景。 | 可以限制即时部署或降低信心，但不是新的加权基础因子。 |
 | **chain liveness** | 链运行状态 | 通过结构化 block/slot/RPC 数据判断链是否仍在正常推进。 | 只适用于 BTC、ETH、SOL、BNB；链数据传输失败不等于链已 HALTED。 |
 | **HEALTHY / DEGRADED / HALTED / UNKNOWN** | 健康/降级/停止/未知 | 链运行状态的枚举；HALTED 需要配置的独立来源共同证明严重停滞。 | DEGRADED 会限制部署；HALTED 阻止新增敞口；UNKNOWN 不会被当作健康。 |

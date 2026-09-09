@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import metric_definition
-from ..models.metrics_history import CollectionEvent, MetricObservation
+from ..models.metrics_history import CollectionEvent, MetricObservation, observation_freshness_reference
 from ..models.time import normalize_timestamp, parse_timestamp
 from ._jsonl import append_record, read_records
 from .snapshots import runtime_data_dir
@@ -215,7 +215,10 @@ def observation_is_fresh(
             "as_of",
         )
     ) if as_of is not None else datetime.now().astimezone()
-    observed = parse_timestamp(observation.observed_at)
+    reference_at = observation_freshness_reference(observation)
+    if reference_at is None:
+        return False
+    observed = parse_timestamp(reference_at)
     age = (cutoff - observed).total_seconds()
     if age < 0:
         return False
@@ -256,7 +259,11 @@ def latest_usable_observation(
         and item.metric_key == normalized_key
         and observation_is_fresh(item, as_of=as_of, max_age_seconds=max_age_seconds)
     ]
-    return max(candidates, key=lambda item: (parse_timestamp(item.observed_at), item.observation_id), default=None)
+    return max(
+        candidates,
+        key=lambda item: (parse_timestamp(observation_freshness_reference(item) or item.observed_at), item.observation_id),
+        default=None,
+    )
 
 
 def previous_metric(

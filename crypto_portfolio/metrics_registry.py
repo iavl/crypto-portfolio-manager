@@ -28,6 +28,7 @@ CHAIN_NATIVE_ASSETS = _CHAIN_NATIVE_ASSETS
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
 _APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
 _ETH_ASSETS = ("ETH",)
+_FDV_ASSETS = tuple(asset for asset in _PROTOCOL_ASSETS if asset != "ETH")
 _FDV_RATIO_ASSETS = tuple(asset for asset in _PROTOCOL_ASSETS if asset != "ETH")
 _ACTIVE_USER_ASSETS = tuple(asset for asset in _APPLICATION_ASSETS if asset != "ETH")
 _DEVELOPER_ACTIVITY_ASSETS = ("ETH", "AAVE")
@@ -321,7 +322,7 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "onchain.blockspace_fees": _definition("onchain.blockspace_fees", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_CHAIN_NATIVE_ASSETS),
     "onchain.transaction_count": _definition("onchain.transaction_count", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
     "valuation.market_cap": _definition("valuation.market_cap", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_PROTOCOL_ASSETS),
-    "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_PROTOCOL_ASSETS),
+    "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_FDV_ASSETS),
     "valuation.fdv_market_cap_ratio": _definition("valuation.fdv_market_cap_ratio", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="7d", asset_scope=_FDV_RATIO_ASSETS),
     "valuation.fee_revenue_multiple": _definition("valuation.fee_revenue_multiple", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="14d", asset_scope=_APPLICATION_ASSETS),
     "btc_valuation.mvrv": _definition(

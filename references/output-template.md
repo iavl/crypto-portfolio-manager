@@ -29,6 +29,8 @@ and the effect on confidence or trade eligibility. State the current-versus-
 target deviation, active threshold, stablecoin floor, concentration and
 turnover constraints. If evidence is missing, say `无法确认` and state the
 decision effect; never replace missing evidence with a neutral assumption.
+For daily OHLCV-derived metrics, also show the completed-candle close boundary
+as `freshness_reference_at` and verify it equals `metadata.completed_through`.
 
 ### Debug 报告
 
@@ -367,7 +369,9 @@ or:
 
 Finalized reports show Data Confidence dimensions, Regime Confidence, Decision
 Confidence, raw/final scores, bands, caps, evidence IDs, and their action
-effects. They also show NAV status, cash-flow-adjusted return, current/max
-drawdown, BTC benchmark/excess return, and EventScanner state. A pending event
-resolution or unresolved historical cash flow keeps the packet
-`PROVISIONAL`/`BLOCKED`; the writer never recomputes these values.
+effects. They also show NAV status, `performance_finality`,
+`cash_flow_resolution_status`, cash-flow-adjusted return, current/max drawdown,
+BTC benchmark/excess return, and EventScanner state. Only
+`CONFIRMED_NONE`/`CONFIRMED_AMOUNT` or `BASELINE_RESET` can produce
+`performance_finality=FINAL`; an unresolved historical cash flow keeps the
+packet `PROVISIONAL`/`BLOCKED`. The writer never recomputes these values.

@@ -398,7 +398,7 @@ def calculate_data_confidence(
         domain = str(latest.get("confidence_domain", latest.get("domain", ""))).strip().lower()
         max_age, half_life = _configured_freshness(key, domain, freshness_policy)
         freshness, freshness_status = calculate_freshness(
-            latest.get("observed_at"),
+            latest.get("freshness_reference_at", latest.get("observed_at")),
             as_of=as_of,
             max_age_seconds=max_age,
             half_life_seconds=half_life,

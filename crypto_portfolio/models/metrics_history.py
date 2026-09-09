@@ -118,6 +118,7 @@ class MetricObservation:
     source_quality: float | None = None
     confidence_score: float | None = None
     conflict_ids: tuple[str, ...] = ()
+    freshness_reference_at: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observation_id", _text(self.observation_id, "observation_id"))
@@ -148,6 +149,12 @@ class MetricObservation:
         object.__setattr__(self, "fetched_at", normalize_timestamp(self.fetched_at, "fetched_at"))
         if parse_timestamp(self.fetched_at) < parse_timestamp(self.observed_at):
             raise ValueError("fetched_at must be at or after observed_at")
+        freshness_reference = self.freshness_reference_at
+        if freshness_reference is not None:
+            freshness_reference = normalize_timestamp(freshness_reference, "freshness_reference_at")
+            if parse_timestamp(freshness_reference) < parse_timestamp(self.observed_at):
+                raise ValueError("freshness_reference_at must be at or after observed_at")
+        object.__setattr__(self, "freshness_reference_at", freshness_reference)
         object.__setattr__(self, "source", _text(self.source, "source"))
         if self.source_group is not None:
             object.__setattr__(self, "source_group", _text(self.source_group, "source_group").lower())
@@ -195,6 +202,19 @@ class MetricObservation:
             except (TypeError, ValueError) as exc:
                 raise ValueError("metadata must be JSON serializable and finite") from exc
             object.__setattr__(self, "metadata", metadata)
+        metadata = self.metadata or {}
+        timeframe = str(metadata.get("timeframe", "")).strip().upper()
+        requires_completed_boundary = timeframe == "1D" or "completed_through" in metadata
+        completed_through = metadata.get("completed_through")
+        if completed_through is not None:
+            completed_through = normalize_timestamp(completed_through, "metadata.completed_through")
+            if freshness_reference != completed_through:
+                raise ValueError("freshness_reference_at must match metadata.completed_through")
+            metadata["completed_through"] = completed_through
+        if requires_completed_boundary and freshness_reference is None:
+            raise ValueError("1D OHLCV observations require freshness_reference_at")
+        if self.metadata is not None:
+            object.__setattr__(self, "metadata", metadata)
         supersedes = _optional_text(self.supersedes_observation_id, "supersedes_observation_id")
         reason = _optional_text(self.revision_reason, "revision_reason")
         if reason is not None and supersedes is None:
@@ -213,6 +233,7 @@ class MetricObservation:
             "observed_at", "fetched_at", "source", "freshness", "confidence", "decision_id",
             "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason",
             "source_group", "authority_tier", "source_quality", "confidence_score", "conflict_ids",
+            "freshness_reference_at",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -254,6 +275,8 @@ class MetricObservation:
                 result[field] = value
         if self.conflict_ids:
             result["conflict_ids"] = list(self.conflict_ids)
+        if self.freshness_reference_at is not None:
+            result["freshness_reference_at"] = self.freshness_reference_at
         return result
 
     def __getitem__(self, key: str) -> Any:
@@ -276,6 +299,7 @@ class MetricObservation:
             "source_quality": self.source_quality,
             "confidence_score": self.confidence_score,
             "conflict_ids": list(self.conflict_ids),
+            "freshness_reference_at": self.freshness_reference_at,
         })
         if self.supersedes_observation_id is not None:
             metadata.update({
@@ -300,6 +324,21 @@ class MetricObservation:
             confidence_score=self.confidence_score,
             conflict_ids=self.conflict_ids,
         )
+
+
+def observation_freshness_reference(observation: MetricObservation) -> str | None:
+    """Return the timestamp used for freshness, including completed candles."""
+    if not isinstance(observation, MetricObservation):
+        raise ValueError("observation must be a MetricObservation")
+    metadata = observation.metadata or {}
+    timeframe = str(metadata.get("timeframe", "")).strip().upper()
+    is_ohlcv = (
+        "completed_through" in metadata
+        or str(metadata.get("source_dataset", "")).strip().lower() in {"ohlcv", "spot_klines"}
+    )
+    if observation.freshness_reference_at is None and (timeframe == "1D" or (is_ohlcv and timeframe == "")):
+        return None
+    return observation.freshness_reference_at or observation.observed_at
 
 
 @dataclass(frozen=True)
@@ -399,5 +438,6 @@ class CollectionEvent:
 __all__ = [
     "CollectionEvent",
     "MetricObservation",
+    "observation_freshness_reference",
     "stable_observation_id",
 ]

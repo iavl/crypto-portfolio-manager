@@ -385,7 +385,11 @@ class ProviderCache:
             completed_through = parse_timestamp(_timestamp(value.get("completed_through"), "series manifest completed_through"))
         except (TypeError, ValueError) as exc:
             raise CacheCorruption(f"series manifest has invalid range {path}") from exc
-        if start > end or completed_through < start or completed_through > end:
+        try:
+            interval_seconds = {"1H": 3600, "4H": 14400, "1D": 86400}[str(value["series_key"]["timeframe"]).upper()]
+        except (KeyError, TypeError):
+            raise CacheCorruption(f"series manifest has an invalid timeframe {path}") from None
+        if start > end or completed_through < start or completed_through > end + timedelta(seconds=interval_seconds):
             raise CacheCorruption(f"series manifest range is inconsistent {path}")
         return value
 
@@ -400,6 +404,9 @@ class ProviderCache:
         expected = self.series_key(provider, symbol, timeframe, market=market, quote_currency=quote_currency)
         if series.symbol != expected["symbol"] or series.timeframe != expected["timeframe"]:
             raise CacheCorruption("series manifest content has a mismatched symbol or timeframe")
+        expected_completed = parse_timestamp(series.candles[-1].timestamp) + timedelta(seconds=series.interval_seconds)
+        if parse_timestamp(manifest["completed_through"]) != expected_completed:
+            raise CacheCorruption("series manifest completed_through does not match the latest candle boundary")
         return series
 
     def store_series(
@@ -429,9 +436,10 @@ class ProviderCache:
                 market=series.market,
                 quote_currency=series.quote_currency,
             )
-        completed = _timestamp(completed_through, "completed_through") if completed_through is not None else series.candles[-1].timestamp
-        if parse_timestamp(completed) > parse_timestamp(series.candles[-1].timestamp):
-            raise ValueError("completed_through must not be after the series end")
+        expected_completed = parse_timestamp(series.candles[-1].timestamp) + timedelta(seconds=series.interval_seconds)
+        completed = _timestamp(completed_through, "completed_through") if completed_through is not None else _timestamp(expected_completed.isoformat(), "completed_through")
+        if parse_timestamp(completed) != expected_completed:
+            raise ValueError("completed_through must equal the latest completed candle boundary")
         cache_ohlcv(series, self.market_data_directory)
         directory = self.series_directory(provider_name, series.symbol, series.timeframe, market=market_name, quote_currency=quote)
         directory.mkdir(parents=True, exist_ok=True)

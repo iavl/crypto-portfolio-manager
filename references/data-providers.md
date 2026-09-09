@@ -100,7 +100,11 @@ Binance uses the shared verified-TLS HTTP client and requires no API key.
 
 Approved public spot mappings are limited to the configured supported assets.
 OHLCV is normalized with completed-candle status, venue/market/quote, range,
-calendar coverage, and an immutable OHLCV hash. Binance does not provide this
+calendar coverage, and an immutable OHLCV hash. For 1D-derived metrics,
+`observed_at` remains the candle data anchor while `freshness_reference_at` and
+`metadata.completed_through` are the latest completed close boundary. Binance
+validates its explicit close time against the interval; Bybit derives the
+boundary from normalized open time plus interval. Binance does not provide this
 project's historical liquidation aggregates, global exchange-address
 attribution, or broad protocol market valuation.
 
@@ -142,8 +146,11 @@ identity, history, and diagnostics.
 | GET | `https://api.coingecko.com/api/v3/coins/{id}/history` | historical market cap and explicitly supplied historical FDV |
 
 The exact allowlisted IDs are `bitcoin`, `ethereum`, `solana`, `binancecoin`,
-`chainlink`, and `aave`. Market cap may succeed when FDV is absent; FDV absence
-is retained as a diagnostic (`COINGECKO_NO_FDV`).
+`chainlink`, and `aave`. ETH is outside the supported FDV methodology scope.
+For other assets, reported FDV is preferred; when it is null, Python derives
+`current_price * max_supply` only from valid fields in the same response.
+Missing or unprovable inputs are `UNAVAILABLE_BY_METHODOLOGY`, not a provider
+transport failure, and never use circulating or total supply as a substitute.
 Historical valuation uses the history endpoint at the requested `as_of` date.
 The current `/coins/markets` value is never substituted for historical data.
 Python derives `valuation.fdv_market_cap_ratio` only from same-asset,
@@ -383,13 +390,21 @@ social posts with interactions for the bucket, not a literal textual token
 mention count. Percentiles are same-asset trailing-history ranks, not
 cross-sectional ranks across cryptocurrencies. Social metrics are lower-authority
 positioning context and cannot by themselves produce a strong allocation change.
-The endpoint may require a LunarCrush subscription plan; credential presence is
-not entitlement proof. Missing or malformed rows remain unavailable evidence.
+All requested social metrics for one asset share one daily time-series request;
+the cache identity includes the asset, metric bundle, and time window. No
+cross-asset batch endpoint is assumed without a verified current contract. A
+402/plan response is `ENTITLEMENT_REQUIRED`, 429 or Retry-After is
+`RATE_LIMITED`, and an open circuit is `CIRCUIT_OPEN`; each keeps status and
+retryability. Only an explicitly optional/premium social metric may become
+`SKIPPED`; these errors never become zero or successful observations.
 
 ## Rated Free tier
 
 The current Rated OpenAPI document is OpenAPI `3.1.0` and uses an HTTP Bearer
-credential. Probes without `RATED_API_KEY` return HTTP 401. The adapter uses
+credential. Probes without `RATED_API_KEY` return HTTP 401. A bounded upstream
+body containing `{"detail":"Subscription is not active."}` is classified as
+`RATED_SUBSCRIPTION_INACTIVE` with `status_code=401`; it remains a failure until
+the user activates the subscription, and is never `SKIPPED_PREMIUM`. The adapter uses
 `/v0/eth/network/dailyRewards` for `sumEffectiveBalance`,
 `sumConsensusRewards`, and `sumExecutionRewards`, and `/v1/eth/queues` for
 `activatingStake`, `exitingStake`, and `totalWithdrawingBalance`. These source
@@ -437,12 +452,19 @@ derived. Missing history is `INSUFFICIENT_HISTORY`, not a fabricated value.
 ### Structured event transports
 
 The event catalog can use bounded GitHub releases/advisories/commits, RSS/Atom,
-Aave Discourse JSON, and the allowlisted BNB Governor RPC contract
-`0x0000000000000000000000000000000000002004`. Transport code only returns
+Aave Discourse JSON, the allowlisted BNB Governor RPC contract
+`0x0000000000000000000000000000000000002004`, and Aave Governance V3 on
+Ethereum at `0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7`. Governance V3 uses
+the verified `ProposalCreated`, `ProposalQueued`, `ProposalExecuted`,
+`ProposalCanceled`, and `ProposalFailed` topics from the official
+`aave-dao/aave-governance-v3` interface. Transport code only returns
 metadata candidates. Python filters lookback and deduplicates; `LUNA_MAX`
 classifies bounded candidates for materiality. A complete reachable source with
 zero candidates is a valid empty response. Same-authority URLs share a
-`source_group`; independent security domains do not. The current event mappings
+`source_group`; independent security domains do not. AAVE governance records
+`coverage_rule=ONCHAIN_AND_ONE_OFFCHAIN` and is `SUFFICIENT` only when the
+on-chain and one official off-chain group are both reachable and complete. The
+current event mappings
 are Ethereum Foundation security -> Blog RSS, Ethereum EIPs -> `ethereum/EIPs`
 GitHub commits, Aave security -> Governance Risk Discourse JSON plus the Aave
 V3 advisory source, and ESMA/MiCA -> ESMA RSS. GitHub commit requests pass the
@@ -468,7 +490,8 @@ covers:
 - Bitcoin Core security/releases/BIPs;
 - Ethereum security guidance, go-ethereum and consensus-spec advisories, EIPs,
   AllCoreDevs and Foundation protocol notices;
-- Aave security advisories and governance forum/proposals;
+- Aave security advisories and governance forum/proposals plus Governance V3
+  on-chain proposal events;
 - BNB Smart Chain security/release sources and BEPs/governance sources;
 - shared MARKET regulatory scans over SEC, CFTC, and ESMA/MiCA sources.
 
@@ -530,8 +553,11 @@ daily tail, merges it with the cached payload, and reparses the full history.
 
 Mutable response TTLs come from `config/data-providers.json` and are bounded by
 metric freshness. Historical OHLCV and other verified series are reusable and
-are not silently overwritten. Current incomplete candles are not persisted as
-completed evidence.
+are not silently overwritten. Daily OHLCV-derived observations persist
+`freshness_reference_at` and matching `metadata.completed_through` at the latest
+completed candle close boundary. Old observations/cache entries without that
+boundary are not AUTO fresh hits and must be refreshed or rebuilt. Current
+incomplete candles are not persisted as completed evidence.
 
 Offline status and explicit probes are separate:
 

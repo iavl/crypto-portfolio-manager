@@ -92,7 +92,34 @@ class ValuationProviderTests(unittest.TestCase):
             ("valuation.market_cap", "valuation.fdv"),
         ))
         self.assertEqual([item["metric_key"] for item in response.observations], ["valuation.market_cap"])
-        self.assertEqual(response.diagnostics["valuation.fdv"]["error_code"], "COINGECKO_NO_FDV")
+        self.assertEqual(response.diagnostics["valuation.fdv"]["error_code"], "UNAVAILABLE_BY_METHODOLOGY")
+
+    def test_null_fdv_is_derived_only_from_same_response_inputs(self):
+        response = CoinGeckoProvider(
+            client=FakeClient([{
+                "id": "aave",
+                "market_cap": 100,
+                "fully_diluted_valuation": None,
+                "current_price": 2,
+                "max_supply": 75,
+                "last_updated": "2026-09-05T23:59:00Z",
+            }]),
+            api_key="fake-key",
+        ).collect(ProviderRequest(
+            "coingecko", "valuation", "AAVE", {"as_of": None}, ("valuation.fdv",),
+        ))
+        self.assertEqual(response.observations[0]["value"], 150)
+        self.assertEqual(response.observations[0]["metadata"]["input_fields"], ["current_price", "max_supply"])
+
+    def test_eth_fdv_is_not_requested(self):
+        class NoRequest:
+            def get_json(self, *_args, **_kwargs):
+                raise AssertionError("ETH FDV must be outside the metric scope")
+
+        response = CoinGeckoProvider(client=NoRequest(), api_key="fake-key").collect(ProviderRequest(
+            "coingecko", "valuation", "ETH", {"as_of": None}, ("valuation.fdv",),
+        ))
+        self.assertEqual(response.diagnostics["valuation.fdv"]["error_code"], "PROVIDER_NOT_APPLICABLE")
 
     def test_historical_request_uses_history_only_and_never_current_value(self):
         client = FakeClient({"market_data": {"market_cap": {"usd": 90}}})
@@ -104,7 +131,7 @@ class ValuationProviderTests(unittest.TestCase):
         self.assertEqual(client.calls[0][1]["date"], "05-09-2026")
         self.assertEqual(response.observations[0]["value"], 90)
         self.assertEqual(response.observations[0]["observed_at"], "2026-09-05T00:00:00Z")
-        self.assertEqual(response.diagnostics["valuation.fdv"]["error_code"], "COINGECKO_NO_FDV")
+        self.assertEqual(response.diagnostics["valuation.fdv"]["error_code"], "UNAVAILABLE_BY_METHODOLOGY")
 
     def test_invalid_market_rows_do_not_become_observations(self):
         response = CoinGeckoProvider(client=FakeClient([
@@ -126,6 +153,7 @@ class ValuationProviderTests(unittest.TestCase):
             "coingecko", "coinmetrics_community",
         ))
         self.assertEqual(provider_chain("valuation.fdv", "AAVE"), ("coingecko",))
+        self.assertEqual(provider_chain("valuation.fdv", "ETH"), ())
         self.assertEqual(provider_chain("valuation.fdv_market_cap_ratio", "AAVE"), ())
         self.assertEqual(provider_chain("valuation.fee_revenue_multiple", "AAVE"), ("defillama",))
         self.assertEqual(dataset_for_metric("valuation.market_cap"), "valuation")

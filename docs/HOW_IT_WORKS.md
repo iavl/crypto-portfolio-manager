@@ -115,8 +115,12 @@ snapshot 和 decision 是 append-only。状态变更写入独立 status event，
 不会自动迁移或静默删除用户状态。
 
 现金流调整后的 NAV 使用 unitized NAV。一个 snapshot 附着的外部现金流被视为
-发生在该 snapshot valuation 之前。如果 material balance change 没有明确
-DEPOSIT/WITHDRAWAL/NONE 分类，NAV 和 benchmark 表现必须标记为 `PROVISIONAL`。
+发生在该 snapshot valuation 之前。snapshot 使用唯一的
+`cash_flow_resolution_status`：`CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、
+`UNRESOLVED` 或 `BASELINE_RESET`。只有用户明确确认或执行 baseline reset
+时 `performance_finality` 才是 `FINAL`；未知流量保持 `PROVISIONAL`，不把
+余额变化猜成存款、取款或零流量。确认记录追加到
+`cash-flow-resolutions.jsonl`，旧 snapshot 不被重写。
 
 ## 6. 指标注册表与采集计划
 
@@ -148,7 +152,8 @@ fresh MetricObservation
 - `FAILED`：应用数据预期存在，但没有可用值；
 - `CONFLICT`：来源冲突；
 - `NOT_APPLICABLE`：语义上不适用；
-- `SKIPPED`：可选或 premium provider 没有配置。
+- `SKIPPED`：可选或 premium provider 没有配置；provider entitlement、rate
+  limit 和 circuit 状态不会伪造成成功。
 
 `market.flow_state`、BTC-relative returns、ETH/BTC opportunity ratios、ETH
 staking/flow normalization 和 OI/market-cap 等明确依赖图由
@@ -171,7 +176,7 @@ secret。
 valuation.market_cap / valuation.fdv
     -> CoinGecko
     -> Coin Metrics CapMrktEstUSD fallback for market cap only
-    -> Python-derived FDV / market-cap ratio
+    -> Python-derived FDV / market-cap ratio; ETH FDV is NOT_APPLICABLE
 
 fundamentals.tvl / fees / revenue / fee-revenue multiple
     -> DeFiLlama
@@ -307,7 +312,9 @@ single-asset cap、chain liveness 和 overlays。Rebalance 使用 post-new-cash
 
 只有 rebalance 先批准 `INCREASE`，才进入技术层。技术层使用带 timestamp 的
 `SpotPrice` 和 completed `1D` OHLCV，优先至少 200 根日线、最好 240 天，
-并检查 freshness、cadence、calendar coverage 和 provenance。
+并检查 freshness、cadence、calendar coverage 和 provenance。日线指标的
+freshness 以 `freshness_reference_at == metadata.completed_through` 的收盘
+边界计算；旧 observation 缺少该字段时必须 refresh/rebuild。
 
 技术 snapshot 计算 MA20/50/100/200、execution-specific calendar
 30D/90D/180D return、ATR14、

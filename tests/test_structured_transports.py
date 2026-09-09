@@ -5,6 +5,8 @@ from tempfile import TemporaryDirectory
 
 from crypto_portfolio.events import EventScanner, EventSourceScanResponse
 from crypto_portfolio.events.transports import (
+    AAVE_GOVERNANCE_V3_ADDRESS,
+    AAVE_GOVERNANCE_V3_EVENT_TOPICS,
     BNB_GOVERNOR_ADDRESS,
     EventTransportCache,
     GITHUB_PAGE_SIZE,
@@ -206,6 +208,31 @@ class StructuredTransportTests(unittest.TestCase):
         self.assertIn("BNB Governor proposal", response.items[0]["title"])
         logs_call = next(call for call in self.client.calls if call[0] == "POST" and call[2]["method"] == "eth_getLogs")
         self.assertEqual(logs_call[2]["params"][0]["address"], BNB_GOVERNOR_ADDRESS)
+
+    def test_aave_governance_v3_uses_official_address_and_topics(self):
+        class AaveClient(Client):
+            def post_json(self, url, *, json_body, idempotent=False, **kwargs):
+                self.calls.append(("POST", url, json_body, idempotent))
+                if json_body["method"] == "eth_blockNumber":
+                    return {"jsonrpc": "2.0", "id": 1, "result": "0x100"}
+                return {"jsonrpc": "2.0", "id": 2, "result": [{
+                    "address": AAVE_GOVERNANCE_V3_ADDRESS,
+                    "topics": [AAVE_GOVERNANCE_V3_EVENT_TOPICS[0], "0x07"],
+                    "blockNumber": "0x100",
+                    "transactionHash": "0x" + "7" * 64,
+                    "timestamp": AS_OF,
+                }]}
+
+        client = AaveClient()
+        result = StructuredEventTransport(client=client).fetch_result(
+            self.request("AAVE", "governance", "aave-governance-v3")
+        )
+        self.assertTrue(result.reachable)
+        self.assertTrue(result.complete_for_source)
+        self.assertEqual(result.candidates[0].external_id, "aave-governance-v3:0x07")
+        logs_call = next(call for call in client.calls if call[0] == "POST" and call[2]["method"] == "eth_getLogs")
+        self.assertEqual(logs_call[2]["params"][0]["address"], AAVE_GOVERNANCE_V3_ADDRESS)
+        self.assertEqual(logs_call[2]["params"][0]["topics"][0], list(AAVE_GOVERNANCE_V3_EVENT_TOPICS))
 
     def test_rpc_log_without_timestamp_is_not_marked_complete(self):
         class NoTimestamp(Client):

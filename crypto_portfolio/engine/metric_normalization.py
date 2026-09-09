@@ -106,6 +106,7 @@ def _unit_and_value(
 def _freshness_from_age(
     definition: MetricDefinition,
     observed_at: str,
+    freshness_reference_at: str | None,
     as_of: str | datetime | None,
 ) -> str:
     if as_of is None:
@@ -113,7 +114,8 @@ def _freshness_from_age(
     window = definition.freshness
     if not isinstance(window, str) or not window.lower().endswith("d"):
         return "CURRENT"
-    age = (parse_timestamp(_timestamp(as_of, "as_of")) - parse_timestamp(observed_at)).total_seconds()
+    reference = freshness_reference_at or observed_at
+    age = (parse_timestamp(_timestamp(as_of, "as_of")) - parse_timestamp(reference)).total_seconds()
     if age < 0:
         raise ValueError("observed_at must not be after as_of")
     return "CURRENT" if age <= int(window[:-1]) * 86400 else "STALE"
@@ -134,7 +136,7 @@ def normalize_metric_observation(
         raise ValueError("metric observation must be an object")
     allowed = {
         "observation_id", "asset", "metric_key", "factor", "status", "value", "unit", "period",
-        "observed_at", "fetched_at", "source", "freshness", "confidence", "decision_id",
+        "observed_at", "fetched_at", "freshness_reference_at", "source", "freshness", "confidence", "decision_id",
         "review_type", "summary", "metadata", "supersedes_observation_id", "revision_reason",
         "timestamp", "event_id", "venue", "aggregation_scope", "scope", "funding_interval",
         "interval", "methodology", "method",
@@ -163,6 +165,16 @@ def normalize_metric_observation(
         scan_timestamp = _timestamp(scan_as_of, "scan_as_of")
         if parse_timestamp(scan_timestamp) >= parse_timestamp(observed_at):
             observed_at = scan_timestamp
+    freshness_reference_at = value.get("freshness_reference_at")
+    if freshness_reference_at is not None:
+        freshness_reference_at = _timestamp(freshness_reference_at, "freshness_reference_at")
+    if metadata.get("completed_through") is not None:
+        completed_through = _timestamp(metadata["completed_through"], "metadata.completed_through")
+        metadata["completed_through"] = completed_through
+        if freshness_reference_at is None:
+            freshness_reference_at = completed_through
+        elif freshness_reference_at != completed_through:
+            raise ValueError("freshness_reference_at must match metadata.completed_through")
     now_value = _now(now)
     fetched_at = _timestamp(value.get("fetched_at"), "fetched_at", fallback=now_value or observed_at)
     observation_value, unit = _unit_and_value(value.get("value"), value.get("unit"), definition)
@@ -171,8 +183,17 @@ def normalize_metric_observation(
     validate_metric_value(definition.key, observation_value)
     if as_of is not None and parse_timestamp(observed_at) > parse_timestamp(_timestamp(as_of, "as_of")):
         raise ValueError("observed_at must not be after as_of")
+    if as_of is not None and freshness_reference_at is not None and parse_timestamp(freshness_reference_at) > parse_timestamp(_timestamp(as_of, "as_of")):
+        raise ValueError("freshness_reference_at must not be after as_of")
     freshness = value.get("freshness")
-    freshness = _freshness_from_age(definition, observed_at, as_of) if freshness is None else _text(freshness, "freshness").upper()
+    freshness = _freshness_from_age(definition, observed_at, freshness_reference_at, as_of) if freshness is None else _text(freshness, "freshness").upper()
+    timeframe = str(metadata.get("timeframe", "")).strip().upper()
+    is_ohlcv = (
+        "completed_through" in metadata
+        or str(metadata.get("source_dataset", "")).strip().lower() in {"ohlcv", "spot_klines"}
+    )
+    if freshness_reference_at is None and (timeframe == "1D" or (is_ohlcv and timeframe == "")):
+        freshness = "STALE"
     if freshness not in _FRESHNESS:
         raise ValueError(f"freshness must be one of {sorted(_FRESHNESS)}")
     confidence = _confidence(value.get("confidence", "LOW"))
@@ -194,6 +215,7 @@ def normalize_metric_observation(
         period=value.get("period"),
         observed_at=observed_at,
         fetched_at=fetched_at,
+        freshness_reference_at=freshness_reference_at,
         source=value["source"],
         freshness=freshness,
         confidence=confidence,

@@ -14,6 +14,7 @@
     "period": {"type": ["string", "null"]},
     "observed_at": {"type": "string", "format": "date-time"},
     "fetched_at": {"type": "string", "format": "date-time"},
+    "freshness_reference_at": {"type": ["string", "null"], "format": "date-time"},
     "source": {"type": "string", "minLength": 1},
     "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
     "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},

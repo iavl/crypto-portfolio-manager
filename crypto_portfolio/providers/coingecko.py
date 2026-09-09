@@ -164,6 +164,7 @@ def parse_market_payload(
             "valuation.market_cap": row.get("market_cap"),
             "valuation.fdv": row.get("fully_diluted_valuation"),
         }
+        fdv_inputs = (row.get("current_price"), row.get("max_supply"))
         source_dataset = "coins/markets"
         period = "current"
         methodologies = {
@@ -178,6 +179,7 @@ def parse_market_payload(
             "valuation.market_cap": _usd_value(market_data, "market_cap"),
             "valuation.fdv": _usd_value(market_data, "fully_diluted_valuation"),
         }
+        fdv_inputs = (_usd_value(market_data, "current_price"), market_data.get("max_supply"))
         source_dataset = "coins/{id}/history".format(id=provider_asset_id)
         period = "1d"
         methodologies = {
@@ -188,9 +190,24 @@ def parse_market_payload(
     observations: list[Mapping[str, Any]] = []
     for key in keys:
         raw = values.get(key)
-        if key == "valuation.fdv" and (raw is None or isinstance(raw, bool)):
-            diagnostics[key] = _diagnostic("COINGECKO_NO_FDV", "CoinGecko did not return FDV")
-            continue
+        methodology = methodologies[key]
+        input_fields: list[str] = []
+        if key == "valuation.fdv" and (raw is None or isinstance(raw, bool) or raw == 0):
+            price, max_supply = fdv_inputs
+            try:
+                derived_price = _number(price, "current_price", positive=True)
+                derived_supply = _number(max_supply, "max_supply", positive=True)
+                raw = derived_price * derived_supply
+                if not math.isfinite(raw) or raw <= 0:
+                    raise ProviderDataError("derived FDV is invalid")
+                methodology = "coingecko_derived_current_price_times_max_supply"
+                input_fields = ["current_price", "max_supply"]
+            except ProviderDataError:
+                diagnostics[key] = _diagnostic(
+                    "UNAVAILABLE_BY_METHODOLOGY",
+                    "CoinGecko FDV is unavailable without a valid same-response current_price and max_supply",
+                )
+                continue
         if raw is None:
             diagnostics[key] = _diagnostic(
                 "HISTORICAL_RANGE_UNAVAILABLE" if as_of is not None else "COINGECKO_SCHEMA",
@@ -201,11 +218,11 @@ def parse_market_payload(
             number = _number(raw, key.rsplit(".", 1)[-1], positive=True)
         except ProviderDataError as exc:
             diagnostics[key] = _diagnostic(
-                "COINGECKO_NO_FDV" if key == "valuation.fdv" else "COINGECKO_SCHEMA",
+                "UNAVAILABLE_BY_METHODOLOGY" if key == "valuation.fdv" else "COINGECKO_SCHEMA",
                 str(exc),
             )
             continue
-        observations.append(_observation(
+        observation = _observation(
             asset,
             key,
             number,
@@ -213,9 +230,15 @@ def parse_market_payload(
             fetched_at=fetched_at,
             source_dataset=source_dataset,
             provider_asset_id=provider_asset_id,
-            methodology=methodologies[key],
+            methodology=methodology,
             period=period,
-        ))
+        )
+        if input_fields:
+            observation["metadata"].update({
+                "input_fields": input_fields,
+                "as_of": as_of or observed_at,
+            })
+        observations.append(observation)
     return ProviderResponse(tuple(observations), diagnostics=diagnostics or None)
 
 
@@ -373,6 +396,14 @@ class CoinGeckoProvider:
         keys = tuple(dict.fromkeys(request.metric_keys))
         if any(key not in VALUATION_METRICS for key in keys):
             raise ProviderUnsupportedMetric("CoinGecko supports only market cap and FDV")
+        if asset == "ETH" and "valuation.fdv" in keys:
+            keys = tuple(key for key in keys if key != "valuation.fdv")
+            if not keys:
+                return ProviderResponse(
+                    (),
+                    diagnostics={"valuation.fdv": {"error_code": "PROVIDER_NOT_APPLICABLE", "detail": "ETH FDV is not applicable without a supported max-supply methodology"}},
+                    network_requests=0,
+                )
         as_of = request.parameters.get("as_of")
         if as_of is None:
             payload = self.client.get_json(

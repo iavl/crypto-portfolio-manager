@@ -288,6 +288,7 @@ Use this format:
 [DATA] <asset/scope> <metric> <STATUS> <value or short summary>
        source: <source or N/A>
        observed_at: <UTC timestamp or N/A>
+       freshness_reference_at: <UTC close boundary or N/A>
        fetched_at: <UTC timestamp or N/A>
        reason: <required for FAILED/STALE/CONFLICT/NOT_APPLICABLE/SKIPPED>
        scoring_effect: <coverage, confidence, or entry effect>
@@ -339,7 +340,10 @@ required evidence remains a failure when it is unavailable.
 `MetricObservation` history is sparse and append-only. The Agent receives only
 latest/previous values, changes, and compact trends; current values are still
 refetched for freshness. `CollectionEvent` records failed or stale attempts so
-missing data remains visible.
+missing data remains visible. For `1D` OHLCV-derived metrics, freshness uses
+`freshness_reference_at`, which must equal `metadata.completed_through` at the
+latest completed candle close; observations without that boundary are not
+reusable fresh cache hits.
 
 Chain liveness is a current operational check of canonical block/slot progress
 and, where available, finality. It is collected from structured RPC or block
@@ -418,9 +422,12 @@ new allocation.
 When a material change between snapshots has no explicit cash-flow
 classification, continue allocation/risk review if possible but mark NAV
 performance `PROVISIONAL`; do not infer a deposit or investment return from
-stablecoin growth alone. Use `external_cash_flow` with
-`external_cash_flow_type` (`DEPOSIT`, `WITHDRAWAL`, or explicit `NONE`) when
-the user confirms the classification.
+stablecoin growth alone. Use the single
+`cash_flow_resolution_status` (`CONFIRMED_NONE`, `CONFIRMED_AMOUNT`,
+`UNRESOLVED`, or `BASELINE_RESET`) with matching nullable
+`external_cash_flow`/`external_cash_flow_type`. Only explicit confirmation or
+baseline reset produces `performance_finality=FINAL`; append user resolutions
+to `cash-flow-resolutions.jsonl`.
 
 ## Runtime data boundary
 

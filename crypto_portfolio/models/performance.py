@@ -21,6 +21,7 @@ VALIDATION_STATUSES = frozenset(
     {"PASS", "ROUNDING_WARNING", "MATERIAL_MISMATCH", "INSUFFICIENT_DATA"}
 )
 NAV_HISTORY_STATUSES = frozenset({"AVAILABLE", "PROVISIONAL", "UNAVAILABLE"})
+PERFORMANCE_FINALITIES = frozenset({"FINAL", "PROVISIONAL", "UNAVAILABLE"})
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
@@ -245,6 +246,7 @@ class NAVHistoryResult:
     current_drawdown: float | None = None
     max_drawdown: float | None = None
     benchmark_status: str = "UNAVAILABLE"
+    performance_finality: str | None = None
     btc_return: float | None = None
     btc_excess_return: float | None = None
     secondary_benchmark_return: float | None = None
@@ -257,6 +259,17 @@ class NAVHistoryResult:
         benchmark_status = str(self.benchmark_status).strip().upper()
         if benchmark_status not in NAV_HISTORY_STATUSES:
             raise ValueError("benchmark_status is unsupported")
+        finality = (
+            ("FINAL" if status == "AVAILABLE" else status)
+            if self.performance_finality is None
+            else str(self.performance_finality).strip().upper()
+        )
+        if finality not in PERFORMANCE_FINALITIES:
+            raise ValueError("performance_finality is unsupported")
+        if status == "AVAILABLE" and finality != "FINAL":
+            raise ValueError("available NAV history must be FINAL")
+        if status == "UNAVAILABLE" and finality != "UNAVAILABLE":
+            raise ValueError("unavailable NAV history must be UNAVAILABLE")
         for field_name in (
             "cash_flow_adjusted_return", "nav_return", "current_drawdown", "max_drawdown",
             "btc_return", "btc_excess_return", "secondary_benchmark_return",
@@ -274,6 +287,7 @@ class NAVHistoryResult:
             raise ValueError("explanations must contain non-empty strings")
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "benchmark_status", benchmark_status)
+        object.__setattr__(self, "performance_finality", finality)
         object.__setattr__(self, "states", states)
         object.__setattr__(self, "segments", segments)
         object.__setattr__(self, "unresolved_cash_flows", unresolved)
@@ -297,6 +311,7 @@ class NAVHistoryResult:
             "current_drawdown": self.current_drawdown,
             "max_drawdown": self.max_drawdown,
             "benchmark_status": self.benchmark_status,
+            "performance_finality": self.performance_finality,
             "btc_return": self.btc_return,
             "btc_excess_return": self.btc_excess_return,
             "secondary_benchmark_return": self.secondary_benchmark_return,
@@ -310,5 +325,6 @@ __all__ = [
     "PortfolioPerformanceSummary",
     "NAVHistoryResult",
     "NAV_HISTORY_STATUSES",
+    "PERFORMANCE_FINALITIES",
     "PositionPerformance",
 ]

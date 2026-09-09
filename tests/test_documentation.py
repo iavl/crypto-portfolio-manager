@@ -109,6 +109,9 @@ class DocumentationTests(unittest.TestCase):
             "RATED_API_KEY", "ETH_BEACON_API_URL", "export/tvl.json",
             "latest common completed UTC day", "only active structured route",
             "volume_24h_approximate", "market_price_usd", "ethereum/stats",
+            "freshness_reference_at", "completed_through", "RATED_SUBSCRIPTION_INACTIVE",
+            "ENTITLEMENT_REQUIRED", "RATE_LIMITED", "UNAVAILABLE_BY_METHODOLOGY",
+            "ONCHAIN_AND_ONE_OFFCHAIN", "0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)
@@ -173,6 +176,8 @@ class DocumentationTests(unittest.TestCase):
             "Position P&L",
             "NAV Return",
             "成本数据覆盖率",
+            "performance_finality",
+            "cash_flow_resolution_status",
             "scoring/decision effect",
             "Debug 报告",
             "脚本执行异常",
@@ -380,6 +385,8 @@ class DocumentationTests(unittest.TestCase):
             "observed_at",
             "fetched_at",
             "as_of",
+            "freshness_reference_at",
+            "completed_through",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, glossary)

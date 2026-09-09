@@ -34,12 +34,23 @@ MAX_GITHUB_PAGES = 3
 MAX_DISCOURSE_PAGES = 10
 GITHUB_PAGE_SIZE = 100
 MAX_RPC_BLOCK_RANGE = 500
+MAX_RPC_TIMESTAMP_REQUESTS = 64
 BNB_GOVERNOR_ADDRESS = "0x0000000000000000000000000000000000002004"
 BNB_RPC_ENDPOINT = "https://bsc-dataseed.bnbchain.org"
 BNB_RPC_ENDPOINTS = (BNB_RPC_ENDPOINT, "https://bsc-dataseed-public.bnbchain.org")
 RPC_EVENT_TOPICS = (
     "0x95f03e437e6d5037418f12bef80fc7e0a5f27754c078a1d5d3f62d39bac44e50",
     "0x712ae1383f79ac853f8d882153778e0260ef8f03b504e2866e0593e04d2b291f",
+)
+AAVE_GOVERNANCE_V3_ADDRESS = "0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7"
+AAVE_GOVERNANCE_V3_RPC_ENDPOINT = "https://ethereum-rpc.publicnode.com"
+AAVE_GOVERNANCE_V3_RPC_ENDPOINTS = (AAVE_GOVERNANCE_V3_RPC_ENDPOINT, "https://rpc.flashbots.net")
+AAVE_GOVERNANCE_V3_EVENT_TOPICS = (
+    "0xcc914becfa276bbc067049bf8db2d34ebbdc1bafa851e4d4936aaed376c08dbe",
+    "0xe39e7fc9f2013b8ab01110f66610f9fb8675d3126e69b3752f0084afc72be19a",
+    "0x712ae1383f79ac853f8d882153778e0260ef8f03b504e2866e0593e04d2b291f",
+    "0x789cf55be980739dad1d0699b93b58e806b51c9d96619bfa8fe0a28abaa7b30c",
+    "0x2bed878481293fc7587c48352c8b09aeeca52bed666011d7f916706ec72d6d6d",
 )
 _MAX_EXCERPT = 2_000
 
@@ -239,6 +250,8 @@ def infer_transport_kind(endpoint: str, source_id: str = "") -> str:
     source = source_id.lower()
     if source == "bnb-governor-rpc" or path.endswith("/rpc"):
         return "RPC_LOGS"
+    if source == "aave-governance-v3" and urlsplit(endpoint).netloc in {"ethereum-rpc.publicnode.com", "rpc.flashbots.net"}:
+        return "RPC_LOGS"
     if urlsplit(endpoint).netloc in {"api.github.com", "github.com"}:
         if "/security-advisories" in path:
             return "GITHUB_SECURITY_ADVISORIES"
@@ -425,32 +438,66 @@ def _discourse_pagination_endpoint(value: Any, base_endpoint: str) -> str:
     return urlunsplit((base.scheme, base.netloc, path, query, ""))
 
 
-def _rpc_candidates(payload: Any, spec: EventTransportSpec) -> tuple[EventCandidate, ...]:
+def _rpc_candidates(
+    payload: Any,
+    spec: EventTransportSpec,
+    *,
+    block_timestamps: Mapping[str, str] | None = None,
+) -> tuple[EventCandidate, ...]:
     if not isinstance(payload, list):
         raise ProviderResponseError("RPC logs response must be an array")
     candidates = []
+    if spec.source_id == "bnb-governor-rpc":
+        address = BNB_GOVERNOR_ADDRESS.lower()
+        allowed_topics = RPC_EVENT_TOPICS
+        label = "BNB Governor"
+        explorer = "https://bscscan.com/tx/"
+    elif spec.source_id == "aave-governance-v3":
+        address = AAVE_GOVERNANCE_V3_ADDRESS.lower()
+        allowed_topics = AAVE_GOVERNANCE_V3_EVENT_TOPICS
+        label = "Aave Governance V3"
+        explorer = "https://etherscan.io/tx/"
+    else:
+        raise ProviderResponseError("RPC source is not allowlisted")
     for item in payload:
         if not isinstance(item, Mapping):
             continue
-        topics = item.get("topics")
-        if not isinstance(topics, list) or not topics or str(topics[0]).lower() not in {topic.lower() for topic in RPC_EVENT_TOPICS}:
+        row_topics = item.get("topics")
+        if (
+            str(item.get("address", "")).lower() != address
+            or not isinstance(row_topics, list)
+            or not row_topics
+            or str(row_topics[0]).lower() not in {topic.lower() for topic in allowed_topics}
+        ):
             continue
         transaction_hash = item.get("transactionHash")
         timestamp = _date_from(item.get("timestamp"))
+        if timestamp is None and block_timestamps is not None:
+            timestamp = _date_from(block_timestamps.get(str(item.get("blockNumber", ""))))
         if timestamp is None:
             raise ProviderResponseError("RPC event log has no usable block timestamp")
         if not isinstance(transaction_hash, str) or not transaction_hash.strip():
             raise ProviderResponseError("RPC event log has no transaction hash")
-        proposal = str(topics[1]) if len(topics) > 1 else transaction_hash
+        proposal = str(row_topics[1]) if len(row_topics) > 1 else transaction_hash
         block = item.get("blockNumber", "")
         candidates.append(EventCandidate(
-            f"bnb-governor:{proposal}",
-            f"BNB Governor proposal {proposal}",
+            f"{spec.source_id}:{proposal}",
+            f"{label} proposal {proposal}",
             timestamp,
-            f"https://bscscan.com/tx/{transaction_hash}",
-            f"allowlisted Governor event at block {block}",
+            f"{explorer}{transaction_hash}",
+            f"allowlisted {label} event proposal_id={proposal} transaction={transaction_hash} block={block}",
         ))
     return _dedup(candidates, spec)
+
+
+def _rpc_block_timestamp(value: Any) -> str:
+    if not isinstance(value, str) or not value.startswith("0x"):
+        raise ProviderResponseError("RPC block timestamp is malformed")
+    try:
+        timestamp = int(value, 16)
+    except ValueError as exc:
+        raise ProviderResponseError("RPC block timestamp is malformed") from exc
+    return normalize_timestamp(datetime.fromtimestamp(timestamp, timezone.utc).isoformat(), "block timestamp")
 
 
 class EventTransportCache:
@@ -596,6 +643,14 @@ class StructuredEventTransport:
             raise AssertionError("bounded Discourse pagination did not return a result")
         if spec.kind == "RPC_LOGS":
             endpoint = spec.endpoint
+            if spec.source_id == "bnb-governor-rpc":
+                contract_address = BNB_GOVERNOR_ADDRESS
+                event_topics = RPC_EVENT_TOPICS
+            elif spec.source_id == "aave-governance-v3":
+                contract_address = AAVE_GOVERNANCE_V3_ADDRESS
+                event_topics = AAVE_GOVERNANCE_V3_EVENT_TOPICS
+            else:
+                raise ProviderResponseError("RPC source is not allowlisted")
             latest = self.client.post_json(
                 endpoint,
                 json_body={"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []},
@@ -615,10 +670,10 @@ class StructuredEventTransport:
                 json_body={
                     "jsonrpc": "2.0", "id": 2, "method": "eth_getLogs",
                     "params": [{
-                        "address": BNB_GOVERNOR_ADDRESS,
+                        "address": contract_address,
                         "fromBlock": hex(from_block),
                         "toBlock": hex(to_block),
-                        "topics": [list(RPC_EVENT_TOPICS)],
+                        "topics": [list(event_topics)],
                     }],
                 },
                 idempotent=True,
@@ -630,7 +685,46 @@ class StructuredEventTransport:
                 )
             if not isinstance(response, Mapping) or not isinstance(response.get("result"), list):
                 raise ProviderResponseError("RPC logs response is malformed")
-            return EventTransportResult(spec.source_id, spec.kind, endpoint, True, True, checked_at, _rpc_candidates(response["result"], spec))
+            logs = response["result"]
+            blocks = sorted({
+                str(item.get("blockNumber"))
+                for item in logs
+                if isinstance(item, Mapping)
+                and item.get("timestamp") is None
+                and item.get("blockNumber") is not None
+            })
+            if len(blocks) > MAX_RPC_TIMESTAMP_REQUESTS:
+                return EventTransportResult(
+                    spec.source_id,
+                    spec.kind,
+                    endpoint,
+                    True,
+                    False,
+                    checked_at,
+                    error="RPC_BLOCK_TIMESTAMP_LIMIT",
+                )
+            block_timestamps: dict[str, str] = {}
+            for block in blocks:
+                block_response = self.client.post_json(
+                    endpoint,
+                    json_body={
+                        "jsonrpc": "2.0", "id": 3, "method": "eth_getBlockByNumber",
+                        "params": [block, False],
+                    },
+                    idempotent=True,
+                )
+                if not isinstance(block_response, Mapping) or not isinstance(block_response.get("result"), Mapping):
+                    raise ProviderResponseError("RPC block response is malformed")
+                block_timestamps[block] = _rpc_block_timestamp(block_response["result"].get("timestamp"))
+            return EventTransportResult(
+                spec.source_id,
+                spec.kind,
+                endpoint,
+                True,
+                True,
+                checked_at,
+                _rpc_candidates(logs, spec, block_timestamps=block_timestamps),
+            )
         raise ProviderResponseError(f"unsupported event transport {spec.kind}")
 
     def fetch_result(
@@ -718,6 +812,10 @@ def structured_event_source_fetcher(
 
 
 __all__ = [
+    "AAVE_GOVERNANCE_V3_ADDRESS",
+    "AAVE_GOVERNANCE_V3_EVENT_TOPICS",
+    "AAVE_GOVERNANCE_V3_RPC_ENDPOINT",
+    "AAVE_GOVERNANCE_V3_RPC_ENDPOINTS",
     "BNB_GOVERNOR_ADDRESS",
     "BNB_RPC_ENDPOINT",
     "BNB_RPC_ENDPOINTS",
@@ -729,6 +827,7 @@ __all__ = [
     "MAX_DISCOURSE_PAGES",
     "MAX_CANDIDATES",
     "MAX_RPC_BLOCK_RANGE",
+    "MAX_RPC_TIMESTAMP_REQUESTS",
     "RPC_EVENT_TOPICS",
     "StructuredEventTransport",
     "TRANSPORT_KINDS",

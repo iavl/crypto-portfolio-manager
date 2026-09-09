@@ -189,12 +189,19 @@ EVENT_SOURCE_CATALOG = (
     EventSource(
         "aave-governance-forum", "governance", ("AAVE",), "Aave governance", "official",
         "https://governance.aave.com/", True, name="Aave governance forum",
-        transport_urls=("https://governance.aave.com/latest.json",), transport_kind="DISCOURSE_JSON", source_group="aave-governance",
+        transport_urls=("https://governance.aave.com/latest.json",), transport_kind="DISCOURSE_JSON", source_group="aave-governance-offchain",
     ),
     EventSource(
         "aave-governance-proposals", "governance", ("AAVE",), "Aave governance", "official",
         "https://governance.aave.com/c/governance/4", True, name="Aave governance proposals",
-        transport_urls=("https://governance.aave.com/c/governance/4.json",), transport_kind="DISCOURSE_JSON", source_group="aave-governance",
+        transport_urls=("https://governance.aave.com/c/governance/4.json",), transport_kind="DISCOURSE_JSON", source_group="aave-governance-offchain",
+    ),
+    EventSource(
+        "aave-governance-v3", "governance", ("AAVE",), "Aave Governance V3", "official",
+        "https://etherscan.io/address/0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7", True,
+        name="Aave Governance V3 proposal events",
+        transport_urls=("https://ethereum-rpc.publicnode.com", "https://rpc.flashbots.net"), transport_kind="RPC_LOGS",
+        source_group="aave-governance-onchain",
     ),
     EventSource(
         "bnb-beps", "governance", ("BNB",), "BNB Chain BEPs", "official",

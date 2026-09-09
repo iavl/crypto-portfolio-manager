@@ -8,6 +8,9 @@ class PortfolioSnapshotTests(unittest.TestCase):
     def test_unresolved_material_change_does_not_become_nav_return(self):
         previous = {
             "timestamp": "2026-09-01T00:00:00Z",
+            "external_cash_flow": 0,
+            "external_cash_flow_type": "NONE",
+            "cash_flow_resolution_status": "CONFIRMED_NONE",
             "positions": [{"symbol": "BTC", "value_usd": 10000}, {"symbol": "USDT", "value_usd": 5000}],
         }
         current = {
@@ -22,9 +25,32 @@ class PortfolioSnapshotTests(unittest.TestCase):
             **current,
             "external_cash_flow": 10000,
             "external_cash_flow_type": "DEPOSIT",
+            "cash_flow_resolution_status": "CONFIRMED_AMOUNT",
         }
         self.assertEqual(detect_external_cash_flow(previous, confirmed)["status"], "CONFIRMED")
         self.assertAlmostEqual(cash_flow_adjusted_performance((previous, confirmed))["return"], 0.0)
+
+    def test_cash_flow_status_matrix_is_strict(self):
+        base = {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "positions": [{"symbol": "BTC", "value_usd": 100}],
+        }
+        for status, amount, flow_type in (
+            ("CONFIRMED_NONE", 0, "NONE"),
+            ("CONFIRMED_AMOUNT", 10, "DEPOSIT"),
+            ("CONFIRMED_AMOUNT", -10, "WITHDRAWAL"),
+            ("UNRESOLVED", None, None),
+            ("BASELINE_RESET", 0, "NONE"),
+        ):
+            value = {**base, "cash_flow_resolution_status": status, "external_cash_flow": amount, "external_cash_flow_type": flow_type}
+            if status == "BASELINE_RESET":
+                value["snapshot_id"] = "baseline-1"
+            with self.subTest(status=status):
+                self.assertEqual(normalize(value)["cash_flow_resolution_status"], status)
+        with self.assertRaises(ValueError):
+            normalize({**base, "external_cash_flow": 10, "external_cash_flow_type": "DEPOSIT"})
+        with self.assertRaises(ValueError):
+            normalize({**base, "cash_flow_resolution_status": "BASELINE_RESET", "external_cash_flow": 0, "external_cash_flow_type": "NONE"})
 
     def test_classify_accepts_partial_config(self):
         self.assertEqual(classify("alpha", {"core_symbols": ["ALPHA"]}), "core")

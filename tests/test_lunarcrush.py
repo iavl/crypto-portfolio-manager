@@ -8,6 +8,8 @@ from unittest.mock import patch
 from crypto_portfolio.providers.base import (
     ProviderDataError,
     ProviderInsufficientHistory,
+    ProviderDiagnostic,
+    ProviderRateLimited,
     ProviderRequest,
     ProviderResponseError,
     ProviderUnsupportedMetric,
@@ -198,6 +200,34 @@ class LunarCrushTests(unittest.TestCase):
         config = load_provider_config()
         self.assertFalse(provider_enabled("lunarcrush", config, {}))
         self.assertTrue(provider_enabled("lunarcrush", config, {"LUNARCRUSH_API_KEY": "key"}))
+
+    def test_all_social_metrics_share_one_asset_request(self):
+        client = Client(_payload(90))
+        result = LunarCrushProvider(client=client, api_key="key").collect(ProviderRequest(
+            "lunarcrush", "sentiment", "BTC", {"as_of": "2026-09-10T00:00:00Z"}, SUPPORTED_METRICS,
+        ))
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual({item["metric_key"] for item in result.observations}, set(SUPPORTED_METRICS))
+
+    def test_plan_and_rate_limit_diagnostics_are_distinct(self):
+        class ErrorClient:
+            def __init__(self, error):
+                self.error = error
+
+            def get_json(self, *_args, **_kwargs):
+                raise self.error
+
+        cases = (
+            (ProviderResponseError("payment", diagnostic=ProviderDiagnostic(error_code="HTTP_402", status_code=402, detail="plan required")), "ENTITLEMENT_REQUIRED"),
+            (ProviderRateLimited("slow", diagnostic=ProviderDiagnostic(error_code="HTTP_429", status_code=429, detail="retry later", retryable=True)), "RATE_LIMITED"),
+        )
+        for error, expected in cases:
+            with self.subTest(expected=expected):
+                with self.assertRaises(Exception) as raised:
+                    LunarCrushProvider(client=ErrorClient(error), api_key="key").collect(ProviderRequest(
+                        "lunarcrush", "sentiment", "BTC", {"as_of": "2026-09-10T00:00:00Z"}, (SUPPORTED_METRICS[0],),
+                    ))
+                self.assertEqual(raised.exception.diagnostic["error_code"], expected)
 
     def test_router_registers_lunarcrush_only_with_key(self):
         config = {

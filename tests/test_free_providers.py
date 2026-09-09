@@ -1,8 +1,10 @@
 import json
 import unittest
+from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.error import HTTPError
 
 from crypto_portfolio.providers.base import (
     ProviderDataError,
@@ -23,6 +25,7 @@ from crypto_portfolio.providers.growthepie import (
 )
 from crypto_portfolio.providers.ethereum_beacon import EthereumBeaconProvider
 from crypto_portfolio.providers.rated import RatedProvider, parse_daily_rewards, parse_queues
+from crypto_portfolio.providers.http import HttpClient
 from crypto_portfolio.providers.routes import build_provider_requests, provider_chain
 from crypto_portfolio.providers.cache import ProviderCache
 from crypto_portfolio.providers.router import ProviderRouter
@@ -56,6 +59,26 @@ def _provider_fixture(name: str):
 
 
 class FreeProviderTests(unittest.TestCase):
+    def test_rated_subscription_body_is_classified_without_raw_body(self):
+        def opener(request, **_kwargs):
+            raise HTTPError(
+                request.full_url,
+                401,
+                "Unauthorized",
+                {},
+                BytesIO(b'{"detail":"Subscription is not active."}'),
+            )
+
+        result = RatedProvider(
+            client=HttpClient(opener=opener, max_attempts=1),
+            api_key="secret",
+        ).collect(ProviderRequest(
+            "rated", "staking", "ETH", {"as_of": "2026-09-10T00:00:00Z"}, ("eth.staking.staking_apr_7d",),
+        ))
+        diagnostic = result.diagnostics["eth.staking.staking_apr_7d"]
+        self.assertEqual(diagnostic["error_code"], "RATED_SUBSCRIPTION_INACTIVE")
+        self.assertEqual(diagnostic["detail"], "Subscription is not active.")
+        self.assertNotIn("secret", str(diagnostic))
     def test_bgeometrics_uses_source_date_and_rejects_stale_values(self):
         payload = {"d": "2026-09-08", "unixTs": 1788825600, "mvrvZscore": 0.8725}
         observation = parse_mvrv_zscore(payload, fetched_at="2026-09-09T00:00:00Z")
