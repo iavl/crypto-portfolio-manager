@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -39,6 +40,13 @@ from crypto_portfolio.providers.sosovalue import (
 )
 from crypto_portfolio.providers.config import load_provider_config, provider_enabled, provider_runtime_status, provider_status
 from crypto_portfolio.providers.defillama import identifier_for_asset
+from crypto_portfolio.providers.growthepie import (
+    EXPORT_TVL_PATH,
+    FUNDAMENTALS_PATH,
+    GrowthepieProvider,
+    LANDING_PAGE_PATH,
+    MASTER_PATH,
+)
 from crypto_portfolio.providers.http import HttpClient, build_ssl_context, classify_transport_error, redact_secrets
 from crypto_portfolio.providers.probe import probe_provider
 from crypto_portfolio.providers.router import ProviderRouter
@@ -51,6 +59,26 @@ def config_for(*providers):
         "cache_ttl_seconds": {"default": 3600, "spot": 600},
         "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
         "fallback": {"allow_web": True},
+    }
+
+
+def growthepie_fixture(name):
+    return json.loads((Path(__file__).parent / "fixtures/providers" / name).read_text())
+
+
+def growthepie_landing_fixture():
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    tx_rows = []
+    fee_rows = []
+    for index in range(32):
+        stamp = int((start + timedelta(days=index)).timestamp() * 1000)
+        tx_rows.append([stamp, index + 1])
+        fee_rows.append([stamp, 100 + index, 1])
+    return {
+        "data": {
+            "all_l2s": {"metrics": {"txcount": {"daily": {"types": ["unix", "value"], "data": tx_rows}}}},
+            "ethereum": {"metrics": {"fees": {"daily": {"types": ["unix", "usd", "eth"], "data": fee_rows}}}},
+        }
     }
 
 
@@ -195,6 +223,51 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result["network"], "OK")
         self.assertEqual(result["auth"], "NOT_REQUIRED")
         self.assertEqual(client.calls, 1)
+
+    def test_growthepie_probe_validates_tvs_export_contract(self):
+        class ProbeClient:
+            def __init__(self, malformed=False):
+                self.malformed = malformed
+                self.urls = []
+
+            def get_json(self, url, **_kwargs):
+                self.urls.append(url)
+                if url.endswith(MASTER_PATH):
+                    return growthepie_fixture("growthepie_tvs_master.json")
+                if url.endswith(FUNDAMENTALS_PATH):
+                    return growthepie_fixture("growthepie_fundamentals.json")
+                if url.endswith(LANDING_PAGE_PATH):
+                    return growthepie_landing_fixture()
+                if url.endswith(EXPORT_TVL_PATH):
+                    return {"unexpected": True} if self.malformed else growthepie_fixture("growthepie_tvl_export.json")
+                raise AssertionError(f"unexpected URL: {url}")
+
+        client = ProbeClient()
+        result = probe_provider(
+            ProviderRouter({"growthepie": GrowthepieProvider(client=client)}, config=config_for("growthepie")),
+            "growthepie",
+            asset="ETH",
+        )[0]
+        self.assertEqual(result["network"], "OK")
+        self.assertEqual(result["schema"], "OK")
+        self.assertEqual(result["normalization"], "OK")
+        self.assertEqual(result["tvs_contract"], "master.json + export/tvl.json")
+        self.assertEqual(result["tvs_normalization"], "OK")
+        self.assertEqual(result["tvs_chain_count"], 2)
+
+        malformed_client = ProbeClient(malformed=True)
+        malformed = probe_provider(
+            ProviderRouter(
+                {"growthepie": GrowthepieProvider(client=malformed_client)},
+                config=config_for("growthepie"),
+            ),
+            "growthepie",
+            asset="ETH",
+        )[0]
+        self.assertEqual(malformed["network"], "OK")
+        self.assertEqual(malformed["schema"], "ERROR")
+        self.assertEqual(malformed["normalization"], "ERROR")
+        self.assertEqual(malformed["error_code"], "PROVIDER_SCHEMA_ERROR")
 
     def test_targeted_authenticated_probes_honor_asset_and_redact_credentials(self):
         from crypto_portfolio.providers.coingecko import CoinGeckoProvider
@@ -478,6 +551,13 @@ class DataAcquisitionTests(unittest.TestCase):
         oversized = Client([Response(200, b"12345", {"Content-Length": "5"})])
         with self.assertRaises(Exception):
             HttpClient(opener=oversized, max_response_bytes=4).get_json("https://example.test/data")
+        expanded = Client([Response(200, b"12345", {"Content-Length": "5"})])
+        self.assertEqual(
+            HttpClient(opener=expanded, max_response_bytes=4).get_json(
+                "https://example.test/data", max_response_bytes=5,
+            ),
+            12345,
+        )
         self.assertEqual(redact_secrets({"api_key": "secret"})["api_key"], "[REDACTED]")
         self.assertNotIn("secret", redact_secrets("api_key=secret Authorization: Bearer secret"))
 

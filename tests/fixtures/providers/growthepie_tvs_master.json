@@ -1,0 +1,32 @@
+{
+  "current_version": "fixture",
+  "last_updated_utc": "2026-09-06T00:00:00Z",
+  "chains": {
+    "arbitrum": {"deployment": "PROD", "chain_type": "rollup", "supported_metrics": ["tvl"]},
+    "base": {"deployment": "PROD", "chain_type": "rollup", "supported_metrics": ["tvl"]},
+    "ethereum": {"deployment": "PROD", "chain_type": "l1", "supported_metrics": ["tvl"]},
+    "polygon_pos": {"deployment": "PROD", "chain_type": "others", "supported_metrics": ["tvl"]},
+    "all_l2s": {"deployment": "PROD", "chain_type": "others", "supported_metrics": ["tvl"]},
+    "multiple": {"deployment": "PROD", "chain_type": "others", "supported_metrics": ["tvl"]},
+    "dev-chain": {"deployment": "DEV", "chain_type": "rollup", "supported_metrics": ["tvl"]},
+    "archived-chain": {"deployment": "ARCHIVED", "chain_type": "rollup", "supported_metrics": ["tvl"]},
+    "no-tvl": {"deployment": "PROD", "chain_type": "rollup", "supported_metrics": ["txcount"]}
+  },
+  "metrics": {
+    "tvl": {
+      "metric_keys": ["tvl", "tvl_eth"],
+      "supported_chains": [
+        "arbitrum",
+        "base",
+        "ethereum",
+        "polygon_pos",
+        "all_l2s",
+        "multiple",
+        "dev-chain",
+        "archived-chain",
+        "no-tvl"
+      ],
+      "units": {"usd": {}, "eth": {}}
+    }
+  }
+}

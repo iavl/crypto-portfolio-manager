@@ -40,7 +40,14 @@ gaps; they are never required for a normal review. See
 
 BTC MVRV Z uses the no-key BGeometrics latest-value endpoint when available.
 Ethereum L2 activity and Ethereum blockspace fees use growthepie's structured
-aggregate data; L2 TVS is not inferred from an unrelated metric. Rated is an
+aggregate data; L2 TVS is not inferred from an unrelated metric. The
+`eth.l2.tvs_usd` stock metric is derived from growthepie's TVL/TVS data: the
+runtime selects the growthepie-defined production L2 universe, excludes
+Ethereum L1, aggregate keys, and documented non-L2 sidechains, selects one
+common completed UTC day, and sums exact USD TVL rows for that day. Missing
+chain rows make the observation unavailable and are never treated as zero.
+The upstream API calls the series `tvl`; this project's semantic metric is L2
+TVS. Rated is an
 optional exact aggregate source for Ethereum staking primitives, while the
 standard Beacon API is bounded to node/finality checks unless a semantically
 exact aggregate is available.

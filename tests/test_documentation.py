@@ -105,7 +105,8 @@ class DocumentationTests(unittest.TestCase):
             "L2BEAT_API_KEY", "query parameter `apiKey`", "OpenAPI `3.1.0`",
             "`SKIPPED`", "`NOT_APPLICABLE`", "bitcoin-data.com", "landing_page.json",
             "sumEffectiveBalance", "QUERY_BUDGET_EXCEEDED", "GOOGLE_CLOUD_PROJECT",
-            "RATED_API_KEY", "ETH_BEACON_API_URL", "does not currently expose an equivalent TVS",
+            "RATED_API_KEY", "ETH_BEACON_API_URL", "export/tvl.json",
+            "latest common completed UTC day", "no-key primary for ETH L2 TVS",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)

@@ -30,9 +30,11 @@ DA_OVERVIEW_PATH = "/daoverview.json"
 DA_TIMESERIES_PATH = "/datimeseries.json"
 MASTER_PATH = "/master.json"
 LANDING_PAGE_PATH = "/landing_page.json"
+EXPORT_TVL_PATH = "/export/tvl.json"
 ATTRIBUTION = "growthepie / orbal GmbH"
 LICENSE = "CC BY 4.0"
 MAX_CALLS_PER_MINUTE = 10
+EXPORT_TVL_MAX_RESPONSE_BYTES = 8_000_000
 
 _RENT_KEYS = {"eth.l2.rent_paid_30d_usd", "eth.l2.rent_paid_90d_usd"}
 _DA_KEYS = {
@@ -41,7 +43,10 @@ _DA_KEYS = {
     "eth.da.ethereum_share_of_tracked_da_bytes_30d",
     "eth.da.ethereum_share_of_tracked_da_fees_30d",
 }
-_LANDING_KEYS = {"eth.l2.tvs_usd", "eth.l2.activity_30d", "onchain.blockspace_fees"}
+_TVS_KEYS = {"eth.l2.tvs_usd"}
+_LANDING_KEYS = {"eth.l2.activity_30d", "onchain.blockspace_fees"}
+TVS_NON_L2_EXCLUSIONS = frozenset({"polygon_pos"})
+TVS_AGGREGATE_KEYS = frozenset({"all_l2s", "alll2s", "multiple"})
 
 
 def _diagnostic(error: Exception) -> Mapping[str, Any]:
@@ -283,6 +288,154 @@ def _eligible_chain_keys(master: Mapping[str, Any], metric_name: str) -> set[str
     return result
 
 
+def _eligible_tvs_chain_keys(master: Mapping[str, Any]) -> tuple[str, ...]:
+    metrics = master.get("metrics")
+    chains = master.get("chains")
+    tvl = metrics.get("tvl") if isinstance(metrics, Mapping) else None
+    if not isinstance(tvl, Mapping) or not isinstance(chains, Mapping):
+        raise ProviderResponseError("growthepie TVL export requires master.json TVL and chains metadata")
+
+    supported = tvl.get("supported_chains")
+    if supported is None:
+        supported = tuple(chains)
+    if isinstance(supported, str) or not isinstance(supported, (list, tuple)):
+        raise ProviderResponseError("growthepie master TVL supported_chains is malformed")
+
+    normalized_chains: dict[str, Mapping[str, Any]] = {}
+    for raw_key, row in chains.items():
+        key = str(raw_key).strip().lower()
+        if key in normalized_chains:
+            raise ProviderResponseError(f"growthepie master has duplicate chain key {key}")
+        if not isinstance(row, Mapping):
+            raise ProviderResponseError(f"growthepie master chain {key} is malformed")
+        normalized_chains[key] = row
+
+    eligible: set[str] = set()
+    for raw_key in supported:
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise ProviderResponseError("growthepie master TVL supported_chains contains a malformed key")
+        key = raw_key.strip().lower()
+        row = normalized_chains.get(key)
+        if row is None:
+            raise ProviderResponseError(f"growthepie master TVL chain {key} is missing from chains")
+        if key in TVS_NON_L2_EXCLUSIONS or key in TVS_AGGREGATE_KEYS:
+            continue
+        if str(row.get("deployment", "")).strip().upper() != "PROD":
+            continue
+        if key == "ethereum" or str(row.get("chain_type", "")).strip().lower() == "l1":
+            continue
+        supported_metrics = row.get("supported_metrics")
+        if not isinstance(supported_metrics, (list, tuple)):
+            continue
+        if "tvl" not in {str(metric).strip().lower() for metric in supported_metrics}:
+            continue
+        eligible.add(key)
+    if not eligible:
+        raise ProviderUnsupportedMetric("growthepie TVL export has no eligible production L2 chains")
+    return tuple(sorted(eligible))
+
+
+def _tvs_usd_metric_key(master: Mapping[str, Any]) -> str:
+    metrics = master.get("metrics")
+    tvl = metrics.get("tvl") if isinstance(metrics, Mapping) else None
+    keys = tvl.get("metric_keys") if isinstance(tvl, Mapping) else None
+    if isinstance(keys, str) or not isinstance(keys, (list, tuple)):
+        raise ProviderResponseError("growthepie TVL metadata has no metric_keys list")
+    metric_keys = tuple(str(key).strip().lower() for key in keys if isinstance(key, str) and key.strip())
+    if len(metric_keys) != len(keys) or len(set(metric_keys)) != len(metric_keys):
+        raise ProviderResponseError("growthepie TVL metadata has malformed metric_keys")
+
+    usd_candidates = [key for key in metric_keys if key == "usd" or key.endswith("_usd")]
+    if len(usd_candidates) == 1:
+        return usd_candidates[0]
+    if len(usd_candidates) > 1:
+        raise ProviderResponseError("growthepie TVL metadata has ambiguous USD metric_keys")
+
+    units = tvl.get("units") if isinstance(tvl, Mapping) else None
+    eth_keys = {key for key in metric_keys if key == "eth" or key.endswith("_eth")}
+    remaining = [key for key in metric_keys if key not in eth_keys]
+    if not isinstance(units, Mapping) or "usd" not in units or len(remaining) != 1:
+        raise ProviderResponseError("growthepie TVL metadata has no unambiguous USD metric key")
+    return remaining[0]
+
+
+def parse_tvs_export_payload(
+    payload: Any,
+    master_payload: Any,
+    *,
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str = EXPORT_TVL_PATH,
+) -> tuple[Mapping[str, Any], ...]:
+    master = parse_master_payload(master_payload)
+    if not isinstance(payload, list):
+        raise ProviderResponseError("growthepie TVL export must be an array of rows")
+    if any(not isinstance(row, Mapping) for row in payload):
+        raise ProviderResponseError("growthepie TVL export contains a malformed row")
+
+    usd_metric_key = _tvs_usd_metric_key(master)
+    eligible = _eligible_tvs_chain_keys(master)
+    eligible_set = set(eligible)
+    cutoff = parse_timestamp(as_of) if as_of else parse_timestamp(fetched_at)
+    values_by_day: dict[str, dict[str, float]] = {}
+    seen: dict[tuple[str, str, str], float] = {}
+    required_fields = {"metric_key", "origin_key", "date", "value"}
+    for index, row in enumerate(payload):
+        if set(row) != required_fields:
+            raise ProviderResponseError(f"growthepie TVL export row {index} does not match the documented schema")
+        if not isinstance(row["metric_key"], str) or not row["metric_key"].strip():
+            raise ProviderResponseError(f"growthepie TVL export row {index} has an invalid metric_key")
+        if not isinstance(row["origin_key"], str) or not row["origin_key"].strip():
+            raise ProviderResponseError(f"growthepie TVL export row {index} has an invalid origin_key")
+        timestamp = _timestamp(row["date"], f"growthepie TVL export row {index} date")
+        value = _number(row["value"], f"growthepie TVL export row {index} value")
+        metric_key = row["metric_key"].strip().lower()
+        origin_key = row["origin_key"].strip().lower()
+        day = parse_timestamp(timestamp).date().isoformat()
+        if metric_key != usd_metric_key or origin_key not in eligible_set or parse_timestamp(timestamp).date() >= cutoff.date():
+            continue
+        identity = (day, origin_key, metric_key)
+        previous = seen.get(identity)
+        if previous is not None and previous != value:
+            raise ProviderDataError(f"growthepie TVL export has conflicting duplicate row for {day}:{origin_key}")
+        seen[identity] = value
+        values_by_day.setdefault(day, {})[origin_key] = value
+
+    complete_days = sorted(
+        (day for day, values in values_by_day.items() if eligible_set <= values.keys()),
+        reverse=True,
+    )
+    if not complete_days:
+        raise ProviderInsufficientHistory(
+            f"growthepie TVL export has no common completed day for {len(eligible)} eligible L2 chains"
+        )
+    observation_day = complete_days[0]
+    by_chain = values_by_day[observation_day]
+    return (_observation(
+        "ETH",
+        "eth.l2.tvs_usd",
+        sum(by_chain[chain] for chain in eligible),
+        observed_at=f"{observation_day}T00:00:00Z",
+        fetched_at=fetched_at,
+        period="1d",
+        endpoint=endpoint,
+        metadata={
+            "source_metric": "tvl",
+            "metric_key": usd_metric_key,
+            "methodology": "growthepie_l2_tvs_common_completed_day_sum",
+            "chain_scope": "growthepie_ethereum_l2_universe",
+            "source_contract": "master.json + export/tvl.json",
+            "observation_day": observation_day,
+            "chain_count": len(eligible),
+            "chain_set": list(eligible),
+            "excludes_ethereum_l1": True,
+            "excluded_non_l2_chains": sorted(TVS_NON_L2_EXCLUSIONS),
+            "excluded_aggregate_keys": sorted(TVS_AGGREGATE_KEYS),
+            "common_day_required": True,
+        },
+    ),)
+
+
 def _ethereum_da_chain_keys(master: Mapping[str, Any]) -> tuple[set[str], set[str]]:
     eligible: set[str] = set()
     tracked: set[str] = set()
@@ -514,8 +667,8 @@ class GrowthepieProvider:
         self._request_times: list[float] = []
         self.capabilities = ProviderCapabilities(
             provider=self.name,
-            metric_keys=tuple(sorted(_RENT_KEYS | _DA_KEYS | _LANDING_KEYS)),
-            historical_series=tuple(sorted(_RENT_KEYS | _DA_KEYS | _LANDING_KEYS)),
+            metric_keys=tuple(sorted(_RENT_KEYS | _DA_KEYS | _LANDING_KEYS | _TVS_KEYS)),
+            historical_series=tuple(sorted(_RENT_KEYS | _DA_KEYS | _LANDING_KEYS | _TVS_KEYS)),
             supports_batching=True,
             requires_api_key=False,
         )
@@ -535,12 +688,33 @@ class GrowthepieProvider:
             if len(self._request_times) >= MAX_CALLS_PER_MINUTE:
                 raise ProviderRateLimited("growthepie request budget exceeded: 10 calls per minute")
             self._request_times.append(now)
+            if isinstance(self.client, HttpClient) and url.endswith(EXPORT_TVL_PATH):
+                return self.client.get_json(url, max_response_bytes=EXPORT_TVL_MAX_RESPONSE_BYTES)
             return self.client.get_json(url)
 
+        network_requests = 0
+
+        def fetch(url: str) -> Any:
+            nonlocal network_requests
+            try:
+                value = get_json(url)
+            except Exception:
+                network_requests += 1
+                raise
+            network_requests += 1
+            return value
+
+        def get_master() -> Mapping[str, Any]:
+            if self._master_payload is None:
+                self._master_payload = parse_master_payload(fetch(BASE_URL + MASTER_PATH))
+            return self._master_payload
+
         landing_requested = tuple(key for key in requested if key in _LANDING_KEYS)
+        tvs_requested = tuple(key for key in requested if key in _TVS_KEYS)
         fundamentals_requested = tuple(key for key in requested if key in _RENT_KEYS or key in _DA_KEYS)
         unsupported_requested = tuple(
-            key for key in requested if key not in _LANDING_KEYS and key not in _RENT_KEYS and key not in _DA_KEYS
+            key for key in requested
+            if key not in _LANDING_KEYS and key not in _TVS_KEYS and key not in _RENT_KEYS and key not in _DA_KEYS
         )
         for key in unsupported_requested:
             diagnostics[key] = {
@@ -548,11 +722,9 @@ class GrowthepieProvider:
                 "detail": "growthepie capability does not include metric",
             }
 
-        network_requests = 0
         if landing_requested:
             try:
-                landing = get_json(BASE_URL + LANDING_PAGE_PATH)
-                network_requests += 1
+                landing = fetch(BASE_URL + LANDING_PAGE_PATH)
                 for key in landing_requested:
                     try:
                         values.extend(parse_landing_page_payload(
@@ -561,21 +733,31 @@ class GrowthepieProvider:
                     except Exception as exc:
                         diagnostics[key] = _diagnostic(exc)
             except Exception as exc:
-                network_requests += 1
                 for key in landing_requested:
+                    diagnostics[key] = _diagnostic(exc)
+        if tvs_requested:
+            try:
+                master = get_master()
+                tvl_export = fetch(BASE_URL + EXPORT_TVL_PATH)
+                for key in tvs_requested:
+                    try:
+                        values.extend(parse_tvs_export_payload(
+                            tvl_export, master, fetched_at=fetched_at, as_of=as_of,
+                        ))
+                    except Exception as exc:
+                        diagnostics[key] = _diagnostic(exc)
+            except Exception as exc:
+                for key in tvs_requested:
                     diagnostics[key] = _diagnostic(exc)
         if fundamentals_requested:
             try:
-                if self._master_payload is None:
-                    self._master_payload = parse_master_payload(get_json(BASE_URL + MASTER_PATH))
-                    network_requests += 1
-                fundamentals = get_json(BASE_URL + FUNDAMENTALS_PATH)
-                network_requests += 1
+                master = get_master()
+                fundamentals = fetch(BASE_URL + FUNDAMENTALS_PATH)
                 for key in fundamentals_requested:
                     try:
                         values.extend(parse_fundamentals_payload(
                             fundamentals,
-                            self._master_payload,
+                            master,
                             (key,),
                             fetched_at=fetched_at,
                             as_of=as_of,
@@ -583,7 +765,6 @@ class GrowthepieProvider:
                     except Exception as exc:
                         diagnostics[key] = _diagnostic(exc)
             except Exception as exc:
-                network_requests += 1
                 for key in fundamentals_requested:
                     diagnostics[key] = _diagnostic(exc)
         return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=network_requests)
@@ -595,6 +776,8 @@ __all__ = [
     "DA_OVERVIEW_PATH",
     "DA_TIMESERIES_PATH",
     "EXPORT_RENT_PATH",
+    "EXPORT_TVL_PATH",
+    "EXPORT_TVL_MAX_RESPONSE_BYTES",
     "FUNDAMENTALS_PATH",
     "LANDING_PAGE_PATH",
     "MAX_CALLS_PER_MINUTE",
@@ -607,4 +790,5 @@ __all__ = [
     "parse_landing_page_payload",
     "parse_master_payload",
     "parse_rent_payload",
+    "parse_tvs_export_payload",
 ]

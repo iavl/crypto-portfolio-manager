@@ -27,7 +27,7 @@ those contracts; it is not a second schema or routing implementation.
 | FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
 | GitHub | bounded developer activity | optional `GITHUB_TOKEN` | fixed ETH/AAVE repository commit counts | optional and allowlisted |
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
-| growthepie | Ethereum L2 activity, fees, rent and DA economics | None | `all_l2s` activity, Ethereum fees, L2 rent, DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
+| growthepie | Ethereum L2 TVS, activity, fees, rent and DA economics | None | `eth.l2.tvs_usd` from `master.json` + `export/tvl.json`, `all_l2s` activity, Ethereum fees, L2 rent, DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
 | Blobscan | Ethereum blob demand history | None | blob count, bytes, blob transactions, utilization | ETH-specific public route; RPC is a protocol cross-check |
 | L2BEAT | Ethereum-secured L2 context | `L2BEAT_API_KEY` via official `apiKey` query parameter | filtered L2 TVS and activity | ETH-specific route; current OpenAPI contract and host-chain classification are required |
 | Rated | Ethereum staking network aggregates | `RATED_API_KEY` via Bearer header | effective balance, daily rewards/APR, queue balances | optional Free-tier route; cache daily primitives; no count×32 conversion |
@@ -61,9 +61,10 @@ the fixed EventScanner catalog for events. BGeometrics is the no-key BTC MVRV Z
 route; ETH monetary/realized valuation routes
 use catalog-aware Coin Metrics with Ultrasound and optional Etherscan fallbacks;
 staking routes require an exact aggregate source and are currently optional;
-growthepie owns L2 activity, Ethereum fees, L2 rent/DA,
-Blobscan owns blob history, L2BEAT owns explicitly Ethereum-secured L2 TVS and
-activity, and SoSoValue owns structured ETH ETF flow/AUM. Derived metrics such as
+growthepie is the no-key primary for ETH L2 TVS and activity, and also supplies
+Ethereum fees and L2 rent/DA; L2BEAT remains an optional authenticated fallback
+or cross-check where configured. Blobscan owns blob history, and SoSoValue owns
+structured ETH ETF flow/AUM. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
 ETH/BTC opportunity ratios, ETH staking/exchange-flow normalization, market
 flow state, and BTC-relative returns are computed by Python and have no
@@ -292,7 +293,15 @@ ending ETF date; missing AUM is unavailable and never zero-filled.
 
 ## Ethereum-specific public data
 
-The ETH route is split by economic meaning. growthepie uses
+The ETH route is split by economic meaning. For `eth.l2.tvs_usd`, growthepie
+uses `master.json` plus the bulk `export/tvl.json` contract. Python derives the
+source-defined production L2 universe, excludes Ethereum L1, aggregate keys,
+and documented non-L2 sidechains, then sums only exact USD `tvl` rows from the
+latest common completed UTC day. Missing chain data is unavailable, never zero.
+The normal path uses at most one master request and one TVL export request per
+fresh provider instance, within the source's 10 calls/minute fair-use limit;
+DeFiLlama protocol TVL is not a semantic substitute. For the remaining metrics,
+growthepie uses
 `/v1/master.json` and `/v1/fundamentals.json` (or the documented
 `/v1/export/rent_paid.json`) for L2 rent and compatible DA/blob metrics,
 retaining `growthepie / orbal GmbH` and `CC BY 4.0` attribution. The
@@ -402,10 +411,12 @@ operation-level security. `/v1/projects` has no extra parameter;
 `range=30d|90d|180d|1y|max`. A 2026-09-09 live probe returned HTTP 401 for
 the public projects, TVS, and activity operations, so the current adapter
 requires `L2BEAT_API_KEY` when used. With a key it uses the aggregate `/v1/tvs`
-and `/v1/activity` operations and does not fan out over project details. The
-credential-free baseline is growthepie `landing_page.json`; it supplies
-`all_l2s` transaction activity but does not currently expose an equivalent TVS
-series, so TVS remains unavailable rather than using a different metric.
+and `/v1/activity` operations and does not fan out over project details.
+The credential-free baseline is growthepie `master.json` plus
+`export/tvl.json` for TVS; its `landing_page.json` supplies `all_l2s`
+transaction activity and Ethereum fees. If growthepie is unavailable or its
+TVS contract has insufficient history, configured L2BEAT may remain the
+authenticated fallback; no unrelated metric is substituted.
 
 The opt-in provider probe checks the OpenAPI document and then probes the
 aggregate TVS and activity operations with redacted diagnostics. Missing

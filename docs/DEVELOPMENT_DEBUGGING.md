@@ -31,6 +31,36 @@ python3 scripts/providers.py --smoke ETH --metric market.spot_price
 未配置 Provider 不会导致命令失败。`scripts/run_with_debug.py` 保持适合报告
 流程的退出码 `0`，同时把子进程退出码 `2` 记录为 `FAILED`。
 
+## growthepie L2 TVS 定向验证
+
+验证 `ETH:eth.l2.tvs_usd` 时使用当前 growthepie bulk TVL 合约：
+
+```bash
+python3 scripts/providers.py --metric eth.l2.tvs_usd --asset ETH
+
+python3 scripts/providers.py \
+  --doctor growthepie \
+  --asset ETH
+
+python3 scripts/providers.py \
+  --probe growthepie \
+  --asset ETH
+
+python3 scripts/providers.py \
+  --contract growthepie \
+  --asset ETH
+
+python3 scripts/providers.py \
+  --smoke ETH \
+  --metric eth.l2.tvs_usd
+```
+
+健康结果应满足：growthepie 不需要 credential；TVS 使用
+`master.json + export/tvl.json`；规范化结果的 `source=growthepie`；
+`observed_at` 是已完成的 UTC 日期；chain count 非零；growthepie 成功时
+不应回退到 L2BEAT。缺失链数据不能按零处理，DeFiLlama protocol TVL 也不是
+该 L2 TVS 指标的替代品。
+
 ## Provider 架构
 
 ```text

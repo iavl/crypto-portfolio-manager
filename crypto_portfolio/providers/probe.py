@@ -32,11 +32,14 @@ from .ultrasound_money import BASE_URL as ULTRASOUND_BASE_URL, BURN_RATES_PATH, 
 from .etherscan import BASE_URL as ETHERSCAN_BASE_URL, EtherscanProvider
 from .growthepie import (
     BASE_URL as GROWTHEPIE_BASE_URL,
+    EXPORT_TVL_PATH,
+    EXPORT_TVL_MAX_RESPONSE_BYTES,
     FUNDAMENTALS_PATH,
     LANDING_PAGE_PATH,
     MASTER_PATH,
     parse_landing_page_payload,
     parse_master_payload,
+    parse_tvs_export_payload,
 )
 from .blobscan import BASE_URL as BLOBCAN_BASE_URL, TIMESERIES_PATH as BLOBCAN_TIMESERIES_PATH, parse_timeseries as parse_blobscan_timeseries
 
@@ -539,6 +542,17 @@ def probe_provider(
                 ("eth.l2.activity_30d", "onchain.blockspace_fees"),
                 fetched_at=_now(),
             )
+            tvl_endpoint = GROWTHEPIE_BASE_URL + EXPORT_TVL_PATH
+            tvl_kwargs = (
+                {"max_response_bytes": EXPORT_TVL_MAX_RESPONSE_BYTES}
+                if isinstance(client, HttpClient) else {}
+            )
+            tvl_export = client.get_json(tvl_endpoint, **tvl_kwargs)
+            captured["tvs_observations"] = parse_tvs_export_payload(
+                tvl_export,
+                captured["master"],
+                fetched_at=_now(),
+            )
             return master
 
         result = _probe_call("growthepie", master_endpoint, call, validate=lambda value: parse_master_payload(value))
@@ -548,7 +562,11 @@ def probe_provider(
                 "chain_count": len(captured["master"]["chains"]),
                 "fundamentals_rows": captured["fundamentals_rows"],
                 "landing_metrics": sorted(item["metric_key"] for item in captured["landing_observations"]),
-                "endpoint_name": "master.json + fundamentals.json + landing_page.json",
+                "tvs_contract": "master.json + export/tvl.json",
+                "tvs_normalization": "OK",
+                "tvs_observed_at": captured["tvs_observations"][0]["observed_at"],
+                "tvs_chain_count": captured["tvs_observations"][0]["metadata"]["chain_count"],
+                "endpoint_name": "master.json + fundamentals.json + landing_page.json + export/tvl.json",
             })
         return (_with_config(result, client),)
     if name == "blobscan":

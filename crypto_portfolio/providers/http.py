@@ -494,12 +494,17 @@ class HttpClient:
         json_body: Any = None,
         headers: Mapping[str, str] | None = None,
         idempotent: bool = False,
+        max_response_bytes: int | None = None,
     ) -> Any:
         if not isinstance(method, str) or not method.strip():
             raise ValueError("provider HTTP method must be a non-empty string")
         method = method.strip().upper()
         if not isinstance(idempotent, bool):
             raise ValueError("provider request idempotent must be boolean")
+        if max_response_bytes is not None and (
+            isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int) or max_response_bytes < 1
+        ):
+            raise ValueError("max_response_bytes must be a positive integer or null")
         if not isinstance(url, str) or urlsplit(url).scheme not in {"http", "https"}:
             raise ProviderResponseError("provider URL must use http or https")
         if params:
@@ -549,7 +554,7 @@ class HttpClient:
                 if status >= 400:
                     raise HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
                 phase = "read"
-                raw = self._read(response)
+                raw = self._read(response, max_response_bytes=max_response_bytes)
                 try:
                     return json.loads(raw.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -630,8 +635,9 @@ class HttpClient:
         *,
         params: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
+        max_response_bytes: int | None = None,
     ) -> Any:
-        return self.request_json("GET", url, params=params, headers=headers)
+        return self.request_json("GET", url, params=params, headers=headers, max_response_bytes=max_response_bytes)
 
     def request_text(
         self,
@@ -764,21 +770,22 @@ class HttpClient:
             return self.opener(request, timeout=self.timeout)
         return urlopen(request, timeout=self.timeout, context=self.ssl_context)
 
-    def _read(self, response: Any) -> bytes:
+    def _read(self, response: Any, *, max_response_bytes: int | None = None) -> bytes:
+        response_limit = self.max_response_bytes if max_response_bytes is None else max_response_bytes
         headers = getattr(response, "headers", None)
         try:
             content_length = headers.get("Content-Length") if headers is not None else None
-            if content_length is not None and int(content_length) > self.max_response_bytes:
+            if content_length is not None and int(content_length) > response_limit:
                 raise ProviderResponseError("provider response exceeds size limit")
         except (TypeError, ValueError):
             pass
         try:
-            raw = response.read(self.max_response_bytes + 1)
+            raw = response.read(response_limit + 1)
         except TypeError:
             raw = response.read()
         if not isinstance(raw, (bytes, bytearray)):
             raise ProviderResponseError("provider response body is not bytes")
-        if len(raw) > self.max_response_bytes:
+        if len(raw) > response_limit:
             raise ProviderResponseError("provider response exceeds size limit")
         return bytes(raw)
 

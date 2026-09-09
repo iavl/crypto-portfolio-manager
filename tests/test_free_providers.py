@@ -1,15 +1,31 @@
+import json
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from crypto_portfolio.providers.base import ProviderInsufficientHistory, ProviderRequest, ProviderResponseError, ProviderUnavailable
+from crypto_portfolio.providers.base import (
+    ProviderDataError,
+    ProviderInsufficientHistory,
+    ProviderRequest,
+    ProviderResponseError,
+    ProviderUnavailable,
+    ProviderUnsupportedMetric,
+)
 from crypto_portfolio.providers.bgeometrics import BGeometricsProvider, parse_mvrv_zscore
 from crypto_portfolio.providers.google_blockchain_analytics import (
     GoogleBlockchainAnalyticsProvider,
     native_transfer_volume_wei,
 )
-from crypto_portfolio.providers.growthepie import parse_landing_page_payload
+from crypto_portfolio.providers.growthepie import (
+    EXPORT_TVL_PATH,
+    FUNDAMENTALS_PATH,
+    GrowthepieProvider,
+    LANDING_PAGE_PATH,
+    MASTER_PATH,
+    parse_landing_page_payload,
+    parse_tvs_export_payload,
+)
 from crypto_portfolio.providers.ethereum_beacon import EthereumBeaconProvider
 from crypto_portfolio.providers.rated import RatedProvider, parse_daily_rewards, parse_queues
 from crypto_portfolio.providers.config import provider_enabled
@@ -36,6 +52,13 @@ def _landing_payload(days: int = 32):
             "ethereum": {"metrics": {"fees": {"daily": {"types": ["unix", "usd", "eth"], "data": fee_rows}}}},
         }
     }
+
+
+_PROVIDER_FIXTURES = Path(__file__).parent / "fixtures/providers"
+
+
+def _provider_fixture(name: str):
+    return json.loads((_PROVIDER_FIXTURES / name).read_text())
 
 
 class FreeProviderTests(unittest.TestCase):
@@ -114,15 +137,146 @@ class FreeProviderTests(unittest.TestCase):
         self.assertEqual(by_key["onchain.blockspace_fees"]["metadata"]["methodology"], "fees_paid_by_users")
 
     def test_growthepie_tvs_does_not_use_another_metric_as_a_substitute(self):
-        with self.assertRaises(ProviderResponseError):
+        with self.assertRaises(ProviderUnsupportedMetric):
             parse_landing_page_payload(
                 _landing_payload(), ("eth.l2.tvs_usd",), fetched_at="2026-09-02T00:00:00Z",
             )
+
+    def test_growthepie_tvs_aggregates_exact_usd_rows_on_common_completed_day(self):
+        observation = parse_tvs_export_payload(
+            _provider_fixture("growthepie_tvl_export.json"),
+            _provider_fixture("growthepie_tvs_master.json"),
+            fetched_at="2026-09-09T00:00:00Z",
+            as_of="2026-09-09T12:00:00Z",
+        )[0]
+        self.assertEqual(observation["value"], 70)
+        self.assertEqual(observation["observed_at"], "2026-09-05T00:00:00Z")
+        self.assertEqual(observation["unit"], "USD")
+        self.assertEqual(observation["source"], "growthepie")
+        self.assertEqual(observation["metadata"]["chain_count"], 2)
+        self.assertEqual(observation["metadata"]["chain_set"], ["arbitrum", "base"])
+        self.assertEqual(observation["metadata"]["metric_key"], "tvl")
+
+    def test_growthepie_tvs_excludes_l1_sidechain_and_aggregate_keys(self):
+        observation = parse_tvs_export_payload(
+            _provider_fixture("growthepie_tvl_export.json"),
+            _provider_fixture("growthepie_tvs_master.json"),
+            fetched_at="2026-09-09T00:00:00Z",
+            as_of="2026-09-09T12:00:00Z",
+        )[0]
+        self.assertEqual(observation["value"], 70)
+        self.assertNotIn("ethereum", observation["metadata"]["chain_set"])
+        self.assertNotIn("polygon_pos", observation["metadata"]["chain_set"])
+        self.assertNotIn("all_l2s", observation["metadata"]["chain_set"])
+        self.assertNotIn("multiple", observation["metadata"]["chain_set"])
+
+    def test_growthepie_tvs_obeys_as_of_and_never_uses_future_or_same_day_rows(self):
+        export = _provider_fixture("growthepie_tvl_export.json")
+        master = _provider_fixture("growthepie_tvs_master.json")
+        current_day = parse_tvs_export_payload(
+            export, master, fetched_at="2026-09-09T00:00:00Z", as_of="2026-09-06T12:00:00Z",
+        )[0]
+        earlier_day = parse_tvs_export_payload(
+            export, master, fetched_at="2026-09-09T00:00:00Z", as_of="2026-09-05T12:00:00Z",
+        )[0]
+        self.assertEqual(current_day["value"], 70)
+        self.assertEqual(current_day["observed_at"], "2026-09-05T00:00:00Z")
+        self.assertEqual(earlier_day["value"], 30)
+        self.assertEqual(earlier_day["observed_at"], "2026-09-04T00:00:00Z")
+
+    def test_growthepie_tvs_does_not_zero_fill_missing_chain(self):
+        export = [
+            row for row in _provider_fixture("growthepie_tvl_export.json")
+            if not (row["origin_key"] == "base" and row["metric_key"] == "tvl")
+        ]
+        with self.assertRaises(ProviderInsufficientHistory):
+            parse_tvs_export_payload(
+                export,
+                _provider_fixture("growthepie_tvs_master.json"),
+                fetched_at="2026-09-09T00:00:00Z",
+                as_of="2026-09-09T12:00:00Z",
+            )
+
+    def test_growthepie_tvs_rejects_conflicting_duplicate_rows(self):
+        export = _provider_fixture("growthepie_tvl_export.json")
+        export.append({"metric_key": "tvl", "origin_key": "arbitrum", "date": "2026-09-05", "value": 31})
+        with self.assertRaises(ProviderDataError):
+            parse_tvs_export_payload(
+                export,
+                _provider_fixture("growthepie_tvs_master.json"),
+                fetched_at="2026-09-09T00:00:00Z",
+                as_of="2026-09-09T12:00:00Z",
+            )
+
+    def test_growthepie_tvs_requires_unambiguous_usd_metric_contract(self):
+        master = _provider_fixture("growthepie_tvs_master.json")
+        master["metrics"]["tvl"]["metric_keys"] = ["tvl", "tvl_eth", "usd_candidate"]
+        with self.assertRaises(ProviderResponseError):
+            parse_tvs_export_payload(
+                _provider_fixture("growthepie_tvl_export.json"),
+                master,
+                fetched_at="2026-09-09T00:00:00Z",
+                as_of="2026-09-09T12:00:00Z",
+            )
+
+    def test_growthepie_tvs_uses_bulk_export_and_caches_master(self):
+        class Client:
+            def __init__(self):
+                self.urls = []
+
+            def get_json(self, url, **_kwargs):
+                self.urls.append(url)
+                if url.endswith(MASTER_PATH):
+                    return _provider_fixture("growthepie_tvs_master.json")
+                if url.endswith(EXPORT_TVL_PATH):
+                    return _provider_fixture("growthepie_tvl_export.json")
+                raise AssertionError(f"unexpected URL: {url}")
+
+        client = Client()
+        provider = GrowthepieProvider(client=client, clock=lambda: datetime(2026, 9, 9, tzinfo=timezone.utc))
+        request = ProviderRequest(
+            "growthepie", "ethereum_l2", "ETH", {"as_of": "2026-09-09T12:00:00Z"}, ("eth.l2.tvs_usd",),
+        )
+        first = provider.collect(request)
+        second = provider.collect(request)
+        self.assertEqual(first.network_requests, 2)
+        self.assertEqual(second.network_requests, 1)
+        self.assertEqual(client.urls.count("https://api.growthepie.com/v1/master.json"), 1)
+        self.assertEqual(client.urls.count("https://api.growthepie.com/v1/export/tvl.json"), 2)
+        self.assertTrue(all(not url.endswith(LANDING_PAGE_PATH) for url in client.urls))
+        self.assertEqual(first.observations[0]["source"], "growthepie")
+
+    def test_growthepie_tvs_and_fundamentals_share_one_master_request(self):
+        class Client:
+            def __init__(self):
+                self.urls = []
+
+            def get_json(self, url, **_kwargs):
+                self.urls.append(url)
+                if url.endswith(MASTER_PATH):
+                    return _provider_fixture("growthepie_tvs_master.json")
+                if url.endswith(EXPORT_TVL_PATH):
+                    return _provider_fixture("growthepie_tvl_export.json")
+                if url.endswith(FUNDAMENTALS_PATH):
+                    return []
+                raise AssertionError(f"unexpected URL: {url}")
+
+        client = Client()
+        provider = GrowthepieProvider(client=client, clock=lambda: datetime(2026, 9, 9, tzinfo=timezone.utc))
+        result = provider.collect(ProviderRequest(
+            "growthepie", "ethereum_l2", "ETH", {"as_of": "2026-09-09T12:00:00Z"},
+            ("eth.l2.tvs_usd", "eth.l2.rent_paid_30d_usd"),
+        ))
+        self.assertEqual(result.network_requests, 3)
+        self.assertEqual(client.urls.count("https://api.growthepie.com/v1/master.json"), 1)
+        self.assertEqual(client.urls.count("https://api.growthepie.com/v1/fundamentals.json"), 1)
+        self.assertEqual([item["metric_key"] for item in result.observations], ["eth.l2.tvs_usd"])
 
     def test_free_routes_are_primary_for_confirmed_metrics(self):
         self.assertEqual(provider_chain("btc_valuation.mvrv_zscore", "BTC")[0], "bgeometrics")
         self.assertEqual(provider_chain("onchain.blockspace_fees", "ETH")[0], "growthepie")
         self.assertEqual(provider_chain("eth.l2.activity_30d", "ETH")[0], "growthepie")
+        self.assertEqual(provider_chain("eth.l2.tvs_usd", "ETH"), ("growthepie", "l2beat"))
         self.assertEqual(provider_chain("onchain.transfer_volume", "ETH")[0], "google_blockchain_analytics")
 
     def test_optional_project_env_controls_google_provider(self):
