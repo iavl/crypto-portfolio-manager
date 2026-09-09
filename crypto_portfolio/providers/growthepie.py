@@ -29,6 +29,7 @@ EXPORT_RENT_PATH = "/export/rent_paid.json"
 DA_OVERVIEW_PATH = "/daoverview.json"
 DA_TIMESERIES_PATH = "/datimeseries.json"
 MASTER_PATH = "/master.json"
+LANDING_PAGE_PATH = "/landing_page.json"
 ATTRIBUTION = "growthepie / orbal GmbH"
 LICENSE = "CC BY 4.0"
 MAX_CALLS_PER_MINUTE = 10
@@ -40,6 +41,7 @@ _DA_KEYS = {
     "eth.da.ethereum_share_of_tracked_da_bytes_30d",
     "eth.da.ethereum_share_of_tracked_da_fees_30d",
 }
+_LANDING_KEYS = {"eth.l2.tvs_usd", "eth.l2.activity_30d", "onchain.blockspace_fees"}
 
 
 def _diagnostic(error: Exception) -> Mapping[str, Any]:
@@ -168,6 +170,101 @@ def parse_master_payload(payload: Any) -> Mapping[str, Any]:
     if not isinstance(payload.get("metrics"), Mapping):
         raise ProviderResponseError("growthepie master response has no metrics object")
     return {"chains": dict(chains), "metrics": dict(payload["metrics"]), "last_updated_utc": payload.get("last_updated_utc")}
+
+
+def _daily_metric_rows(payload: Any, chain: str, metric: str) -> tuple[tuple[str, float], ...]:
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("data"), Mapping):
+        raise ProviderResponseError("growthepie landing page response has no data object")
+    chain_data = payload["data"].get(chain)
+    metrics = chain_data.get("metrics") if isinstance(chain_data, Mapping) else None
+    metric_data = metrics.get(metric) if isinstance(metrics, Mapping) else None
+    daily = metric_data.get("daily") if isinstance(metric_data, Mapping) else None
+    if not isinstance(daily, Mapping) or not isinstance(daily.get("types"), list) or not isinstance(daily.get("data"), list):
+        raise ProviderResponseError(f"growthepie landing page is missing {chain}/{metric} daily data")
+    types = tuple(str(item) for item in daily["types"])
+    if not types or types[0] != "unix":
+        raise ProviderResponseError(f"growthepie {chain}/{metric} daily schema has no unix timestamp")
+    rows: list[tuple[str, float]] = []
+    for index, row in enumerate(daily["data"]):
+        if not isinstance(row, list) or len(row) != len(types):
+            raise ProviderResponseError(f"growthepie {chain}/{metric} row {index} is malformed")
+        timestamp = _timestamp(row[0], f"growthepie {chain}/{metric} timestamp")
+        value_index = 1
+        if metric in {"fees", "tvl"}:
+            try:
+                value_index = types.index("usd")
+            except ValueError as exc:
+                raise ProviderResponseError(f"growthepie {chain}/{metric} has no USD value") from exc
+        rows.append((timestamp, _number(row[value_index], f"growthepie {chain}/{metric} value")))
+    return tuple(rows)
+
+
+def _completed_daily_rows(rows: Iterable[tuple[str, float]], as_of: str | None) -> list[tuple[str, float]]:
+    cutoff = parse_timestamp(as_of) if as_of else datetime.now(timezone.utc)
+    latest_by_day: dict[str, tuple[str, float]] = {}
+    for timestamp, value in rows:
+        if parse_timestamp(timestamp).date() >= cutoff.date():
+            continue
+        day = timestamp[:10]
+        previous = latest_by_day.get(day)
+        if previous is not None and previous[1] != value:
+            raise ProviderDataError(f"growthepie has conflicting duplicate landing row for {day}")
+        latest_by_day[day] = (timestamp, value)
+    return [latest_by_day[day] for day in sorted(latest_by_day)]
+
+
+def parse_landing_page_payload(
+    payload: Any,
+    metric_keys: Iterable[str],
+    *,
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str = LANDING_PAGE_PATH,
+) -> tuple[Mapping[str, Any], ...]:
+    requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
+    if not requested or any(key not in _LANDING_KEYS for key in requested):
+        raise ProviderUnsupportedMetric("growthepie landing page does not support the requested metrics")
+    result: list[Mapping[str, Any]] = []
+    for key in requested:
+        if key == "eth.l2.activity_30d":
+            rows = _completed_daily_rows(_daily_metric_rows(payload, "all_l2s", "txcount"), as_of)
+            if len(rows) < 30:
+                raise ProviderInsufficientHistory("growthepie all_l2s transaction history is insufficient for 30d")
+            latest_day = parse_timestamp(rows[-1][0]).date()
+            start_day = latest_day - timedelta(days=29)
+            selected = [item for item in rows if start_day <= parse_timestamp(item[0]).date() <= latest_day]
+            if len(selected) != 30:
+                raise ProviderInsufficientHistory("growthepie all_l2s transaction history has missing completed days")
+            result.append(_observation(
+                "ETH", key, sum(value for _, value in selected),
+                observed_at=selected[-1][0], fetched_at=fetched_at, period="30d", endpoint=endpoint,
+                metadata={
+                    "source_metric": "txcount",
+                    "methodology": "growthepie_all_l2s_daily_transaction_count_sum",
+                    "chain_scope": "all_l2s",
+                    "window": "30d",
+                    "rows_used": len(selected),
+                    "excludes_ethereum_l1": True,
+                },
+            ))
+            continue
+        chain = "ethereum" if key == "onchain.blockspace_fees" else "all_l2s"
+        metric = "fees" if key == "onchain.blockspace_fees" else "tvl"
+        rows = _completed_daily_rows(_daily_metric_rows(payload, chain, metric), as_of)
+        if not rows:
+            raise ProviderInsufficientHistory(f"growthepie {chain}/{metric} has no completed daily observation")
+        observed_at, value = rows[-1]
+        result.append(_observation(
+            "ETH", key, value,
+            observed_at=observed_at, fetched_at=fetched_at, period="1d", endpoint=endpoint,
+            metadata={
+                "source_metric": metric,
+                "methodology": "fees_paid_by_users" if key == "onchain.blockspace_fees" else "growthepie_tvl",
+                "chain_scope": chain,
+                "window": "latest_completed_utc_day" if key == "onchain.blockspace_fees" else "stock_latest_completed_utc_day",
+            },
+        ))
+    return tuple(result)
 
 
 def _eligible_chain_keys(master: Mapping[str, Any], metric_name: str) -> set[str]:
@@ -417,8 +514,8 @@ class GrowthepieProvider:
         self._request_times: list[float] = []
         self.capabilities = ProviderCapabilities(
             provider=self.name,
-            metric_keys=tuple(sorted(_RENT_KEYS | _DA_KEYS)),
-            historical_series=tuple(sorted(_RENT_KEYS | _DA_KEYS)),
+            metric_keys=tuple(sorted(_RENT_KEYS | _DA_KEYS | _LANDING_KEYS)),
+            historical_series=tuple(sorted(_RENT_KEYS | _DA_KEYS | _LANDING_KEYS)),
             supports_batching=True,
             requires_api_key=False,
         )
@@ -440,21 +537,56 @@ class GrowthepieProvider:
             self._request_times.append(now)
             return self.client.get_json(url)
 
-        try:
-            if self._master_payload is None:
-                self._master_payload = parse_master_payload(get_json(BASE_URL + MASTER_PATH))
-            fundamentals = get_json(BASE_URL + FUNDAMENTALS_PATH)
-            values.extend(parse_fundamentals_payload(
-                fundamentals,
-                self._master_payload,
-                requested,
-                fetched_at=fetched_at,
-                as_of=as_of,
-            ))
-        except Exception as exc:
-            for key in requested:
-                diagnostics[key] = _diagnostic(exc)
-        return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=2)
+        landing_requested = tuple(key for key in requested if key in _LANDING_KEYS)
+        fundamentals_requested = tuple(key for key in requested if key in _RENT_KEYS or key in _DA_KEYS)
+        unsupported_requested = tuple(
+            key for key in requested if key not in _LANDING_KEYS and key not in _RENT_KEYS and key not in _DA_KEYS
+        )
+        for key in unsupported_requested:
+            diagnostics[key] = {
+                "error_code": "PROVIDER_UNSUPPORTED",
+                "detail": "growthepie capability does not include metric",
+            }
+
+        network_requests = 0
+        if landing_requested:
+            try:
+                landing = get_json(BASE_URL + LANDING_PAGE_PATH)
+                network_requests += 1
+                for key in landing_requested:
+                    try:
+                        values.extend(parse_landing_page_payload(
+                            landing, (key,), fetched_at=fetched_at, as_of=as_of,
+                        ))
+                    except Exception as exc:
+                        diagnostics[key] = _diagnostic(exc)
+            except Exception as exc:
+                network_requests += 1
+                for key in landing_requested:
+                    diagnostics[key] = _diagnostic(exc)
+        if fundamentals_requested:
+            try:
+                if self._master_payload is None:
+                    self._master_payload = parse_master_payload(get_json(BASE_URL + MASTER_PATH))
+                    network_requests += 1
+                fundamentals = get_json(BASE_URL + FUNDAMENTALS_PATH)
+                network_requests += 1
+                for key in fundamentals_requested:
+                    try:
+                        values.extend(parse_fundamentals_payload(
+                            fundamentals,
+                            self._master_payload,
+                            (key,),
+                            fetched_at=fetched_at,
+                            as_of=as_of,
+                        ))
+                    except Exception as exc:
+                        diagnostics[key] = _diagnostic(exc)
+            except Exception as exc:
+                network_requests += 1
+                for key in fundamentals_requested:
+                    diagnostics[key] = _diagnostic(exc)
+        return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=network_requests)
 
 
 __all__ = [
@@ -464,6 +596,7 @@ __all__ = [
     "DA_TIMESERIES_PATH",
     "EXPORT_RENT_PATH",
     "FUNDAMENTALS_PATH",
+    "LANDING_PAGE_PATH",
     "MAX_CALLS_PER_MINUTE",
     "GrowthepieProvider",
     "LICENSE",
@@ -471,6 +604,7 @@ __all__ = [
     "RENT_PATH",
     "parse_da_payload",
     "parse_fundamentals_payload",
+    "parse_landing_page_payload",
     "parse_master_payload",
     "parse_rent_payload",
 ]

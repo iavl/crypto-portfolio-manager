@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             parser.error(str(exc))
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-        return 0 if result["status"] == "PASS" else 2
+        return 0 if result["status"] in {"PASS", "SKIPPED"} else 2
     return 0
 
 

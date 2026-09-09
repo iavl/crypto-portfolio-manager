@@ -24,6 +24,13 @@ providers may fill advanced ETF, liquidation, social, or exchange-attribution
 gaps; they are never required for a normal review. See
 `references/data-providers.md` for routing and cache details.
 
+BTC MVRV Z uses the no-key BGeometrics latest-value endpoint when available.
+Ethereum L2 activity and Ethereum blockspace fees use growthepie's structured
+aggregate data; L2 TVS is not inferred from an unrelated metric. Rated is an
+optional exact aggregate source for Ethereum staking primitives, while the
+standard Beacon API is bounded to node/finality checks unless a semantically
+exact aggregate is available.
+
 ## Source hierarchy
 
 ### Tier 1 — primary / first-party
@@ -165,6 +172,30 @@ evidence groups; provider failure is unavailable evidence, never zero. ETH
 FDV/market-cap is not economically applicable, and structural client/entity/
 builder concentration remains non-scoring context unless a stable structured
 source is available.
+
+### Ethereum metric methodologies
+
+`onchain.transfer_volume` for ETH is the sum, for one completed UTC day, of
+successful non-zero native ETH value transfers in top-level transactions and
+successful internal EVM calls with a non-empty trace path. Self-transfers,
+failed/reverted calls, issuance, burn accounting, gas fees, and ERC-20
+transfers are excluded. Root traces are not counted as a second copy of their
+top-level transaction. The resulting ETH amount is multiplied by that same
+day's completed ETH/USD daily close.
+
+`eth.staking.active_effective_stake_pct` is
+`active_effective_stake_eth / current_supply_eth`, with time-aligned inputs.
+30D and 90D active-stake changes use the current observation minus the closest
+cached same-source observation at or before the target date, within the
+configured tolerance. Staking APR uses
+`window_rewards / average_effective_stake * 365 / window_days`; the current
+Rated implementation includes consensus and execution rewards and retains
+that component declaration in metadata. Queue metrics require source-provided
+ETH balances; validator counts are not converted with a 32 ETH shortcut.
+
+If a required primitive, timestamp, history segment, or methodology match is
+missing, the metric remains unavailable or `SKIPPED`. No provider outage is
+converted to zero.
 
 ### Fundamentals
 

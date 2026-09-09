@@ -185,6 +185,8 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "eth_valuation.price_to_realized_price": ("market.spot_price", "eth_valuation.realized_price"),
     "market.breadth_state": ("market.breadth",),
     "eth.staking.active_effective_stake_pct": ("eth.staking.active_effective_stake_eth", "eth.monetary.current_supply_eth"),
+    "eth.staking.active_effective_stake_change_30d": ("eth.staking.active_effective_stake_eth",),
+    "eth.staking.active_effective_stake_change_90d": ("eth.staking.active_effective_stake_eth",),
     "flows.eth_exchange_netflow_to_market_cap": ("flows.exchange_netflow", "valuation.market_cap"),
     "flows.eth_active_stake_change_to_supply_30d": ("eth.staking.active_effective_stake_change_30d", "eth.monetary.current_supply_eth"),
     "flows.eth_etf_net_to_aum_7d": ("flows.etf_net_7d", "flows.eth_etf_aum_usd"),

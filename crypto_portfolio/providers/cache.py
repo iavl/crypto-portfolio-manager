@@ -245,6 +245,9 @@ class ProviderCache:
                 and request.parameters.get("history_mode") == "FULL_AVAILABLE"
                 and range_end is not None
                 and parse_timestamp(range_end) < cutoff
+                # BGeometrics /last is a current scalar; its TTL is checked
+                # below, while full-history providers must cover the cutoff.
+                and request.provider != "bgeometrics"
             ):
                 return None
             if range_end is None:

@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import time
 import traceback
+import os
 from typing import Any, Iterable, Mapping
 
 from ..models.market import OHLCVSeries
@@ -184,6 +185,7 @@ class ProviderRouter:
 
     def _default_providers(self) -> dict[str, Any]:
         from .alternative_me import AlternativeMeProvider
+        from .bgeometrics import BGeometricsProvider
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
@@ -196,6 +198,8 @@ class ProviderRouter:
         from .blobscan import BlobscanProvider
         from .growthepie import GrowthepieProvider
         from .l2beat import L2BeatProvider
+        from .rated import RatedProvider
+        from .ethereum_beacon import DEFAULT_BASE_URL, EthereumBeaconProvider
         from .ethereum_protocol import EthereumProtocolProvider
         from .ultrasound_money import UltrasoundMoneyProvider
         from .etherscan import EtherscanProvider
@@ -208,12 +212,21 @@ class ProviderRouter:
             "alternative_me": AlternativeMeProvider(client=client),
             "defillama": DeFiLlamaProvider(client=client),
             "coinmetrics_community": CoinMetricsProvider(client=client, authenticated=False),
+            "bgeometrics": BGeometricsProvider(client=client),
             "chain_liveness": ChainLivenessProvider(client=client),
             "blobscan": BlobscanProvider(client=client),
             "growthepie": GrowthepieProvider(client=client),
             "ethereum_protocol": EthereumProtocolProvider(client=client),
             "ultrasound_money": UltrasoundMoneyProvider(client=client),
         }
+        if provider_enabled("ethereum_beacon", self.config):
+            settings = self.config.get("providers", {}).get("ethereum_beacon", {})
+            base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
+            base_url = os.environ.get(base_url_env) if base_url_env else None
+            providers["ethereum_beacon"] = EthereumBeaconProvider(
+                client=client,
+                base_url=base_url or (settings.get("base_url_default") if isinstance(settings, Mapping) else None) or DEFAULT_BASE_URL,
+            )
         if provider_enabled("fred", self.config):
             providers["fred"] = FREDProvider(
                 client=client,
@@ -229,6 +242,22 @@ class ProviderRouter:
                 client=client,
                 api_key=provider_api_key("coingecko", self.config),
             )
+        if provider_enabled("google_blockchain_analytics", self.config):
+            from .google_blockchain_analytics import GoogleBlockchainAnalyticsProvider
+
+            settings = self.config.get("providers", {}).get("google_blockchain_analytics", {})
+            project_env = settings.get("project_env") if isinstance(settings, Mapping) else None
+            try:
+                providers["google_blockchain_analytics"] = GoogleBlockchainAnalyticsProvider.from_environment(
+                    os.environ.get(project_env, "") if project_env else "",
+                    http_client=client,
+                    maximum_bytes_billed=(
+                        settings.get("maximum_bytes_billed", 10_000_000_000)
+                        if isinstance(settings, Mapping) else 10_000_000_000
+                    ),
+                )
+            except ProviderUnavailable:
+                pass
         if provider_enabled("coinmetrics_pro", self.config):
             from .coinmetrics import CoinMetricsAuthenticatedProvider
 
@@ -240,6 +269,11 @@ class ProviderRouter:
             providers["sosovalue"] = SoSoValueProvider(
                 client=client,
                 api_key=provider_api_key("sosovalue", self.config),
+            )
+        if provider_enabled("rated", self.config):
+            providers["rated"] = RatedProvider(
+                client=client,
+                api_key=provider_api_key("rated", self.config),
             )
         if provider_enabled("l2beat", self.config):
             providers["l2beat"] = L2BeatProvider(

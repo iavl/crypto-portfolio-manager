@@ -156,6 +156,14 @@ def derive_active_effective_stake_change(
             "current_observation_at": current_at,
             "prior_observation_at": prior_at,
             "methodology": current_metadata["methodology"],
+            "input_observation_ids": [
+                item for item in (
+                    current.observation_id if isinstance(current, MetricObservation) else current.get("observation_id"),
+                    prior.observation_id if isinstance(prior, MetricObservation) else prior.get("observation_id"),
+                ) if item
+            ],
+            "inputs": ["eth.staking.active_effective_stake_eth", "historical_active_effective_stake_eth"],
+            "source_methodologies": [current_metadata["methodology"]],
         },
     }
 
@@ -483,7 +491,7 @@ def derive_eth_active_effective_stake_pct(
         value = calculate_active_effective_stake_pct(staked[0], supply[0])
     except ValueError:
         return None
-    return _derived_ratio_observation(
+    result = _derived_ratio_observation(
         asset,
         "eth.staking.active_effective_stake_pct",
         value,
@@ -491,6 +499,19 @@ def derive_eth_active_effective_stake_pct(
         fetched_at=fetched_at,
         calculation="eth.staking.active_effective_stake_eth / eth.monetary.current_supply_eth",
     )
+    if result is not None:
+        result["metadata"] = {
+            **dict(result.get("metadata") or {}),
+            "inputs": ["eth.staking.active_effective_stake_eth", "eth.monetary.current_supply_eth"],
+            "formula": "active_effective_stake_eth / current_supply_eth",
+            "source_methodologies": [
+                method for method in (
+                    dict(staked[3]).get("methodology"),
+                    dict(supply[3]).get("methodology"),
+                ) if method
+            ],
+        }
+    return result
 
 
 def derive_eth_exchange_flow_to_market_cap(
@@ -567,6 +588,29 @@ def derive_metric_observations(
     for observation in historical_observations:
         if isinstance(observation, MetricObservation):
             history_by_identity.setdefault((observation.asset, observation.metric_key), []).append(observation)
+
+    def aligned_prior(
+        current: MetricObservation | Mapping[str, Any],
+        candidates: Iterable[MetricObservation],
+        days: int,
+    ) -> MetricObservation | None:
+        current_at = current.observed_at if isinstance(current, MetricObservation) else current.get("observed_at")
+        if not isinstance(current_at, str):
+            return None
+        try:
+            target = parse_timestamp(current_at) - timedelta(days=days)
+        except ValueError:
+            return None
+        usable = []
+        for item in candidates:
+            try:
+                observed = parse_timestamp(item.observed_at)
+            except ValueError:
+                continue
+            if observed <= target and target - observed <= timedelta(days=7):
+                usable.append(item)
+        return max(usable, key=lambda item: (parse_timestamp(item.observed_at), item.observation_id), default=None)
+
     for request in requests:
         if request.metric_key not in {
             "market.breadth_state",
@@ -575,6 +619,8 @@ def derive_metric_observations(
             "btc_valuation.price_to_realized_price",
             "eth_valuation.price_to_realized_price",
             "eth.staking.active_effective_stake_pct",
+            "eth.staking.active_effective_stake_change_30d",
+            "eth.staking.active_effective_stake_change_90d",
             "flows.eth_exchange_netflow_to_market_cap",
             "flows.eth_active_stake_change_to_supply_30d",
             "flows.eth_etf_net_to_aum_7d",
@@ -624,6 +670,31 @@ def derive_metric_observations(
                     values[(request.asset, request.metric_key)] = derived
                     continue
             unresolved[(request.asset, request.metric_key)] = "DERIVED_INPUT_UNAVAILABLE: aligned cumulative burn snapshots are required"
+            continue
+        if request.metric_key in {
+            "eth.staking.active_effective_stake_change_30d",
+            "eth.staking.active_effective_stake_change_90d",
+        }:
+            stake_identity = (request.asset, "eth.staking.active_effective_stake_eth")
+            current = reusable.get(stake_identity) or routed.get(stake_identity)
+            candidates = [
+                item for item in history_by_identity.get(stake_identity, ())
+                if current is None or item.observation_id != getattr(current, "observation_id", None)
+            ]
+            days = 30 if request.metric_key.endswith("30d") else 90
+            prior = aligned_prior(current, candidates, days) if current is not None else None
+            derived = derive_active_effective_stake_change(
+                request.asset,
+                current,
+                prior,
+                days=days,
+                fetched_at=fetched_at,
+                as_of=as_of,
+            ) if current is not None and prior is not None else None
+            if derived is None:
+                unresolved[identity] = "DERIVED_INPUT_UNAVAILABLE: aligned active effective stake snapshots are required"
+            else:
+                values[identity] = derived
             continue
         cap_identity = (request.asset, "valuation.market_cap")
         cap = reusable.get(cap_identity) or routed.get(cap_identity)

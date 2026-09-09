@@ -7,12 +7,27 @@
       "api_key_env": "COINGECKO_API_KEY"
     },
     "coinmetrics_community": {"enabled": true},
+    "bgeometrics": {"enabled": true},
     "defillama": {"enabled": true},
     "growthepie": {"enabled": true},
+    "google_blockchain_analytics": {
+      "enabled": "AUTO",
+      "project_env": "GOOGLE_CLOUD_PROJECT",
+      "maximum_bytes_billed": 10000000000
+    },
     "blobscan": {"enabled": true},
     "l2beat": {
       "enabled": "AUTO",
       "api_key_env": "L2BEAT_API_KEY"
+    },
+    "rated": {
+      "enabled": "AUTO",
+      "api_key_env": "RATED_API_KEY"
+    },
+    "ethereum_beacon": {
+      "enabled": true,
+      "base_url_env": "ETH_BEACON_API_URL",
+      "base_url_default": "https://ethereum-beacon-api.publicnode.com"
     },
     "ultrasound_money": {"enabled": true},
     "etherscan": {

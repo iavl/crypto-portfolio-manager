@@ -114,6 +114,7 @@ def parse_tvs_payload(
     fetched_at: str,
     as_of: str | None = None,
     endpoint: str = TVS_PATH,
+    scope: str | None = None,
 ) -> Mapping[str, Any]:
     cutoff = parse_timestamp(as_of) if as_of else None
     latest: tuple[str, float] | None = None
@@ -147,8 +148,9 @@ def parse_tvs_payload(
         "source": "l2beat",
         "confidence": "MEDIUM",
         "metadata": {
-            "source_dataset": "v1/tvs/{projectId}",
+            "source_dataset": "v1/tvs" if not project_ids else "v1/tvs/{projectId}",
             "source_url": BASE_URL + endpoint,
+            "scope": scope or ("l2beat_aggregate" if not project_ids else "ethereum_secured_projects"),
             "ethereum_secured_project_ids": sorted(project_ids),
         },
     }
@@ -161,6 +163,7 @@ def parse_activity_payload(
     fetched_at: str,
     as_of: str | None = None,
     endpoint: str = ACTIVITY_PATH,
+    scope: str | None = None,
 ) -> Mapping[str, Any]:
     cutoff = parse_timestamp(as_of) if as_of else None
     rows: list[tuple[str, float]] = []
@@ -176,6 +179,8 @@ def parse_activity_payload(
     latest = max(timestamp for timestamp, _ in rows)
     start = parse_timestamp(latest) - timedelta(days=29)
     selected = [(timestamp, value) for timestamp, value in rows if parse_timestamp(timestamp) >= start]
+    if len(selected) < 30:
+        raise ProviderInsufficientHistory("L2BEAT activity has fewer than 30 completed daily rows")
     return {
         "asset": "ETH",
         "metric_key": "eth.l2.activity_30d",
@@ -187,8 +192,9 @@ def parse_activity_payload(
         "source": "l2beat",
         "confidence": "MEDIUM",
         "metadata": {
-            "source_dataset": "v1/activity/{projectId}",
+            "source_dataset": "v1/activity" if not project_ids else "v1/activity/{projectId}",
             "source_url": BASE_URL + endpoint,
+            "scope": scope or ("l2beat_aggregate" if not project_ids else "ethereum_secured_projects"),
             "window": "30d",
             "rows_used": len(selected),
             "ethereum_secured_project_ids": sorted(project_ids),
@@ -224,49 +230,22 @@ class L2BeatProvider:
             raise ProviderUnsupportedMetric("L2BEAT metrics require ETH scope")
         requested = tuple(dict.fromkeys(request.metric_keys))
         fetched_at = _now(self.clock)
-        project_payload = self._get(PROJECTS_PATH)
-        try:
-            ids = ethereum_project_ids(project_payload)
-        except ProviderUnsupportedMetric:
-            details = []
-            project_rows = _rows(project_payload)
-            if len(project_rows) > MAX_PROJECT_DETAILS:
-                raise ProviderInsufficientHistory(
-                    "L2BEAT project host-chain classification exceeds the bounded detail budget"
-                )
-            for row in project_rows:
-                project_id = _project_id(row)
-                if project_id:
-                    details.append(self._get(f"/v1/project/{project_id}"))
-            ids = ethereum_project_ids(details)
         values: list[Mapping[str, Any]] = []
-        network_requests = 1 + len(ids)
+        network_requests = 0
         if "eth.l2.tvs_usd" in requested:
-            observations = [parse_tvs_payload(
-                self._get(f"{TVS_PATH}/{project_id}", params={"range": "30d"}), {project_id},
+            values.append(parse_tvs_payload(
+                self._get(TVS_PATH, params={"range": "30d"}), (),
                 fetched_at=fetched_at, as_of=request.parameters.get("as_of"),
-                endpoint=f"{TVS_PATH}/{project_id}",
-            ) for project_id in ids]
-            if not observations:
-                raise ProviderInsufficientHistory("L2BEAT TVS has no Ethereum-secured project data")
-            combined = dict(observations[0])
-            combined["value"] = sum(float(item["value"]) for item in observations)
-            combined["metadata"] = {**dict(combined.get("metadata") or {}), "ethereum_secured_project_ids": sorted(ids)}
-            values.append(combined)
-            network_requests += len(ids)
+                endpoint=TVS_PATH, scope="l2beat_aggregate",
+            ))
+            network_requests += 1
         if "eth.l2.activity_30d" in requested:
-            observations = [parse_activity_payload(
-                self._get(f"{ACTIVITY_PATH}/{project_id}", params={"range": "30d"}), {project_id},
+            values.append(parse_activity_payload(
+                self._get(ACTIVITY_PATH, params={"range": "30d"}), (),
                 fetched_at=fetched_at, as_of=request.parameters.get("as_of"),
-                endpoint=f"{ACTIVITY_PATH}/{project_id}",
-            ) for project_id in ids]
-            if not observations:
-                raise ProviderInsufficientHistory("L2BEAT activity has no Ethereum-secured project data")
-            combined = dict(observations[0])
-            combined["value"] = sum(float(item["value"]) for item in observations)
-            combined["metadata"] = {**dict(combined.get("metadata") or {}), "ethereum_secured_project_ids": sorted(ids)}
-            values.append(combined)
-            network_requests += len(ids)
+                endpoint=ACTIVITY_PATH, scope="l2beat_aggregate",
+            ))
+            network_requests += 1
         return ProviderResponse(tuple(values), network_requests=network_requests)
 
 

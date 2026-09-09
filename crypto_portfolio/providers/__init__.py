@@ -39,6 +39,10 @@ from .health import (
 from .circuit_breaker import CircuitBreaker, CircuitState
 from .recording import RecordingEnvelope, RecordingTransport, ReplayTransport, load_recording
 from .alternative_me import AlternativeMeProvider
+from .bgeometrics import BGeometricsProvider
+from .google_blockchain_analytics import GoogleBlockchainAnalyticsProvider
+from .ethereum_beacon import EthereumBeaconProvider
+from .rated import RatedProvider
 from .chain_liveness import (
     CHAIN_NATIVE_ASSETS,
     ChainLivenessAssessment,
@@ -103,6 +107,10 @@ __all__ = [
     "ProviderNotApplicable",
     "SocialDataProvider",
     "AlternativeMeProvider",
+    "BGeometricsProvider",
+    "GoogleBlockchainAnalyticsProvider",
+    "EthereumBeaconProvider",
+    "RatedProvider",
     "CHAIN_NATIVE_ASSETS",
     "ChainLivenessAssessment",
     "ChainLivenessProvider",

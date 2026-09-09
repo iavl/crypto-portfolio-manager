@@ -1,0 +1,333 @@
+import unittest
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from crypto_portfolio.providers.base import ProviderInsufficientHistory, ProviderRequest, ProviderResponseError, ProviderUnavailable
+from crypto_portfolio.providers.bgeometrics import BGeometricsProvider, parse_mvrv_zscore
+from crypto_portfolio.providers.google_blockchain_analytics import (
+    GoogleBlockchainAnalyticsProvider,
+    native_transfer_volume_wei,
+)
+from crypto_portfolio.providers.growthepie import parse_landing_page_payload
+from crypto_portfolio.providers.ethereum_beacon import EthereumBeaconProvider
+from crypto_portfolio.providers.rated import RatedProvider, parse_daily_rewards, parse_queues
+from crypto_portfolio.providers.config import provider_enabled
+from crypto_portfolio.providers.routes import build_provider_requests, provider_chain
+from crypto_portfolio.providers.cache import ProviderCache
+from crypto_portfolio.providers.router import ProviderRouter
+from crypto_portfolio.engine.derived_metrics import derive_metric_observations
+from crypto_portfolio.engine.metric_plan import MetricRequest
+from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
+
+
+def _landing_payload(days: int = 32):
+    start = date(2026, 8, 1)
+    tx_rows = []
+    fee_rows = []
+    for index in range(days):
+        stamp = datetime.combine(start + timedelta(days=index), datetime.min.time(), tzinfo=timezone.utc)
+        unix_ms = int(stamp.timestamp() * 1000)
+        tx_rows.append([unix_ms, index + 1])
+        fee_rows.append([unix_ms, 100 + index, 1])
+    return {
+        "data": {
+            "all_l2s": {"metrics": {"txcount": {"daily": {"types": ["unix", "value"], "data": tx_rows}}}},
+            "ethereum": {"metrics": {"fees": {"daily": {"types": ["unix", "usd", "eth"], "data": fee_rows}}}},
+        }
+    }
+
+
+class FreeProviderTests(unittest.TestCase):
+    def test_bgeometrics_uses_source_date_and_rejects_stale_values(self):
+        payload = {"d": "2026-09-08", "unixTs": 1788825600, "mvrvZscore": 0.8725}
+        observation = parse_mvrv_zscore(payload, fetched_at="2026-09-09T00:00:00Z")
+        self.assertEqual(observation["observed_at"], "2026-09-08T00:00:00Z")
+        self.assertEqual(observation["metadata"]["source_url"], "https://bitcoin-data.com/v1/mvrv-zscore/last")
+        with self.assertRaises(ProviderInsufficientHistory):
+            parse_mvrv_zscore(payload, fetched_at="2026-09-20T00:00:00Z")
+
+    def test_bgeometrics_provider_is_no_key_and_one_request(self):
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def get_json(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return {"d": "2026-09-08", "mvrvZscore": 1.25}
+
+        client = Client()
+        provider = BGeometricsProvider(client=client, clock=lambda: datetime(2026, 9, 9, tzinfo=timezone.utc))
+        result = provider.collect(ProviderRequest(
+            "bgeometrics", "onchain", "BTC", {"as_of": "2026-09-09T00:00:00Z"},
+            ("btc_valuation.mvrv_zscore",),
+        ))
+        self.assertFalse(provider.capabilities.requires_api_key)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(result.observations[0]["value"], 1.25)
+
+    def test_bgeometrics_latest_value_uses_ttl_cache_after_refresh(self):
+        class Client:
+            def __init__(self):
+                self.calls = 0
+
+            def get_json(self, *_args, **_kwargs):
+                self.calls += 1
+                return {"d": "2026-09-08", "mvrvZscore": 1.25}
+
+        config = {
+            "providers": {"bgeometrics": {"enabled": True}},
+            "cache_ttl_seconds": {"onchain": 86400, "default": 3600},
+            "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
+            "fallback": {"allow_web": False},
+        }
+        client = Client()
+        with TemporaryDirectory() as directory:
+            router = ProviderRouter(
+                {"bgeometrics": BGeometricsProvider(client=client)},
+                config=config,
+                cache=ProviderCache(Path(directory) / "cache"),
+            )
+            request = build_provider_requests(
+                (MetricRequest("BTC", "btc_valuation.mvrv_zscore"),),
+                as_of="2026-09-09T00:00:00Z",
+                now="2026-09-09T00:00:00Z",
+            )[0]
+            first = router.collect((request,), mode="REFRESH", as_of="2026-09-09T00:00:00Z", now="2026-09-09T00:00:00Z")
+            second = router.collect((request,), mode="AUTO", as_of="2026-09-09T00:00:00Z", now="2026-09-09T00:00:00Z")
+        self.assertEqual(first.api_requests, 1)
+        self.assertEqual(second.api_requests, 0)
+        self.assertEqual(second.provider_cache_hits, 1)
+        self.assertEqual(client.calls, 1)
+
+    def test_growthepie_landing_page_sums_l2_activity_and_keeps_fees_daily(self):
+        values = parse_landing_page_payload(
+            _landing_payload(),
+            ("eth.l2.activity_30d", "onchain.blockspace_fees"),
+            fetched_at="2026-09-02T00:00:00Z",
+            as_of="2026-09-02T00:00:00Z",
+        )
+        by_key = {item["metric_key"]: item for item in values}
+        self.assertEqual(by_key["eth.l2.activity_30d"]["value"], sum(range(3, 33)))
+        self.assertEqual(by_key["eth.l2.activity_30d"]["metadata"]["chain_scope"], "all_l2s")
+        self.assertEqual(by_key["onchain.blockspace_fees"]["value"], 131)
+        self.assertEqual(by_key["onchain.blockspace_fees"]["metadata"]["methodology"], "fees_paid_by_users")
+
+    def test_growthepie_tvs_does_not_use_another_metric_as_a_substitute(self):
+        with self.assertRaises(ProviderResponseError):
+            parse_landing_page_payload(
+                _landing_payload(), ("eth.l2.tvs_usd",), fetched_at="2026-09-02T00:00:00Z",
+            )
+
+    def test_free_routes_are_primary_for_confirmed_metrics(self):
+        self.assertEqual(provider_chain("btc_valuation.mvrv_zscore", "BTC")[0], "bgeometrics")
+        self.assertEqual(provider_chain("onchain.blockspace_fees", "ETH")[0], "growthepie")
+        self.assertEqual(provider_chain("eth.l2.activity_30d", "ETH")[0], "growthepie")
+        self.assertEqual(provider_chain("onchain.transfer_volume", "ETH")[0], "google_blockchain_analytics")
+
+    def test_optional_project_env_controls_google_provider(self):
+        config = {"providers": {"google_blockchain_analytics": {
+            "enabled": "AUTO", "project_env": "GOOGLE_CLOUD_PROJECT",
+        }}}
+        self.assertFalse(provider_enabled("google_blockchain_analytics", config, {}))
+        self.assertTrue(provider_enabled(
+            "google_blockchain_analytics", config, {"GOOGLE_CLOUD_PROJECT": "project"},
+        ))
+
+    def test_native_transfer_volume_excludes_failed_self_zero_and_root_transfers(self):
+        top_level = [
+            {"hash": "tx-1", "value_wei": "100", "from_address": "0xa", "to_address": "0xb", "receipt_success": True},
+            {"hash": "tx-1", "value_wei": "100", "from_address": "0xa", "to_address": "0xb", "receipt_success": True},
+            {"hash": "tx-2", "value_wei": "200", "from_address": "0xa", "to_address": "0xc", "receipt_success": False},
+            {"hash": "tx-3", "value_wei": "300", "from_address": "0xa", "to_address": "0xa", "receipt_success": True},
+        ]
+        internal = [
+            {"hash": "tx-1", "trace_address": [], "value_wei": "999", "from_address": "0xa", "to_address": "0xb", "success": True},
+            {"hash": "tx-1", "trace_address": [0], "value_wei": "50", "from_address": "0xb", "to_address": "0xc", "success": True},
+            {"hash": "tx-2", "trace_address": [0], "value_wei": "70", "from_address": "0xb", "to_address": "0xc", "success": False},
+            {"hash": "tx-3", "trace_address": [0], "value_wei": "80", "from_address": "0xb", "to_address": "0xb", "success": True},
+        ]
+        self.assertEqual(native_transfer_volume_wei(top_level, internal), 150)
+
+    def test_bigquery_transfer_volume_has_partition_guard_and_same_day_price(self):
+        class Job:
+            def __init__(self, rows=(), bytes_processed=100):
+                self.rows = rows
+                self.total_bytes_processed = bytes_processed
+
+            def result(self):
+                return iter(self.rows)
+
+        class BigQueryClient:
+            def __init__(self):
+                self.calls = []
+
+            def query(self, query, *, job_config):
+                self.calls.append((query, job_config))
+                dry_run = job_config["dry_run"] if isinstance(job_config, dict) else job_config.dry_run
+                return Job(bytes_processed=100) if dry_run else Job([{"transfer_volume_wei": "2000000000000000000"}])
+
+        class PriceProvider:
+            def daily_close(self, target_day):
+                self.target_day = target_day
+                return 2000
+
+        client = BigQueryClient()
+        price = PriceProvider()
+        provider = GoogleBlockchainAnalyticsProvider(
+            client=client,
+            project="test-project",
+            price_provider=price,
+            maximum_bytes_billed=1000,
+        )
+        result = provider.collect(ProviderRequest(
+            "google_blockchain_analytics", "onchain", "ETH", {"target_day": "2026-09-08"},
+            ("onchain.transfer_volume",),
+        ))
+        self.assertEqual(result.observations[0]["value"], 4000)
+        self.assertEqual(price.target_day, date(2026, 9, 8))
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn("DATE(t.block_timestamp) = @target_day", client.calls[0][0])
+        self.assertIn("ARRAY_LENGTH(tr.trace_address) > 0", client.calls[0][0])
+
+    def test_bigquery_transfer_volume_rejects_estimate_over_budget(self):
+        class Job:
+            total_bytes_processed = 1001
+
+        class Client:
+            def query(self, *_args, **_kwargs):
+                return Job()
+
+        provider = GoogleBlockchainAnalyticsProvider(
+            client=Client(), project="test-project", price_provider=object(), maximum_bytes_billed=1000,
+        )
+        with self.assertRaises(ProviderUnavailable) as raised:
+            provider.collect(ProviderRequest(
+                "google_blockchain_analytics", "onchain", "ETH", {"target_day": "2026-09-08"},
+                ("onchain.transfer_volume",),
+            ))
+        self.assertEqual(raised.exception.diagnostic.error_code, "QUERY_BUDGET_EXCEEDED")
+
+    def test_rated_uses_effective_balance_and_declares_reward_components(self):
+        rows = []
+        for index in range(31):
+            rows.append({
+                "date": (date(2026, 8, 2) + timedelta(days=index)).isoformat(),
+                "activeValidators": 1,
+                "sumEffectiveBalance": str((32 + index) * 1_000_000_000),
+                "sumConsensusRewards": 1_000_000_000,
+                "sumExecutionRewards": 2_000_000_000,
+                "sumPriorityFees": 0,
+                "sumBaselineMev": 0,
+            })
+        values = parse_daily_rewards(
+            {"data": rows},
+            ("eth.staking.active_effective_stake_eth", "eth.staking.staking_apr_7d", "eth.staking.staking_apr_30d"),
+            fetched_at="2026-09-02T00:00:00Z",
+            as_of="2026-09-02T00:00:00Z",
+        )
+        by_key = {item["metric_key"]: item for item in values}
+        self.assertEqual(by_key["eth.staking.active_effective_stake_eth"]["value"], 62)
+        self.assertEqual(by_key["eth.staking.staking_apr_30d"]["metadata"]["reward_components"], ["consensus", "execution"])
+        expected = (3 * 30) / (sum(range(33, 63)) / 30) * 365 / 30
+        self.assertAlmostEqual(by_key["eth.staking.staking_apr_30d"]["value"], expected)
+
+    def test_rated_queues_require_explicit_eth_balance_and_timestamp(self):
+        payload = {"results": [{
+            "date": "2026-09-01",
+            "activatingStake": 40_000_000_000,
+            "exitingStake": 5_000_000_000,
+            "totalWithdrawingBalance": 7_000_000_000,
+        }]}
+        values = parse_queues(
+            payload,
+            ("eth.staking.deposit_queue_eth", "eth.staking.exit_queue_eth", "eth.staking.withdrawal_backlog_eth"),
+            fetched_at="2026-09-02T00:00:00Z",
+        )
+        self.assertEqual({item["value"] for item in values}, {40.0, 5.0, 7.0})
+        with self.assertRaises(ProviderResponseError):
+            parse_queues(
+                {"results": [{"activatingStake": 1, "exitingStake": 1, "totalWithdrawingBalance": 1}]},
+                ("eth.staking.deposit_queue_eth",), fetched_at="2026-09-02T00:00:00Z",
+            )
+
+    def test_rated_provider_batches_daily_rewards_and_queues(self):
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def get_json(self, url, *, params=None, headers=None):
+                self.calls.append((url, params, headers))
+                if url.endswith("dailyRewards"):
+                    return {"data": [{
+                        "date": "2026-09-01",
+                        "sumEffectiveBalance": "40000000000",
+                        "sumConsensusRewards": 1,
+                        "sumExecutionRewards": 1,
+                    }]}
+                return {"results": [{
+                    "date": "2026-09-01",
+                    "activatingStake": 1,
+                    "exitingStake": 2,
+                    "totalWithdrawingBalance": 3,
+                }]}
+
+        client = Client()
+        provider = RatedProvider(client=client, api_key="fake-key")
+        result = provider.collect(ProviderRequest(
+            "rated", "ethereum_staking", "ETH", {"as_of": "2026-09-02T00:00:00Z"},
+            ("eth.staking.active_effective_stake_eth", "eth.staking.deposit_queue_eth"),
+        ))
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual({item["metric_key"] for item in result.observations}, {
+            "eth.staking.active_effective_stake_eth", "eth.staking.deposit_queue_eth",
+        })
+        self.assertTrue(all(call[2]["Authorization"] == "Bearer fake-key" for call in client.calls))
+
+    def test_active_stake_change_uses_cached_aligned_history(self):
+        def observation(day, value):
+            stamp = f"{day}T23:59:59Z"
+            return MetricObservation(
+                stable_observation_id("ETH", "eth.staking.active_effective_stake_eth", stamp, "rated", value, "1d"),
+                "ETH", "eth.staking.active_effective_stake_eth", "fundamentals", value, "ETH", "1d",
+                stamp, "2026-09-09T00:00:00Z", "rated", "CURRENT", "MEDIUM",
+                metadata={"methodology": "rated_sum_effective_balance"},
+            )
+
+        current = observation("2026-09-08", 40)
+        prior = observation("2026-08-09", 32)
+        values, unresolved = derive_metric_observations(
+            (MetricRequest("ETH", "eth.staking.active_effective_stake_change_30d"),),
+            {("ETH", "eth.staking.active_effective_stake_eth"): current},
+            {},
+            fetched_at="2026-09-09T00:00:00Z",
+            as_of="2026-09-09T00:00:00Z",
+            historical_observations=(prior,),
+        )
+        self.assertEqual(values[("ETH", "eth.staking.active_effective_stake_change_30d")]["value"], 8)
+        self.assertEqual(unresolved, {})
+
+    def test_staking_raw_requests_share_one_budget_bundle(self):
+        requests = build_provider_requests(tuple(
+            MetricRequest("ETH", key) for key in (
+                "eth.staking.active_effective_stake_eth",
+                "eth.staking.staking_apr_7d",
+                "eth.staking.staking_apr_30d",
+                "eth.staking.deposit_queue_eth",
+            )
+        ), as_of="2026-09-09T00:00:00Z", now="2026-09-09T00:00:00Z")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].provider, "rated")
+
+    def test_beacon_provider_is_bounded_and_does_not_scan_validators(self):
+        class Client:
+            def get_json(self, url, **kwargs):
+                return {"data": {"version": "v", "finalized": "0x1"}}
+
+        result = EthereumBeaconProvider(client=Client(), base_url="https://beacon.example").probe()
+        self.assertTrue(result["bounded"])
+        self.assertFalse(result["validator_registry_scan"])
+
+
+if __name__ == "__main__":
+    unittest.main()

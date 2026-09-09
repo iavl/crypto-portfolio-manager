@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from ..engine.metric_plan import MetricRequest
+from ..metric_availability import metric_availability
 from ..metrics_registry import metric_definition, normalize_metric_key
 from .base import FetchMode
 from .config import validate_provider_registry
@@ -141,6 +142,7 @@ def smoke_provider(
     chain = provider_chain(metric_key, normalized_asset)
     built = router.build_requests((request,))
     if not chain or not built:
+        skipped = metric_availability(normalized_asset, metric_key).is_skippable
         return {
             "check": "SMOKE",
             "asset": normalized_asset,
@@ -152,8 +154,8 @@ def smoke_provider(
             "network_requests": 0,
             "cache_hits": 0,
             "fallback_count": 0,
-            "observation_status": "FAILED",
-            "status": "FAIL",
+            "observation_status": "SKIPPED" if skipped else "FAILED",
+            "status": "SKIPPED" if skipped else "FAIL",
             "unresolved": [{"error_code": "NO_PROVIDER_ROUTE", "reason": "no configured provider route"}],
         }
     routed = router.collect(built, mode=FetchMode.REFRESH)
@@ -163,6 +165,16 @@ def smoke_provider(
         row = item.as_dict()
         row.pop("log", None)
         attempts.append(row)
+    unresolved = [dict(item) for item in routed.unresolved_details]
+    skip_codes = {
+        "NO_PROVIDER_ROUTE", "PROVIDER_DISABLED", "PROVIDER_UNSUPPORTED",
+        "OPTIONAL_PROVIDER_UNSUPPORTED", "OPTIONAL_SOURCE_UNAVAILABLE",
+        "PROVIDER_INSUFFICIENT_HISTORY", "CONFIG_DISABLED", "CREDENTIAL_MISSING",
+        "ADAPTER_UNAVAILABLE", "DERIVED_INPUT_UNAVAILABLE",
+    }
+    skipped = metric_availability(normalized_asset, metric_key).is_skippable and unresolved and all(
+        str(item.get("error_code", "")).upper() in skip_codes for item in unresolved
+    )
     return {
         "check": "SMOKE",
         "asset": normalized_asset,
@@ -174,9 +186,9 @@ def smoke_provider(
         "network_requests": routed.api_requests,
         "cache_hits": routed.provider_cache_hits,
         "fallback_count": routed.provider_fallbacks,
-        "observation_status": "SUCCESS" if routed.observations else "FAILED",
-        "status": "PASS" if not routed.unresolved else "FAIL",
-        "unresolved": [dict(item) for item in routed.unresolved_details],
+        "status": "SKIPPED" if skipped else "PASS" if not routed.unresolved else "FAIL",
+        "observation_status": "SKIPPED" if skipped else "SUCCESS" if routed.observations else "FAILED",
+        "unresolved": unresolved,
     }
 
 

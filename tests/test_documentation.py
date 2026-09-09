@@ -92,7 +92,8 @@ class DocumentationTests(unittest.TestCase):
         provider_policy = (ROOT / "references/data-providers.md").read_text(encoding="utf-8")
         for provider in (
             "Binance", "Bybit", "CoinGecko", "DeFiLlama", "Alternative.me",
-            "Chain liveness", "Coin Metrics", "GitHub", "SoSoValue", "EventScanner",
+            "Chain liveness", "Coin Metrics", "BGeometrics", "Google Blockchain Analytics",
+            "Rated", "Ethereum Beacon API", "GitHub", "SoSoValue", "EventScanner",
         ):
             with self.subTest(provider=provider):
                 self.assertIn(provider, provider_policy)
@@ -100,7 +101,9 @@ class DocumentationTests(unittest.TestCase):
             "COINGECKO_API_KEY", "GITHUB_TOKEN", "SOSOVALUE_API_KEY",
             "CapMrktEstUSD", "historicalInflowChart", "PROVIDER_INSUFFICIENT_HISTORY",
             "L2BEAT_API_KEY", "query parameter `apiKey`", "OpenAPI `3.1.0`",
-            "`SKIPPED`", "`NOT_APPLICABLE`",
+            "`SKIPPED`", "`NOT_APPLICABLE`", "bitcoin-data.com", "landing_page.json",
+            "sumEffectiveBalance", "QUERY_BUDGET_EXCEEDED", "GOOGLE_CLOUD_PROJECT",
+            "RATED_API_KEY", "ETH_BEACON_API_URL", "does not currently expose an equivalent TVS",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)

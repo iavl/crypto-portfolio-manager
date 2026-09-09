@@ -95,7 +95,8 @@ CIRCUIT_OPEN / REQUEST_BUDGET_EXHAUSTED
 Provider 错误码包括 `PROVIDER_PLAN_RESTRICTED`、
 `PROVIDER_INSUFFICIENT_HISTORY`、`PROVIDER_UNSUPPORTED`、
 `PROVIDER_NOT_APPLICABLE`、`PROVIDER_SCHEMA_ERROR` 和
-`PROVIDER_SCHEMA_CHANGED`。缓存及本地安全错误码包括 `CACHE_MISS`、
+`PROVIDER_SCHEMA_CHANGED`、`SOURCE_METHOD_MISMATCH`、
+`DERIVED_INPUT_UNAVAILABLE` 和 `QUERY_BUDGET_EXCEEDED`。缓存及本地安全错误码包括 `CACHE_MISS`、
 `CACHE_EXPIRED`、`CACHE_CORRUPT`、`CIRCUIT_OPEN` 和
 `REQUEST_BUDGET_EXHAUSTED`。
 
@@ -229,6 +230,10 @@ python3 scripts/providers.py --probe coinmetrics_community --asset BTC
 python3 scripts/providers.py --probe coinmetrics_community --asset ETH
 python3 scripts/providers.py --probe coinmetrics_community --asset BNB
 python3 scripts/providers.py --probe l2beat --asset ETH
+python3 scripts/providers.py --probe bgeometrics --asset BTC
+python3 scripts/providers.py --probe google_blockchain_analytics --asset ETH
+python3 scripts/providers.py --probe rated --asset ETH
+python3 scripts/providers.py --probe ethereum_beacon --asset ETH
 python3 scripts/providers.py --probe ultrasound_money --asset ETH
 python3 scripts/providers.py --probe etherscan --asset ETH
 ```
@@ -236,6 +241,12 @@ python3 scripts/providers.py --probe etherscan --asset ETH
 Coin Metrics 输出按 asset 显示真实 1D catalog；L2BEAT 无 key 仍可检查
 OpenAPI，但端点认证失败必须显示 `CREDENTIAL_MISSING`/`HTTP_401`。数值
 历史缺失保持 `PROVIDER_INSUFFICIENT_HISTORY`，不会生成 Web 请求。
+
+BGeometrics 不需要 key；Google Blockchain Analytics 需要
+`GOOGLE_CLOUD_PROJECT`、ADC 和可选 BigQuery client 依赖；Rated 需要
+`RATED_API_KEY`；Beacon 使用 `ETH_BEACON_API_URL` 或 PublicNode 候选地址。
+缺少这些可选配置时，`--status`/`--doctor` 会显示未准备状态，不会将
+provider failure 变成零值。
 
 ## 合并前检查清单
 

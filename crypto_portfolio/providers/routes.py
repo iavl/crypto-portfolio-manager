@@ -94,7 +94,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key.startswith("eth.l2.rent_paid") or key.startswith("eth.da."):
         return ("growthepie",)
     if key.startswith("eth.l2."):
-        return ("l2beat",)
+        return ("growthepie", "l2beat")
     if key.startswith("eth.blobs."):
         return ("blobscan",)
     if key == "eth.monetary.burn_30d_eth":
@@ -106,13 +106,22 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key.startswith("eth.monetary."):
         return ("coinmetrics_community", "etherscan", "coinmetrics_pro")
     if key.startswith("eth.staking."):
+        if key in {
+            "eth.staking.active_effective_stake_eth",
+            "eth.staking.staking_apr_7d",
+            "eth.staking.staking_apr_30d",
+            "eth.staking.deposit_queue_eth",
+            "eth.staking.exit_queue_eth",
+            "eth.staking.withdrawal_backlog_eth",
+        }:
+            return ("rated",)
         return ()
     if key.startswith("eth.structural."):
         return ()
     if key == "btc_valuation.price_to_realized_price":
         return ()
     if key.startswith("btc_valuation."):
-        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
+        return ("bgeometrics", "coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC"} else ()
     if key == "valuation.fee_revenue_multiple":
         return ("defillama",)
     if key.startswith(("flows.etf_", "flows.btc_etf_")):
@@ -145,6 +154,10 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         "onchain.active_addresses", "onchain.transfer_volume",
         "onchain.blockspace_fees", "onchain.transaction_count",
     }:
+        if symbol == "ETH" and key == "onchain.blockspace_fees":
+            return ("growthepie", "coinmetrics_community", "coinmetrics_pro")
+        if symbol == "ETH" and key == "onchain.transfer_volume":
+            return ("google_blockchain_analytics", "coinmetrics_community", "coinmetrics_pro")
         return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH", "BNB"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)
@@ -354,7 +367,11 @@ def build_provider_requests(
         timeframe = str(item.parameters.get("timeframe", "1D")).upper() if hasattr(item, "parameters") else "1D"
         # OHLCV remains an execution cohort. It intentionally over-fetches
         # the 30/90/180-day return inputs to the configured MA200 horizon.
-        cohort = f"EXECUTION:{execution_history_days}" if dataset == "ohlcv" else requirement.cohort
+        if dataset == "ethereum_staking":
+            # Rated can batch raw primitives and choose the largest requested window itself.
+            cohort = "ETH_STAKING_BUNDLE"
+        else:
+            cohort = f"EXECUTION:{execution_history_days}" if dataset == "ohlcv" else requirement.cohort
         group_key = (chain[0], dataset, item.asset.strip().upper(), timeframe, cohort)
         groups.setdefault(group_key, []).append(item)
     result = []
@@ -383,7 +400,9 @@ def build_provider_requests(
             any(metric_is_mutable(key) for key in keys)
             and dataset != "ohlcv"
             and not (dataset == "valuation" and as_of is not None)
-            and requirement.mode != "FULL_AVAILABLE"
+            # BGeometrics exposes only a current /last scalar; its TTL cache is
+            # not a substitute for the full-history Coin Metrics fallback.
+            and (requirement.mode != "FULL_AVAILABLE" or chain[0] == "bgeometrics")
         )
         result.append(
             ProviderRequest(

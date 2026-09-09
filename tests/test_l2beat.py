@@ -7,7 +7,6 @@ from crypto_portfolio.providers.l2beat import (
     ACTIVITY_PATH,
     BASE_URL,
     OPENAPI_PATH,
-    PROJECTS_PATH,
     TVS_PATH,
     L2BeatProvider,
 )
@@ -53,7 +52,10 @@ def tvs_rows():
 
 
 def activity_rows():
-    return [{"timestamp": 1788739200, "txCount": 42, "uopsCount": 0}]
+    return [
+        {"timestamp": 1788739200 - (29 - index) * 86400, "txCount": 42, "uopsCount": 0}
+        for index in range(30)
+    ]
 
 
 class Client:
@@ -64,13 +66,9 @@ class Client:
         self.calls.append((url, params, headers))
         if url.endswith(OPENAPI_PATH):
             return openapi_document()
-        if url.endswith(PROJECTS_PATH):
-            return [{"id": "arb-one", "slug": "arb-one", "name": "Arbitrum One"}]
-        if url.endswith("/v1/project/arb-one"):
-            return {"id": "arb-one", "slug": "arb-one", "name": "Arbitrum One", "hostChain": "Ethereum"}
-        if url.endswith(f"{TVS_PATH}/arb-one"):
+        if url.endswith(TVS_PATH):
             return tvs_rows()
-        if url.endswith(f"{ACTIVITY_PATH}/arb-one"):
+        if url.endswith(ACTIVITY_PATH):
             return activity_rows()
         raise AssertionError(f"unexpected L2BEAT endpoint: {url}")
 
@@ -101,14 +99,9 @@ class L2BeatContractTests(unittest.TestCase):
         })
         self.assertTrue(provider.capabilities.requires_api_key)
         self.assertTrue(all(call[1]["apiKey"] == "fake-key" for call in client.calls))
-        self.assertEqual(
-            next(call[1]["range"] for call in client.calls if call[0].endswith(f"{TVS_PATH}/arb-one")),
-            "30d",
-        )
-        self.assertEqual(
-            next(call[1]["range"] for call in client.calls if call[0].endswith(f"{ACTIVITY_PATH}/arb-one")),
-            "30d",
-        )
+        self.assertEqual({call[0] for call in client.calls}, {BASE_URL + TVS_PATH, BASE_URL + ACTIVITY_PATH})
+        self.assertTrue(all(call[1]["range"] == "30d" for call in client.calls))
+        self.assertFalse(any("project" in call[0] for call in client.calls))
 
     def test_probe_reports_openapi_and_all_read_operations_without_secret(self):
         client = Client()
@@ -122,9 +115,9 @@ class L2BeatContractTests(unittest.TestCase):
         router = ProviderRouter({"l2beat": provider}, config=config)
         with patch.dict("os.environ", {"L2BEAT_API_KEY": "fake-key"}, clear=True):
             rows = probe_provider(router, "l2beat")
-        self.assertEqual(len(rows), 4)
+        self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0]["auth_scheme"], "apiKey query parameter")
-        self.assertEqual({row.get("operation_path") for row in rows[2:]}, {"/v1/tvs", "/v1/activity"})
+        self.assertEqual({row.get("operation_path") for row in rows[1:]}, {"/v1/tvs", "/v1/activity"})
         self.assertTrue(all(row["http_status"] == 200 for row in rows))
         self.assertNotIn("fake-key", str(rows))
 

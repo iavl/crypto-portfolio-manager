@@ -17,17 +17,21 @@ those contracts; it is not a second schema or routing implementation.
 | Binance | spot, OHLCV, derivatives, delivery basis | None | price, candles, funding, OI, ratios, basis | first market/derivatives route; public and registered |
 | Bybit | market and derivatives fallback | None | spot candles, funding, OI, account ratio | second market/derivatives route; no delivery basis |
 | CoinGecko | broad market valuation | `COINGECKO_API_KEY` | market cap, FDV, historical market cap/FDV | primary valuation; credential-gated |
+| BGeometrics | latest BTC MVRV Z-score | None | `btc_valuation.mvrv_zscore` from `/v1/mvrv-zscore/last` | free/no-token; cache at least 24h; low quota |
 | DeFiLlama | protocol fundamentals | None | TVL, fees, revenue, fee/revenue multiple | protocol route; registered |
 | Alternative.me | market sentiment context | None | Fear & Greed | market-context route; registered |
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
 | Coin Metrics Pro | authenticated Coin Metrics fallback | `COINMETRICS_API_KEY` | same catalog-aware datasets at the authenticated tier | optional, credential-gated |
+| Google Blockchain Analytics | bounded native ETH transfer volume | GCP project + ADC | successful top-level and internal ETH value transfers | optional BigQuery route; one UTC day and maximum-bytes guard |
 | FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
 | GitHub | bounded developer activity | optional `GITHUB_TOKEN` | fixed ETH/AAVE repository commit counts | optional and allowlisted |
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
-| growthepie | Ethereum L2 rent and DA economics | None | L2 rent, Ethereum DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
+| growthepie | Ethereum L2 activity, fees, rent and DA economics | None | `all_l2s` activity, Ethereum fees, L2 rent, DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
 | Blobscan | Ethereum blob demand history | None | blob count, bytes, blob transactions, utilization | ETH-specific public route; RPC is a protocol cross-check |
 | L2BEAT | Ethereum-secured L2 context | `L2BEAT_API_KEY` via official `apiKey` query parameter | filtered L2 TVS and activity | ETH-specific route; current OpenAPI contract and host-chain classification are required |
+| Rated | Ethereum staking network aggregates | `RATED_API_KEY` via Bearer header | effective balance, daily rewards/APR, queue balances | optional Free-tier route; cache daily primitives; no count×32 conversion |
+| Ethereum Beacon API | bounded Beacon node health/fallback | None | node version, genesis and finality checks | configurable `ETH_BEACON_API_URL`; no validator-registry scan |
 | Ethereum JSON-RPC | canonical execution fields | None | `baseFeePerGas`, `gasUsed`, `blobGasUsed`, `excessBlobGas` | bounded protocol cross-check; no per-block review fan-out |
 | Ultrasound Money | ETH burn-rate history | None | public `d30.rate.eth_per_minute` | structured 30D burn route; medium confidence unless methodology changes |
 | Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` current fields | optional; not historical burn authority |
@@ -53,10 +57,11 @@ derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
 Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
 DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Coin Metrics for
 supported exchange attribution and network data; and
-the fixed EventScanner catalog for events. ETH monetary/realized valuation routes
+the fixed EventScanner catalog for events. BGeometrics is the no-key BTC MVRV Z
+route; ETH monetary/realized valuation routes
 use catalog-aware Coin Metrics with Ultrasound and optional Etherscan fallbacks;
 staking routes require an exact aggregate source and are currently optional;
-growthepie owns L2 rent/DA,
+growthepie owns L2 activity, Ethereum fees, L2 rent/DA,
 Blobscan owns blob history, L2BEAT owns explicitly Ethereum-secured L2 TVS and
 activity, and SoSoValue owns structured ETH ETF flow/AUM. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
@@ -315,6 +320,54 @@ Qualitative ETH structural-risk evidence may use a bounded Web fallback when no
 structured source is available; it remains non-scoring and is never treated as
 deterministic numerical evidence.
 
+## BGeometrics
+
+BGeometrics provides the no-key endpoint
+`GET https://bitcoin-data.com/v1/mvrv-zscore/last`. The verified 2026-09-09
+response contains `d`, `unixTs`, and numeric `mvrvZscore`; `d` is the source
+observation date and is never replaced by `fetched_at`. The adapter makes one
+request per refresh, uses a cache TTL of at least 24 hours, and marks values
+older than the seven-day metric freshness window unavailable. It does not
+download the full history during a normal review.
+
+## Google Blockchain Analytics
+
+This optional route requires `GOOGLE_CLOUD_PROJECT` and Google Application
+Default Credentials. The BigQuery client is loaded lazily, and the provider
+uses a one-UTC-day partition filter plus `maximum_bytes_billed`; a dry-run
+estimate above the configured limit returns `QUERY_BUDGET_EXCEEDED` without
+executing the query. The query unions successful top-level transaction values
+with successful internal trace values where `trace_address` is non-empty,
+excluding zero-value, failed, and self transfers. It does not count root traces
+twice. ETH is converted to USD with the same completed daily ETH/USD close,
+not the current spot price. The 2026-09-09 live probe could not run because no
+GCP project/ADC was configured, so no live schema or billing estimate is
+claimed here.
+
+## Rated Free tier
+
+The current Rated OpenAPI document is OpenAPI `3.1.0` and uses an HTTP Bearer
+credential. Probes without `RATED_API_KEY` return HTTP 401. The adapter uses
+`/v0/eth/network/dailyRewards` for `sumEffectiveBalance`,
+`sumConsensusRewards`, and `sumExecutionRewards`, and `/v1/eth/queues` for
+`activatingStake`, `exitingStake`, and `totalWithdrawingBalance`. These source
+fields are Gwei and are converted to ETH by `1e9`; validator count is never
+multiplied by 32. APR is calculated as
+`window_rewards_gwei / average_effective_balance_gwei * 365 / window_days`
+and declares consensus plus execution rewards in metadata. Queue records must
+include an explicit source date/timestamp; a queue delay or validator count is
+not substituted for an ETH amount. `participation_rate` remains skipped until
+an exact bounded aggregate definition is available.
+
+## Ethereum Beacon API
+
+`EthereumBeaconProvider` uses `ETH_BEACON_API_URL` or the documented candidate
+`https://ethereum-beacon-api.publicnode.com`. The 2026-09-09 bounded probes
+for node version, genesis, and finality checkpoints returned HTTP 200. The
+provider is registered for diagnostics and future exact fallbacks, but it does
+not scan the validator registry during a normal review and does not expose a
+staking aggregate without a bounded, semantically exact source.
+
 ### ETH monetary providers
 
 `UltrasoundMoneyProvider` uses the public
@@ -345,14 +398,17 @@ The verified contract is the current OpenAPI document at
 API key in the query parameter `apiKey`. Top-level security requires
 `apiKeyAuth`; the GET operations inherit it because they do not override
 operation-level security. `/v1/projects` has no extra parameter;
-`/v1/tvs/{projectId}` accepts `range=7d|30d|90d|180d|1y|max`; and
-`/v1/activity/{projectId}` accepts `range=30d|90d|180d|1y|max`. The adapter
-therefore uses `L2BEAT_API_KEY` only when configured, sends the key as the
-documented query parameter, and never treats a bare HTTP 401 as proof of a
-credential requirement without this contract check.
+`/v1/tvs` accepts `range=7d|30d|90d|180d|1y|max`; and `/v1/activity` accepts
+`range=30d|90d|180d|1y|max`. A 2026-09-09 live probe returned HTTP 401 for
+the public projects, TVS, and activity operations, so the current adapter
+requires `L2BEAT_API_KEY` when used. With a key it uses the aggregate `/v1/tvs`
+and `/v1/activity` operations and does not fan out over project details. The
+credential-free baseline is growthepie `landing_page.json`; it supplies
+`all_l2s` transaction activity but does not currently expose an equivalent TVS
+series, so TVS remains unavailable rather than using a different metric.
 
 The opt-in provider probe checks the OpenAPI document and then probes the
-projects, TVS, and activity operations with redacted diagnostics. Missing
+aggregate TVS and activity operations with redacted diagnostics. Missing
 credentials remain `CREDENTIAL_MISSING`; a credential-present 401 is reported
 as an authentication rejection.
 

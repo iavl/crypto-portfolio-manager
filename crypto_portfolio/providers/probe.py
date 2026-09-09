@@ -7,6 +7,10 @@ import time
 from typing import Any, Callable, Iterable, Mapping
 
 from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
+from .bgeometrics import BASE_URL as BGEOMETRICS_BASE_URL, MVRV_ZSCORE_PATH, BGeometricsProvider
+from .google_blockchain_analytics import GoogleBlockchainAnalyticsProvider
+from .ethereum_beacon import EthereumBeaconProvider, NODE_VERSION_PATH
+from .rated import DAILY_REWARDS_PATH, RatedProvider
 from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
@@ -22,12 +26,18 @@ from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_HISTORICAL_INFLOW_PAT
 from .l2beat import (
     BASE_URL as L2BEAT_BASE_URL,
     OPENAPI_PATH as L2BEAT_OPENAPI_PATH,
-    PROJECTS_PATH,
     L2BeatProvider,
 )
 from .ultrasound_money import BASE_URL as ULTRASOUND_BASE_URL, BURN_RATES_PATH, UltrasoundMoneyProvider
 from .etherscan import BASE_URL as ETHERSCAN_BASE_URL, EtherscanProvider
-from .growthepie import BASE_URL as GROWTHEPIE_BASE_URL, FUNDAMENTALS_PATH, MASTER_PATH, parse_master_payload
+from .growthepie import (
+    BASE_URL as GROWTHEPIE_BASE_URL,
+    FUNDAMENTALS_PATH,
+    LANDING_PAGE_PATH,
+    MASTER_PATH,
+    parse_landing_page_payload,
+    parse_master_payload,
+)
 from .blobscan import BASE_URL as BLOBCAN_BASE_URL, TIMESERIES_PATH as BLOBCAN_TIMESERIES_PATH, parse_timeseries as parse_blobscan_timeseries
 
 
@@ -357,6 +367,94 @@ def probe_provider(
         return ({"provider": name, "config": "READY", "tested": True, "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
         return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
+    if name == "bgeometrics" and isinstance(provider, BGeometricsProvider):
+        target = (asset or "BTC").strip().upper()
+        if target != "BTC":
+            raise ValueError("BGeometrics probe asset must be BTC")
+        endpoint = BGEOMETRICS_BASE_URL + MVRV_ZSCORE_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "bgeometrics", "onchain", "BTC", {"as_of": _now()},
+                ("btc_valuation.mvrv_zscore",),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call("bgeometrics", endpoint, call, validate=_require_observations)
+        if "error_code" not in result:
+            observation = tuple(getattr(captured["value"], "observations", ()))
+            result.update({
+                "asset": "BTC",
+                "metric": "btc_valuation.mvrv_zscore",
+                "observed_at": observation[0].get("observed_at") if observation else None,
+                "methodology": "BGeometrics latest MVRV Z-score",
+            })
+        return (_with_config(result, client),)
+    if name == "google_blockchain_analytics" and isinstance(provider, GoogleBlockchainAnalyticsProvider):
+        endpoint = "bigquery://bigquery-public-data.crypto_ethereum"
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "google_blockchain_analytics", "onchain", "ETH", {"as_of": _now()},
+                ("onchain.transfer_volume",),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call(
+            "google_blockchain_analytics", endpoint, call, method="QUERY", validate=_require_observations,
+        )
+        if "error_code" not in result:
+            observation = tuple(getattr(captured["value"], "observations", ()))
+            result.update({
+                "asset": "ETH",
+                "metric": "onchain.transfer_volume",
+                "observed_at": observation[0].get("observed_at") if observation else None,
+                "query_maximum_bytes_billed": provider.maximum_bytes_billed,
+            })
+        return (_with_config(result, getattr(provider, "http_client", client)),)
+    if name == "rated" and isinstance(provider, RatedProvider):
+        endpoint = "https://api.rated.network" + DAILY_REWARDS_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "rated", "ethereum_staking", "ETH", {"as_of": _now()},
+                ("eth.staking.active_effective_stake_eth",),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call("rated", endpoint, call, validate=_require_observations)
+        if "error_code" not in result:
+            observation = tuple(getattr(captured["value"], "observations", ()))
+            result.update({
+                "asset": "ETH",
+                "metric": "eth.staking.active_effective_stake_eth",
+                "observed_at": observation[0].get("observed_at") if observation else None,
+                "raw_unit": "Gwei",
+                "methodology": "rated_sum_effective_balance",
+            })
+        return (_with_config(result, client),)
+    if name == "ethereum_beacon" and isinstance(provider, EthereumBeaconProvider):
+        endpoint = provider.base_url + NODE_VERSION_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            captured["value"] = provider.probe()
+            return captured["value"]
+
+        result = _probe_call("ethereum_beacon", endpoint, call, validate=_require_mapping)
+        if "error_code" not in result:
+            result.update({
+                "endpoint_name": "node/version + genesis + finality_checkpoints",
+                "bounded": True,
+                "validator_registry_scan": False,
+            })
+        return (_with_config(result, client),)
     if name == "ultrasound_money" and isinstance(provider, UltrasoundMoneyProvider):
         endpoint = ULTRASOUND_BASE_URL + BURN_RATES_PATH
         captured: dict[str, Any] = {}
@@ -412,33 +510,12 @@ def probe_provider(
         if "error_code" in result:
             return tuple(rows)
 
-        captured: dict[str, Any] = {}
-        projects_endpoint = L2BEAT_BASE_URL + PROJECTS_PATH
-        projects = _probe_call(
-            "l2beat",
-            projects_endpoint,
-            lambda: captured.setdefault("projects", provider._get(PROJECTS_PATH)),
-            authenticated=True,
-            validate=_require_array,
-        )
-        rows.append(_with_config(projects, client))
-        project_rows = captured.get("projects", ())
-        project_id = next(
-            (
-                str(item.get("id")).strip()
-                for item in project_rows
-                if isinstance(item, Mapping) and item.get("id") is not None and str(item.get("id")).strip()
-            ),
-            None,
-        )
-        if project_id is None or "error_code" in projects:
-            return tuple(rows)
         for path, range_value in (("/v1/tvs", "30d"), ("/v1/activity", "30d")):
-            endpoint = f"{L2BEAT_BASE_URL}{path}/{project_id}"
+            endpoint = f"{L2BEAT_BASE_URL}{path}"
             probe = _probe_call(
                 "l2beat",
                 endpoint,
-                lambda path=path: provider._get(f"{path}/{project_id}", params={"range": range_value}),
+                lambda path=path: provider._get(path, params={"range": range_value}),
                 authenticated=True,
                 validate=_require_array,
             )
@@ -456,6 +533,12 @@ def probe_provider(
             if not isinstance(fundamentals, list) or any(not isinstance(row, Mapping) for row in fundamentals[:10]):
                 raise ProviderResponseError("growthepie fundamentals response is not a row array")
             captured["fundamentals_rows"] = len(fundamentals)
+            landing = client.get_json(GROWTHEPIE_BASE_URL + LANDING_PAGE_PATH)
+            captured["landing_observations"] = parse_landing_page_payload(
+                landing,
+                ("eth.l2.activity_30d", "onchain.blockspace_fees"),
+                fetched_at=_now(),
+            )
             return master
 
         result = _probe_call("growthepie", master_endpoint, call, validate=lambda value: parse_master_payload(value))
@@ -464,7 +547,8 @@ def probe_provider(
                 "master_version": captured["master"].get("last_updated_utc"),
                 "chain_count": len(captured["master"]["chains"]),
                 "fundamentals_rows": captured["fundamentals_rows"],
-                "endpoint_name": "master.json + fundamentals.json",
+                "landing_metrics": sorted(item["metric_key"] for item in captured["landing_observations"]),
+                "endpoint_name": "master.json + fundamentals.json + landing_page.json",
             })
         return (_with_config(result, client),)
     if name == "blobscan":

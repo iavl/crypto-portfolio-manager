@@ -62,6 +62,19 @@ def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
             if not isinstance(settings["api_key_env"], str) or not settings["api_key_env"].strip():
                 raise ValueError(f"provider {raw_name} api_key_env must be a non-empty string")
             settings["api_key_env"] = settings["api_key_env"].strip()
+        if "project_env" in settings:
+            if not isinstance(settings["project_env"], str) or not settings["project_env"].strip():
+                raise ValueError(f"provider {raw_name} project_env must be a non-empty string")
+            settings["project_env"] = settings["project_env"].strip()
+        for field in ("base_url_env", "base_url_default"):
+            if field in settings:
+                if not isinstance(settings[field], str) or not settings[field].strip():
+                    raise ValueError(f"provider {raw_name} {field} must be a non-empty string")
+                settings[field] = settings[field].strip()
+        if "maximum_bytes_billed" in settings:
+            value = settings["maximum_bytes_billed"]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"provider {raw_name} maximum_bytes_billed must be a positive integer")
         if any(str(key).strip().lower().replace("-", "_") in _SECRET_FIELDS for key in settings):
             raise ValueError(f"provider {raw_name} config must not contain secret values")
         normalized_providers[raw_name.strip().lower()] = settings
@@ -136,8 +149,8 @@ def provider_enabled(
     if enabled is False:
         return False
     if enabled == "AUTO":
-        key_name = settings.get("api_key_env")
-        return bool(key_name and environment.get(key_name, "").strip())
+        required_env = settings.get("api_key_env") or settings.get("project_env")
+        return bool(required_env and environment.get(required_env, "").strip())
     if not enabled:
         return False
     if settings.get("api_key_env"):
