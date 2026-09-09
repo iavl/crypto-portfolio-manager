@@ -1,7 +1,7 @@
 # 工作原理
 
 本文档说明 `crypto-portfolio-manager` 当前的架构、Python 与模型的边界、
-数据流、历史记录和可复现性。它描述当前代码，不把未来扩展写成已实现功能。
+数据流、历史记录和可复现性。
 策略概念和决策原则见[投资策略](../references/investment-strategy.md)。
 
 ## 1. 系统总览
