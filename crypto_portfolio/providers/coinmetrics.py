@@ -8,8 +8,18 @@ from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import metric_definition
 from ..models.time import normalize_timestamp, parse_timestamp
-from .base import ProviderAuthenticationError, ProviderCapabilities, ProviderDataError, ProviderInsufficientHistory, ProviderRequest, ProviderResponseError, ProviderUnsupportedMetric
-from .http import HttpClient
+from .base import (
+    ProviderAuthenticationError,
+    ProviderCapabilities,
+    ProviderDataError,
+    ProviderError,
+    ProviderInsufficientHistory,
+    ProviderRequest,
+    ProviderResponse,
+    ProviderResponseError,
+    ProviderUnsupportedMetric,
+)
+from .http import HttpClient, redact_secrets
 
 
 COMMUNITY_BASE_URL = "https://community-api.coinmetrics.io"
@@ -53,7 +63,7 @@ COINMETRICS_BTC_NETWORK_METRICS = {
 }
 COINMETRICS_BTC_VALUATION_INPUTS = {
     "btc_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
-    "btc_valuation.mvrv_zscore": ("CapMVRVZ",),
+    "btc_valuation.mvrv_zscore": ("CapMVRVZ", "CapMrktCurUSD", "CapRealUSD"),
     "btc_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur", "CapMVRVCur", "CapMrktCurUSD"),
     "btc_valuation.realized_cap_usd": ("CapRealUSD", "CapMVRVCur", "CapMrktCurUSD"),
 }
@@ -69,12 +79,6 @@ COINMETRICS_ETH_INPUTS = {
     "eth.monetary.net_supply_growth_30d": ("SplyCur",),
     "eth.monetary.net_supply_growth_90d": ("SplyCur",),
     "eth.monetary.net_supply_growth_365d": ("SplyCur",),
-    "eth.staking.staked_supply_eth": ("SplyStkedNtv", "SplyTotStkedNtv"),
-    "eth.staking.active_staked_supply_eth": ("SplyActStkedNtv",),
-    "eth.staking.staked_supply_pct": ("SplyStkedNtv", "SplyCur"),
-    "eth.staking.staked_supply_change_30d": ("SplyStkedNtv", "SplyTotStkedNtv"),
-    "eth.staking.staked_supply_change_90d": ("SplyStkedNtv", "SplyTotStkedNtv"),
-    "eth.staking.participation_rate": ("SplyActStkedNtv", "SplyTotStkedNtv"),
     "eth_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
     "eth_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur", "CapMVRVCur", "CapMrktCurUSD"),
     "eth_valuation.realized_cap_usd": ("CapRealUSD", "CapMVRVCur", "CapMrktCurUSD"),
@@ -96,6 +100,28 @@ COINMETRICS_SUPPORTED_METRICS = tuple(dict.fromkeys((
 SUPPLY_LOOKBACK_DAYS = 365
 SUPPLY_LOOKBACK_TOLERANCE_DAYS = 7
 CATALOG_TTL_SECONDS = 86400
+MAX_HISTORY_PAGES = 20
+
+
+def _metric_diagnostic(error: BaseException, secrets: tuple[str, ...] = ()) -> dict[str, Any]:
+    diagnostic = getattr(error, "diagnostic", None)
+    if hasattr(diagnostic, "as_dict"):
+        return dict(redact_secrets(diagnostic.as_dict(), secrets))
+    if isinstance(diagnostic, Mapping):
+        return dict(redact_secrets(dict(diagnostic), secrets))
+    if isinstance(error, ProviderInsufficientHistory):
+        code = "PROVIDER_INSUFFICIENT_HISTORY"
+    elif isinstance(error, ProviderUnsupportedMetric):
+        code = "PROVIDER_UNSUPPORTED"
+    elif isinstance(error, ProviderResponseError):
+        code = "PROVIDER_SCHEMA_ERROR"
+    elif isinstance(error, ProviderDataError):
+        code = "PROVIDER_SCHEMA_ERROR"
+    elif isinstance(error, ProviderError):
+        code = "PROVIDER_SCHEMA_ERROR"
+    else:
+        code = "PROVIDER_SCHEMA_ERROR"
+    return {"error_code": code, "detail": redact_secrets(str(error), secrets) or error.__class__.__name__}
 
 
 def _now(clock: Any | None = None) -> str:
@@ -198,7 +224,32 @@ def _rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     rows = payload.get("data", payload.get("rows"))
     if not isinstance(rows, list):
         raise ProviderResponseError("Coin Metrics response has no data rows")
-    return [item for item in rows if isinstance(item, Mapping)]
+    if any(not isinstance(item, Mapping) for item in rows):
+        raise ProviderResponseError("Coin Metrics response contains a malformed data row")
+    return list(rows)
+
+
+def _append_history_pages(
+    client: Any,
+    payload: Mapping[str, Any],
+    *,
+    headers: Mapping[str, str],
+    full_history: bool,
+) -> tuple[Mapping[str, Any], int]:
+    """Follow only the provider's explicit bounded pagination link."""
+    if not full_history:
+        return payload, 1
+    rows = list(_rows(payload))
+    next_url = payload.get("next_page_url")
+    requests = 1
+    while next_url is not None:
+        if requests >= MAX_HISTORY_PAGES or not isinstance(next_url, str) or not next_url.startswith((COMMUNITY_BASE_URL, AUTHENTICATED_BASE_URL)):
+            raise ProviderResponseError("Coin Metrics full-history pagination exceeded the bounded contract")
+        page = client.get_json(next_url, headers=headers)
+        rows.extend(_rows(page))
+        requests += 1
+        next_url = page.get("next_page_url")
+    return {**dict(payload), "data": rows}, requests
 
 
 def parse_timeseries(
@@ -301,6 +352,31 @@ def _parse_btc_valuation(
                     value = float(market_cap) / float(realized_cap)
                     mode = "DERIVED"
                     methodology = "CapMrktCurUSD / CapRealUSD"
+        elif key == "btc_valuation.mvrv_zscore":
+            direct = row.get("CapMVRVZ")
+            if "CapMVRVZ" in inputs and direct is not None:
+                value = float(direct)
+            elif {"CapMrktCurUSD", "CapRealUSD"} <= set(inputs):
+                market = row.get("CapMrktCurUSD")
+                realized = row.get("CapRealUSD")
+                history: list[float] = []
+                for history_row in rows:
+                    candidate = history_row.get("CapMrktCurUSD")
+                    try:
+                        candidate_value = float(candidate)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(candidate_value) and candidate_value > 0:
+                        history.append(candidate_value)
+                if market is not None and realized is not None and len(history) >= 2:
+                    mean = sum(history) / len(history)
+                    standard_deviation = math.sqrt(sum((item - mean) ** 2 for item in history) / len(history))
+                    if standard_deviation > 0:
+                        value = (float(market) - float(realized)) / standard_deviation
+                        mode = "DERIVED"
+                        methodology = "(CapMrktCurUSD - CapRealUSD) / population_std(CapMrktCurUSD)"
+            if value is None:
+                raise ProviderInsufficientHistory("Coin Metrics MVRV Z-score requires aligned market-cap history and realized cap")
         elif key == "btc_valuation.realized_price":
             if "PriceRealizedUSD" in inputs and row.get("PriceRealizedUSD") is not None:
                 value = float(row["PriceRealizedUSD"])
@@ -345,6 +421,20 @@ def _parse_btc_valuation(
                 "coinmetrics_metrics": list(inputs),
                 "source_mode": mode,
                 **({"methodology": methodology} if methodology else {}),
+                **(
+                    {
+                        "history_start": min(
+                            _timestamp(item.get("time", item.get("timestamp")), "Coin Metrics observation time")
+                            for item in rows
+                            if item.get("CapMrktCurUSD") is not None
+                        ),
+                        "history_end": observed,
+                        "rows_used": len(rows),
+                        "std_semantics": "population",
+                    }
+                    if key == "btc_valuation.mvrv_zscore" and mode == "DERIVED"
+                    else {}
+                ),
             },
         })
     return tuple(result)
@@ -479,17 +569,6 @@ def parse_eth_metrics(
             raise ProviderUnsupportedMetric(f"Coin Metrics catalog does not support {key}")
         if key == "eth.monetary.current_supply_eth":
             add(key, current["values"].get(inputs[0]), "latest SplyCur")
-        elif key in {"eth.staking.staked_supply_eth", "eth.staking.active_staked_supply_eth", "eth.staking.participation_rate"}:
-            if key == "eth.staking.participation_rate":
-                active = current["values"].get(inputs[0])
-                total = current["values"].get(inputs[1])
-                add(key, active / total if active is not None and total and total > 0 else None, "SplyActStkedNtv / SplyTotStkedNtv")
-            else:
-                add(key, current["values"].get(inputs[0]), inputs[0])
-        elif key == "eth.staking.staked_supply_pct":
-            staked = current["values"].get(inputs[0])
-            supply = current["values"].get(inputs[1])
-            add(key, staked / supply if staked is not None and supply and supply > 0 else None, "staked supply / SplyCur")
         elif key.startswith("eth.monetary.issuance_"):
             days = int(key.rsplit("_", 2)[-2].removesuffix("d"))
             start = current_time - timedelta(days=days)
@@ -502,18 +581,18 @@ def parse_eth_metrics(
             prior = _eth_prior(rows, inputs[0], current_time - timedelta(days=days))
             current_supply = current["values"].get(inputs[0])
             prior_supply = prior["values"].get(inputs[0]) if prior else None
+            aligned = (
+                prior is not None
+                and current_time - parse_timestamp(prior["observed_at"]) - timedelta(days=days)
+                <= timedelta(days=SUPPLY_LOOKBACK_TOLERANCE_DAYS)
+            )
             add(
                 key,
-                current_supply / prior_supply - 1 if current_supply is not None and prior_supply and prior_supply > 0 else None,
+                current_supply / prior_supply - 1
+                if aligned and current_supply is not None and prior_supply and prior_supply > 0
+                else None,
                 f"SplyCur / SplyCur at trailing {days}d - 1",
             )
-        elif key.startswith("eth.staking.staked_supply_change_"):
-            days = int(key.rsplit("_", 1)[-1].removesuffix("d"))
-            field = inputs[0]
-            prior = _eth_prior(rows, field, current_time - timedelta(days=days))
-            current_staked = current["values"].get(field)
-            prior_staked = prior["values"].get(field) if prior else None
-            add(key, current_staked - prior_staked if current_staked is not None and prior_staked is not None else None, f"{field} current - {field} at trailing {days}d")
         elif key == "eth_valuation.mvrv":
             direct = current["values"].get("CapMVRVCur")
             market = current["values"].get("CapMrktCurUSD")
@@ -656,15 +735,92 @@ class CoinMetricsProvider:
             return self._catalog_by_asset[normalized]
         return self._catalog_by_asset.get("*", frozenset()) if self._catalog_by_asset else frozenset()
 
-    def collect(self, request: ProviderRequest) -> list[Mapping[str, Any]]:
+    def parse_cached_payload(
+        self,
+        request: ProviderRequest,
+        payload: Mapping[str, Any],
+        *,
+        fetched_at: str | None = None,
+    ) -> ProviderResponse:
+        """Reparse a cached full-history payload without another network call."""
+        _rows(payload)
+        timestamp = fetched_at or _now(self.clock)
+        fields = {str(field) for row in _rows(payload) for field in row}
+        diagnostics: dict[str, Mapping[str, Any]] = {}
+        values: list[Mapping[str, Any]] = []
+        for key in request.metric_keys:
+            try:
+                if key in COINMETRICS_BTC_VALUATION_INPUTS:
+                    candidates = COINMETRICS_BTC_VALUATION_INPUTS[key]
+                    inputs = (
+                        (candidates[0],)
+                        if candidates[0] in fields
+                        else tuple(item for item in candidates[1:] if item in fields)
+                    )
+                    if key == "btc_valuation.mvrv_zscore" and set(inputs) not in (
+                        {"CapMVRVZ"},
+                        {"CapMrktCurUSD", "CapRealUSD"},
+                    ):
+                        raise ProviderUnsupportedMetric(f"cached payload has no exact inputs for {key}")
+                    if not inputs:
+                        raise ProviderUnsupportedMetric(f"cached payload has no inputs for {key}")
+                    values.extend(_parse_btc_valuation(
+                        payload, request.asset, (key,), {key: inputs},
+                        fetched_at=timestamp, as_of=request.parameters.get("as_of"), source=self.name,
+                    ))
+                elif key in COINMETRICS_METRIC_MAP:
+                    values.extend(parse_timeseries(
+                        payload, (key,), asset=request.asset, source=self.name,
+                        fetched_at=timestamp, as_of=request.parameters.get("as_of"),
+                    ))
+                elif key in COINMETRICS_TOKENOMICS_INPUTS:
+                    values.extend(parse_tokenomics(
+                        payload, request.asset, (key,), source=self.name,
+                        fetched_at=timestamp, as_of=request.parameters.get("as_of"),
+                    ))
+                elif key in COINMETRICS_ETH_INPUTS:
+                    candidates = COINMETRICS_ETH_INPUTS[key]
+                    inputs = tuple(item for item in candidates if item in fields)
+                    if key == "eth_valuation.mvrv" and "CapMVRVCur" in fields:
+                        inputs = ("CapMVRVCur",)
+                    elif key == "eth_valuation.realized_price" and "PriceRealizedUSD" in fields:
+                        inputs = ("PriceRealizedUSD",)
+                    elif key == "eth_valuation.realized_cap_usd" and "CapRealUSD" in fields:
+                        inputs = ("CapRealUSD",)
+                    if not inputs:
+                        raise ProviderUnsupportedMetric(f"cached payload has no inputs for {key}")
+                    values.extend(parse_eth_metrics(
+                        payload, request.asset, (key,), {key: inputs},
+                        source=self.name, fetched_at=timestamp, as_of=request.parameters.get("as_of"),
+                    ))
+                elif key == "flows.exchange_netflow":
+                    values.append(parse_exchange_netflow(
+                        payload, request.asset, source=self.name,
+                        fetched_at=timestamp, as_of=request.parameters.get("as_of"),
+                    ))
+                else:
+                    raise ProviderUnsupportedMetric(f"cached full-history payload does not support {key}")
+            except (ProviderError, ValueError) as exc:
+                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+        return ProviderResponse(tuple(values), payload=payload, diagnostics=diagnostics, network_requests=0)
+
+    def collect(self, request: ProviderRequest) -> ProviderResponse | list[Mapping[str, Any]]:
         asset = request.asset.strip().upper()
         try:
             asset_id = COINMETRICS_ASSETS[asset]
         except KeyError as exc:
             raise ProviderUnsupportedMetric(f"Coin Metrics has no approved asset mapping for {asset}") from exc
         requested = tuple(dict.fromkeys(request.metric_keys))
-        if any(key not in self.capabilities.metric_keys for key in requested):
-            raise ProviderUnsupportedMetric("Coin Metrics does not support one or more requested metrics")
+        unsupported_keys = {
+            key for key in requested if key not in self.capabilities.metric_keys
+        }
+        diagnostics: dict[str, Mapping[str, Any]] = {
+            key: {"error_code": "PROVIDER_UNSUPPORTED", "detail": "metric is not supported by this adapter"}
+            for key in unsupported_keys
+        }
+        requested = tuple(key for key in requested if key not in unsupported_keys)
+        if not requested:
+            return ProviderResponse(observations=(), diagnostics=diagnostics, network_requests=0)
         available = self.available_metrics_for_asset(asset)
         required_inputs: dict[str, tuple[str, ...]] = {}
         input_plans: dict[str, tuple[str, ...]] = {}
@@ -673,6 +829,10 @@ class CoinMetricsProvider:
                 candidates = COINMETRICS_BTC_VALUATION_INPUTS[key]
                 if key == "btc_valuation.mvrv" and candidates[0].lower() in available:
                     selected_inputs = (candidates[0],)
+                elif key == "btc_valuation.mvrv_zscore" and candidates[0].lower() in available:
+                    selected_inputs = (candidates[0],)
+                elif key == "btc_valuation.mvrv_zscore" and all(item.lower() in available for item in candidates[1:]):
+                    selected_inputs = candidates[1:]
                 elif key == "btc_valuation.realized_price" and candidates[0].lower() in available:
                     selected_inputs = (candidates[0],)
                 elif key == "btc_valuation.mvrv" and all(item.lower() in available for item in candidates[1:]):
@@ -720,24 +880,6 @@ class CoinMetricsProvider:
                         if {"capmvrvcur", "capmrktcurusd"} <= available_fields
                         else ()
                     )
-                elif key == "eth.staking.participation_rate":
-                    denominator = "SplyTotStkedNtv" if "splytotstkedntv" in available_fields else "SplyStkedNtv"
-                    selected_inputs = (
-                        ("SplyActStkedNtv", denominator)
-                        if "splyactstkedntv" in available_fields and denominator.lower() in available_fields
-                        else ()
-                    )
-                elif key in {"eth.staking.staked_supply_pct"}:
-                    staked = "SplyStkedNtv" if "splystkedntv" in available_fields else "SplyTotStkedNtv"
-                    selected_inputs = (staked, "SplyCur") if staked.lower() in available_fields and "splycur" in available_fields else ()
-                elif key in {"eth.staking.staked_supply_eth", "eth.staking.staked_supply_change_30d", "eth.staking.staked_supply_change_90d"}:
-                    selected_inputs = (
-                        ("SplyStkedNtv",)
-                        if "splystkedntv" in available_fields
-                        else ("SplyTotStkedNtv",)
-                        if "splytotstkedntv" in available_fields
-                        else ()
-                    )
                 else:
                     selected_inputs = candidates if all(item.lower() in available_fields for item in candidates) else ()
                 input_plans[key] = selected_inputs
@@ -750,8 +892,16 @@ class CoinMetricsProvider:
             key for key in requested
             if required_inputs[key] and all(input_metric.lower() in available for input_metric in required_inputs[key])
         )
+        diagnostics.update({
+            key: {
+                "error_code": "PROVIDER_UNSUPPORTED",
+                "detail": f"catalog does not include the required 1d primitive for {key}",
+            }
+            for key in requested
+            if key not in available_requested
+        })
         if not available_requested:
-            raise ProviderUnsupportedMetric("Coin Metrics catalog does not include requested metrics for this asset")
+            return ProviderResponse(observations=(), diagnostics=diagnostics, network_requests=0)
         input_metrics = tuple(dict.fromkeys(
             input_metric
             for key in available_requested
@@ -772,62 +922,89 @@ class CoinMetricsProvider:
             params=params,
             headers=self._headers(),
         )
+        payload, network_requests = _append_history_pages(
+            self.client,
+            payload,
+            headers=self._headers(),
+            full_history=request.parameters.get("history_mode") == "FULL_AVAILABLE",
+        )
+        _rows(payload)
         fetched_at = _now(self.clock)
         direct = tuple(
             key for key in available_requested
             if key in COINMETRICS_METRIC_MAP and key not in COINMETRICS_BTC_VALUATION_INPUTS
         )
         result: list[Mapping[str, Any]] = []
-        if direct:
-            result.extend(parse_timeseries(
-                payload,
-                direct,
-                asset=asset,
-                source=self.name,
-                fetched_at=fetched_at,
-                as_of=request.parameters.get("as_of"),
-            ))
+        for key in direct:
+            try:
+                result.extend(parse_timeseries(
+                    payload,
+                    (key,),
+                    asset=asset,
+                    source=self.name,
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                ))
+            except (ProviderError, ValueError) as exc:
+                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
         btc_valuation = tuple(key for key in available_requested if key in COINMETRICS_BTC_VALUATION_INPUTS)
-        if btc_valuation:
-            result.extend(_parse_btc_valuation(
-                payload,
-                asset,
-                btc_valuation,
-                input_plans,
-                fetched_at=fetched_at,
-                as_of=request.parameters.get("as_of"),
-                source=self.name,
-            ))
+        for key in btc_valuation:
+            try:
+                result.extend(_parse_btc_valuation(
+                    payload,
+                    asset,
+                    (key,),
+                    input_plans,
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                    source=self.name,
+                ))
+            except (ProviderError, ValueError) as exc:
+                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
         tokenomics = tuple(key for key in available_requested if key in COINMETRICS_TOKENOMICS_INPUTS)
-        if tokenomics:
-            result.extend(parse_tokenomics(
-                payload,
-                asset,
-                tokenomics,
-                source=self.name,
-                fetched_at=fetched_at,
-                as_of=request.parameters.get("as_of"),
-            ))
+        for key in tokenomics:
+            try:
+                result.extend(parse_tokenomics(
+                    payload,
+                    asset,
+                    (key,),
+                    source=self.name,
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                ))
+            except (ProviderError, ValueError) as exc:
+                diagnostics[key] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
         eth_metrics = tuple(key for key in available_requested if key in COINMETRICS_ETH_INPUTS)
-        if eth_metrics:
-            result.extend(parse_eth_metrics(
-                payload,
-                asset,
-                eth_metrics,
-                input_plans,
-                source=self.name,
-                fetched_at=fetched_at,
-                as_of=request.parameters.get("as_of"),
-            ))
+        for key in eth_metrics:
+            try:
+                result.extend(parse_eth_metrics(
+                    payload,
+                    asset,
+                    (key,),
+                    input_plans,
+                    source=self.name,
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                ))
+            except (ProviderError, ValueError) as exc:
+                diagnostics[key] = _metric_diagnostic(exc)
         if "flows.exchange_netflow" in available_requested:
-            result.append(parse_exchange_netflow(
-                payload,
-                asset,
-                source=self.name,
-                fetched_at=fetched_at,
-                as_of=request.parameters.get("as_of"),
-            ))
-        return [dict(item) for item in result]
+            try:
+                result.append(parse_exchange_netflow(
+                    payload,
+                    asset,
+                    source=self.name,
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                ))
+            except (ProviderError, ValueError) as exc:
+                diagnostics["flows.exchange_netflow"] = _metric_diagnostic(exc, (self.api_key,) if self.api_key else ())
+        return ProviderResponse(
+            observations=tuple(dict(item) for item in result),
+            payload=payload,
+            diagnostics=diagnostics,
+            network_requests=network_requests,
+        )
 
 
 class CoinMetricsAuthenticatedProvider(CoinMetricsProvider):
@@ -852,6 +1029,7 @@ __all__ = [
     "COINMETRICS_METRIC_MAP",
     "COINMETRICS_SUPPORTED_METRICS",
     "COMMUNITY_BASE_URL",
+    "MAX_HISTORY_PAGES",
     "CoinMetricsAuthenticatedProvider",
     "CoinMetricsProvider",
     "catalog_metrics",

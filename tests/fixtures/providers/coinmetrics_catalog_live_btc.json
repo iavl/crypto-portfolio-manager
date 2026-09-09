@@ -1,0 +1,15 @@
+{
+  "captured_at": "2026-09-08T23:12:45Z",
+  "provider": "coinmetrics_community",
+  "frequency": "1d",
+  "data": [
+    {"metric": "AdrActCnt", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "CapMVRVCur", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "CapMrktCurUSD", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "CapMrktEstUSD", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "HashRate", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "IssTotNtv", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "SplyCur", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+    {"metric": "TxCnt", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]}
+  ]
+}

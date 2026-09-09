@@ -1193,10 +1193,10 @@ class DataAcquisitionTests(unittest.TestCase):
                 cache=ProviderCache(Path(directory) / "cache", market_data_directory=Path(directory) / "market-data"),
             )
             requests = router.build_requests(plan.requests, as_of="2026-09-04T00:00:00Z", now="2026-09-04T00:01:00Z")
-            self.assertEqual(len(requests), 1)
+            self.assertEqual(len(requests), 2)
             routed = router.collect(requests, as_of="2026-09-04T00:00:00Z", now="2026-09-04T00:01:00Z")
             self.assertEqual(len(routed.observations), 3)
-            self.assertEqual(routed.provider_fallbacks, 1)
+            self.assertEqual(routed.provider_fallbacks, 2)
             self.assertTrue(all(item["source"] == "bybit" for item in routed.observations))
 
     def test_router_retains_exhausted_unresolved_details(self):
@@ -1248,7 +1248,7 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result.unresolved, (("BTC", "derivatives.funding_rate_24h_avg"),))
         self.assertEqual(len(result.unresolved_details), 1)
 
-    def test_acquisition_uses_router_unresolved_reason_for_web_fallback(self):
+    def test_acquisition_does_not_web_fallback_numeric_metrics(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
             MetricRequest("ETH", "fundamentals.tvl"),
         ))
@@ -1265,8 +1265,9 @@ class DataAcquisitionTests(unittest.TestCase):
                 ),
                 persist=False,
             ).run(plan, as_of="2026-09-04T00:00:00Z", now="2026-09-04T00:00:00Z", cached_observations=())
-        self.assertEqual(len(result.web_fallbacks), 1)
-        self.assertIn("provider unavailable", result.web_fallbacks[0].reason)
+        self.assertEqual(result.web_fallbacks, ())
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertIn("provider unavailable", result.results[0].event.reason)
 
     def test_incremental_series_requests_only_tail(self):
         base = datetime(2026, 9, 1, tzinfo=timezone.utc)

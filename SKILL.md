@@ -457,6 +457,24 @@ The report writer uses only finalized packet values. It must not recalculate
 scores, weights, amounts, zones, or missing evidence, and it must not persist
 private model reasoning.
 
+## Current acquisition contracts
+
+Numeric/time-series metrics are `STRUCTURED_ONLY`; missing numeric providers
+become `REQUIRED FAILED` or optional `SKIPPED`, never generic Web work. Metric
+history is explicit and independent from the 240D execution OHLCV preference:
+30D/90D/180D use bounded 45D/105D/195D cohorts, 365D uses about 380D, and
+BTC MVRV Z uses `FULL_AVAILABLE` when exact derivation inputs exist.
+Qualitative structural-risk metrics may use bounded Web evidence when no
+structured source exists, but remain non-scoring and methodology-bound.
+
+Events are structured-first. An injected `StructuredEventTransport` may use
+bounded GitHub, RSS/Atom, Discourse JSON, and allowlisted RPC transports;
+Python filters and deduplicates candidates, while `LUNA_MAX` only classifies
+their materiality. A complete reachable source with zero candidates returns a
+valid empty scan; same-authority URLs share a source group. L2BEAT's verified
+OpenAPI requires `L2BEAT_API_KEY` in query `apiKey`, so missing credentials
+remain fail-closed.
+
 ## Confidence workflow
 
 The Python-owned confidence chain is Data Confidence -> Regime Confidence ->

@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/report-packet.schema.json",
   "title": "Final report packet",
   "type": "object",
-  "required": ["review_type", "market_regime", "scores", "current_weights", "target_weights", "actions", "approved_amounts", "execution_zones", "historical_changes", "risk_flags", "critical_missing_data", "data_quality", "failed_data_fetches", "script_failures"],
+  "required": ["review_type", "market_regime", "scores", "current_weights", "target_weights", "actions", "approved_amounts", "execution_zones", "historical_changes", "risk_flags", "critical_missing_data", "data_quality", "failed_data_fetches", "optional_data", "script_failures"],
   "properties": {
     "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
     "market_regime": {"enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
@@ -62,6 +62,7 @@
         "additionalProperties": false
       }
     },
+    "optional_data": {"type": "array", "items": {"type": "object"}},
     "script_failures": {
       "type": "array",
       "items": {

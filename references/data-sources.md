@@ -321,3 +321,32 @@ The current policy defines metric/domain `max_age_seconds` and `half_life_second
 `observed_at` measures the fact; `fetched_at` measures retrieval. Source
 quality is tiered, cache reuse is not independent redundancy, and unresolved
 material conflicts do not produce a synthetic value.
+
+## Metric history ownership
+
+Investment horizon and calculation history are separate. The canonical
+`crypto_portfolio.metric_history_requirements` table assigns `CURRENT`, bounded
+`BOUNDED` windows (45D, 105D, 195D, or 380D), or `FULL_AVAILABLE` to each
+metric. The 240D execution preference applies to OHLCV only; it cannot
+truncate issuance, tokenomics, or full-history valuation inputs.
+
+| Metric class | Requirement | Web policy |
+|---|---|---|
+| Spot/current scalar | `CURRENT` | `STRUCTURED_ONLY` |
+| 30D/90D/180D aggregation | 45D/105D/195D bounded history | `STRUCTURED_ONLY` |
+| 365D tokenomics/issuance | 380D bounded history | `STRUCTURED_ONLY` |
+| BTC MVRV Z derivation | `FULL_AVAILABLE` | `STRUCTURED_ONLY` |
+| Qualitative structural risk | current bounded evidence | `WEB_ALLOWED` when no structured source exists; non-scoring |
+| Security/governance/regulatory event | source lookback | structured first, `WEB_ALLOWED` only when incomplete |
+
+Missing numeric history is unavailable evidence. It is never converted into a
+generic Web task or a zero.
+
+## Structured event transport
+
+The fixed event catalog may use bounded GitHub REST, RSS/Atom, Discourse JSON,
+or allowlisted RPC log transports. Python performs lookback filtering and
+deduplication; `LUNA_MAX` only classifies the bounded candidate packet for
+materiality. A reachable, complete source with zero candidates is a valid
+empty response for that declared scope. Sources from one authority use a
+shared source group, while independent security domains remain separate.

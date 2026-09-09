@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from .data_collection import collection_summary
 from .engine.factors.flows import classify_flow_state
-from .metric_availability import metric_availability, skip_reason
+from .metric_availability import fallback_mode, metric_availability, skip_reason
 from .engine.derived_metrics import derive_metric_observations
 from .engine.metric_normalization import NormalizedMetricResult, normalize_metric_result, persist_metric_result
 from .engine.metric_plan import (
@@ -44,6 +44,8 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "NO_PROVIDER_ROUTE",
     "PROVIDER_DISABLED",
     "PROVIDER_UNSUPPORTED",
+    "OPTIONAL_PROVIDER_UNSUPPORTED",
+    "OPTIONAL_SOURCE_UNAVAILABLE",
     "PROVIDER_PLAN_RESTRICTED",
     "PROVIDER_NOT_APPLICABLE",
     "CACHE_MISS",
@@ -53,6 +55,9 @@ _PROVIDER_SKIP_ERROR_CODES = {
     "CONFIG_DISABLED",
     "CREDENTIAL_MISSING",
     "ADAPTER_UNAVAILABLE",
+}
+_OPTIONAL_NONBLOCKING_ERROR_CODES = _PROVIDER_SKIP_ERROR_CODES | {
+    "DERIVED_INPUT_UNAVAILABLE",
 }
 class AcquisitionResolutionRequired(RuntimeError):
     """Control-flow signal that hard-critical external evidence is pending."""
@@ -274,6 +279,7 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
         f"Finalized: {summary.get('finalized', True)}",
         f"Provider failures: {summary.get('provider_failures_by_error_code', {})}",
         f"Failed after all fallbacks: {summary.get('failed_after_fallbacks', 0)}",
+        f"Optional data not collected: {len(summary.get('optional_data', ())) if isinstance(summary.get('optional_data', ()), (list, tuple)) else 0}",
     ))
 
 
@@ -331,6 +337,7 @@ class AcquisitionManager:
         persist: bool = True,
         fetch_mode: FetchMode | str | None = None,
         event_scanner: EventScanner | None = None,
+        event_transport: Any | None = None,
         policy: Policy | None = None,
     ) -> None:
         self.config = dict(config or load_provider_config())
@@ -340,7 +347,7 @@ class AcquisitionManager:
         self.persist = persist
         self.fetch_mode = resolve_fetch_mode(fetch_mode)
         self.policy = policy or resolve_policy()
-        self.event_scanner = event_scanner or EventScanner(policy=self.policy)
+        self.event_scanner = event_scanner or EventScanner(policy=self.policy, transport=event_transport)
 
     def run(
         self,
@@ -462,7 +469,7 @@ class AcquisitionManager:
             pending,
             as_of=as_of,
             now=current,
-            history_days=self.policy.execution["preferred_history_days"],
+            execution_history_days=self.policy.execution["preferred_history_days"],
         )
         routed = self.router.collect(provider_requests, mode=selected_mode, as_of=as_of, now=current)
         routed_values = {
@@ -490,6 +497,7 @@ class AcquisitionManager:
             routed_values,
             fetched_at=current,
             as_of=as_of,
+            historical_observations=local,
         )
         routed_values.update(derived_values)
         routed_reasons = {
@@ -651,6 +659,7 @@ class AcquisitionManager:
                 or request.metric_key in DERIVED_METRIC_DEPENDENCIES
                 or request.metric_key in RELATIVE_RETURN_DEPENDENCIES
                 or request.metric_key in {"market.breadth_state", "market.flow_state"}
+                or fallback_mode(request.metric_key) == "STRUCTURED_ONLY"
             ):
                 return
             chain = provider_chain(request.metric_key, request.asset)
@@ -746,7 +755,8 @@ class AcquisitionManager:
                             and diagnostic.get("error_code") not in _PROVIDER_SKIP_ERROR_CODES
                         )
                     )
-                    if availability.is_skippable and provider_failed:
+                    diagnostic_code = str((diagnostic or {}).get("error_code", "")).upper()
+                    if availability.is_skippable and provider_failed and diagnostic_code not in _OPTIONAL_NONBLOCKING_ERROR_CODES:
                         normalized = self._failure(
                             request,
                             current,
@@ -783,6 +793,20 @@ class AcquisitionManager:
 
         events = tuple(item.event for item in results)
         summary = collection_summary(events, review_type=model.review_type)
+        optional_data = []
+        for result in results:
+            availability = metric_availability(result.event.asset, result.event.metric_key)
+            if not availability.is_skippable or result.status in {"SUCCESS", "NOT_APPLICABLE"}:
+                continue
+            optional_data.append({
+                "asset": result.event.asset,
+                "metric_key": result.event.metric_key,
+                "status": result.status,
+                "reason": result.event.reason,
+                "requirement": availability.requirement,
+                "decision_impact": "non-blocking; excluded from applicable coverage",
+            })
+        summary["optional_data"] = optional_data
         pending_web_identities = {
             (item.asset, item.metric_key) for item in web_fallbacks
         }

@@ -9,7 +9,7 @@ from crypto_portfolio.engine.derived_metrics import (
     calculate_eth_etf_flow_to_aum,
     calculate_exchange_flow_to_market_cap,
     calculate_net_supply_growth,
-    calculate_staked_supply_pct,
+    calculate_active_effective_stake_pct,
 )
 from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
 from crypto_portfolio.engine.factors.flows import calculate_flow_factor
@@ -32,8 +32,7 @@ class _CoinMetricsClient:
     def get_json(self, url, **kwargs):
         if "catalog" in url:
             metrics = [
-                "SplyCur", "IssTotNtv", "SplyStkedNtv", "SplyActStkedNtv",
-                "SplyTotStkedNtv", "CapMVRVCur", "CapRealUSD",
+                "SplyCur", "IssTotNtv", "CapMVRVCur", "CapRealUSD",
             ]
             return {"metrics": [{"metric": item, "frequencies": [{"frequency": "1d", "assets": ["eth"]}]} for item in metrics]}
         return {"data": self.rows}
@@ -48,11 +47,11 @@ class EthMetricsTests(unittest.TestCase):
     def test_pure_eth_derivations_fail_closed(self):
         self.assertTrue(math.isclose(calculate_net_supply_growth(101, 100), 0.01))
         self.assertIsNone(calculate_burn_to_issuance(1, 0))
-        self.assertTrue(math.isclose(calculate_staked_supply_pct(30, 100), 0.3))
+        self.assertTrue(math.isclose(calculate_active_effective_stake_pct(30, 100), 0.3))
         self.assertTrue(math.isclose(calculate_exchange_flow_to_market_cap(-10, 100), -0.1))
         self.assertTrue(math.isclose(calculate_eth_etf_flow_to_aum(-10, 100), -0.1))
         with self.assertRaises(ValueError):
-            calculate_staked_supply_pct(1, 0)
+            calculate_active_effective_stake_pct(1, 0)
 
     def test_eth_metric_plan_is_scoped(self):
         policy = load_policy()
@@ -93,7 +92,6 @@ class EthMetricsTests(unittest.TestCase):
             (
                 "eth.monetary.current_supply_eth",
                 "eth.monetary.issuance_30d_eth",
-                "eth.staking.staked_supply_pct",
                 "eth_valuation.mvrv",
                 "eth_valuation.realized_price",
             ),
@@ -101,7 +99,6 @@ class EthMetricsTests(unittest.TestCase):
         values = {item["metric_key"]: item["value"] for item in result}
         self.assertEqual(values["eth.monetary.current_supply_eth"], 101)
         self.assertEqual(values["eth.monetary.issuance_30d_eth"], 31)
-        self.assertAlmostEqual(values["eth.staking.staked_supply_pct"], 31 / 101)
         self.assertEqual(values["eth_valuation.mvrv"], 1.2)
         self.assertAlmostEqual(values["eth_valuation.realized_price"], 531 / 101)
 

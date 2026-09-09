@@ -607,6 +607,104 @@ class HttpClient:
     ) -> Any:
         return self.request_json("GET", url, params=params, headers=headers)
 
+    def request_text(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> str:
+        """Fetch a bounded UTF-8 text document with the same verified transport."""
+        if method.strip().upper() != "GET":
+            raise ValueError("text provider requests must use GET")
+        if not isinstance(url, str) or urlsplit(url).scheme not in {"http", "https"}:
+            raise ProviderResponseError("provider URL must use http or https")
+        if params:
+            encoded = [(key, value) for key, value in params.items() if value is not None]
+            separator = "&" if urlsplit(url).query else "?"
+            url = url + (separator + urlencode(encoded) if encoded else "")
+        safe_headers = {str(key): str(value) for key, value in (headers or {}).items()}
+        safe_headers.setdefault("Accept", "application/xml, text/xml, text/plain")
+        safe_headers.setdefault("User-Agent", self.user_agent)
+        request = Request(url, headers=safe_headers, method="GET")
+        request_secrets = tuple(value for key, value in safe_headers.items() if _secret_name(key))
+        for attempt in range(self.max_attempts):
+            self.request_count += 1
+            phase = "connect"
+            try:
+                response = self._open(request)
+                status = int(getattr(response, "status", response.getcode() if hasattr(response, "getcode") else 200))
+                if status >= 400:
+                    raise HTTPError(request.full_url, status, f"HTTP {status}", getattr(response, "headers", None), None)
+                phase = "read"
+                return self._read(response).decode("utf-8")
+            except HTTPError as exc:
+                code = classify_transport_error(exc)
+                retryable = attempt + 1 < self.max_attempts and (
+                    exc.code == 429 or 500 <= exc.code <= 599 or code == "HTTP_403_RATE_LIMIT"
+                )
+                if retryable:
+                    self._sleep(attempt, getattr(exc, "headers", None))
+                    continue
+                diagnostic = _diagnostic(
+                    exc,
+                    endpoint=request.full_url,
+                    method="GET",
+                    attempt=attempt + 1,
+                    status_code=exc.code,
+                    error_code=code,
+                    secrets=request_secrets,
+                    retryable=retryable,
+                )
+                if exc.code == 429 or code == "HTTP_403_RATE_LIMIT":
+                    raise ProviderRateLimited(f"provider rate limited request ({exc.code})", diagnostic=diagnostic) from exc
+                if 500 <= exc.code <= 599:
+                    raise ProviderUnavailable(f"provider server error ({exc.code})", diagnostic=diagnostic) from exc
+                if exc.code == 401 or code == "HTTP_403_AUTH":
+                    raise ProviderAuthenticationError(f"provider authentication rejected ({exc.code})", diagnostic=diagnostic) from exc
+                raise ProviderResponseError(f"provider request failed ({exc.code})", diagnostic=diagnostic) from exc
+            except (TimeoutError, socket.timeout, URLError, OSError) as exc:
+                code = classify_transport_error(exc, phase=phase)
+                if attempt + 1 < self.max_attempts and _retryable(code):
+                    self._sleep(attempt, None)
+                    continue
+                raise ProviderUnavailable(
+                    f"provider network request failed: {code}",
+                    diagnostic=_diagnostic(
+                        exc,
+                        endpoint=request.full_url,
+                        method="GET",
+                        attempt=attempt + 1,
+                        phase=phase,
+                        secrets=request_secrets,
+                        retryable=True,
+                    ),
+                ) from exc
+            except UnicodeDecodeError as exc:
+                raise ProviderResponseError(
+                    "provider returned invalid UTF-8 text",
+                    diagnostic=_diagnostic(
+                        exc,
+                        endpoint=request.full_url,
+                        method="GET",
+                        attempt=attempt + 1,
+                        phase="read",
+                        error_code="INVALID_JSON",
+                        secrets=request_secrets,
+                    ),
+                ) from exc
+        raise ProviderUnavailable("provider text request failed")
+
+    def get_text(
+        self,
+        url: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> str:
+        return self.request_text("GET", url, params=params, headers=headers)
+
     def post_json(
         self,
         url: str,

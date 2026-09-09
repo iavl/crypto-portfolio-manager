@@ -340,6 +340,7 @@ class ReportPacket:
     overlay_warnings: tuple[str, ...] = ()
     effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
     failed_data_fetches: tuple[Mapping[str, Any], ...] = ()
+    optional_data: tuple[Mapping[str, Any], ...] = ()
     script_failures: tuple[Mapping[str, Any], ...] = ()
     regime_confidence: ConfidenceResult | Mapping[str, Any] | None = None
     decision_confidence: DecisionConfidence | Mapping[str, Any] | None = None
@@ -390,6 +391,7 @@ class ReportPacket:
                 raise ValueError(f"{field_name} must be an object")
             object.__setattr__(self, field_name, freeze_packet_value(getattr(self, field_name), path=field_name))
         object.__setattr__(self, "failed_data_fetches", _failed_data_fetches(self.failed_data_fetches, review_type=review))
+        object.__setattr__(self, "optional_data", _sequence(self.optional_data, "optional_data"))
         object.__setattr__(self, "script_failures", _script_failures(self.script_failures))
         if not isinstance(self.positioning_summaries, Mapping):
             raise ValueError("positioning_summaries must be an object")
@@ -482,6 +484,7 @@ class ReportPacket:
             "critical_missing_data": list(self.critical_missing_data),
             "data_quality": thaw_packet_value(self.data_quality),
             "failed_data_fetches": thaw_packet_value(self.failed_data_fetches),
+            "optional_data": thaw_packet_value(self.optional_data),
             "script_failures": thaw_packet_value(self.script_failures),
             "positioning_summaries": {
                 symbol: thaw_packet_value(summary)
@@ -505,7 +508,7 @@ class ReportPacket:
     def from_mapping(cls, value: Mapping[str, Any]) -> "ReportPacket":
         if not isinstance(value, Mapping):
             raise ValueError("report packet must be an object")
-        for field_name in ("failed_data_fetches", "script_failures"):
+        for field_name in ("failed_data_fetches", "optional_data", "script_failures"):
             if field_name not in value:
                 raise ValueError(f"report packet is missing {field_name}")
         return cls(**dict(value))

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
+from ..metric_history_requirements import MetricHistoryRequirement, history_requirement
 from ..metrics_registry import METRIC_REGISTRY, REVIEW_TYPES, MetricDefinition, metric_definition
 from ..models.metrics_history import MetricObservation
 from ..models.portfolio import PortfolioSnapshot
@@ -79,13 +80,13 @@ _ETH_METRICS = (
     "eth.monetary.net_supply_growth_365d",
     "eth.monetary.burn_30d_eth",
     "eth.monetary.burn_365d_eth",
+    "eth.monetary.cumulative_burn_eth",
     "eth.monetary.burn_to_issuance_30d",
     "eth.monetary.burn_to_issuance_365d",
-    "eth.staking.staked_supply_eth",
-    "eth.staking.staked_supply_pct",
-    "eth.staking.active_staked_supply_eth",
-    "eth.staking.staked_supply_change_30d",
-    "eth.staking.staked_supply_change_90d",
+    "eth.staking.active_effective_stake_eth",
+    "eth.staking.active_effective_stake_pct",
+    "eth.staking.active_effective_stake_change_30d",
+    "eth.staking.active_effective_stake_change_90d",
     "eth.staking.staking_apr_7d",
     "eth.staking.staking_apr_30d",
     "eth.staking.participation_rate",
@@ -110,7 +111,7 @@ _ETH_METRICS = (
     "eth_valuation.realized_cap_usd",
     "eth_valuation.price_to_realized_price",
     "flows.eth_exchange_netflow_to_market_cap",
-    "flows.eth_staking_netflow_to_supply_30d",
+    "flows.eth_active_stake_change_to_supply_30d",
     "eth.structural.consensus_client_largest_share",
     "eth.structural.execution_client_largest_share",
     "eth.structural.staking_entity_largest_share",
@@ -183,13 +184,15 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "btc_valuation.price_to_realized_price": ("market.spot_price", "btc_valuation.realized_price"),
     "eth_valuation.price_to_realized_price": ("market.spot_price", "eth_valuation.realized_price"),
     "market.breadth_state": ("market.breadth",),
-    "eth.staking.staked_supply_pct": ("eth.staking.staked_supply_eth", "eth.monetary.current_supply_eth"),
+    "eth.staking.active_effective_stake_pct": ("eth.staking.active_effective_stake_eth", "eth.monetary.current_supply_eth"),
     "flows.eth_exchange_netflow_to_market_cap": ("flows.exchange_netflow", "valuation.market_cap"),
-    "flows.eth_staking_netflow_to_supply_30d": ("eth.staking.staked_supply_change_30d", "eth.monetary.current_supply_eth"),
+    "flows.eth_active_stake_change_to_supply_30d": ("eth.staking.active_effective_stake_change_30d", "eth.monetary.current_supply_eth"),
     "flows.eth_etf_net_to_aum_7d": ("flows.etf_net_7d", "flows.eth_etf_aum_usd"),
     "flows.eth_etf_net_to_aum_30d": ("flows.etf_net_30d", "flows.eth_etf_aum_usd"),
     "eth.monetary.burn_to_issuance_30d": ("eth.monetary.burn_30d_eth", "eth.monetary.issuance_30d_eth"),
     "eth.monetary.burn_to_issuance_365d": ("eth.monetary.burn_365d_eth", "eth.monetary.issuance_365d_eth"),
+    "eth.monetary.burn_30d_eth": ("eth.monetary.cumulative_burn_eth",),
+    "eth.monetary.burn_365d_eth": ("eth.monetary.cumulative_burn_eth",),
     **{
         metric: (dependency,)
         for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()
@@ -348,6 +351,7 @@ class MetricRequest:
             "asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness",
             "trend_enabled", "can_reuse", "cached_observation_id", "reason",
             "decision_role", "context_group",
+            "history_requirement", "fallback_mode",
             "review_type",
         }
         unknown = set(data) - allowed
@@ -369,15 +373,27 @@ class MetricRequest:
             raise ValueError("metric request decision_role does not match the registry")
         if "context_group" in data and data["context_group"] != definition.context_group:
             raise ValueError("metric request context_group does not match the registry")
+        if "fallback_mode" in data and str(data["fallback_mode"]).strip().upper() != definition.fallback_mode:
+            raise ValueError("metric request fallback_mode does not match the registry")
+        supplied_history = data.pop("history_requirement", None)
+        if supplied_history is not None:
+            if not isinstance(supplied_history, Mapping) or dict(supplied_history) != history_requirement(definition.key).as_dict():
+                raise ValueError("metric request history_requirement does not match the registry")
         data.pop("value_type", None)
         data.pop("unit", None)
         data.pop("decision_role", None)
         data.pop("context_group", None)
+        data.pop("fallback_mode", None)
         return cls(**data)
 
     @property
     def freshness_requirement(self) -> str | int | float:
         return self.freshness
+
+    @property
+    def history_requirement(self) -> MetricHistoryRequirement:
+        """Return the explicit source-history contract for this metric."""
+        return history_requirement(self.metric_key)
 
     @property
     def decision_role(self) -> str:
@@ -402,6 +418,8 @@ class MetricRequest:
             "can_reuse": self.can_reuse,
             "cached_observation_id": self.cached_observation_id,
             "reason": self.reason,
+            "history_requirement": self.history_requirement.as_dict(),
+            "fallback_mode": self.definition.fallback_mode,
         }
         return result
 

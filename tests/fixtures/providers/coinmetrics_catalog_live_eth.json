@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-09-08T23:12:46Z",
+  "provider": "coinmetrics_community",
+  "frequency": "1d",
+  "data": [
+    {"metric": "AdrActCnt", "frequencies": [{"frequency": "1d", "assets": ["eth"]}]},
+    {"metric": "CapMVRVCur", "frequencies": [{"frequency": "1d", "assets": ["eth"]}]},
+    {"metric": "CapMrktCurUSD", "frequencies": [{"frequency": "1d", "assets": ["eth"]}]},
+    {"metric": "IssTotNtv", "frequencies": [{"frequency": "1d", "assets": ["eth"]}]},
+    {"metric": "SplyCur", "frequencies": [{"frequency": "1d", "assets": ["eth"]}]},
+    {"metric": "TxCnt", "frequencies": [{"frequency": "1d", "assets": ["eth"]}]}
+  ]
+}

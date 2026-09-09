@@ -30,6 +30,8 @@ class EventSource:
     tier: int = 1
     name: str | None = None
     transport_urls: tuple[str, ...] = ()
+    source_group: str | None = None
+    transport_kind: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "event source id").lower())
@@ -64,6 +66,16 @@ class EventSource:
             if parts.scheme not in {"http", "https"} or not parts.netloc:
                 raise ValueError("event source transport url must use http or https")
         object.__setattr__(self, "transport_urls", tuple(dict.fromkeys((self.url, *transports))))
+        group = self.authority if self.source_group is None else self.source_group
+        object.__setattr__(self, "source_group", _text(group, "event source group").lower())
+        if self.transport_kind is not None:
+            kind = _text(self.transport_kind, "event source transport kind").upper()
+            if kind not in {
+                "GITHUB_RELEASES", "GITHUB_SECURITY_ADVISORIES", "GITHUB_COMMITS",
+                "RSS_ATOM", "DISCOURSE_JSON", "RPC_LOGS", "WEB",
+            }:
+                raise ValueError("event source transport kind is unsupported")
+            object.__setattr__(self, "transport_kind", kind)
 
     @property
     def source_name(self) -> str:
@@ -89,6 +101,8 @@ class EventSource:
             "tier": self.tier,
             "name": self.name,
             "transport_urls": list(self.transport_urls),
+            "source_group": self.source_group,
+            "transport_kind": self.transport_kind,
         }
 
 
@@ -96,82 +110,103 @@ EVENT_SOURCE_CATALOG = (
     EventSource(
         "bitcoin-core-security", "security", ("BTC",), "Bitcoin Core", "official",
         "https://github.com/bitcoin/bitcoin/security/advisories", True, name="Bitcoin Core security advisories",
+        transport_kind="GITHUB_SECURITY_ADVISORIES", source_group="bitcoin-core-security",
     ),
     EventSource(
         "bitcoin-core-security-advisories", "security", ("BTC",), "Bitcoin Core", "official",
         "https://github.com/bitcoin/bitcoin/releases", True, name="Bitcoin Core repository releases",
+        transport_kind="GITHUB_RELEASES", source_group="bitcoin-core-security",
     ),
     EventSource(
         "bitcoin-core-releases", "security", ("BTC",), "Bitcoin Core", "official",
         "https://bitcoincore.org/en/releases/", True, name="Bitcoin Core releases",
+        transport_urls=("https://bitcoincore.org/en/feed.xml",), transport_kind="RSS_ATOM", source_group="bitcoin-core-security",
     ),
     EventSource(
         "ethereum-foundation-security", "security", ("ETH",), "Ethereum Foundation", "official",
-        "https://ethereum.org/en/security/", True, name="Ethereum security",
+        "https://ethereum.org/en/security/", True, name="Ethereum security", source_group="ethereum-foundation-security",
     ),
     EventSource(
         "geth-security-advisories", "security", ("ETH",), "go-ethereum", "official",
         "https://github.com/ethereum/go-ethereum/security/advisories", True, name="go-ethereum advisories",
+        transport_kind="GITHUB_SECURITY_ADVISORIES", source_group="geth-security",
     ),
     EventSource(
         "ethereum-consensus-security-advisories", "security", ("ETH",), "Ethereum consensus specs", "official",
         "https://github.com/ethereum/consensus-specs/security/advisories", True, name="Ethereum consensus advisories",
+        transport_kind="GITHUB_SECURITY_ADVISORIES", source_group="ethereum-consensus-security",
     ),
     EventSource(
         "bitcoin-bips", "governance", ("BTC",), "Bitcoin BIPs", "official",
         "https://github.com/bitcoin/bips", True, name="Bitcoin Improvement Proposals",
+        transport_kind="GITHUB_COMMITS", source_group="bitcoin-governance",
     ),
     EventSource(
         "bitcoin-core-protocol-releases", "governance", ("BTC",), "Bitcoin Core", "official",
-        "https://bitcoincore.org/en/releases/", True, name="Bitcoin Core protocol releases",
+        "https://bitcoincore.org/en/releases/", True, name="Bitcoin Core protocol releases", source_group="bitcoin-core-governance",
+        transport_urls=("https://bitcoincore.org/en/feed.xml",), transport_kind="RSS_ATOM",
     ),
     EventSource(
         "ethereum-eips", "governance", ("ETH",), "Ethereum EIPs", "official",
-        "https://eips.ethereum.org/", True, name="Ethereum Improvement Proposals",
+        "https://eips.ethereum.org/", True, name="Ethereum Improvement Proposals", source_group="ethereum-eips",
     ),
     EventSource(
         "ethereum-all-core-devs", "governance", ("ETH",), "Ethereum PM", "official",
         "https://github.com/ethereum/pm", True, name="Ethereum AllCoreDevs coordination",
+        transport_kind="GITHUB_COMMITS", source_group="ethereum-all-core-devs",
     ),
     EventSource(
         "ethereum-foundation-protocol", "governance", ("ETH",), "Ethereum Foundation", "official",
-        "https://blog.ethereum.org/", True, name="Ethereum protocol announcements",
+        "https://blog.ethereum.org/", True, name="Ethereum protocol announcements", source_group="ethereum-foundation-protocol",
+        transport_urls=("https://blog.ethereum.org/feed.xml",), transport_kind="RSS_ATOM",
     ),
     EventSource(
         "aave-security", "security", ("AAVE",), "Aave", "official",
-        "https://aave.com/security", True, name="Aave security",
+        "https://aave.com/security", True, name="Aave security", source_group="aave-security",
     ),
     EventSource(
         "aave-v3-security-advisories", "security", ("AAVE",), "Aave", "official",
         "https://github.com/aave/aave-v3-core/security/advisories", True, name="Aave V3 security advisories",
+        transport_kind="GITHUB_SECURITY_ADVISORIES", source_group="aave-security",
     ),
     EventSource(
         "bnb-bsc-security-advisories", "security", ("BNB",), "BNB Chain", "official",
         "https://github.com/bnb-chain/bsc/security/advisories", True, name="BNB Smart Chain security advisories",
+        transport_kind="GITHUB_SECURITY_ADVISORIES", source_group="bnb-security",
     ),
     EventSource(
         "bnb-bsc-releases", "security", ("BNB",), "BNB Chain", "official",
-        "https://www.bnbchain.org/en/releases", True, name="BNB Chain release notes",
+        "https://www.bnbchain.org/en/releases", True, name="BNB Chain release notes", source_group="bnb-security",
     ),
     EventSource(
         "aave-governance-forum", "governance", ("AAVE",), "Aave governance", "official",
         "https://governance.aave.com/", True, name="Aave governance forum",
+        transport_urls=("https://governance.aave.com/latest.json",), transport_kind="DISCOURSE_JSON", source_group="aave-governance",
     ),
     EventSource(
         "aave-governance-proposals", "governance", ("AAVE",), "Aave governance", "official",
         "https://governance.aave.com/c/governance/4", True, name="Aave governance proposals",
+        transport_urls=("https://governance.aave.com/c/governance/4.json",), transport_kind="DISCOURSE_JSON", source_group="aave-governance",
     ),
     EventSource(
         "bnb-beps", "governance", ("BNB",), "BNB Chain BEPs", "official",
         "https://github.com/bnb-chain/BEPs", True, name="BNB Evolution Proposals",
+        transport_kind="GITHUB_COMMITS", source_group="bnb-governance",
     ),
     EventSource(
         "bnb-governance", "governance", ("BNB",), "BNB Chain", "official",
-        "https://www.bnbchain.org/en/bnb-chain-governance", True, name="BNB Chain governance",
+        "https://www.bnbchain.org/en/bnb-chain-governance", True, name="BNB Chain governance", source_group="bnb-governance",
+    ),
+    EventSource(
+        "bnb-governor-rpc", "governance", ("BNB",), "BNB Chain", "official",
+        "https://bsc-dataseed.bnbchain.org", True, name="BNB Governor proposal events",
+        transport_urls=("https://bsc-dataseed-public.bnbchain.org",),
+        transport_kind="RPC_LOGS", source_group="bnb-governance",
     ),
     EventSource(
         "sec-digital-assets", "regulatory", ("MARKET",), "U.S. SEC", "official",
         "https://www.sec.gov/news/pressreleases", True, name="SEC press releases",
+        transport_urls=("https://www.sec.gov/news/pressreleases.rss",), transport_kind="RSS_ATOM", source_group="sec-regulatory",
     ),
     EventSource(
         "cftc-digital-assets", "regulatory", ("MARKET",), "U.S. CFTC", "official",
@@ -179,11 +214,11 @@ EVENT_SOURCE_CATALOG = (
         transport_urls=(
             "https://www.cftc.gov/RSS/RSSGP/rssgp.xml",
             "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",
-        ),
+        ), source_group="cftc-regulatory",
     ),
     EventSource(
         "esma-mica", "regulatory", ("MARKET",), "ESMA", "official",
-        "https://www.esma.europa.eu/press-news/esma-news", True, name="ESMA and MiCA notices",
+        "https://www.esma.europa.eu/press-news/esma-news", True, name="ESMA and MiCA notices", source_group="esma-regulatory",
     ),
 )
 

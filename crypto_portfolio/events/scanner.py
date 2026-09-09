@@ -84,6 +84,8 @@ class EventSourceScanRequest:
     required_for_full_coverage: bool = True
     instructions: str = EVENT_SCAN_SAFETY_INSTRUCTIONS
     source_urls: tuple[str, ...] = ()
+    source_group: str | None = None
+    transport_kind: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "asset", _text(self.asset, "event scan asset").upper())
@@ -103,6 +105,16 @@ class EventSourceScanRequest:
                 raise ValueError("source_urls must contain http or https URLs")
         object.__setattr__(self, "source_urls", tuple(dict.fromkeys((url, *source_urls))))
         object.__setattr__(self, "authority", _text(self.authority, "authority"))
+        group = self.authority if self.source_group is None else self.source_group
+        object.__setattr__(self, "source_group", _text(group, "source_group").lower())
+        if self.transport_kind is not None:
+            kind = _text(self.transport_kind, "transport_kind").upper()
+            if kind not in {
+                "GITHUB_RELEASES", "GITHUB_SECURITY_ADVISORIES", "GITHUB_COMMITS",
+                "RSS_ATOM", "DISCOURSE_JSON", "RPC_LOGS", "WEB",
+            }:
+                raise ValueError("transport_kind is unsupported")
+            object.__setattr__(self, "transport_kind", kind)
         start = _timestamp(self.lookback_start, "lookback_start")
         end = _timestamp(self.as_of, "as_of")
         if parse_timestamp(start) > parse_timestamp(end):
@@ -125,6 +137,8 @@ class EventSourceScanRequest:
             "source_url": self.source_url,
             "source_urls": list(self.source_urls),
             "authority": self.authority,
+            "source_group": self.source_group,
+            "transport_kind": self.transport_kind,
             "lookback_start": self.lookback_start,
             "as_of": self.as_of,
             "tier": self.tier,
@@ -137,13 +151,18 @@ def _normalize_item(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("event scan item must be an object")
     allowed = {
-        "title", "published_at", "canonical_url", "summary", "materiality", "affected_assets",
+        "external_id", "title", "published_at", "canonical_url", "summary", "materiality", "affected_assets",
         "severity", "relevance", "evidence_ids", "source_group",
     }
     unknown = set(value) - allowed
     if unknown:
         raise ValueError("event scan item contains unknown fields: " + ", ".join(sorted(unknown)))
     result: dict[str, Any] = {}
+    if value.get("external_id") is not None:
+        external_id = _text(value["external_id"], "external_id")
+        if len(external_id) > _MAX_ITEM_TEXT:
+            raise ValueError("event scan external_id exceeds size limit")
+        result["external_id"] = external_id
     for field in ("title", "summary"):
         if value.get(field) is not None:
             text = _text(value[field], field)
@@ -197,6 +216,7 @@ class EventSourceScanResponse:
     items: tuple[Mapping[str, Any], ...] = ()
     error: str | None = None
     conflict: bool = False
+    complete_for_source: bool | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_id", _text(self.source_id, "source_id").lower())
@@ -214,6 +234,12 @@ class EventSourceScanResponse:
             object.__setattr__(self, "error", error)
         if not isinstance(self.conflict, bool):
             raise ValueError("conflict must be boolean")
+        complete = self.reachable if self.complete_for_source is None else self.complete_for_source
+        if not isinstance(complete, bool):
+            raise ValueError("complete_for_source must be boolean")
+        if complete and not self.reachable:
+            raise ValueError("an unreachable source cannot be complete")
+        object.__setattr__(self, "complete_for_source", complete)
         if not self.reachable and self.error is None:
             raise ValueError("unreachable event source requires an error")
 
@@ -221,7 +247,7 @@ class EventSourceScanResponse:
     def from_mapping(cls, value: Mapping[str, Any]) -> "EventSourceScanResponse":
         if not isinstance(value, Mapping):
             raise ValueError("event scan response must be an object")
-        allowed = {"source_id", "reachable", "checked_at", "items", "error", "conflict"}
+        allowed = {"source_id", "reachable", "checked_at", "items", "error", "conflict", "complete_for_source"}
         unknown = set(value) - allowed
         if unknown:
             raise ValueError("event scan response contains unknown fields: " + ", ".join(sorted(unknown)))
@@ -236,6 +262,7 @@ class EventSourceScanResponse:
             items=tuple(value.get("items", ())),
             error=value.get("error"),
             conflict=value.get("conflict", False),
+            complete_for_source=value.get("complete_for_source"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -246,6 +273,7 @@ class EventSourceScanResponse:
             "items": [dict(item) for item in self.items],
             "error": self.error,
             "conflict": self.conflict,
+            "complete_for_source": self.complete_for_source,
         }
 
 
@@ -263,9 +291,16 @@ def _coerce_responses(value: Any) -> tuple[EventSourceScanResponse, ...]:
 class EventScanner:
     """Build allowlisted source requests and synthesize current scan results."""
 
-    def __init__(self, policy: Policy | Mapping[str, Any] | None = None, *, sources: Iterable[EventSource] = EVENT_SOURCE_CATALOG) -> None:
+    def __init__(
+        self,
+        policy: Policy | Mapping[str, Any] | None = None,
+        *,
+        sources: Iterable[EventSource] = EVENT_SOURCE_CATALOG,
+        transport: Any | None = None,
+    ) -> None:
         self.policy = policy or resolve_policy()
         self.sources = tuple(sources)
+        self.transport = transport
         if not self.sources:
             raise ValueError("event scanner requires a non-empty source catalog")
         if len({source.id for source in self.sources}) != len(self.sources):
@@ -338,6 +373,8 @@ class EventScanner:
                 tier=source.tier,
                 required_for_full_coverage=source.required_for_full_coverage,
                 source_urls=source.transport_candidates,
+                source_group=source.source_group,
+                transport_kind=source.transport_kind,
             )
             for source in self.sources
             if source.category == category and source.applies_to(asset)
@@ -375,21 +412,34 @@ class EventScanner:
             raise ValueError("event scan requires at least one source response")
         if len({item.source_id for item in coerced}) != len(coerced):
             raise ValueError("event scan responses contain duplicate source IDs")
+        if any(
+            str(item.get("materiality", "")).strip().upper() == "CANDIDATE"
+            for response in coerced
+            for item in response.items
+        ):
+            raise ValueError("event source candidates require LUNA_MAX materiality classification")
         unknown = {item.source_id for item in coerced} - set(by_id)
         if unknown:
             raise ValueError("event scan response contains an unknown source ID")
         start = parse_timestamp(requests[0].lookback_start) if requests else parse_timestamp(end)
         end_time = parse_timestamp(end)
         required = [source for source in self.sources if source.category == category and source.applies_to(asset) and source.required_for_full_coverage]
+        required_groups = {
+            source.source_group: source
+            for source in required
+        }
         responses_by_id = {item.source_id: item for item in coerced}
         checked = tuple(request.source_id for request in requests if request.source_id in responses_by_id)
         if not checked:
             raise ValueError("event scan has no recognized source responses")
-        reachable_required = sum(
-            bool(responses_by_id.get(source.id) and responses_by_id[source.id].reachable)
+        reachable_groups = {
+            source.source_group
             for source in required
-        )
-        coverage = reachable_required / len(required) if required else 0.0
+            for response in (responses_by_id.get(source.id),)
+            if response is not None and response.reachable and response.complete_for_source
+        }
+        reachable_required = len(reachable_groups)
+        coverage = reachable_required / len(required_groups) if required_groups else 0.0
         material_events: list[dict[str, Any]] = []
         conflict = False
         for source_id in checked:
@@ -405,7 +455,7 @@ class EventScanner:
                     )
                     material_events.append({
                         "source_id": source_id,
-                        "source_group": item.get("source_group", source.authority.strip().lower()),
+                        "source_group": item.get("source_group", source.source_group),
                         "severity": severity,
                         **dict(item),
                     })
@@ -447,11 +497,11 @@ class EventScanner:
             else "CLEAR"
         )
         source_groups = {
-            source.authority.strip().lower()
+            source.source_group
             for source in self.sources
             if source.category == category and source.applies_to(asset)
         }
-        source_quality = sum({1: 1.0, 2: 0.75, 3: 0.5}[source.tier] for source in self.sources if source.category == category and source.applies_to(asset)) / len(required) if required else 0.0
+        source_quality = sum({1: 1.0, 2: 0.75, 3: 0.5}[source.tier] for source in required_groups.values()) / len(required_groups) if required_groups else 0.0
         return EventScanResult(
             asset=asset,
             category=category,
@@ -464,10 +514,20 @@ class EventScanner:
             state=state,
             confidence_score=coverage * (0.5 if conflict else 1.0),
             source_coverage={
-                "required": len(required),
+                "required": len(required_groups),
                 "reachable": reachable_required,
                 "ratio": coverage,
-                "by_source": {source_id: responses_by_id[source_id].reachable for source_id in sorted(responses_by_id)},
+                "by_source": {
+                    source_id: {
+                        "reachable": responses_by_id[source_id].reachable,
+                        "complete_for_source": responses_by_id[source_id].complete_for_source,
+                    }
+                    for source_id in sorted(responses_by_id)
+                },
+                "by_group": {
+                    group: group in reachable_groups
+                    for group in sorted(required_groups)
+                },
             },
             source_quality={"mean": source_quality},
             source_redundancy={"independent_groups": len(source_groups)},
@@ -494,6 +554,8 @@ class EventScanner:
         if responses is None:
             if mode == FetchMode.CACHE_ONLY:
                 raise ValueError("CACHE_ONLY has no cached event scan result")
+            if source_fetcher is None and self.transport is not None:
+                source_fetcher = self.transport.fetch
             if source_fetcher is None:
                 raise ValueError("event scan responses or a source_fetcher are required")
             responses = tuple(source_fetcher(request) for request in requests)

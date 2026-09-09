@@ -218,6 +218,21 @@ secret 脱敏以及文档。
 
 不得加入交易 key、下单、杠杆或 autonomous execution 能力。
 
+本计划新增/修复的只读契约探测：
+
+```bash
+python3 scripts/providers.py --probe coinmetrics_community --asset BTC
+python3 scripts/providers.py --probe coinmetrics_community --asset ETH
+python3 scripts/providers.py --probe coinmetrics_community --asset BNB
+python3 scripts/providers.py --probe l2beat --asset ETH
+python3 scripts/providers.py --probe ultrasound_money --asset ETH
+python3 scripts/providers.py --probe etherscan --asset ETH
+```
+
+Coin Metrics 输出按 asset 显示真实 1D catalog；L2BEAT 无 key 仍可检查
+OpenAPI，但端点认证失败必须显示 `CREDENTIAL_MISSING`/`HTTP_401`。数值
+历史缺失保持 `PROVIDER_INSUFFICIENT_HISTORY`，不会生成 Web 请求。
+
 ## 合并前检查清单
 
 - [ ] 确定性单元测试保持离线；

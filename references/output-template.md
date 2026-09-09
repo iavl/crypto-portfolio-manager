@@ -342,6 +342,12 @@ items must state that they were excluded from applicable coverage.
 Detailed final fetch failures are shown in `本轮数据抓取失败明细`; keep this
 section as the aggregate data-quality report rather than duplicating that table.
 
+Render `ReportPacket.optional_data` separately as `本次未采集的可选数据` with
+asset, metric, reason/provider/history issue, and the explicit effect
+`non-blocking`. Optional `SKIPPED` values are excluded from applicable coverage;
+they must not be promoted to final required failures or silently counted as
+success.
+
 For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
 show the change in percentage points when both cost bases are usable. For
 `SNAPSHOT_REVIEW`, always show the current table when cost observations are

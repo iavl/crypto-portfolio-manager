@@ -52,11 +52,14 @@ class EventItem:
     severity: str = "WATCH"
     materiality_source: str = "STRUCTURED_EVENT"
     evidence_ids: tuple[str, ...] = ()
+    external_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_id", _text(self.event_id, "event_id"))
         object.__setattr__(self, "category", _text(self.category, "event category").lower())
         object.__setattr__(self, "title", _text(self.title, "event title"))
+        if self.external_id is not None:
+            object.__setattr__(self, "external_id", _text(self.external_id, "external_id"))
         if self.summary is not None:
             object.__setattr__(self, "summary", _text(self.summary, "event summary"))
         if self.published_at is not None:
@@ -83,7 +86,7 @@ class EventItem:
 
     @property
     def stable_fingerprint(self) -> str:
-        payload = "|".join((self.canonical_url or "", self.title.lower(), self.published_at or "", self.category, *self.affected_assets))
+        payload = "|".join((self.external_id or "", self.canonical_url or "", self.title.lower(), self.published_at or "", self.category, *self.affected_assets))
         return hashlib.sha256(payload.encode()).hexdigest()
 
     @classmethod
@@ -91,7 +94,7 @@ class EventItem:
         if not isinstance(value, Mapping):
             raise ValueError("event item must be an object")
         data = dict(value)
-        fallback = data.get("stable_fingerprint") or data.get("canonical_url") or data.get("title") or data.get("published_at") or "event"
+        fallback = data.get("stable_fingerprint") or data.get("external_id") or data.get("canonical_url") or data.get("title") or data.get("published_at") or "event"
         data.setdefault("event_id", fallback)
         data.setdefault("title", data.get("event_id"))
         data.setdefault("category", "unknown")
@@ -99,7 +102,7 @@ class EventItem:
         data.setdefault("affected_assets", tuple(data.get("affected_assets", ())))
         data.setdefault("evidence_ids", tuple(data.get("evidence_ids", ())))
         return cls(**{key: data[key] for key in {
-            "event_id", "category", "title", "summary", "published_at", "canonical_url",
+            "event_id", "category", "title", "external_id", "summary", "published_at", "canonical_url",
             "source_ids", "source_groups", "affected_assets", "relevance", "severity",
             "materiality_source", "evidence_ids",
         } if key in data})
@@ -107,6 +110,7 @@ class EventItem:
     def as_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
+            "external_id": self.external_id,
             "stable_fingerprint": self.stable_fingerprint,
             "category": self.category,
             "title": self.title,

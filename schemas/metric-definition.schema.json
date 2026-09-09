@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/metric-definition.schema.json",
   "title": "Metric definition",
   "type": "object",
-  "required": ["metric_key", "factor", "expected_type", "unit", "direction", "default_freshness", "critical", "trend_comparison_enabled", "asset_scope", "decision_role", "context_group"],
+  "required": ["metric_key", "factor", "expected_type", "unit", "direction", "default_freshness", "critical", "trend_comparison_enabled", "asset_scope", "decision_role", "context_group", "fallback_mode"],
   "properties": {
     "metric_key": {"type": "string", "minLength": 1},
     "factor": {"type": "string", "minLength": 1},
@@ -18,7 +18,8 @@
     "trend_enabled": {"type": "boolean"},
     "asset_scope": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT", "STRUCTURAL_RISK"]},
-    "context_group": {"type": ["string", "null"]}
+    "context_group": {"type": ["string", "null"]},
+    "fallback_mode": {"enum": ["STRUCTURED_ONLY", "WEB_ALLOWED"]}
   },
   "additionalProperties": false
 }

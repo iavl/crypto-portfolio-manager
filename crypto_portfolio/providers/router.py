@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 import traceback
 from typing import Any, Iterable, Mapping
 
 from ..models.market import OHLCVSeries
-from ..models.time import normalize_timestamp
+from ..models.time import normalize_timestamp, parse_timestamp
 from .base import (
     FetchMode,
     ProviderCapabilities,
@@ -197,6 +197,8 @@ class ProviderRouter:
         from .growthepie import GrowthepieProvider
         from .l2beat import L2BeatProvider
         from .ethereum_protocol import EthereumProtocolProvider
+        from .ultrasound_money import UltrasoundMoneyProvider
+        from .etherscan import EtherscanProvider
 
         client = self.http_client or HttpClient()
         self.http_client = client
@@ -210,6 +212,7 @@ class ProviderRouter:
             "blobscan": BlobscanProvider(client=client),
             "growthepie": GrowthepieProvider(client=client),
             "ethereum_protocol": EthereumProtocolProvider(client=client),
+            "ultrasound_money": UltrasoundMoneyProvider(client=client),
         }
         if provider_enabled("fred", self.config):
             providers["fred"] = FREDProvider(
@@ -242,6 +245,11 @@ class ProviderRouter:
             providers["l2beat"] = L2BeatProvider(
                 client=client,
                 api_key=provider_api_key("l2beat", self.config),
+            )
+        if provider_enabled("etherscan", self.config):
+            providers["etherscan"] = EtherscanProvider(
+                client=client,
+                api_key=provider_api_key("etherscan", self.config),
             )
         return providers
 
@@ -278,14 +286,14 @@ class ProviderRouter:
         *,
         as_of: str | datetime | None = None,
         now: str | datetime | None = None,
-        history_days: int = 240,
+        execution_history_days: int = 240,
     ) -> tuple[ProviderRequest, ...]:
         ttl = self.config.get("cache_ttl_seconds", {})
         return build_provider_requests(
             requests,
             as_of=as_of,
             now=now,
-            history_days=history_days,
+            execution_history_days=execution_history_days,
             ttl_seconds=dict(ttl) if isinstance(ttl, Mapping) else None,
         )
 
@@ -651,13 +659,15 @@ class ProviderRouter:
     ) -> tuple[tuple[Mapping[str, Any], ...], str, bool, int]:
         self._last_network_requests = 0
         self._last_metric_diagnostics = {}
+        effective_as_of = as_of if as_of is not None else request.parameters.get("as_of")
         if request.dataset == "ohlcv" and hasattr(provider, "candles"):
             return self._collect_ohlcv(provider_name, provider, request, mode, as_of=as_of, now=now)
         if request.dataset == "basis" and as_of is None:
             as_of = request.parameters.get("as_of")
+        cached = None
         if mode != FetchMode.REFRESH or not request.mutable:
             try:
-                cached = self.cache.load_response(request, now=now, as_of=as_of)
+                cached = self.cache.load_response(request, now=now, as_of=effective_as_of)
             except CacheExpired:
                 cached = None
             except CacheCorruption:
@@ -666,10 +676,65 @@ class ProviderRouter:
                 self.cache.quarantine(request)
                 cached = None
             if cached is not None:
+                if isinstance(cached, Mapping) and isinstance(cached.get("diagnostics"), Mapping):
+                    self._last_metric_diagnostics = {
+                        str(key).strip().lower(): dict(value)
+                        for key, value in cached["diagnostics"].items()
+                        if isinstance(value, Mapping)
+                    }
+                if (
+                    isinstance(cached, Mapping)
+                    and cached.get("provider_payload") is not None
+                    and request.parameters.get("history_mode") == "FULL_AVAILABLE"
+                    and hasattr(provider, "parse_cached_payload")
+                ):
+                    parsed = provider.parse_cached_payload(
+                        request,
+                        cached["provider_payload"],
+                        fetched_at=now,
+                    )
+                    parsed_values = _mapping_observations(parsed)
+                    if parsed_values:
+                        return parsed_values, "CACHE_PROVIDER", True, 0
                 values = _mapping_observations(cached)
                 if request.dataset != "basis" or all(
                     current_delivery_basis(value.get("metadata"), as_of or now) for value in values
                 ):
+                    return values, "CACHE_PROVIDER", True, 0
+        if (
+            cached is None
+            and request.parameters.get("history_mode") == "FULL_AVAILABLE"
+            and hasattr(provider, "parse_cached_payload")
+        ):
+            history = self.cache.load_full_history(
+                request,
+                as_of=effective_as_of,
+            )
+            if history is not None:
+                self._last_metric_diagnostics = {
+                    str(key).strip().lower(): dict(value)
+                    for key, value in history.get("diagnostics", {}).items()
+                    if isinstance(value, Mapping)
+                }
+                if history.get("needs_tail") and mode != FetchMode.CACHE_ONLY:
+                    tail = self._collect_full_history_tail(
+                        provider_name,
+                        provider,
+                        request,
+                        history,
+                        mode,
+                        as_of=effective_as_of,
+                        now=now,
+                    )
+                    if tail is not None:
+                        return tail
+                parsed = provider.parse_cached_payload(
+                    request,
+                    history["provider_payload"],
+                    fetched_at=now,
+                )
+                values = _mapping_observations(parsed)
+                if values:
                     return values, "CACHE_PROVIDER", True, 0
         if mode == FetchMode.CACHE_ONLY:
             raise ProviderUnavailable("CACHE_ONLY has no usable provider cache", diagnostic=ProviderDiagnostic(
@@ -712,11 +777,84 @@ class ProviderRouter:
             if value.get("observed_at") is not None
         )
         observed_range = {"start": observed[0], "end": observed[-1]} if observed else None
+        cache_payload: Any = [dict(value) for value in values]
+        if isinstance(raw, ProviderResponse) and (raw.diagnostics or raw.payload is not None):
+            cache_payload = {
+                "observations": cache_payload,
+                "diagnostics": {key: dict(value) for key, value in raw.diagnostics.items()},
+            }
+            if raw.payload is not None:
+                cache_payload["provider_payload"] = raw.payload
+        self.cache.save_response(request, cache_payload, fetched_at=now, observed_range=observed_range)
+        return values, "API", False, network_count
+
+    def _collect_full_history_tail(
+        self,
+        provider_name: str,
+        provider: Any,
+        request: ProviderRequest,
+        history: Mapping[str, Any],
+        mode: FetchMode,
+        *,
+        as_of: str | datetime | None,
+        now: str,
+    ) -> tuple[tuple[Mapping[str, Any], ...], str, bool, int] | None:
+        """Fetch only the missing tail of a cached full-history provider payload."""
+        raw = history.get("provider_payload")
+        covered_through = history.get("covered_through")
+        target_value = as_of or request.parameters.get("end") or request.parameters.get("as_of")
+        if not isinstance(raw, Mapping) or not isinstance(covered_through, str) or target_value is None:
+            return None
+        target = parse_timestamp(target_value.isoformat() if isinstance(target_value, datetime) else target_value)
+        covered = parse_timestamp(covered_through)
+        if target <= covered:
+            return None
+        start = normalize_timestamp((covered + timedelta(days=1)).isoformat(), "start")
+        tail_request = replace(request, parameters={
+            **dict(request.parameters),
+            "start": start,
+            "end": normalize_timestamp(target.isoformat(), "end"),
+        })
+        if not self._circuit(provider_name).allow():
+            return None
+        self._budget(provider_name)
+        self._review_requests += 1
+        self._provider_requests[provider_name] = self._provider_requests.get(provider_name, 0) + 1
+        client = getattr(provider, "client", None)
+        before = getattr(client, "request_count", None)
+        tail = provider.collect(tail_request)
+        after = getattr(client, "request_count", None)
+        network_count = max(0, after - before) if isinstance(before, int) and isinstance(after, int) else 1
+        self._circuit(provider_name).record_success()
+        tail_payload = tail.payload if isinstance(tail, ProviderResponse) else None
+        if not isinstance(tail_payload, Mapping) or not isinstance(tail_payload.get("data", tail_payload.get("rows")), list):
+            return None
+        rows = list(raw.get("data", raw.get("rows", ()))) + list(tail_payload.get("data", tail_payload.get("rows", ())))
+        combined = {**dict(raw), "data": rows}
+        parsed = provider.parse_cached_payload(request, combined, fetched_at=now)
+        values = _mapping_observations(parsed)
+        if not values:
+            return None
+        self._last_metric_diagnostics = {
+            str(key).strip().lower(): dict(value)
+            for key, value in (parsed.diagnostics or {}).items()
+            if isinstance(value, Mapping)
+        }
+        observed = sorted(
+            str(value.get("observed_at"))
+            for value in values
+            if value.get("observed_at") is not None
+        )
+        cache_payload = {
+            "observations": [dict(value) for value in values],
+            "diagnostics": {key: dict(value) for key, value in (parsed.diagnostics or {}).items()},
+            "provider_payload": combined,
+        }
         self.cache.save_response(
             request,
-            [dict(value) for value in values],
+            cache_payload,
             fetched_at=now,
-            observed_range=observed_range,
+            observed_range={"start": observed[0], "end": observed[-1]} if observed else None,
         )
         return values, "API", False, network_count
 

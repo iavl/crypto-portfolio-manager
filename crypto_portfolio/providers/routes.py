@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
+from ..metric_history_requirements import MetricHistoryRequirement, history_requirement
 from ..metrics_registry import metric_definition, normalize_metric_key
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import ProviderRequest
@@ -44,6 +45,8 @@ DEFAULT_TTL_SECONDS = {
     "ethereum_l2": 21600,
     "ethereum_da": 21600,
     "ethereum_valuation": 86400,
+    "ultrasound": 21600,
+    "etherscan": 86400,
     "default": 3600,
 }
 PROVIDER_ROUTES = {
@@ -94,10 +97,16 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("l2beat",)
     if key.startswith("eth.blobs."):
         return ("blobscan",)
+    if key == "eth.monetary.burn_30d_eth":
+        return ("ultrasound_money", "ethereum_protocol")
+    if key == "eth.monetary.burn_365d_eth":
+        return ()
+    if key == "eth.monetary.cumulative_burn_eth":
+        return ("etherscan",)
     if key.startswith("eth.monetary."):
-        return ("ethereum_protocol", "coinmetrics_community", "coinmetrics_pro")
+        return ("coinmetrics_community", "etherscan", "coinmetrics_pro")
     if key.startswith("eth.staking."):
-        return ("coinmetrics_community", "coinmetrics_pro")
+        return ()
     if key.startswith("eth.structural."):
         return ()
     if key == "btc_valuation.price_to_realized_price":
@@ -110,7 +119,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("sosovalue",)
     if key.startswith("flows.eth_etf_"):
         return ("sosovalue",)
-    if key.startswith(("flows.eth_exchange_", "flows.eth_staking_")):
+    if key.startswith(("flows.eth_exchange_", "flows.eth_active_stake_")):
         return ()
     if "liquidations" in key:
         return ()
@@ -128,7 +137,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("github",)
     if key == "fundamentals.stablecoin_liquidity":
         return ("defillama",) if symbol in {"ETH", "SOL", "BNB"} else ()
-    if key == "fundamentals.active_users" and symbol == "AAVE":
+    if key == "fundamentals.active_users" and symbol in {"AAVE", "BNB"}:
         return ()
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"}:
         return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH"} else ()
@@ -136,7 +145,7 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         "onchain.active_addresses", "onchain.transfer_volume",
         "onchain.blockspace_fees", "onchain.transaction_count",
     }:
-        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH"} else ()
+        return ("coinmetrics_community", "coinmetrics_pro") if symbol in {None, "BTC", "ETH", "BNB"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)
     if key.startswith("onchain.btc."):
@@ -174,10 +183,14 @@ def dataset_for_metric(metric_key: str) -> str:
         return "valuation"
     if key == "valuation.fdv_market_cap_ratio":
         return "derived"
+    if key == "eth.monetary.burn_30d_eth":
+        return "ultrasound"
+    if key in {"eth.monetary.burn_365d_eth", "eth.monetary.cumulative_burn_eth"}:
+        return "etherscan"
     if key in {
         "eth_valuation.price_to_realized_price",
         "flows.eth_exchange_netflow_to_market_cap",
-        "flows.eth_staking_netflow_to_supply_30d",
+        "flows.eth_active_stake_change_to_supply_30d",
     }:
         return "derived"
     if key.startswith("eth_valuation."):
@@ -266,17 +279,27 @@ def _as_of(value: str | datetime | None, now: datetime) -> datetime:
     return parse_timestamp(value.isoformat() if isinstance(value, datetime) else value)
 
 
-def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: datetime, history_days: int) -> dict[str, Any]:
+def _parameters(
+    dataset: str,
+    asset: str,
+    *,
+    as_of: str | datetime | None,
+    now: datetime,
+    execution_history_days: int,
+    requirement: MetricHistoryRequirement,
+) -> dict[str, Any]:
     end = _as_of(as_of, now)
-    start_days = (
-        450 if dataset == "macro"
-        else history_days if dataset in {
-            "ohlcv", "onchain", "ethereum_protocol", "ethereum_staking",
-            "ethereum_l2", "ethereum_da", "ethereum_valuation",
-        }
-        else max(7, min(history_days, 90))
-    )
-    start = end - timedelta(days=start_days)
+    if dataset == "macro":
+        start_days: int | None = 450
+    elif dataset == "ohlcv":
+        start_days = execution_history_days
+    elif requirement.mode == "FULL_AVAILABLE":
+        start_days = None
+    elif requirement.mode == "BOUNDED":
+        start_days = requirement.days
+    else:
+        start_days = 7
+    start = end - timedelta(days=start_days) if start_days is not None else None
     result: dict[str, Any] = {
         "symbol": asset,
         "market": "chain" if dataset == "chain_liveness" else "spot" if dataset in {"ohlcv", "spot", "valuation"} else "perpetual",
@@ -286,6 +309,9 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
             if dataset in {"basis", "chain_liveness", "valuation"} and as_of is None
             else normalize_timestamp(end.isoformat(), "as_of")
         ),
+        "history_mode": requirement.mode,
+        "history_days": start_days,
+        "history_tolerance_days": requirement.tolerance_days,
     }
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
@@ -296,10 +322,9 @@ def _parameters(dataset: str, asset: str, *, as_of: str | datetime | None, now: 
     } or (
         dataset == "valuation" and as_of is not None
     ):
-        result.update({
-            "start": normalize_timestamp(start.isoformat(), "start"),
-            "end": normalize_timestamp(end.isoformat(), "end"),
-        })
+        if start is not None:
+            result["start"] = normalize_timestamp(start.isoformat(), "start")
+        result["end"] = normalize_timestamp(end.isoformat(), "end")
     return result
 
 
@@ -308,12 +333,14 @@ def build_provider_requests(
     *,
     as_of: str | datetime | None = None,
     now: str | datetime | None = None,
-    history_days: int = 240,
+    execution_history_days: int = 240,
     ttl_seconds: dict[str, Any] | None = None,
 ) -> tuple[ProviderRequest, ...]:
     """Group metric requests by primary provider and fetchable dataset."""
+    if isinstance(execution_history_days, bool) or not isinstance(execution_history_days, int) or execution_history_days < 1:
+        raise ValueError("execution_history_days must be a positive integer")
     current = parse_timestamp(now.isoformat() if isinstance(now, datetime) else now) if now is not None else datetime.now(timezone.utc)
-    groups: dict[tuple[str, str, str, str], list[Any]] = {}
+    groups: dict[tuple[str, str, str, str, str], list[Any]] = {}
     for item in requests:
         key = normalize_metric_key(item.metric_key)
         definition = getattr(item, "definition", None)
@@ -323,11 +350,26 @@ def build_provider_requests(
         if not chain:
             continue
         dataset = dataset_for_metric(key)
-        group_key = (chain[0], dataset, item.asset.strip().upper(), str(item.parameters.get("timeframe", "1D")).upper() if hasattr(item, "parameters") else "1D")
+        requirement = history_requirement(key)
+        timeframe = str(item.parameters.get("timeframe", "1D")).upper() if hasattr(item, "parameters") else "1D"
+        # OHLCV remains an execution cohort. It intentionally over-fetches
+        # the 30/90/180-day return inputs to the configured MA200 horizon.
+        cohort = f"EXECUTION:{execution_history_days}" if dataset == "ohlcv" else requirement.cohort
+        group_key = (chain[0], dataset, item.asset.strip().upper(), timeframe, cohort)
         groups.setdefault(group_key, []).append(item)
     result = []
-    for (provider, dataset, asset, timeframe), items in groups.items():
-        parameters = _parameters(dataset, asset, as_of=as_of, now=current, history_days=history_days)
+    for (provider, dataset, asset, timeframe, _cohort), items in groups.items():
+        requirement = history_requirement(items[0].metric_key)
+        if dataset == "ohlcv":
+            requirement = MetricHistoryRequirement("BOUNDED", execution_history_days, 0)
+        parameters = _parameters(
+            dataset,
+            asset,
+            as_of=as_of,
+            now=current,
+            execution_history_days=execution_history_days,
+            requirement=requirement,
+        )
         parameters["timeframe"] = timeframe if dataset == "ohlcv" else parameters.get("timeframe")
         if hasattr(items[0], "parameters"):
             parameters.update({key: value for key, value in items[0].parameters.items() if key not in {"api_key", "api_secret", "authorization", "token"}})
@@ -341,6 +383,7 @@ def build_provider_requests(
             any(metric_is_mutable(key) for key in keys)
             and dataset != "ohlcv"
             and not (dataset == "valuation" and as_of is not None)
+            and requirement.mode != "FULL_AVAILABLE"
         )
         result.append(
             ProviderRequest(
@@ -353,7 +396,7 @@ def build_provider_requests(
                 freshness_seconds=cache_ttl_seconds(dataset, ttl_seconds),
             )
         )
-    return tuple(sorted(result, key=lambda item: (item.provider, item.dataset, item.asset, item.metric_keys)))
+    return tuple(sorted(result, key=lambda item: (item.provider, item.dataset, item.asset, item.parameters.get("history_mode", ""), item.parameters.get("history_days") or 0, item.metric_keys)))
 
 
 __all__ = [

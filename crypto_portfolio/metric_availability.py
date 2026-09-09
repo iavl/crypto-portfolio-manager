@@ -9,14 +9,36 @@ from .metrics_registry import metric_definition
 
 
 REQUIREMENTS = ("REQUIRED", "OPTIONAL", "PREMIUM_ONLY")
+FALLBACK_MODES = ("STRUCTURED_ONLY", "WEB_ALLOWED")
 REASON_CODES = (
     "OPTIONAL_PROVIDER_UNAVAILABLE",
     "PREMIUM_PROVIDER_NOT_CONFIGURED",
     "OPTIONAL_METRIC_DISABLED",
     "OPTIONAL_PROVIDER_UNSUPPORTED",
+    "OPTIONAL_SOURCE_UNAVAILABLE",
     "METHODOLOGY_NOT_DEFINED",
     "DERIVED_INPUT_UNAVAILABLE",
 )
+
+_OPTIONAL_METRICS = {
+    "btc_valuation.mvrv_zscore": "OPTIONAL_SOURCE_UNAVAILABLE",
+    "eth.monetary.issuance_365d_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
+    "eth.monetary.net_supply_growth_365d": "OPTIONAL_PROVIDER_UNAVAILABLE",
+    "eth.monetary.burn_365d_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
+    "eth.monetary.burn_to_issuance_365d": "DERIVED_INPUT_UNAVAILABLE",
+    "eth.monetary.cumulative_burn_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
+    "eth.staking.active_effective_stake_eth": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.active_effective_stake_pct": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.active_effective_stake_change_30d": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.active_effective_stake_change_90d": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.staking_apr_7d": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.staking_apr_30d": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.participation_rate": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.deposit_queue_eth": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.exit_queue_eth": "METHODOLOGY_NOT_DEFINED",
+    "eth.staking.withdrawal_backlog_eth": "METHODOLOGY_NOT_DEFINED",
+    "flows.eth_active_stake_change_to_supply_30d": "DERIVED_INPUT_UNAVAILABLE",
+}
 
 
 @dataclass(frozen=True)
@@ -44,12 +66,18 @@ class MetricAvailabilityPolicy:
     def is_skippable(self) -> bool:
         return self.requirement != "REQUIRED"
 
+    @property
+    def fallback_mode(self) -> str:
+        return metric_definition(self.metric_key).fallback_mode
+
 
 def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy:
     """Return the explicit availability rule for one asset/metric pair."""
     asset = str(asset).strip().upper()
     definition = metric_definition(metric_key)
     key = definition.key
+    if key in _OPTIONAL_METRICS:
+        return MetricAvailabilityPolicy(key, "OPTIONAL", _OPTIONAL_METRICS[key])
     if key == "flows.exchange_netflow":
         return MetricAvailabilityPolicy(key, "PREMIUM_ONLY", "PREMIUM_PROVIDER_NOT_CONFIGURED")
     if key == "fundamentals.developer_activity":
@@ -58,8 +86,10 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
         if asset == "AAVE":
             return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
         return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
-    if key == "fundamentals.active_users" and asset == "AAVE":
-        return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
+    if key == "fundamentals.active_users" and asset in {"AAVE", "BNB"}:
+        return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
+    if asset == "BNB" and key in {"onchain.transfer_volume", "onchain.blockspace_fees"}:
+        return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNSUPPORTED")
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"} and asset not in {"BTC", "ETH"}:
         return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
     if definition.is_event_risk:
@@ -67,6 +97,17 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
     if definition.decision_role != "SCORING_FACTOR":
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
     return MetricAvailabilityPolicy(key)
+
+
+def metric_fallback_mode(metric_key: str) -> str:
+    """Return the explicit fallback owner for one metric."""
+    definition = metric_definition(metric_key)
+    return definition.fallback_mode
+
+
+def fallback_mode(metric_key: str) -> str:
+    """Short alias for callers that only need fallback ownership."""
+    return metric_fallback_mode(metric_key)
 
 
 def skip_reason(policy: MetricAvailabilityPolicy, detail: Any | None = None) -> str:
@@ -87,9 +128,12 @@ def is_skippable(metric_key: str, asset: str) -> bool:
 
 __all__ = [
     "MetricAvailabilityPolicy",
+    "FALLBACK_MODES",
     "REASON_CODES",
     "REQUIREMENTS",
     "is_skippable",
+    "fallback_mode",
+    "metric_fallback_mode",
     "metric_availability",
     "skip_reason",
 ]

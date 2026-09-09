@@ -235,6 +235,15 @@ The current scoring model uses fixed profile weights, reliability shrinkage,
 and a separate event-risk gate. Old generated records are not replayed or
 migrated.
 
+BTC `btc_valuation.mvrv_zscore` is optional unless Community exposes a direct
+`CapMVRVZ` or the exact full-history `(CapMrktCurUSD - CapRealUSD) /
+population_std(CapMrktCurUSD)` derivation inputs. ETH 365D monetary values are
+long-structure context and do not block a 3–6 month decision when history is
+unavailable. ETH staking uses exact `active_effective_stake_*` names only;
+staking quantity/change/APR/participation remains optional until a documented
+aggregate source proves the denominator. `fundamentals.active_users` for BNB
+is optional because active addresses are not users.
+
 ### Data Confidence
 
 Each applicable metric/factor retains fixed-denominator `coverage`, exponential

@@ -1,0 +1,14 @@
+{
+  "captured_at": "2026-09-08T23:12:46Z",
+  "provider": "coinmetrics_community",
+  "frequency": "1d",
+  "data": [
+    {"metric": "AdrActCnt", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]},
+    {"metric": "CapMVRVCur", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]},
+    {"metric": "CapMrktCurUSD", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]},
+    {"metric": "CapMrktEstUSD", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]},
+    {"metric": "IssTotNtv", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]},
+    {"metric": "SplyCur", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]},
+    {"metric": "TxCnt", "frequencies": [{"frequency": "1d", "assets": ["bnb"]}]}
+  ]
+}

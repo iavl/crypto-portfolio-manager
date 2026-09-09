@@ -57,6 +57,8 @@ from .blobscan import BlobscanProvider
 from .growthepie import GrowthepieProvider
 from .l2beat import L2BeatProvider
 from .ethereum_protocol import EthereumProtocolProvider
+from .ultrasound_money import UltrasoundMoneyProvider
+from .etherscan import EtherscanProvider
 
 __all__ = [
     "EventDataProvider",
@@ -118,4 +120,6 @@ __all__ = [
     "GrowthepieProvider",
     "L2BeatProvider",
     "EthereumProtocolProvider",
+    "UltrasoundMoneyProvider",
+    "EtherscanProvider",
 ]

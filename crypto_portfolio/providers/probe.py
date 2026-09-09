@@ -10,11 +10,12 @@ from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
 from .base import ProviderRequest, ProviderResponseError
 from .binance import SPOT_BASE_URL
 from .bybit import BASE_URL as BYBIT_BASE_URL
-from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, CoinMetricsProvider, catalog_metrics
+from .coinmetrics import AUTHENTICATED_BASE_URL, COMMUNITY_BASE_URL, COINMETRICS_ASSETS, CoinMetricsProvider, catalog_metrics
 from .coingecko import BASE_URL as COINGECKO_BASE_URL, COINGECKO_IDS, CoinGeckoProvider
 from .chain_liveness import CHAIN_NATIVE_ASSETS, ChainLivenessProvider
 from .github_activity import BASE_URL as GITHUB_BASE_URL, GitHubActivityProvider, REPOSITORY_ALLOWLIST
 from .http import classify_transport_error, redact_secrets, redact_url
+from .http import HttpClient
 from .fred import FREDProvider, FRED_SERIES, BASE_URL as FRED_BASE_URL, OBSERVATIONS_PATH
 from .router import ProviderRouter
 from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_HISTORICAL_INFLOW_PATH, SoSoValueProvider
@@ -24,6 +25,8 @@ from .l2beat import (
     PROJECTS_PATH,
     L2BeatProvider,
 )
+from .ultrasound_money import BASE_URL as ULTRASOUND_BASE_URL, BURN_RATES_PATH, UltrasoundMoneyProvider
+from .etherscan import BASE_URL as ETHERSCAN_BASE_URL, EtherscanProvider
 from .growthepie import BASE_URL as GROWTHEPIE_BASE_URL, FUNDAMENTALS_PATH, MASTER_PATH, parse_master_payload
 from .blobscan import BASE_URL as BLOBCAN_BASE_URL, TIMESERIES_PATH as BLOBCAN_TIMESERIES_PATH, parse_timeseries as parse_blobscan_timeseries
 
@@ -313,6 +316,29 @@ def probe_provider(
     name = provider_name.strip().lower()
     statuses = {item.provider: item for item in router.provider_runtime_status()}
     status = statuses.get(name)
+    if name == "l2beat" and status is not None and status.reason == "CREDENTIAL_MISSING":
+        provider = router.providers.get(name)
+        client = getattr(provider, "client", None) or router.http_client or HttpClient()
+        endpoint = L2BEAT_BASE_URL + L2BEAT_OPENAPI_PATH
+        contract: dict[str, Any] = {}
+        result = _probe_call(
+            "l2beat",
+            endpoint,
+            lambda: client.get_json(endpoint),
+            validate=lambda value: contract.update(validate_l2beat_openapi(value)),
+        )
+        result.update(contract)
+        result.update({
+            "config": "NOT_READY",
+            "tested": True,
+            "credential_required": True,
+            "credential_present": False,
+            "runtime_ready": False,
+            "auth": "NOT_TESTED",
+            "error_code": "CREDENTIAL_MISSING",
+            "credential_error_code": "CREDENTIAL_MISSING",
+        })
+        return (result,)
     if status is None or not status.runtime_ready:
         return ({
             "provider": name,
@@ -331,6 +357,47 @@ def probe_provider(
         return ({"provider": name, "config": "READY", "tested": True, "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
         return (_with_config(_sosovalue_probe(provider, asset or "BTC"), client),)
+    if name == "ultrasound_money" and isinstance(provider, UltrasoundMoneyProvider):
+        endpoint = ULTRASOUND_BASE_URL + BURN_RATES_PATH
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "ultrasound_money", "ultrasound", "ETH", {"as_of": _now()},
+                ("eth.monetary.burn_30d_eth",),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call("ultrasound_money", endpoint, call, validate=_require_observations)
+        if "error_code" not in result:
+            observation = tuple(getattr(captured["value"], "observations", ()))
+            result.update({
+                "asset": "ETH",
+                "metric": "eth.monetary.burn_30d_eth",
+                "observed_at": observation[0].get("observed_at") if observation else None,
+                "methodology": "d30.rate.eth_per_minute * 60 * 24 * 30",
+            })
+        return (_with_config(result, client),)
+    if name == "etherscan" and isinstance(provider, EtherscanProvider):
+        endpoint = ETHERSCAN_BASE_URL
+        captured: dict[str, Any] = {}
+
+        def call() -> Any:
+            response = provider.collect(ProviderRequest(
+                "etherscan", "etherscan", "ETH", {},
+                ("eth.monetary.current_supply_eth", "eth.monetary.cumulative_burn_eth"),
+            ))
+            captured["value"] = response
+            return response
+
+        result = _probe_call("etherscan", endpoint, call, authenticated=True, validate=_require_observations)
+        if "error_code" not in result:
+            result.update({
+                "asset": "ETH",
+                "metrics": sorted(item.get("metric_key") for item in getattr(captured["value"], "observations", ())),
+            })
+        return (_with_config(result, client),)
     if name == "l2beat" and isinstance(provider, L2BeatProvider):
         endpoint = L2BEAT_BASE_URL + L2BEAT_OPENAPI_PATH
         contract: dict[str, Any] = {}
@@ -537,9 +604,14 @@ def probe_provider(
 
         result = _probe_call(name, endpoint, call, validate=lambda value: catalog_metrics(value), authenticated=name == "coinmetrics_pro")
         if "error_code" not in result and isinstance(provider, CoinMetricsProvider):
-            available = provider.available_metrics_for_asset("BTC")
-            result["btc_1d_available"] = sorted(
+            target = (asset or "BTC").strip().upper()
+            if target not in COINMETRICS_ASSETS:
+                raise ValueError(f"Coin Metrics probe asset must be one of {tuple(COINMETRICS_ASSETS)}")
+            available = provider.available_metrics_for_asset(target)
+            result["asset"] = target
+            result["asset_1d_available"] = sorted(
                 item for item in (
+                    "AdrActCnt", "TxTfrValAdjUSD", "FeeTotUSD", "TxCnt", "IssTotNtv",
                     "CapMVRVCur", "CapMVRVZ", "CapRealUSD", "CapMrktCurUSD", "SplyCur",
                     "PriceRealizedUSD", "SOPR", "NUPL", "HashRate", "DiffMean",
                 ) if item.lower() in available

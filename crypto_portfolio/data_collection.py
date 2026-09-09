@@ -61,6 +61,8 @@ _ERROR_CODE_DESCRIPTIONS = {
     "PROVIDER_NOT_APPLICABLE": "provider does not apply to this metric",
     "PROVIDER_PLAN_RESTRICTED": "provider plan does not permit this metric",
     "PROVIDER_UNSUPPORTED": "provider does not support this metric",
+    "OPTIONAL_PROVIDER_UNSUPPORTED": "optional provider does not support this metric",
+    "OPTIONAL_SOURCE_UNAVAILABLE": "no exact optional source is available",
     "RATE_LIMITED": "provider rate limit was exceeded",
     "NO_MARKET_DATA": "no compatible market data was available",
     "TLS_CERTIFICATE_VERIFY_FAILED": "provider TLS certificate verification failed",
@@ -97,6 +99,8 @@ def collection_decision_effect(event: CollectionEvent, *, review_type: str | Non
     elif event.status == "SKIPPED":
         requirement = metric_availability(event.asset, event.metric_key).requirement
         effect = f"excluded from applicable coverage ({requirement.lower()} metric)"
+    elif metric_availability(event.asset, event.metric_key).is_skippable:
+        effect = "optional evidence unavailable; excluded from applicable coverage"
     else:
         effect = "coverage/confidence reduced"
         hard_critical = definition.is_critical_for(review_type) if review_type is not None else definition.critical
@@ -394,6 +398,8 @@ def build_failed_data_fetches(
     rows: list[dict[str, Any]] = []
     for raw_result in results:
         event = _result_event(raw_result)
+        if metric_availability(event.asset, event.metric_key).is_skippable:
+            continue
         category = _event_category(event.metric_key)
         group = ("MARKET", category) if category == "regulatory" else (event.asset, category)
         if (

@@ -115,6 +115,10 @@ def build_report_packet(
         deployment_caps = compact["effective_deployment_caps"]
     from ..data_collection import build_failed_data_fetches
 
+    acquisition_summary = getattr(acquisition, "summary", None) if acquisition is not None else None
+    if not isinstance(acquisition_summary, Mapping) and isinstance(acquisition, Mapping):
+        acquisition_summary = acquisition.get("summary")
+
     return ReportPacket(
         review_type=packet.review_type,
         market_regime=packet.market_regime,
@@ -130,6 +134,7 @@ def build_report_packet(
         critical_missing_data=packet.critical_missing_data,
         data_quality=data_quality or {},
         failed_data_fetches=build_failed_data_fetches(acquisition, review_type=packet.review_type),
+        optional_data=tuple(acquisition_summary.get("optional_data", ())) if isinstance(acquisition_summary, Mapping) else (),
         script_failures=_failed_script_executions(script_executions),
         positioning_summaries=positioning_summaries,
         btc_cycle_summary=btc_cycle_summary,
@@ -180,6 +185,7 @@ def build_final_review_output(
         pnl = calculate_portfolio_position_performance(snapshot).as_dict()
     collection = dict(acquisition_value.get("summary", {}))
     collection["failed_data_fetches"] = packet_value["failed_data_fetches"]
+    collection["optional_data"] = packet_value["optional_data"]
     result = {
         "portfolio": {
             "current_weights": packet_value["current_weights"],

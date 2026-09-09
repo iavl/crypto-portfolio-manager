@@ -60,13 +60,13 @@ class ReportFailureTests(unittest.TestCase):
     def test_single_provider_failure_keeps_final_metric_and_safe_attempt(self):
         failed = result(
             "ETH",
-            "fundamentals.developer_activity",
+            "fundamentals.tvl",
             reason="GitHub API rate limit exceeded GITHUB_TOKEN=fake-secret",
         )
         attempts = ({
             "provider": "github",
             "asset": "ETH",
-            "metric_keys": ["fundamentals.developer_activity"],
+            "metric_keys": ["fundamentals.tvl"],
             "status": "FAILED",
             "error_code": "HTTP_403_RATE_LIMIT",
             "reason": "rate limited GITHUB_TOKEN=fake-secret",
@@ -208,11 +208,11 @@ class ReportFailureTests(unittest.TestCase):
         ])
 
     def test_report_packet_round_trip_and_immutability(self):
-        failed = result("ETH", "fundamentals.developer_activity", reason="provider unavailable")
+        failed = result("ETH", "fundamentals.tvl", reason="provider unavailable")
         acq = acquisition((failed,), attempts=({
             "provider": "github",
             "asset": "ETH",
-            "metric_keys": ["fundamentals.developer_activity"],
+            "metric_keys": ["fundamentals.tvl"],
             "status": "FAILED",
             "error_code": "HTTP_500",
         },))

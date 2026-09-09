@@ -15,7 +15,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness", "trend_enabled", "can_reuse", "cached_observation_id", "reason"],
+        "required": ["asset", "metric_key", "factor", "value_type", "unit", "critical", "freshness", "trend_enabled", "can_reuse", "cached_observation_id", "reason", "history_requirement", "fallback_mode"],
         "properties": {
           "asset": {"type": "string", "minLength": 1},
           "metric_key": {"type": "string", "minLength": 1},
@@ -24,12 +24,23 @@
           "unit": {"type": ["string", "null"]},
           "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT", "STRUCTURAL_RISK"]},
           "context_group": {"type": ["string", "null"]},
+          "fallback_mode": {"enum": ["STRUCTURED_ONLY", "WEB_ALLOWED"]},
           "critical": {"type": "boolean"},
           "freshness": {"type": ["string", "number"]},
           "trend_enabled": {"type": "boolean"},
           "can_reuse": {"type": "boolean"},
           "cached_observation_id": {"type": ["string", "null"]},
-          "reason": {"type": "string"}
+          "reason": {"type": "string"},
+          "history_requirement": {
+            "type": "object",
+            "required": ["mode", "days", "tolerance_days"],
+            "properties": {
+              "mode": {"enum": ["CURRENT", "BOUNDED", "FULL_AVAILABLE"]},
+              "days": {"type": ["integer", "null"], "minimum": 1},
+              "tolerance_days": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": false
       }

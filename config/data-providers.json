@@ -14,13 +14,10 @@
       "enabled": "AUTO",
       "api_key_env": "L2BEAT_API_KEY"
     },
+    "ultrasound_money": {"enabled": true},
     "etherscan": {
       "enabled": "AUTO",
       "api_key_env": "ETHERSCAN_API_KEY"
-    },
-    "beaconchain": {
-      "enabled": "AUTO",
-      "api_key_env": "BEACONCHAIN_API_KEY"
     },
     "alternative_me": {"enabled": true},
     "chain_liveness": {"enabled": true},
@@ -62,6 +59,8 @@
     "ethereum_l2": 21600,
     "ethereum_da": 21600,
     "ethereum_valuation": 86400,
+    "ultrasound": 21600,
+    "etherscan": 86400,
     "macro": 86400,
     "default": 3600
   },

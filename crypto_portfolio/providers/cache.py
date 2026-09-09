@@ -240,6 +240,13 @@ class ProviderCache:
         if as_of is not None:
             cutoff = parse_timestamp(_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of, "as_of"))
             range_end = _range_end(record.get("observed_range"))
+            if (
+                isinstance(request, ProviderRequest)
+                and request.parameters.get("history_mode") == "FULL_AVAILABLE"
+                and range_end is not None
+                and parse_timestamp(range_end) < cutoff
+            ):
+                return None
             if range_end is None:
                 if parse_timestamp(record["fetched_at"]) > cutoff:
                     return None
@@ -263,6 +270,54 @@ class ProviderCache:
         if record is None or payload is None:
             return None
         return record
+
+    def load_full_history(
+        self,
+        request: ProviderRequest,
+        *,
+        as_of: str | datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Find a cached full-history payload covering the requested cutoff."""
+        identity = request_identity(request)
+        directory = self.root / "responses" / _safe_component(identity["provider"], "provider") / "sha256"
+        if not directory.is_dir() or request.parameters.get("history_mode") != "FULL_AVAILABLE":
+            return None
+        cutoff = parse_timestamp(_timestamp(as_of.isoformat() if isinstance(as_of, datetime) else as_of, "as_of")) if as_of is not None else None
+        matches: list[dict[str, Any]] = []
+        for path in directory.glob("*.json"):
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+                cached_identity = record.get("request_identity", {})
+                payload = record.get("payload")
+                raw = payload.get("provider_payload") if isinstance(payload, Mapping) else None
+                if (
+                    cached_identity.get("provider") != identity["provider"]
+                    or cached_identity.get("dataset") != identity["dataset"]
+                    or cached_identity.get("asset") != identity["asset"]
+                    or (cached_identity.get("parameters") or {}).get("history_mode") != "FULL_AVAILABLE"
+                    or not set(identity["metric_keys"]).issubset(cached_identity.get("metric_keys", ()))
+                    or not isinstance(raw, Mapping)
+                    or record.get("content_hash") != content_hash(payload)
+                ):
+                    continue
+                rows = raw.get("data", raw.get("rows", ()))
+                observed = [
+                    _timestamp(row.get("time", row.get("timestamp")), "history observation")
+                    for row in rows
+                    if isinstance(row, Mapping) and row.get("time", row.get("timestamp")) is not None
+                ]
+                if not observed:
+                    continue
+                end = max(observed, key=parse_timestamp)
+                matches.append({
+                    "provider_payload": raw,
+                    "diagnostics": payload.get("diagnostics", {}) if isinstance(payload, Mapping) else {},
+                    "covered_through": end,
+                    "needs_tail": cutoff is not None and parse_timestamp(end) < cutoff,
+                })
+            except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+                continue
+        return max(matches, key=lambda item: parse_timestamp(item["covered_through"]), default=None)
 
     def quarantine(self, request: ProviderRequest | Mapping[str, Any]) -> Path | None:
         path = self.response_path(request)

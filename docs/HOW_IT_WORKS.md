@@ -378,3 +378,21 @@ python3 -m unittest discover -s tests -v
 ruff check .
 python3 -m compileall crypto_portfolio scripts
 ```
+
+## 本轮数据获取修复
+
+Metric history 由 `crypto_portfolio/metric_history_requirements.py` 显式拥有：
+30D/90D/180D 请求分别使用约 45D/105D/195D，365D 使用约 380D，
+`btc_valuation.mvrv_zscore` 使用 `FULL_AVAILABLE`。240D 只属于执行层
+OHLCV，不会截断货币、tokenomics 或 valuation 历史。
+
+Coin Metrics 在一个 bundle 中按 metric 保留成功值和独立 diagnostics；
+Community 是 no-key 首选，Pro 只是可选 fallback。数值指标使用
+`STRUCTURED_ONLY`，不会被转换成随机 Web fallback。ETH 30D burn 使用
+Ultrasound 的 `d30.rate.eth_per_minute`，Etherscan 只作为可选当前 supply/
+cumulative burn 来源；缺少同源、日期对齐的累计快照时不制造窗口值。
+
+EventScanner 可注入 `StructuredEventTransport`，使用 bounded GitHub、RSS/Atom、
+Discourse JSON 和 allowlisted BNB Governor RPC。Transport 只发现并去重候选，
+`LUNA_MAX` 只判断候选 materiality；同 authority 的 URL 以 source group 完成
+覆盖，独立安全域仍分别保留。

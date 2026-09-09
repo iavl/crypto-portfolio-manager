@@ -28,6 +28,7 @@ TVS_PATH = "/v1/tvs"
 ACTIVITY_PATH = "/v1/activity"
 
 _KEYS = {"eth.l2.tvs_usd", "eth.l2.activity_30d"}
+MAX_PROJECT_DETAILS = 50
 
 
 def _now(clock: Any | None = None) -> str:
@@ -228,7 +229,12 @@ class L2BeatProvider:
             ids = ethereum_project_ids(project_payload)
         except ProviderUnsupportedMetric:
             details = []
-            for row in _rows(project_payload):
+            project_rows = _rows(project_payload)
+            if len(project_rows) > MAX_PROJECT_DETAILS:
+                raise ProviderInsufficientHistory(
+                    "L2BEAT project host-chain classification exceeds the bounded detail budget"
+                )
+            for row in project_rows:
                 project_id = _project_id(row)
                 if project_id:
                     details.append(self._get(f"/v1/project/{project_id}"))
@@ -268,6 +274,7 @@ __all__ = [
     "ACTIVITY_PATH",
     "BASE_URL",
     "L2BeatProvider",
+    "MAX_PROJECT_DETAILS",
     "OPENAPI_PATH",
     "PROJECTS_PATH",
     "TVS_PATH",

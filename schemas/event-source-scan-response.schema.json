@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/event-source-scan-response.schema.json",
   "title": "Structured event source scan response",
   "type": "object",
-  "required": ["source_id", "reachable", "checked_at", "items", "error", "conflict"],
+  "required": ["source_id", "reachable", "checked_at", "items", "error", "conflict", "complete_for_source"],
   "properties": {
     "source_id": {"type": "string", "minLength": 1},
     "reachable": {"type": "boolean"},
@@ -13,18 +13,24 @@
       "items": {
         "type": "object",
         "properties": {
+          "external_id": {"type": "string", "minLength": 1},
           "title": {"type": "string", "minLength": 1},
           "published_at": {"type": "string", "format": "date-time"},
           "canonical_url": {"type": "string", "format": "uri"},
           "summary": {"type": "string", "minLength": 1},
           "materiality": {"oneOf": [{"type": "boolean"}, {"type": "string"}]},
-          "affected_assets": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          "affected_assets": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "severity": {"enum": ["CLEAR", "WATCH", "ELEVATED", "CRITICAL"]},
+          "relevance": {"enum": ["RELEVANT", "IRRELEVANT", "UNKNOWN"]},
+          "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "source_group": {"type": "string", "minLength": 1}
         },
         "additionalProperties": false
       }
     },
     "error": {"type": ["string", "null"]},
-    "conflict": {"type": "boolean"}
+    "conflict": {"type": "boolean"},
+    "complete_for_source": {"type": "boolean"}
   },
   "additionalProperties": false
 }

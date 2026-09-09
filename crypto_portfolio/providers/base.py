@@ -273,6 +273,12 @@ class ProviderRequest:
             "freshness_seconds": self.freshness_seconds,
         }
 
+    @property
+    def history_cohort(self) -> str:
+        mode = self.parameters.get("history_mode", "CURRENT")
+        days = self.parameters.get("history_days")
+        return f"{mode}:{days if days is not None else 'CURRENT'}"
+
 
 @dataclass(frozen=True)
 class ProviderResponse:
@@ -303,6 +309,16 @@ class ProviderResponse:
             "network_requests": self.network_requests,
             "diagnostics": {key: dict(value) for key, value in (self.diagnostics or {}).items()},
         }
+
+    def __iter__(self):
+        """Allow simple callers to iterate successful observations."""
+        return iter(self.observations)
+
+    def __len__(self) -> int:
+        return len(self.observations)
+
+    def __getitem__(self, index: int) -> Mapping[str, Any]:
+        return self.observations[index]
 
 
 class MarketDataProvider(Protocol):

@@ -148,9 +148,10 @@ class EventScannerTests(unittest.TestCase):
             "BTC", "security", AS_OF,
             responses=responses(scanner, "BTC", "security", reachable_ids={"bitcoin-core-security"}),
         )
-        self.assertEqual(partial.status, "INSUFFICIENT_SOURCE_COVERAGE")
-        self.assertAlmostEqual(partial.coverage, 1 / 3)
-        self.assertEqual(partial.confidence, "LOW")
+        self.assertEqual(partial.status, "NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES")
+        self.assertEqual(partial.coverage, 1.0)
+        self.assertEqual(partial.confidence, "HIGH")
+        self.assertEqual(partial.source_redundancy["independent_groups"], 1)
 
     def test_material_event_is_retained(self):
         scanner = EventScanner()
@@ -397,9 +398,8 @@ class EventScannerTests(unittest.TestCase):
             event_source_scan_responses=(response,),
         )
         self.assertEqual(second.event_scan_requests, ())
-        self.assertFalse(second.ready_for_scoring)
-        self.assertEqual(second.results[0].status, "FAILED")
-        self.assertIn("INSUFFICIENT_SOURCE_COVERAGE", second.results[0].event.reason)
+        self.assertTrue(second.ready_for_scoring)
+        self.assertEqual(second.results[0].status, "SUCCESS")
 
     def test_cache_only_missing_hard_critical_scan_is_not_scoring_ready(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (

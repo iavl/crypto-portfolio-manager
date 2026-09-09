@@ -29,8 +29,9 @@ those contracts; it is not a second schema or routing implementation.
 | Blobscan | Ethereum blob demand history | None | blob count, bytes, blob transactions, utilization | ETH-specific public route; RPC is a protocol cross-check |
 | L2BEAT | Ethereum-secured L2 context | `L2BEAT_API_KEY` via official `apiKey` query parameter | filtered L2 TVS and activity | ETH-specific route; current OpenAPI contract and host-chain classification are required |
 | Ethereum JSON-RPC | canonical execution fields | None | `baseFeePerGas`, `gasUsed`, `blobGasUsed`, `excessBlobGas` | bounded protocol cross-check; no per-block review fan-out |
+| Ultrasound Money | ETH burn-rate history | None | public `d30.rate.eth_per_minute` | structured 30D burn route; medium confidence unless methodology changes |
 | Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` current fields | optional; not historical burn authority |
-| beaconcha.in | validator queues/entities | `BEACONCHAIN_API_KEY` | optional queue/context fields | optional/context-only; never required for scoring |
+| Beaconchain | not registered | N/A | no stable aggregate contract verified | intentionally omitted; staking metrics remain optional |
 | EventScanner | current security/governance/regulatory scans | None | event status and source coverage | fixed source catalog; no generic fallback |
 | LunarCrush | social context | `LUNARCRUSH_API_KEY` | no active adapter | unavailable/optional; remains skipped |
 
@@ -52,9 +53,10 @@ derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
 Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
 DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Coin Metrics for
 supported exchange attribution and network data; and
-the fixed EventScanner catalog for events. ETH monetary/staking/realized
-valuation routes use catalog-aware Coin Metrics with bounded Ethereum protocol
-helpers where canonical block batches are available; growthepie owns L2 rent/DA,
+the fixed EventScanner catalog for events. ETH monetary/realized valuation routes
+use catalog-aware Coin Metrics with Ultrasound and optional Etherscan fallbacks;
+staking routes require an exact aggregate source and are currently optional;
+growthepie owns L2 rent/DA,
 Blobscan owns blob history, L2BEAT owns explicitly Ethereum-secured L2 TVS and
 activity, and SoSoValue owns structured ETH ETF flow/AUM. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
@@ -201,7 +203,7 @@ support, not this document, decides whether a particular asset/metric is usable.
 | Data group | Implemented inputs |
 |---|---|
 | Market-cap fallback | `CapMrktEstUSD` → `valuation.market_cap` only |
-| Network | `AdrActCnt`, `TxTfrValAdjUSD`, `FeeTotUSD`, `TxCnt` → on-chain metrics |
+| Network | Catalog-checked `AdrActCnt`, `TxTfrValAdjUSD`, `FeeTotUSD`, `TxCnt` → on-chain metrics |
 | BTC cycle | MVRV, MVRV z-score, realized price, SOPR, LTH/STH, NUPL inputs |
 | Tokenomics | `IssTotNtv`, `SplyCur` for annualized emissions and supply growth |
 | Exchange attribution | `FlowInExUSD` and `FlowOutExUSD` for `flows.exchange_netflow` |
@@ -213,8 +215,11 @@ for it, and unsupported catalog combinations remain unavailable.
 For BTC-native valuation, the provider checks the Community catalog for
 `CapMVRVCur`, `CapMVRVZ`, `CapRealUSD`, `CapMrktCurUSD`, `SplyCur`, and
 `PriceRealizedUSD` at `btc`/`1d`. MVRV and realized price are derived in Python
-from free primitives when the exact metric is unavailable. `SOPR` and `NUPL`
-are context-only holder/cycle inputs, not BTC base-score factors.
+from free primitives when the exact metric is unavailable. MVRV Z is derived
+only when aligned `CapMrktCurUSD` and `CapRealUSD` history is present; otherwise
+it is optional and is never replaced by Web snippets. `SOPR` and `NUPL` are
+context-only holder/cycle inputs, not BTC base-score factors. Community is
+no-key first and authenticated Pro remains optional.
 
 ## FRED
 
@@ -297,11 +302,39 @@ details, and aggregates only `hostChain=Ethereum` projects from the documented
 `TvsChartDataPoint` and `ActivityChartDataPoint` arrays.
 
 Coin Metrics Community is checked first for catalog-supported ETH `SplyCur`,
-issuance, staking, MVRV, realized-cap, and realized-price primitives; Pro is
-the configured fallback. Python derives supply growth, staking ratios,
-exchange-flow/market-cap, staking-flow/supply, and ETH flow/AUM ratios. Provider
-failure, unsupported catalog metrics, missing denominators, and conflicting
-rows remain unavailable; they never become zero or neutral positive evidence.
+`IssTotNtv`, MVRV, realized-cap, and realized-price primitives; Pro is the
+configured fallback. The current Community catalog does not provide the
+staking primitives required to name a value "active effective stake", so
+staking quantity/change/APR/participation metrics are optional until an exact
+aggregate source is configured. Python derives supply growth,
+exchange-flow/market-cap, active-stake-change/supply, and ETH flow/AUM ratios.
+Provider failure, unsupported catalog metrics, missing denominators, and
+conflicting rows remain unavailable; they never become zero or neutral
+positive evidence.
+Qualitative ETH structural-risk evidence may use a bounded Web fallback when no
+structured source is available; it remains non-scoring and is never treated as
+deterministic numerical evidence.
+
+### ETH monetary providers
+
+`UltrasoundMoneyProvider` uses the public
+`GET https://ultrasound.money/api/v2/fees/burn-rates` contract. The `d30.rate`
+`eth_per_minute` value is converted deterministically with
+`* 60 * 24 * 30`; `since_merge` and `since_burn` are never relabeled as 365D.
+Etherscan v2 is optional and uses `stats/ethsupply2` with `chainid=1`; only the
+documented `EthSupply` and `BurntFees` counters are accepted. Cumulative burn
+snapshots are persisted before any same-source, date-aligned window delta is
+derived. Missing history is `INSUFFICIENT_HISTORY`, not a fabricated value.
+
+### Structured event transports
+
+The event catalog can use bounded GitHub releases/advisories/commits, RSS/Atom,
+Aave Discourse JSON, and the allowlisted BNB Governor RPC contract
+`0x0000000000000000000000000000000000002004`. Transport code only returns
+metadata candidates. Python filters lookback and deduplicates; `LUNA_MAX`
+classifies bounded candidates for materiality. A complete reachable source with
+zero candidates is a valid empty response. Same-authority URLs share a
+`source_group`; independent security domains do not.
 
 ### L2BEAT authentication contract
 
@@ -384,6 +417,12 @@ provider-cache/responses/<provider>/sha256/<request-hash>.json
 provider-cache/series/<provider>/<series-key-hash>/manifest.json
 market-data/sha256/<ohlcv-hash>.json
 ```
+
+`FULL_AVAILABLE` Coin Metrics responses retain a validated public provider
+payload inside the content-addressed cache. Historical replay reparses that
+payload at the requested `as_of`; a later cutoff must not silently reuse a
+payload that ends before the cutoff. The router requests only the missing
+daily tail, merges it with the cached payload, and reparses the full history.
 
 Mutable response TTLs come from `config/data-providers.json` and are bounded by
 metric freshness. Historical OHLCV and other verified series are reusable and
