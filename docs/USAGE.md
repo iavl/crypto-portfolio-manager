@@ -102,7 +102,7 @@ $crypto-portfolio-manager
 用于安全、协议、治理、监管或其他可能改变投资 thesis 的事件。事件扫描会
 使用固定的 source catalog，并明确记录来源覆盖率。
 
-### Dry run
+### 试运行
 
 要求不改变本地历史时使用 dry run：
 
@@ -133,7 +133,7 @@ $crypto-portfolio-manager
 - `STALE`、`FAILED`、`SKIPPED`、Position P&L、NAV Return 和成本数据覆盖率
   都会说明其对 confidence 和交易资格的影响。
 
-## 5. Debug 报告与脚本日志
+## 5. 调试报告与脚本日志
 
 复盘中实际执行的仓库脚本统一通过包装器运行：
 
@@ -380,7 +380,7 @@ python3 -m compileall crypto_portfolio scripts
 出现缺失、过期、冲突或来源不可用时，报告必须保留状态和对 confidence、
 交易资格及最终 Action 的影响。未知数据不会被默认为安全，也不会被填成零。
 
-## Confidence 与当前状态检查
+## 信心与当前状态检查
 
 以下命令只读运行时目录，不抓取数据、不下单：
 

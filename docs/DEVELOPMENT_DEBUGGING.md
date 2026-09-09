@@ -113,7 +113,7 @@ python3 scripts/providers.py --doctor coingecko
 
 凭证存在不代表 Provider 健康：DNS、TLS、plan 权限或上游规范化仍可能不可用。
 
-## Proxy 与 TLS 排查
+## 代理与 TLS 排查
 
 客户端要求证书和主机名校验。如果本地信任库不完整，请提供可信 CA bundle：
 
@@ -125,7 +125,7 @@ python3 scripts/providers.py --doctor binance
 不要使用 `verify=False`、未验证的 SSL context 或 `curl -k`。TLS 失败代表证据
 不可用，不代表链或 Provider 已停止。
 
-## Rate limit 与重试
+## 速率限制与重试
 
 `HTTP_429` 和有限的 `HTTP_403_RATE_LIMIT` 只会对幂等请求进行重试。重试延迟
 遵循 `Retry-After`；否则使用有上限的指数 full jitter。永久性 4xx、plan、
@@ -135,7 +135,7 @@ Router 在同一 Provider 出现三次可重试失败后，会打开该 Provider
 60 秒。断路器打开时发出 `CIRCUIT_OPEN` 并继续执行配置的 fallback，不会抹掉原始
 失败原因。
 
-## 缓存与 fallback 排查
+## 缓存与回退排查
 
 需要证明流程离线时使用 `CACHE_ONLY`。`REFRESH` 会绕过可变响应缓存。缺失、
 过期、损坏或 unsupported 数据仍保持不可用，绝不会被转换成零。Provider attempt
@@ -160,7 +160,7 @@ JSON 响应。请求头、cookie、authorization 值、query credential 和原�
 回放请求必须匹配 recording 的 method 和脱敏 endpoint；不匹配时会失败，不会静默
 返回错误 payload。
 
-## 离线、contract 与 smoke 测试
+## 离线、契约与冒烟测试
 
 普通单元测试不得访问互联网：
 
@@ -168,7 +168,7 @@ JSON 响应。请求头、cookie、authorization 值、query credential 和原�
 python3 -m unittest discover -s tests -v
 ```
 
-Live contract 检查必须显式执行且请求保持最小化：
+实时契约检查必须显式执行且请求保持最小化：
 
 ```bash
 python3 scripts/providers.py --contract coingecko
@@ -176,7 +176,7 @@ python3 scripts/providers.py --contract all
 ```
 
 缺少可选 credential 时标记为 `SKIPPED`/`NOT_READY`；已提供但被拒绝的 credential、
-schema 变更或规范化失败则属于失败。Smoke 检查使用生产 Router 和 `REFRESH`：
+schema 变更或规范化失败则属于失败。冒烟检查使用生产 Router 和 `REFRESH`：
 
 ```bash
 python3 scripts/providers.py --smoke ETH --metric market.spot_price
@@ -185,7 +185,7 @@ python3 scripts/providers.py --smoke ETH --metric market.spot_price
 结果会报告 chain、attempts、选中的 Provider、网络请求数、缓存命中数、fallback 数、
 最终 status 和 unresolved diagnostics，不输出原始市场 payload。
 
-## Debug 报告集成
+## 调试报告集成
 
 需要把 live 或 contract 命令结果纳入报告时，使用包装器：
 
@@ -208,7 +208,7 @@ schema 和 normalization 失败。
 
 ## 新增 Provider
 
-Provider addition 只有同时包含以下内容才算完成：
+新增 Provider 只有同时包含以下内容才算完成：
 
 ```text
 adapter、config、capabilities、route、readiness/doctor 行为、

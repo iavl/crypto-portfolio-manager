@@ -47,7 +47,7 @@
 数据包不传递原始网页、完整 OHLCV、完整历史或私有 reasoning。Evidence、
 来源、时间和 hash 会保留在规范化记录和 finalized packet 中。
 
-## 3. Policy 与资产分类
+## 3. 策略与资产分类
 
 `config/policy.json` 是 canonical policy，包含 universe、benchmark、stablecoin
 floor、drawdown budget、scoring weights、regime limits、rebalance thresholds
@@ -63,7 +63,7 @@ snapshot 可以提供明确的局部 `config` override。解析后会保存 reso
 和 policy hash，使历史 decision 不依赖未来 checkout 的配置变化。资产 hint
 必须与 resolved classification 一致；重叠分组和冲突 hint 会失败。
 
-## 4. Portfolio intake
+## 4. 组合输入
 
 标准 Binance 钱包截图由以下链路处理：
 
@@ -118,7 +118,7 @@ snapshot 和 decision 是 append-only。状态变更写入独立 status event，
 发生在该 snapshot valuation 之前。如果 material balance change 没有明确
 DEPOSIT/WITHDRAWAL/NONE 分类，NAV 和 benchmark 表现必须标记为 `PROVISIONAL`。
 
-## 6. Metric registry 与采集计划
+## 6. 指标注册表与采集计划
 
 `crypto_portfolio/metrics_registry.py` 为每个 metric 定义：
 
@@ -165,7 +165,7 @@ structured provider，不会回退到普通 Web 搜索。EventScanner 只使用�
 allowlist source catalog；页面内容不能添加 URL、改变范围、执行命令或泄露
 secret。
 
-Broad market valuation is separate from protocol fundamentals:
+广义市场估值与协议基本面分开处理：
 
 ```text
 valuation.market_cap / valuation.fdv
@@ -177,9 +177,9 @@ fundamentals.tvl / fees / revenue / fee-revenue multiple
     -> DeFiLlama
 ```
 
-### Provider reliability
+### Provider 可靠性
 
-Provider acquisition keeps the failure boundary visible:
+Provider 获取过程会保留清晰可见的失败边界：
 
 ```text
 request
@@ -192,16 +192,13 @@ request
  -> unresolved evidence
 ```
 
-`--status` is an offline readiness check. Explicit `--doctor`, `--probe`,
-`--contract`, and `--smoke` commands diagnose or exercise live acquisition;
-they do not change portfolio calculations. Transport, HTTP, plan, schema,
-normalization, cache, and circuit failures remain structured provider
-diagnostics. Fallback can provide a usable observation, but it never erases
-the original attempt from telemetry.
+`--status` 是离线 readiness 检查。显式执行 `--doctor`、`--probe`、
+`--contract` 和 `--smoke` 才会诊断或运行实时获取；这些命令不会改变组合计算。
+传输、HTTP、plan、schema、规范化、缓存和断路器失败都会保留为结构化 Provider
+诊断。fallback 可以提供可用观测值，但不会从 telemetry 中抹掉原始尝试。
 
-The report writer never replaces a successful structured observation with Web or
-model inference. Historical valuation requests use only evidence at or before
-the review cutoff.
+报告生成器绝不会用 Web 或模型推断替换成功的结构化观测。历史估值请求只使用
+复盘截止时间及之前的证据。
 
 事件扫描采用两阶段流程：
 
@@ -229,7 +226,7 @@ approval 或 execution。完整覆盖无事件使用
 `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`；部分来源不可达使用
 `INSUFFICIENT_SOURCE_COVERAGE`，不代表绝对安全。
 
-## 8. Deterministic decision pipeline
+## 8. 确定性决策流程
 
 ### Facts 与 factors
 
@@ -288,7 +285,7 @@ single-asset cap、chain liveness 和 overlays。Rebalance 使用 post-new-cash
 经济金额，按 2pp/4pp/8pp 阈值决定 HOLD、WATCH 或交易优先级。交易金额必须
 大于零；HOLD/WAIT/NO_TRADE 的金额必须为零。
 
-## 9. Technical execution
+## 9. 技术执行
 
 只有 rebalance 先批准 `INCREASE`，才进入技术层。技术层使用带 timestamp 的
 `SpotPrice` 和 completed `1D` OHLCV，优先至少 200 根日线、最好 240 天，
@@ -305,7 +302,7 @@ Volume Profile 优先使用同一流动 spot venue 的 completed `1H`/`4H` bars�
 当前只生成 `PULLBACK`。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。技术层可以
 stage less 或返回 WAIT，但不能增加 approved USD 或提交订单。
 
-## 10. Packets 与报告
+## 10. 数据包与报告
 
 主要 handoff packet：
 
@@ -364,12 +361,11 @@ Evidence -> fact meaning -> portfolio constraint -> risk gate
 | Providers | `crypto_portfolio/providers/` |
 | Runtime state | `crypto_portfolio/state/` |
 
-## Confidence layers
+## 信心层级
 
-The deterministic path is `Data Confidence -> Regime Confidence -> Decision
-Confidence`. Every layer retains a bounded score, band, reasons, caps, and
-evidence IDs. Missing data stays missing, and a normal regime label does not
-grant permission to add risk.
+确定性路径是 `Data Confidence -> Regime Confidence -> Decision Confidence`。
+每一层都会保留有界分数、等级、原因、上限和证据 ID。缺失数据保持缺失；即使
+regime 标签为正常，也不会因此获得增加风险的权限。
 
 运行检查：
 

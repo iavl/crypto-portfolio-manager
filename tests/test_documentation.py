@@ -16,11 +16,14 @@ class DocumentationTests(unittest.TestCase):
         skill = ROOT / "SKILL.md"
         self.assertTrue(skill.is_file())
         self.assertIn("name: crypto-portfolio-manager", skill.read_text(encoding="utf-8"))
-        self.assertIn("[Usage Guide](docs/USAGE.md)", (ROOT / "README.md").read_text(encoding="utf-8"))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("[使用指南](docs/USAGE.md)", readme)
         self.assertIn(
             "[中文术语表](docs/GLOSSARY.zh-CN.md)",
-            (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"),
+            readme,
         )
+        self.assertNotIn("[English", readme)
+        self.assertFalse((ROOT / "README.zh-CN.md").exists())
         self.assertIn(
             "[中文术语表](GLOSSARY.zh-CN.md)",
             (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8"),
@@ -31,7 +34,6 @@ class DocumentationTests(unittest.TestCase):
             "docs/HOW_IT_WORKS.md",
             "docs/DEVELOPMENT_DEBUGGING.md",
             "docs/GLOSSARY.zh-CN.md",
-            "README.zh-CN.md",
             "config/policy.json",
             "references/investment-policy.md",
             "references/investment-strategy.md",
@@ -74,7 +76,7 @@ class DocumentationTests(unittest.TestCase):
         with (ROOT / "pyproject.toml").open("rb") as stream:
             project = tomllib.load(stream)
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
-        self.assertIn("Python 3.11 or newer", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("Python 3.11 或更高版本", (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_data_sources_document_source_policy(self):
         source_policy = (ROOT / "references/data-sources.md").read_text(encoding="utf-8")
@@ -108,7 +110,6 @@ class DocumentationTests(unittest.TestCase):
         paths = (
             ROOT / "SKILL.md",
             ROOT / "README.md",
-            ROOT / "README.zh-CN.md",
             ROOT / "docs" / "USAGE.md",
             ROOT / "docs" / "HOW_IT_WORKS.md",
             ROOT / "references" / "data-sources.md",
@@ -186,15 +187,13 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIn(text, guide)
         self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"))
         self.assertIn("DEVELOPMENT_DEBUGGING.md", (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8"))
 
     def test_installation_docs_are_concise_and_link_to_usage_guide(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         guide = (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8")
 
-        for content in (readme, readme_zh):
+        for content in (readme,):
             for text in (
                 "git clone https://github.com/iavl/crypto-portfolio-manager.git",
                 "cd crypto-portfolio-manager",
@@ -234,7 +233,7 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(script.is_file())
         self.assertTrue(os.access(script, os.X_OK))
         self.assertIn("./install.sh", readme)
-        self.assertIn("refuses to overwrite", readme)
+        self.assertIn("拒绝覆盖", readme)
 
         with tempfile.TemporaryDirectory() as directory:
             temporary_root = Path(directory)
@@ -258,7 +257,6 @@ class DocumentationTests(unittest.TestCase):
             for relative_path in (
                 "SKILL.md",
                 "README.md",
-                "README.zh-CN.md",
                 "docs/USAGE.md",
                 "docs/HOW_IT_WORKS.md",
                 "docs/GLOSSARY.zh-CN.md",
@@ -284,6 +282,7 @@ class DocumentationTests(unittest.TestCase):
                 "pyproject.toml",
                 "AGENTS.md",
                 "plan.md",
+                "README.zh-CN.md",
             ):
                 with self.subTest(excluded_path=excluded_path):
                     self.assertFalse((installed / excluded_path).exists())
@@ -435,11 +434,9 @@ class DocumentationTests(unittest.TestCase):
     def test_strategy_navigation_and_local_markdown_links(self):
         strategy_link = "references/investment-strategy.md"
         self.assertIn(strategy_link, (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn(strategy_link, (ROOT / "README.zh-CN.md").read_text(encoding="utf-8"))
 
         paths = (
             ROOT / "README.md",
-            ROOT / "README.zh-CN.md",
             ROOT / "references" / "investment-strategy.md",
             ROOT / "references" / "investment-policy.md",
             ROOT / "references" / "scoring-model.md",
@@ -465,7 +462,6 @@ class DocumentationTests(unittest.TestCase):
             ROOT / "docs",
             ROOT / "references",
             ROOT / "README.md",
-            ROOT / "README.zh-CN.md",
             ROOT / "SKILL.md",
             ROOT / "AGENTS.md",
         )

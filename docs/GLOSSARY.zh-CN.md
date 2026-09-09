@@ -1,4 +1,4 @@
-[使用指南](USAGE.md) · [工作原理](HOW_IT_WORKS.md) · [简体中文 README](../README.zh-CN.md)
+[使用指南](USAGE.md) · [工作原理](HOW_IT_WORKS.md) · [中文 README](../README.md)
 
 # 术语表（新手版）
 

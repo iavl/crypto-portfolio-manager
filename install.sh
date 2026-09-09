@@ -8,7 +8,7 @@ skills_dir="$codex_home/skills"
 destination="$skills_dir/$skill_name"
 temporary_dir=
 
-payload_items="SKILL.md README.md README.zh-CN.md docs config references schemas crypto_portfolio scripts"
+payload_items="SKILL.md README.md docs config references schemas crypto_portfolio scripts"
 
 fail() {
     printf 'install.sh: %s\n' "$*" >&2
