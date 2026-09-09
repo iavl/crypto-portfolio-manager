@@ -402,7 +402,7 @@ def build_provider_requests(
             and not (dataset == "valuation" and as_of is not None)
             # BGeometrics exposes only a current /last scalar; its TTL cache is
             # not a substitute for the full-history Coin Metrics fallback.
-            and (requirement.mode != "FULL_AVAILABLE" or chain[0] == "bgeometrics")
+            and (requirement.mode != "FULL_AVAILABLE" or provider == "bgeometrics")
         )
         result.append(
             ProviderRequest(
