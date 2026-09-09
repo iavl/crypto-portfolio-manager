@@ -84,6 +84,35 @@ class EventScannerTests(unittest.TestCase):
             "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",
         ))
 
+    def test_required_event_sources_expose_structured_transport_metadata(self):
+        scanner = EventScanner()
+        expected = (
+            ("ETH", "security", "ethereum-foundation-security", "https://blog.ethereum.org/feed.xml", "RSS_ATOM", "ethereum-foundation-security"),
+            ("ETH", "governance", "ethereum-eips", "https://github.com/ethereum/EIPs", "GITHUB_COMMITS", "ethereum-eips"),
+            ("AAVE", "security", "aave-security", "https://governance.aave.com/c/risk/7.json", "DISCOURSE_JSON", "aave-security"),
+            ("MARKET", "regulatory", "esma-mica", "https://www.esma.europa.eu/rss.xml", "RSS_ATOM", "esma-regulatory"),
+        )
+        for asset, category, source_id, endpoint, kind, group in expected:
+            with self.subTest(source_id=source_id):
+                request = next(
+                    item for item in scanner.build_requests(asset, category, AS_OF)
+                    if item.source_id == source_id
+                )
+                self.assertEqual(request.source_url, {
+                    "ethereum-foundation-security": "https://ethereum.org/en/security/",
+                    "ethereum-eips": "https://eips.ethereum.org/",
+                    "aave-security": "https://aave.com/security",
+                    "esma-mica": "https://www.esma.europa.eu/press-news/esma-news",
+                }[source_id])
+                self.assertIn(endpoint, request.source_urls)
+                self.assertEqual(request.transport_kind, kind)
+                self.assertEqual(request.source_group, group)
+                serialized = request.as_dict()
+                self.assertEqual(serialized["source_url"], request.source_url)
+                self.assertEqual(serialized["source_urls"], list(request.source_urls))
+                self.assertEqual(serialized["transport_kind"], kind)
+                self.assertEqual(serialized["source_group"], group)
+
     def test_cftc_local_failure_remains_external_resolution_until_authoritative_response(self):
         plan = MetricCollectionPlan("EVENT_REVIEW", (
             MetricRequest("BTC", "risk.regulatory_event_status"),

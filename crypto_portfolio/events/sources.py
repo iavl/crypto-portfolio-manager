@@ -124,7 +124,9 @@ EVENT_SOURCE_CATALOG = (
     ),
     EventSource(
         "ethereum-foundation-security", "security", ("ETH",), "Ethereum Foundation", "official",
-        "https://ethereum.org/en/security/", True, name="Ethereum security", source_group="ethereum-foundation-security",
+        "https://ethereum.org/en/security/", True, name="Ethereum Foundation security announcements",
+        transport_urls=("https://blog.ethereum.org/feed.xml",), transport_kind="RSS_ATOM",
+        source_group="ethereum-foundation-security",
     ),
     EventSource(
         "geth-security-advisories", "security", ("ETH",), "go-ethereum", "official",
@@ -148,7 +150,9 @@ EVENT_SOURCE_CATALOG = (
     ),
     EventSource(
         "ethereum-eips", "governance", ("ETH",), "Ethereum EIPs", "official",
-        "https://eips.ethereum.org/", True, name="Ethereum Improvement Proposals", source_group="ethereum-eips",
+        "https://eips.ethereum.org/", True, name="Ethereum Improvement Proposals",
+        transport_urls=("https://github.com/ethereum/EIPs",), transport_kind="GITHUB_COMMITS",
+        source_group="ethereum-eips",
     ),
     EventSource(
         "ethereum-all-core-devs", "governance", ("ETH",), "Ethereum PM", "official",
@@ -162,7 +166,11 @@ EVENT_SOURCE_CATALOG = (
     ),
     EventSource(
         "aave-security", "security", ("AAVE",), "Aave", "official",
-        "https://aave.com/security", True, name="Aave security", source_group="aave-security",
+        "https://aave.com/security", True, name="Aave security and risk incidents",
+        transport_urls=(
+            "https://governance.aave.com/c/risk/7.json",
+            "https://governance.aave.com/c/risk/general/12.json",
+        ), transport_kind="DISCOURSE_JSON", source_group="aave-security",
     ),
     EventSource(
         "aave-v3-security-advisories", "security", ("AAVE",), "Aave", "official",
@@ -218,7 +226,9 @@ EVENT_SOURCE_CATALOG = (
     ),
     EventSource(
         "esma-mica", "regulatory", ("MARKET",), "ESMA", "official",
-        "https://www.esma.europa.eu/press-news/esma-news", True, name="ESMA and MiCA notices", source_group="esma-regulatory",
+        "https://www.esma.europa.eu/press-news/esma-news", True, name="ESMA and MiCA notices",
+        transport_urls=("https://www.esma.europa.eu/rss.xml",), transport_kind="RSS_ATOM",
+        source_group="esma-regulatory",
     ),
 )
 

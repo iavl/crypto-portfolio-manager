@@ -95,6 +95,14 @@ python3 scripts/events.py --smoke --asset BTC --asset ETH
 程序会拒绝未知字段、source/时间戳/URL/候选身份变化。`--smoke` 只显示事件状态、
 覆盖率、confidence、候选数和脱敏诊断。
 
+当前四个结构化 source 映射为：Ethereum Foundation security 使用 Blog RSS，
+Ethereum EIPs 使用 `ethereum/EIPs` GitHub commits，Aave security 使用
+Governance Risk Discourse JSON，ESMA/MiCA 使用 ESMA RSS。GitHub commits 使用
+请求的 `lookback_start`/`as_of` 作为 `since`/`until`；Discourse 只跟随同源的
+`more_topics_url`，达到有界分页上限时保持 incomplete。`NO_STRUCTURED_TRANSPORT`
+表示固定 source 没有配置受支持的结构化 endpoint，与
+`DNS_RESOLUTION_FAILED`、`TLS_*`、`HTTP_*`、`PROVIDER_TRANSPORT_ERROR` 不同。
+
 事件阶段状态和错误边界如下：
 
 ```text

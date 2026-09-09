@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Security update for Ethereum tooling</title>
+      <pubDate>Tue, 08 Sep 2026 00:00:00 GMT</pubDate>
+      <link>https://blog.ethereum.org/2026/09/08/security-update</link>
+      <description>A security announcement for the Ethereum ecosystem.</description>
+    </item>
+    <item>
+      <title>Community highlights</title>
+      <pubDate>Mon, 07 Sep 2026 00:00:00 GMT</pubDate>
+      <link>https://blog.ethereum.org/2026/09/07/community-highlights</link>
+      <description>Non-security community news.</description>
+    </item>
+    <item>
+      <title>Old security notice</title>
+      <pubDate>Wed, 01 Jan 2020 00:00:00 GMT</pubDate>
+      <link>https://blog.ethereum.org/2020/01/01/old-security-notice</link>
+      <description>Outside the review window.</description>
+    </item>
+  </channel>
+</rss>

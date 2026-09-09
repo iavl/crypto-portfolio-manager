@@ -437,7 +437,14 @@ Aave Discourse JSON, and the allowlisted BNB Governor RPC contract
 metadata candidates. Python filters lookback and deduplicates; `LUNA_MAX`
 classifies bounded candidates for materiality. A complete reachable source with
 zero candidates is a valid empty response. Same-authority URLs share a
-`source_group`; independent security domains do not.
+`source_group`; independent security domains do not. The current event mappings
+are Ethereum Foundation security -> Blog RSS, Ethereum EIPs -> `ethereum/EIPs`
+GitHub commits, Aave security -> Governance Risk Discourse JSON plus the Aave
+V3 advisory source, and ESMA/MiCA -> ESMA RSS. GitHub commit requests pass the
+review window as `since`/`until`; Discourse follows same-origin pagination only
+within a bounded page cap. A cap, malformed next URL, or later-page failure
+keeps the source incomplete. `NO_STRUCTURED_TRANSPORT` means no supported
+structured endpoint is configured, not DNS/TLS/HTTP/provider failure.
 
 ## EventScanner
 

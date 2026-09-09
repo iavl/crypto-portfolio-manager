@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>MiCA digital finance notice</title>
+      <pubDate>Tue, 08 Sep 2026 00:00:00 GMT</pubDate>
+      <link>https://www.esma.europa.eu/2026/09/mica-notice</link>
+      <description>Notice concerning digital finance and MiCA.</description>
+    </item>
+    <item>
+      <title>Unrelated supervisory update</title>
+      <pubDate>Mon, 07 Sep 2026 00:00:00 GMT</pubDate>
+      <link>https://www.esma.europa.eu/2026/09/supervisory-update</link>
+      <description>Unrelated ESMA news.</description>
+    </item>
+    <item>
+      <title>Old ESMA notice</title>
+      <pubDate>Wed, 01 Jan 2020 00:00:00 GMT</pubDate>
+      <link>https://www.esma.europa.eu/2020/01/old-notice</link>
+      <description>Outside the review window.</description>
+    </item>
+  </channel>
+</rss>

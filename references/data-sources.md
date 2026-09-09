@@ -272,19 +272,27 @@ Check for:
 
 The on-demand EventScanner uses a deterministic allowlist rather than a
 generic crawler. BTC security/protocol sources are Bitcoin Core security
-advisories, Core releases, and BIPs. ETH security sources are Ethereum.org
-security guidance, go-ethereum advisories, and consensus-spec advisories;
+advisories, Core releases, and BIPs. ETH security sources are Ethereum
+Foundation Blog RSS, go-ethereum advisories, and consensus-spec advisories;
 Ethereum security is not represented by one client. ETH governance sources
-are EIPs, AllCoreDevs coordination, and Ethereum Foundation protocol notices.
-AAVE security uses the official Aave security page and the Aave V3
-repository advisories; AAVE governance uses the official governance forum and
-proposal scope.
+are EIPs (via `ethereum/EIPs` GitHub commits), AllCoreDevs coordination, and
+Ethereum Foundation protocol notices. AAVE security uses Aave Governance Risk
+Discourse JSON plus the Aave V3 repository advisories; AAVE governance uses
+the official governance forum and proposal scope.
 BNB security uses the BNB Smart Chain security-advisory repository and official
 release notes; BNB governance uses the BNB Evolution Proposals repository and
 the official BNB Chain governance page. Regulatory collection remains one
-shared MARKET scan mapped to affected assets.
+shared MARKET scan mapped to affected assets, with ESMA/MiCA collected through
+the ESMA RSS feed.
 The compatible BTC metric key `risk.governance_event_status` means material
 protocol-development/governance-context changes, not DAO governance.
+
+Structured event transports remain bounded and source-specific: GitHub commit
+requests use the review window as `since`/`until`, and Aave Discourse follows
+same-origin `more_topics_url` pagination only up to its configured page cap.
+Reaching that cap leaves the source incomplete. `NO_STRUCTURED_TRANSPORT` means
+the fixed source has no configured supported structured endpoint; it is not a
+DNS, TLS, HTTP, or provider transport failure.
 
 Regulatory collection is one shared market-level scan over the configured SEC,
 CFTC, and ESMA/MiCA primary-source scope and is then mapped to affected assets.

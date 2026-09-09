@@ -235,7 +235,11 @@ python3 scripts/events.py --plan --asset BTC --asset ETH
 python3 scripts/events.py --smoke --asset BTC --asset ETH
 ```
 
-Transport 只发现 bounded candidates；没有 classifier、分类失败或覆盖不足时，
+Transport 只发现 bounded candidates；Ethereum Foundation security、Ethereum EIPs、
+Aave security 和 ESMA/MiCA 分别使用 Blog RSS、`ethereum/EIPs` GitHub commits、
+Aave Governance Risk Discourse JSON 和 ESMA RSS。GitHub commits 受
+`since`/`until` review window 限制，Discourse 只跟随同源且有界的
+`more_topics_url`；分页被截断时保持 incomplete。没有 classifier、分类失败或覆盖不足时，
 结果保持 `CLASSIFICATION_PENDING`、`FETCH_FAILED` 或
 `INSUFFICIENT_SOURCE_COVERAGE`，绝不默认成 `CLEAR`。监管源在 `MARKET` 只抓取一次，
 再按 `affected_assets` 映射到 BTC/ETH。

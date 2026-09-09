@@ -9,7 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 from ..models.time import normalize_timestamp, parse_timestamp
@@ -31,6 +31,7 @@ TRANSPORT_KINDS = (
 )
 MAX_CANDIDATES = 100
 MAX_GITHUB_PAGES = 3
+MAX_DISCOURSE_PAGES = 10
 GITHUB_PAGE_SIZE = 100
 MAX_RPC_BLOCK_RANGE = 500
 BNB_GOVERNOR_ADDRESS = "0x0000000000000000000000000000000000002004"
@@ -384,10 +385,11 @@ def _rss_candidates(text: str, spec: EventTransportSpec) -> tuple[EventCandidate
     return _dedup(candidates, spec)
 
 
-def _discourse_candidates(payload: Any, spec: EventTransportSpec) -> tuple[EventCandidate, ...]:
+def _discourse_page(payload: Any, spec: EventTransportSpec) -> tuple[tuple[EventCandidate, ...], object | None]:
     if not isinstance(payload, Mapping) or not isinstance(payload.get("topic_list"), Mapping):
         raise ProviderResponseError("Discourse response has no topic_list")
-    topics = payload["topic_list"].get("topics")
+    topic_list = payload["topic_list"]
+    topics = topic_list.get("topics")
     if not isinstance(topics, list):
         raise ProviderResponseError("Discourse response has no topic array")
     candidates = []
@@ -406,7 +408,21 @@ def _discourse_candidates(payload: Any, spec: EventTransportSpec) -> tuple[Event
             f"discourse:{topic_id}", title, published, url,
             _bounded(item.get("excerpt") or item.get("fancy_title")),
         ))
-    return _dedup(candidates, spec)
+    return _dedup(candidates, spec), topic_list.get("more_topics_url")
+
+
+def _discourse_pagination_endpoint(value: Any, base_endpoint: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ProviderResponseError("DISCOURSE_PAGINATION_INVALID")
+    base = urlsplit(base_endpoint)
+    candidate = urlsplit(urljoin(base_endpoint, value.strip()))
+    if candidate.scheme != base.scheme or candidate.netloc != base.netloc:
+        raise ProviderResponseError("DISCOURSE_PAGINATION_ORIGIN_REJECTED")
+    path = candidate.path.rstrip("/") or "/"
+    if not path.lower().endswith(".json"):
+        path += ".json"
+    query = urlencode(parse_qsl(candidate.query, keep_blank_values=True))
+    return urlunsplit((base.scheme, base.netloc, path, query, ""))
 
 
 def _rpc_candidates(payload: Any, spec: EventTransportSpec) -> tuple[EventCandidate, ...]:
@@ -476,6 +492,7 @@ class StructuredEventTransport:
         cache: EventTransportCache | None = None,
         github_token: str | None = None,
         max_pages: int = MAX_GITHUB_PAGES,
+        max_discourse_pages: int = MAX_DISCOURSE_PAGES,
     ) -> None:
         self.client = client or HttpClient()
         self.cache = cache
@@ -483,6 +500,13 @@ class StructuredEventTransport:
         if isinstance(max_pages, bool) or not isinstance(max_pages, int) or not 1 <= max_pages <= 10:
             raise ValueError("max_pages must be an integer in [1, 10]")
         self.max_pages = max_pages
+        if (
+            isinstance(max_discourse_pages, bool)
+            or not isinstance(max_discourse_pages, int)
+            or not 1 <= max_discourse_pages <= MAX_DISCOURSE_PAGES
+        ):
+            raise ValueError(f"max_discourse_pages must be an integer in [1, {MAX_DISCOURSE_PAGES}]")
+        self.max_discourse_pages = max_discourse_pages
 
     def _headers(self) -> Mapping[str, str]:
         return {"Authorization": f"Bearer {self.github_token}"} if self.github_token else {}
@@ -496,9 +520,13 @@ class StructuredEventTransport:
             payloads = []
             complete = False
             for page in range(1, self.max_pages + 1):
+                params = {"per_page": GITHUB_PAGE_SIZE, "page": page}
+                if spec.kind == "GITHUB_COMMITS":
+                    params["since"] = spec.lookback_start
+                    params["until"] = spec.as_of
                 payload = self.client.get_json(
                     endpoint,
-                    params={"per_page": GITHUB_PAGE_SIZE, "page": page},
+                    params=params,
                     headers=self._headers(),
                 )
                 if not isinstance(payload, list):
@@ -520,8 +548,52 @@ class StructuredEventTransport:
             return EventTransportResult(spec.source_id, spec.kind, spec.endpoint, True, True, checked_at, _rss_candidates(text, spec))
         if spec.kind == "DISCOURSE_JSON":
             endpoint = spec.endpoint if spec.endpoint.endswith(".json") else spec.endpoint.rstrip("/") + ".json"
-            payload = self.client.get_json(endpoint)
-            return EventTransportResult(spec.source_id, spec.kind, endpoint, True, True, checked_at, _discourse_candidates(payload, spec))
+            current_endpoint = endpoint
+            candidates: list[EventCandidate] = []
+
+            def incomplete(error: str) -> EventTransportResult:
+                return EventTransportResult(
+                    spec.source_id,
+                    spec.kind,
+                    endpoint,
+                    True,
+                    False,
+                    checked_at,
+                    _dedup(candidates, spec),
+                    error=error,
+                )
+
+            for page in range(self.max_discourse_pages):
+                try:
+                    payload = self.client.get_json(current_endpoint)
+                except Exception as exc:
+                    if page == 0:
+                        raise
+                    return incomplete(redact_log(f"PROVIDER_TRANSPORT_ERROR: {exc}") or "PROVIDER_TRANSPORT_ERROR")
+                try:
+                    page_candidates, more_topics_url = _discourse_page(payload, spec)
+                except Exception as exc:
+                    if page == 0:
+                        raise
+                    return incomplete(redact_log(f"DISCOURSE_PAGINATION_ERROR: {exc}") or "DISCOURSE_PAGINATION_ERROR")
+                candidates.extend(page_candidates)
+                if more_topics_url is None:
+                    return EventTransportResult(
+                        spec.source_id,
+                        spec.kind,
+                        endpoint,
+                        True,
+                        True,
+                        checked_at,
+                        _dedup(candidates, spec),
+                    )
+                if page == self.max_discourse_pages - 1:
+                    return incomplete("DISCOURSE_PAGINATION_LIMIT")
+                try:
+                    current_endpoint = _discourse_pagination_endpoint(more_topics_url, endpoint)
+                except Exception as exc:
+                    return incomplete(redact_log(f"DISCOURSE_PAGINATION_ERROR: {exc}") or "DISCOURSE_PAGINATION_ERROR")
+            raise AssertionError("bounded Discourse pagination did not return a result")
         if spec.kind == "RPC_LOGS":
             endpoint = spec.endpoint
             latest = self.client.post_json(
@@ -654,6 +726,7 @@ __all__ = [
     "EventTransportResult",
     "EventTransportSpec",
     "GITHUB_PAGE_SIZE",
+    "MAX_DISCOURSE_PAGES",
     "MAX_CANDIDATES",
     "MAX_RPC_BLOCK_RANGE",
     "RPC_EVENT_TOPICS",
