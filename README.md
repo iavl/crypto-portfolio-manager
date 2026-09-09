@@ -1,4 +1,3 @@
-仓库只支持当前内部契约。破坏性变更后，旧版本生成的本地状态可能需要手动重新生成。Confidence 由 Python 负责，并分为 Data -> Regime -> Decision 三层。时间戳必须带时区，执行计划必须使用带时间戳的 SpotPrice。
 
 # crypto-portfolio-manager
 
