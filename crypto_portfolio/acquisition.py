@@ -508,6 +508,15 @@ class AcquisitionManager:
         }
         routed_reasons.update(relative_reasons)
         routed_reasons.update(derived_reasons)
+        flow_state_identity = ("MARKET", "market.flow_state")
+        if (
+            any((request.asset, request.metric_key) == flow_state_identity for request in model.requests)
+            and flow_state_identity not in routed_values
+            and flow_state_identity not in routed_reasons
+        ):
+            routed_reasons[flow_state_identity] = (
+                "DERIVED_INPUT_UNAVAILABLE: missing dependency flows.etf_net_1d"
+            )
         routed_diagnostics = {
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
             for item in routed.unresolved_details

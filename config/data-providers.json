@@ -73,8 +73,8 @@
     "default": 3600
   },
   "network": {
-    "max_requests_per_review": 60,
-    "max_requests_per_provider": 30
+    "max_requests_per_review": 120,
+    "max_requests_per_provider": 60
   },
   "fallback": {
     "allow_web": true

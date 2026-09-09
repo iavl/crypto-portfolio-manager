@@ -203,6 +203,21 @@ class MetricAvailabilityTests(unittest.TestCase):
         self.assertTrue(all("ethereum/" in call[0] for call in client.calls))
         self.assertNotIn("Authorization", response.observations[0])
 
+    def test_github_activity_clamps_future_review_end_to_fetch_time(self):
+        class Client:
+            def get_json(self, _url, **_kwargs):
+                return []
+
+        fetched_at = datetime(2026, 9, 6, tzinfo=timezone.utc)
+        provider = GitHubActivityProvider(client=Client(), clock=lambda: fetched_at)
+        response = provider.collect(ProviderRequest(
+            "github", "github", "ETH",
+            {"start": "2026-08-01T00:00:00Z", "end": "2026-09-09T00:00:00Z"},
+            ("fundamentals.developer_activity",),
+        ))
+        self.assertEqual(response.observations[0]["observed_at"], "2026-09-06T00:00:00Z")
+        self.assertEqual(response.observations[0]["fetched_at"], "2026-09-06T00:00:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()

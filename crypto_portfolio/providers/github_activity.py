@@ -105,6 +105,10 @@ class GitHubActivityProvider:
             raise ProviderUnsupportedMetric(f"GitHub has no canonical repository allowlist for {request.asset}")
         fetched_at = _now(self.clock)
         end = request.parameters.get("end") or request.parameters.get("as_of") or fetched_at
+        # A live review may use a short future fence to absorb clock skew. Do
+        # not persist an observation whose fact time is after its fetch time.
+        if parse_timestamp(end) > parse_timestamp(fetched_at):
+            end = fetched_at
         start = request.parameters.get("start") or normalize_timestamp(
             (parse_timestamp(end) - timedelta(days=WINDOW_DAYS)).isoformat(),
             "start",

@@ -75,6 +75,7 @@ class MetricDependencyTests(unittest.TestCase):
             "btc_valuation.price_to_realized_price": "BTC",
             "eth_valuation.price_to_realized_price": "ETH",
             "market.breadth_state": "MARKET",
+            "market.flow_state": "MARKET",
         }
         for derived, dependencies in DERIVED_METRIC_DEPENDENCIES.items():
             with self.subTest(derived=derived):
@@ -119,6 +120,34 @@ class MetricDependencyTests(unittest.TestCase):
         self.assertEqual(result.results[0].status, "SUCCESS")
         self.assertAlmostEqual(result.observations[0].value, 2000 / 1500)
         self.assertEqual(result.observations[0].source, "python-derived")
+
+    def test_market_flow_state_expands_its_etf_flow_dependency(self):
+        plan = MetricCollectionPlan(
+            "SNAPSHOT_REVIEW",
+            (MetricRequest("MARKET", "market.flow_state"),),
+        )
+        expanded = _expand_derived_dependencies(plan)
+        self.assertEqual(
+            {(item.asset, item.metric_key) for item in expanded.requests},
+            {
+                ("MARKET", "market.flow_state"),
+                ("MARKET", "flows.etf_net_1d"),
+            },
+        )
+
+    def test_market_flow_state_missing_input_is_not_reported_as_no_provider_route(self):
+        plan = MetricCollectionPlan(
+            "SNAPSHOT_REVIEW",
+            (MetricRequest("MARKET", "market.flow_state"),),
+        )
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter({}, config=_config(), cache=ProviderCache(Path(directory) / "cache")),
+                persist=False,
+            ).run(plan, mode="CACHE_ONLY", cached_observations=(), as_of=NOW, now=NOW)
+        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertIn("DERIVED_INPUT_UNAVAILABLE", result.results[0].event.reason)
+        self.assertNotIn("NO_PROVIDER_ROUTE", result.results[0].event.reason)
 
     def test_relative_mapping_is_the_plan_source_of_truth(self):
         plan = build_metric_collection_plan(["ETH", "AAVE"])

@@ -5,6 +5,7 @@ from urllib.error import HTTPError
 
 from crypto_portfolio.providers.base import ProviderDiagnostic, ProviderRequest, ProviderUnavailable
 from crypto_portfolio.providers.circuit_breaker import CircuitBreaker, CircuitState
+from crypto_portfolio.providers.config import load_provider_config
 from crypto_portfolio.providers.health import (
     contract_providers,
     diagnostic_exit_code,
@@ -36,6 +37,11 @@ def config_for(*names):
 
 
 class ProviderReliabilityTests(unittest.TestCase):
+    def test_default_review_budget_covers_current_snapshot_plan(self):
+        config = load_provider_config(Path(__file__).parents[1] / "config" / "data-providers.json")
+        self.assertGreaterEqual(config["network"]["max_requests_per_review"], 120)
+        self.assertGreaterEqual(config["network"]["max_requests_per_provider"], 60)
+
     def test_forbidden_and_timeout_taxonomy(self):
         self.assertEqual(classify_transport_error(HTTPError("https://x", 403, "forbidden", {}, None)), "HTTP_403_ACCESS_DENIED")
         self.assertEqual(classify_transport_error(HTTPError("https://x", 403, "blocked", {"Retry-After": "1"}, None)), "HTTP_403_RATE_LIMIT")

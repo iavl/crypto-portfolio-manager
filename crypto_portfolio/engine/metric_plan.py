@@ -195,6 +195,7 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "eth.monetary.burn_to_issuance_365d": ("eth.monetary.burn_365d_eth", "eth.monetary.issuance_365d_eth"),
     "eth.monetary.burn_30d_eth": ("eth.monetary.cumulative_burn_eth",),
     "eth.monetary.burn_365d_eth": ("eth.monetary.cumulative_burn_eth",),
+    "market.flow_state": ("flows.etf_net_1d",),
     **{
         metric: (dependency,)
         for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()

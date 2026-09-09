@@ -50,6 +50,11 @@ Set `CRYPTO_PORTFOLIO_FETCH_MODE` or pass a run-level mode; the run-level choice
 wins. Runtime state defaults to `~/.local/share/crypto-portfolio-manager/` and
 can be redirected with `CRYPTO_PORTFOLIO_DATA_DIR`.
 
+The default review network budget is 120 requests per review and 60 requests
+per provider. Cache reuse still avoids network calls, and provider-specific
+rate limits, circuit breakers, authentication failures, and schema failures
+remain final diagnostics rather than being converted to success.
+
 Provider priority is deterministic: Binance then Bybit for spot/OHLCV and
 derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
 Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
