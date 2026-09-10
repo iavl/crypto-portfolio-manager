@@ -88,6 +88,7 @@
     ,"nav_performance": {"type": ["object", "null"]}
     ,"benchmark_performance": {"type": ["object", "null"]}
     ,"event_scan_summary": {"type": ["object", "null"]}
+    ,"manual_asset_contexts": {"type": "array", "items": {"$ref": "#/$defs/manualAssetContext"}}
     ,"no_trade_attribution": {"oneOf": [{"$ref": "#/$defs/noTradeAttribution"}, {"type": "null"}]}
   },
   "additionalProperties": false,
@@ -110,6 +111,21 @@
       },
       "additionalProperties": false
     },
+    "manualAssetContext": {
+      "type": "object",
+      "required": ["asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"],
+      "properties": {
+        "asset": {"type": "string", "minLength": 1},
+        "category": {"enum": ["GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"]},
+        "summary": {"type": "string", "minLength": 1},
+        "impact": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"]},
+        "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "scope": {"enum": ["CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"]},
+        "as_of": {"type": "string", "format": "date-time"},
+        "source": {"const": "MANUAL_USER_INPUT"}
+      },
+      "additionalProperties": false
+    },
     "eventRisk": {
       "type": "object",
       "required": ["state", "reasons", "evidence_ids", "unresolved"],
@@ -129,7 +145,10 @@
         "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
         "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "availability": {"enum": ["AVAILABLE", "MISSING", "NOT_APPLICABLE"]},
-        "reliability": {"type": "number", "minimum": 0, "maximum": 1}
+        "reliability": {"type": "number", "minimum": 0, "maximum": 1},
+        "freshness": {"type": ["string", "null"], "enum": ["CURRENT", "STALE", "UNKNOWN", null]},
+        "source_quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "redundancy": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
       },
       "allOf": [
         {

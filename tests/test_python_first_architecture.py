@@ -67,22 +67,21 @@ class PythonFirstArchitectureTests(unittest.TestCase):
         self.assertEqual(excluded.for_asset("LUNC"), ())
 
     def test_review_specific_criticality_is_resolved_by_plan(self):
-        governance = METRIC_REGISTRY["risk.governance_event_status"]
         security = METRIC_REGISTRY["risk.security_event_status"]
-        self.assertFalse(governance.is_critical_for("SNAPSHOT_REVIEW"))
-        self.assertFalse(governance.is_critical_for("FULL_REVIEW"))
-        self.assertTrue(governance.is_critical_for("EVENT_REVIEW"))
         self.assertTrue(all(security.is_critical_for(review) for review in ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")))
+        self.assertNotIn("risk.governance_event_status", METRIC_REGISTRY)
 
-        for review_type, expected in (("SNAPSHOT_REVIEW", ("risk.security_event_status",)), ("FULL_REVIEW", ("risk.security_event_status",)), ("EVENT_REVIEW", ("risk.governance_event_status", "risk.security_event_status"))):
+        for review_type, expected in (("SNAPSHOT_REVIEW", ("risk.security_event_status",)), ("FULL_REVIEW", ("risk.security_event_status",)), ("EVENT_REVIEW", ("risk.security_event_status",))):
             plan = MetricCollectionPlan(
                 review_type,
                 (
-                    MetricRequest("ETH", "risk.governance_event_status"),
                     MetricRequest("ETH", "risk.security_event_status"),
                 ),
             )
             self.assertEqual(plan.critical_metric_keys, expected)
+
+        with self.assertRaises(ValueError):
+            MetricRequest("ETH", "risk.governance_event_status")
 
         with self.assertRaises(ValueError):
             MetricDefinition(

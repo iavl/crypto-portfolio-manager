@@ -96,12 +96,9 @@ python3 scripts/events.py --smoke --asset BTC --asset ETH
 覆盖率、confidence、候选数和脱敏诊断。
 
 当前结构化 source 映射为：Ethereum Foundation security 使用 Blog RSS，
-Ethereum EIPs 使用 `ethereum/EIPs` GitHub commits，Aave security 使用
-Governance Risk Discourse JSON，AAVE governance 同时使用 Governance V3
-Ethereum contract `0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7` 的
-allowlisted `RPC_LOGS` 和官方 forum/proposals。AAVE governance 只有
-`ONCHAIN_AND_ONE_OFFCHAIN` 两组都满足时才是 `SUFFICIENT`；ESMA/MiCA 使用
-ESMA RSS。GitHub commits 使用
+Aave security 使用 Aave Risk Discourse JSON，ESMA/MiCA 使用 ESMA RSS。
+治理提案不再自动收集；重要治理信息请通过 `ManualAssetContext` 手工提供。
+GitHub commits 使用
 请求的 `lookback_start`/`as_of` 作为 `since`/`until`；Discourse 只跟随同源的
 `more_topics_url`，达到有界分页上限时保持 incomplete。`NO_STRUCTURED_TRANSPORT`
 表示固定 source 没有配置受支持的结构化 endpoint，与

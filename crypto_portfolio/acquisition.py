@@ -37,7 +37,6 @@ from .state.metrics import latest_usable_observation, read_metric_observations
 
 _EVENT_METRIC_KEYS = {
     "security": "risk.security_event_status",
-    "governance": "risk.governance_event_status",
     "regulatory": "risk.regulatory_event_status",
 }
 class AcquisitionResolutionRequired(RuntimeError):

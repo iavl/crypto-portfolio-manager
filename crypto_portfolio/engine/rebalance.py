@@ -385,6 +385,7 @@ def recommend_rebalance(
     policy: Policy | None = None,
     regime: str = "NORMAL",
     decision_confidence: Any | None = None,
+    deployment_caps: Mapping[str, float] | None = None,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -406,6 +407,19 @@ def recommend_rebalance(
         raise ValueError("portfolio_value must be finite and >= 0")
     if not math.isfinite(new_cash_available) or new_cash_available < 0:
         raise ValueError("new_cash_available must be finite and >= 0")
+    normalized_deployment_caps: dict[str, float] = {}
+    for raw_symbol, raw_factor in (deployment_caps or {}).items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol:
+            raise ValueError("deployment_caps contains an empty symbol")
+        if symbol in normalized_deployment_caps:
+            raise ValueError(f"deployment_caps contains duplicate symbol {symbol}")
+        if isinstance(raw_factor, bool) or not isinstance(raw_factor, (int, float)):
+            raise ValueError("deployment_caps values must be numbers")
+        factor = float(raw_factor)
+        if not math.isfinite(factor) or not 0 <= factor <= 1:
+            raise ValueError("deployment_caps values must be finite and in [0, 1]")
+        normalized_deployment_caps[symbol] = factor
 
     if isinstance(thesis_broken, Mapping):
         broken = {
@@ -544,6 +558,19 @@ def recommend_rebalance(
                             item["amount"] *= factor
                             item["rationale"] += f"; decision confidence caps deployment at {factor:.0%}"
 
+    for item in candidates:
+        if item["action"] != "INCREASE" or item["symbol"] not in normalized_deployment_caps:
+            continue
+        factor = normalized_deployment_caps[item["symbol"]]
+        if factor == 0.0:
+            item["action"] = "WAIT"
+            item["amount"] = 0.0
+            item["priority"] = "WATCH"
+            item["rationale"] = "new increase is blocked by the deployment allowance"
+        elif factor < 1.0:
+            item["amount"] *= factor
+            item["rationale"] += f"; deployment allowance caps immediate increase at {factor:.0%}"
+
     actions = [
         RebalanceAction(
             symbol=item["symbol"],
@@ -584,6 +611,7 @@ def rebalance(
     policy: Policy | None = None,
     regime: str = "NORMAL",
     decision_confidence: Any | None = None,
+    deployment_caps: Mapping[str, float] | None = None,
 ) -> RebalanceResult:
     return recommend_rebalance(
         current_weights,
@@ -594,6 +622,7 @@ def rebalance(
         policy=policy,
         regime=regime,
         decision_confidence=decision_confidence,
+        deployment_caps=deployment_caps,
     )
 
 

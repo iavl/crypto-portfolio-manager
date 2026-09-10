@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from ..metrics_registry import metric_definition
 from .confidence import ConfidenceResult, DecisionConfidence
 from .decision_packet import NoTradeAttribution, SolReview
+from .evidence import ManualAssetContext
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .time import normalize_timestamp
 
@@ -353,6 +354,7 @@ class ReportPacket:
     nav_performance: Mapping[str, Any] | None = None
     benchmark_performance: Mapping[str, Any] | None = None
     event_scan_summary: Mapping[str, Any] | None = None
+    manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -471,6 +473,18 @@ class ReportPacket:
                 if not isinstance(value, Mapping):
                     raise ValueError(f"{field_name} must be an object or null")
                 object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        contexts = self.manual_asset_contexts
+        if isinstance(contexts, ManualAssetContext) or isinstance(contexts, Mapping):
+            contexts = (contexts,)
+        if isinstance(contexts, (str, bytes)) or not isinstance(contexts, (list, tuple)):
+            raise ValueError("manual_asset_contexts must be a sequence of objects")
+        parsed_contexts = tuple(
+            item if isinstance(item, ManualAssetContext) else ManualAssetContext.from_mapping(item)
+            for item in contexts
+        )
+        if len({(item.asset, item.category, item.as_of) for item in parsed_contexts}) != len(parsed_contexts):
+            raise ValueError("manual_asset_contexts must not contain duplicate contexts")
+        object.__setattr__(self, "manual_asset_contexts", parsed_contexts)
         if self.no_trade_attribution is not None:
             value = (
                 self.no_trade_attribution
@@ -516,6 +530,7 @@ class ReportPacket:
             "nav_performance": thaw_packet_value(self.nav_performance) if self.nav_performance is not None else None,
             "benchmark_performance": thaw_packet_value(self.benchmark_performance) if self.benchmark_performance is not None else None,
             "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
+            "manual_asset_contexts": [item.as_dict() for item in self.manual_asset_contexts],
             "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
         }
 

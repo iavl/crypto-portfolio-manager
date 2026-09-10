@@ -210,8 +210,8 @@ request
 事件请求的正常运行顺序是：pass 1 生成 EventSourceScanRequest，外部阶段
 为每个请求返回一个 EventSourceScanResponse（不可达时也必须返回
 reachable=false 和有界错误），pass 2 重新运行 acquisition，随后调用
-require_scoring_ready()，最后才进入 scoring。BNB 使用固定的官方
-security/governance source catalog，监管仍复用共享 MARKET source。
+require_scoring_ready()，最后才进入 scoring。安全事件使用固定的官方
+source catalog，监管仍复用共享 MARKET source；治理提案不再自动扫描。
 
 BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d
 作为一个依赖 cohort 处理。缓存日期不一致时两侧一起刷新/重建；Python
@@ -240,9 +240,9 @@ python3 scripts/events.py --plan --asset BTC --asset ETH
 python3 scripts/events.py --smoke --asset BTC --asset ETH
 ```
 
-Transport 只发现 bounded candidates；Ethereum Foundation security、Ethereum EIPs、
-Aave security 和 ESMA/MiCA 分别使用 Blog RSS、`ethereum/EIPs` GitHub commits、
-Aave Governance Risk Discourse JSON 和 ESMA RSS。GitHub commits 受
+Transport 只发现 bounded candidates；Ethereum Foundation security、Aave
+security 和 ESMA/MiCA 分别使用 Blog RSS、Aave Risk Discourse JSON
+和 ESMA RSS。GitHub commits 受
 `since`/`until` review window 限制，Discourse 只跟随同源且有界的
 `more_topics_url`；分页被截断时保持 incomplete。没有 classifier、分类失败或覆盖不足时，
 结果保持 `CLASSIFICATION_PENDING`、`FETCH_FAILED` 或
@@ -331,9 +331,10 @@ stage less 或返回 WAIT，但不能增加 approved USD 或提交订单。
 
 主要 handoff packet：
 
-- `AssetFactorPacket`：单资产 Facts、coverage、previous assessment、Evidence ID；
+- `AssetFactorPacket`：单资产 Facts、coverage、previous assessment、Evidence ID 和可选
+  `ManualAssetContext`；
 - `DecisionReviewPacket`：资产摘要、current/target weights、actions、risk flags、
-  missing data 和 overlays；
+  missing data、manual contexts 和 overlays；
 - `ReportPacket`：finalized regime、scores、weights、actions、amounts、zones、
   historical changes、risk flags、data quality、overlay 结果、最终数据抓取失败
   和脚本执行失败日志。

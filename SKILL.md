@@ -118,7 +118,7 @@ display data, so the engine uses value ÷ quantity and records a note.
    `risk.chain_liveness_status` uses the structured `chain_liveness` provider
    for chain-native assets only; routine liveness is never collected with a
    generic Web search.
-   Security, governance, and regulatory gaps produce the dedicated
+   Security and regulatory gaps produce the dedicated
    `EventScanner` source plan; they are not generic one-line web fallbacks.
    Emit a visible `Data Collection Log` for every requested metric, including
    `FAILED`, `STALE`, `CONFLICT`, `NOT_APPLICABLE`, and `SKIPPED`.
@@ -221,10 +221,10 @@ display data, so the engine uses value ÷ quantity and records a note.
     states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
     `术语解释与决策影响` entry. Explain only terms used or material to the
-    decision. `MATERIAL_EVENT_FOUND` means a relevant proposal or announcement
-    was found in the scanned source; it does not mean an exploit, approval, or
-    execution. Call Ethereum items `协议提案/升级活动` and Aave items
-    `治理提案/风险参数活动` when that is what the evidence supports.
+    decision. `MATERIAL_EVENT_FOUND` means a relevant security or regulatory
+    event was found in the scanned source; it does not mean an exploit,
+    approval, or execution. Record important user-supplied governance or
+    protocol context as `ManualAssetContext` with `MANUAL_USER_INPUT`.
 23. Persist only validated snapshots, decisions, execution plans, metric
     observations, collection events, and complete
     evidence. Never
@@ -249,10 +249,11 @@ multiple compatible derivatives confirmations for
 halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
 `REDUCE`, or `EXIT`.
 
-Allocation and risk remain authoritative for target weights and approved
-dollars. Execution may use `min(base, positioning, cycle)` to cap immediate
-deployment, retain the remainder as unallocated, reject chasing when extension
-and confirmed long crowding agree, or return `WAIT`.
+Allocation and risk remain authoritative for strategic target weights and
+approved dollars. Execution may use `min(base, positioning, cycle)` to cap
+immediate deployment, retain the remainder as unallocated, reject chasing when
+extension and confirmed long crowding agree, or return `WAIT`. Confidence and
+event restrictions affect deployment allowance, not the strategic target.
 
 Structured ETF flow data is optional and comes from the current documented
 SoSoValue v2 POST /openapi/v2/etf/historicalInflowChart endpoint on
@@ -308,8 +309,10 @@ At minimum, request and log these applicable metrics:
 - Each held or considered risk asset: current price, 30D/90D/180D
   relative-return evidence,
   MA50/MA100/MA200, drawdown/historical position, asset-appropriate
-  fundamentals, on-chain activity, capital flow, 1M/3M/6M performance versus
-  BTC, token unlock/supply events, and security/governance/regulatory events.
+  fundamentals, applicable on-chain activity, applicable capital flow, 1M/3M/6M
+  performance versus BTC, token unlock/supply events, and security/regulatory
+  events. AAVE uses protocol fundamentals; ERC-20 transfers are not protocol
+  usage, and its on-chain/capital-flow factors are `NOT_APPLICABLE`.
 
 After collection, show a compact summary and use policy-factor-weighted
 coverage—not the raw number of log lines—as decision confidence:
@@ -361,10 +364,12 @@ The review-criticality matrix is:
 Metric                         Snapshot   Full      Event
 Security                       Critical   Critical  Critical
 Chain liveness                 Critical   Critical  Critical
-Governance                     Context    Required  Critical
 Regulatory                     Context    Required  Critical
 ```
 
+Automatic governance proposal scanning is removed. Important governance,
+tokenomics, legal, or protocol information is optional `ManualAssetContext`
+with `source=MANUAL_USER_INPUT`; its absence has zero confidence penalty.
 `Context` and `Required` failures remain visible and reduce coverage; only
 `Critical` failures count as hard critical for that review. The canonical
 lookbacks and coverage thresholds live in `config/policy.json`.

@@ -86,11 +86,9 @@ _ALLOCATION_FIELDS = {
     "satellite_entry_score",
     "satellite_exit_score",
     "satellite_full_score",
-    "low_confidence_satellite_weight",
-    "confidence_multipliers",
     "risk_multipliers",
 }
-_CORE_ALLOCATION_FIELDS = {"anchor", "eth", "confidence_multipliers", "relative_multipliers"}
+_CORE_ALLOCATION_FIELDS = {"anchor", "eth", "confidence_multipliers"}
 _CORE_ANCHOR_FIELDS = {"BTC", "ETH"}
 _CORE_ETH_FIELDS = {
     "increase_min_score",
@@ -100,7 +98,6 @@ _CORE_ETH_FIELDS = {
     "max_core_sleeve_share",
 }
 _CORE_CONFIDENCE_FIELDS = {"HIGH", "MEDIUM", "LOW"}
-_CORE_RELATIVE_FIELDS = {"strong", "neutral", "weak", "materially_weak"}
 _SCORING_FIELDS = {
     "high_confidence_min_coverage",
     "medium_confidence_min_coverage",
@@ -227,7 +224,7 @@ _CYCLE_FLOW_FIELDS = {"weakening_threshold"}
 _EXECUTION_OVERLAY_FIELDS = {"positioning", "btc_cycle", "wait"}
 _EVENTS_FIELDS = {"lookback_days", "coverage"}
 _EVENT_REVIEW_TYPES = ("SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW")
-_EVENT_CATEGORIES = ("security", "governance", "regulatory")
+_EVENT_CATEGORIES = ("security", "regulatory")
 _CONFIDENCE_FIELDS = {
     "band_thresholds",
     "data_dimension_weights",
@@ -471,18 +468,10 @@ def _parse_core_allocation(value: Any) -> dict[str, Any]:
     ):
         raise PolicyError("core_allocation confidence multipliers must be monotonic")
 
-    relative = value["relative_multipliers"]
-    if not isinstance(relative, dict) or set(relative) != _CORE_RELATIVE_FIELDS:
-        raise PolicyError("core_allocation.relative_multipliers fields are incomplete")
-    parsed_relative = {
-        key: _number(relative[key], f"core_allocation.relative_multipliers.{key}", minimum=0.0, maximum=2.0)
-        for key in _CORE_RELATIVE_FIELDS
-    }
     return {
         "anchor": parsed_anchor,
         "eth": parsed_eth,
         "confidence_multipliers": parsed_confidence,
-        "relative_multipliers": parsed_relative,
     }
 
 
@@ -1801,25 +1790,11 @@ def _parse_policy(
     if not isinstance(allocation, dict):
         raise PolicyError("allocation must be an object")
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
-    common_allocation_fields = {
-        "satellite_full_score",
-        "low_confidence_satellite_weight",
-        "confidence_multipliers",
-        "risk_multipliers",
-    }
+    common_allocation_fields = {"satellite_full_score", "risk_multipliers"}
     score_fields = {"satellite_entry_score", "satellite_exit_score"}
     expected_allocation_fields = common_allocation_fields | score_fields
     if set(allocation) != expected_allocation_fields:
         raise PolicyError("allocation fields are incomplete")
-    confidence_multipliers = allocation["confidence_multipliers"]
-    if not isinstance(confidence_multipliers, dict):
-        raise PolicyError("allocation.confidence_multipliers must be an object")
-    if set(confidence_multipliers) != {"HIGH", "MEDIUM", "LOW"}:
-        raise PolicyError("allocation.confidence_multipliers must contain HIGH, MEDIUM, and LOW")
-    parsed_confidence_multipliers = {
-        key: _fraction(value, f"allocation.confidence_multipliers.{key}")
-        for key, value in confidence_multipliers.items()
-    }
     risk_multipliers = allocation["risk_multipliers"]
     if not isinstance(risk_multipliers, dict):
         raise PolicyError("allocation.risk_multipliers must be an object")
@@ -1833,11 +1808,6 @@ def _parse_policy(
         "satellite_full_score": _number(
             allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100
         ),
-        "low_confidence_satellite_weight": _fraction(
-            allocation["low_confidence_satellite_weight"],
-            "allocation.low_confidence_satellite_weight",
-        ),
-        "confidence_multipliers": parsed_confidence_multipliers,
         "risk_multipliers": parsed_risk_multipliers,
     }
     parsed_allocation["satellite_entry_score"] = _number(

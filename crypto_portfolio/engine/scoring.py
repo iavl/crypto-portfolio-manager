@@ -130,6 +130,141 @@ def _reliability(value: Any, factor: str) -> float:
     return value
 
 
+@dataclass(frozen=True)
+class _FactorMetadata:
+    freshness: float | None = None
+    source_quality: float | None = None
+    redundancy: float | None = None
+    evidence_ids: tuple[str, ...] = ()
+
+
+def _quality_score(value: Any, field: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        value = value.get("mean", value.get("score"))
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be numeric")
+    return _reliability(value, field)
+
+
+def _freshness_quality(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return _reliability(value, "freshness score")
+    result = {"CURRENT": 1.0, "STALE": 0.5, "UNKNOWN": 0.0}.get(str(value).strip().upper())
+    if result is None:
+        raise ValueError("freshness must be CURRENT, STALE, or UNKNOWN")
+    return result
+
+
+def _source_quality(value: Mapping[str, Any]) -> float | None:
+    raw = value.get("source_quality")
+    if raw is not None:
+        return _quality_score(raw, "source_quality")
+    raw = value.get("source_confidence")
+    if raw is not None:
+        result = {"HIGH": 1.0, "MEDIUM": 0.75, "LOW": 0.5}.get(str(raw).strip().upper())
+        if result is None:
+            raise ValueError("source_confidence must be HIGH, MEDIUM, or LOW")
+        return result
+    tier = value.get("authority_tier", value.get("tier"))
+    if tier is not None:
+        if isinstance(tier, bool) or not isinstance(tier, int) or tier not in {1, 2, 3}:
+            raise ValueError("authority_tier must be 1, 2, or 3")
+        return {1: 1.0, 2: 0.75, 3: 0.5}[tier]
+    return None
+
+
+def _factor_mapping_for_metadata(value: Any) -> Mapping[str, Any] | None:
+    if isinstance(value, Mapping):
+        return value
+    if hasattr(value, "as_dict") and not isinstance(value, (str, bytes, int, float, bool)):
+        result = value.as_dict()
+        return result if isinstance(result, Mapping) else None
+    return None
+
+
+def _redundancy_from_records(records: Any) -> float | None:
+    if isinstance(records, (str, bytes)) or not isinstance(records, (list, tuple)) or not records:
+        return None
+    grouped: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    for raw in records:
+        if not isinstance(raw, Mapping):
+            return None
+        metric = raw.get("metric_key", raw.get("fact_key"))
+        if metric is None:
+            return None
+        identity = (
+            str(raw.get("asset", "")).strip().upper(),
+            str(metric).strip().lower(),
+            str(raw.get("window", raw.get("horizon", raw.get("period", "")))).strip().lower(),
+        )
+        grouped.setdefault(identity, []).append(raw)
+    values = []
+    for rows in grouped.values():
+        groups = [row.get("source_group", row.get("source")) for row in rows]
+        count = len({str(group).strip().lower() for group in groups if group is not None and str(group).strip()})
+        values.append((count, all(row.get("redundancy_expected", True) is not False for row in rows)))
+    if not values:
+        return None
+    return sum(
+        0.0 if count == 0 else 0.5 if count == 1 and expected else 1.0 if count == 1 else 0.8 if count == 2 else 1.0
+        for count, expected in values
+    ) / len(values)
+
+
+def _factor_metadata(value: Any) -> _FactorMetadata:
+    record = _factor_mapping_for_metadata(value)
+    if record is None:
+        return _FactorMetadata()
+    facts = record.get("facts")
+    facts_record = _factor_mapping_for_metadata(facts) or {}
+    metadata_record = _factor_mapping_for_metadata(record.get("metadata")) or {}
+    freshness = _freshness_quality(record.get("freshness_score", record.get("freshness")))
+    if freshness is None:
+        freshness = _freshness_quality(facts_record.get("freshness_score", facts_record.get("freshness")))
+    if freshness is None:
+        freshness = _freshness_quality(metadata_record.get("freshness_score", metadata_record.get("freshness")))
+    source_quality = _source_quality(record)
+    if source_quality is None:
+        source_quality = _source_quality(facts_record)
+    if source_quality is None:
+        source_quality = _source_quality(metadata_record)
+    redundancy = _quality_score(record.get("redundancy_score", record.get("redundancy")), "redundancy")
+    if redundancy is None:
+        redundancy = _redundancy_from_records(
+            record.get("evidence", record.get("observations", metadata_record.get("evidence")))
+        )
+    evidence_ids = []
+    for item in (record, facts_record, metadata_record):
+        ids = item.get("evidence_ids", item.get("source_ids", ()))
+        if isinstance(ids, (list, tuple)):
+            evidence_ids.extend(str(identifier) for identifier in ids if str(identifier).strip())
+    return _FactorMetadata(
+        freshness=freshness,
+        source_quality=source_quality,
+        redundancy=redundancy,
+        evidence_ids=tuple(dict.fromkeys(evidence_ids)),
+    )
+
+
+def _metadata_reliability(value: Any, factor: str, metadata: _FactorMetadata) -> float | None:
+    record = _factor_mapping_for_metadata(value)
+    if record is None or "facts" in record or "reliability" in record:
+        return None
+    if metadata.freshness is None and metadata.source_quality is None:
+        return None
+    completeness = record.get("coverage", 1.0)
+    completeness = _reliability(completeness, f"factor {factor}.coverage")
+    return completeness * (metadata.freshness if metadata.freshness is not None else 1.0) * (
+        metadata.source_quality if metadata.source_quality is not None else 1.0
+    )
+
+
 def _extract(value: Any, factor: str) -> tuple[float | None, str, float]:
     """Return raw score, availability, and reliability from a factor value."""
     if isinstance(value, FactorScore):
@@ -154,8 +289,16 @@ def _extract(value: Any, factor: str) -> tuple[float | None, str, float]:
             availability = "MISSING" if value["state"] == "UNKNOWN" else "NOT_APPLICABLE"
             raw_score = None
         score = None if raw_score is None else _score(raw_score, f"factor {factor}.score")
+        metadata = _factor_metadata(value)
+        metadata_reliability = _metadata_reliability(value, factor, metadata)
         reliability = _reliability(
-            value.get("reliability", 1.0 if availability == "AVAILABLE" else 0.0), factor
+            value.get(
+                "reliability",
+                metadata_reliability
+                if availability == "AVAILABLE" and metadata_reliability is not None
+                else 1.0 if availability == "AVAILABLE" else 0.0,
+            ),
+            factor,
         )
     elif hasattr(value, "score") and not isinstance(value, (str, bytes, int, float, bool)):
         default_availability = "MISSING" if getattr(value, "score", None) is None and not hasattr(value, "availability") else "AVAILABLE"
@@ -264,15 +407,21 @@ def _score_factors(
     effective_scores: dict[str, float] = {}
     reliabilities: dict[str, float] = {}
     availability: dict[str, str] = {}
+    metadata_by_factor: dict[str, _FactorMetadata] = {}
     missing: list[str] = []
     not_applicable: list[str] = []
     for factor, weight in resolved_weights.items():
-        if factor not in factor_scores:
+        if weight == 0.0:
+            state = "NOT_APPLICABLE"
+            score = None
+            factor_reliability = 0.0
+        elif factor not in factor_scores:
             state = "NOT_APPLICABLE" if weight == 0 else "MISSING"
             score = None
             factor_reliability = 0.0
         else:
             score, state, factor_reliability = _extract(factor_scores[factor], factor)
+        metadata_by_factor[factor] = _factor_metadata(factor_scores.get(factor))
         if normalized_symbol == "BTC" and factor == "relative_strength_btc":
             if state in {"MISSING", "NOT_APPLICABLE"}:
                 state = "NOT_APPLICABLE"
@@ -285,8 +434,7 @@ def _score_factors(
                 raise ValueError(
                     f"factor {factor} is NOT_APPLICABLE but has positive profile weight"
                 )
-            if factor == "relative_strength_btc":
-                not_applicable.append(factor)
+            not_applicable.append(factor)
         elif state == "MISSING":
             if weight > 0:
                 missing.append(factor)
@@ -310,18 +458,44 @@ def _score_factors(
         confidence_caps = (ConfidenceCap("HARD_CRITICAL_DATA_INCOMPLETE", cap, "ASSET", "critical factor data is incomplete"),)
         data_score = min(data_score, cap)
         reason_codes.add("HARD_CRITICAL_DATA_INCOMPLETE")
-    dimension_weights = policy.confidence.get("data_dimension_weights", {}) if policy.confidence else {}
-    dimension_weights = dimension_weights or {
+    configured_dimensions = policy.confidence.get("data_dimension_weights", {}) if policy.confidence else {}
+    configured_dimensions = configured_dimensions or {
         "coverage": 0.30,
         "freshness": 0.20,
         "source_quality": 0.20,
         "redundancy": 0.30,
     }
+    dimension_values: dict[str, list[tuple[float, float]]] = {"freshness": [], "source_quality": [], "redundancy": []}
+    dimension_evidence: dict[str, list[str]] = {"freshness": [], "source_quality": [], "redundancy": []}
+    for factor, weight in resolved_weights.items():
+        if weight <= 0:
+            continue
+        metadata = metadata_by_factor[factor]
+        for name, value in (
+            ("freshness", metadata.freshness),
+            ("source_quality", metadata.source_quality),
+            ("redundancy", metadata.redundancy),
+        ):
+            if value is not None:
+                dimension_values[name].append((value, weight))
+                dimension_evidence[name].extend(metadata.evidence_ids)
+    dimension_scores = {"coverage": coverage}
+    for name, values in dimension_values.items():
+        if values:
+            dimension_scores[name] = sum(value * weight for value, weight in values) / sum(weight for _, weight in values)
+    included = tuple(name for name in configured_dimensions if name in dimension_scores)
+    dimension_weight_total = sum(float(configured_dimensions[name]) for name in included)
+    if dimension_weight_total <= 0:
+        raise ValueError("data dimension weights must include an applicable dimension")
     data_dimensions = {
-        "coverage": ConfidenceDimension("coverage", coverage, dimension_weights["coverage"], tuple(sorted(reason_codes))),
-        "freshness": ConfidenceDimension("freshness", coverage, dimension_weights["freshness"]),
-        "source_quality": ConfidenceDimension("source_quality", coverage, dimension_weights["source_quality"]),
-        "redundancy": ConfidenceDimension("redundancy", 0.5 if any(reliabilities.values()) else 0.0, dimension_weights["redundancy"]),
+        name: ConfidenceDimension(
+            name,
+            dimension_scores[name],
+            float(configured_dimensions[name]) / dimension_weight_total,
+            tuple(sorted(reason_codes)) if name == "coverage" else (),
+            tuple(dict.fromkeys(dimension_evidence.get(name, ()))),
+        )
+        for name in included
     }
     raw_data_score = sum(item.score * item.weight for item in data_dimensions.values())
     data_score = min(raw_data_score, confidence_caps[0].ceiling) if confidence_caps else raw_data_score
@@ -353,7 +527,7 @@ def _score_factors(
         profile_name=profile_name,
         factor_data_confidence=factor_data_confidence,
         data_confidence_score=data_score,
-        data_confidence_band=confidence_band(data_score),
+        data_confidence_band=confidence_band(data_score, medium_min=medium, high_min=high),
         confidence_reason_codes=tuple(sorted(reason_codes)),
     )
 

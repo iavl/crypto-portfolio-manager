@@ -90,9 +90,10 @@ A new asset should normally enter `WATCHLIST` first and must satisfy most of the
 - deep spot liquidity across reputable venues;
 - sufficiently long and reliable price history;
 - understandable token utility/economic model;
-- credible data for supply, emissions, unlocks, concentration, and governance;
+- credible data for supply, emissions, unlocks, and concentration, plus any
+  relevant manual governance context;
 - analyzable protocol/product fundamentals;
-- no unresolved severe security/governance issue;
+- no unresolved severe security issue or explicitly scoped manual risk;
 - no near-term supply event that dominates the investment thesis;
 - risk-adjusted case materially better than simply adding BTC.
 

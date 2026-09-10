@@ -128,8 +128,8 @@
 | **confidence** | 信心 | 对证据完整度、质量和一致性的综合判断。 | 低信心不能被用户输入悄悄抬高为高信心，也不能产生高置信度新增仓位。 |
 | **reliability** | 可靠性 | 某条数据或因子在当前决策中可被信任和使用的程度。 | 缺失因子保留原政策权重，但其分数向中性 50 收缩。 |
 | **evidence coverage** | 证据覆盖率 | 适用且可用的证据在政策权重下的覆盖程度。 | NOT_APPLICABLE、可选 SKIPPED 和 overlay 不进入适用评分分母；必要失败会降低覆盖率。 |
-| **event-risk gate** | 事件风险门 | 独立于六个基础因子的安全、治理、监管和重大事件限制。 | SEVERE/CRITICAL 可以阻止新增风险，但不会把事件风险伪装成第七个基础分数。 |
-| **AAVE governance coverage** | AAVE 治理覆盖 | Governance V3 on-chain 与至少一个官方 forum/proposals off-chain source 的组合覆盖。 | 缺任一 source group 都是 `INSUFFICIENT_SOURCE_COVERAGE`，泛新闻不能替代。 |
+| **event-risk gate** | 事件风险门 | 独立于六个基础因子的安全、监管和重大事件限制。 | SEVERE/CRITICAL 可以阻止新增风险，但不会把事件风险伪装成第七个基础分数。 |
+| **ManualAssetContext** | 手工资产上下文 | 用户提供的治理、tokenomics、法律或协议事实，带有明确 impact、severity、scope 和 `MANUAL_USER_INPUT` provenance。 | 可补充解释或按明确 scope 交给 review；缺少它不会降低 confidence。 |
 | **overlay** | 覆盖层 | positioning、BTC cycle、execution context 或 structural risk 等额外背景。 | 可以限制即时部署或降低信心，但不是新的加权基础因子。 |
 | **chain liveness** | 链运行状态 | 通过结构化 block/slot/RPC 数据判断链是否仍在正常推进。 | 只适用于 BTC、ETH、SOL、BNB；链数据传输失败不等于链已 HALTED。 |
 | **HEALTHY / DEGRADED / HALTED / UNKNOWN** | 健康/降级/停止/未知 | 链运行状态的枚举；HALTED 需要配置的独立来源共同证明严重停滞。 | DEGRADED 会限制部署；HALTED 阻止新增敞口；UNKNOWN 不会被当作健康。 |

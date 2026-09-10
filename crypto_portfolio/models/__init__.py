@@ -40,7 +40,7 @@ from .confidence import (
     confidence_band,
 )
 from .portfolio import EXTERNAL_CASH_FLOW_TYPES, Position, PortfolioSnapshot
-from .evidence import AVAILABILITY_STATES, AssetAssessment, EventRiskAssessment, Evidence, FactorScore
+from .evidence import AVAILABILITY_STATES, AssetAssessment, EventRiskAssessment, Evidence, FactorScore, ManualAssetContext
 from .structural_risk import StructuralRiskContext
 
 __all__ = [
@@ -69,6 +69,7 @@ __all__ = [
     "Invalidation",
     "FactorJudgment",
     "FactorScore",
+    "ManualAssetContext",
     "StructuralRiskContext",
     "FactBase",
     "FlowFacts",

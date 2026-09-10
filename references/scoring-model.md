@@ -14,8 +14,8 @@ resulting portfolio action.
 
 Event/security risk, derivatives positioning, BTC cycle context, portfolio
 regime, and technical execution timing are separate gates or overlays. They may
-reduce eligibility, confidence, target size, or deployment, but cannot change
-the base score.
+reduce eligibility, confidence, or immediate deployment, but temporary
+uncertainty must not change a strategic target by itself.
 
 `SCORING_FACTOR` is an ownership role, not a requirement declaration. Each
 applicable metric is classified as `CRITICAL`, `PRIMARY`, `SUPPORTING`, or
@@ -55,6 +55,18 @@ Generic valuation, fundamentals, onchain, and relative_strength_btc are 0%.
 
 BTC relative strength is `NOT_APPLICABLE`; no BTC-versus-BTC request or
 calculation is made. A zero-weight factor is excluded from score and coverage.
+
+AAVE uses the explicit `defi_protocol` profile:
+
+```text
+trend 30%, valuation 20%, fundamentals 35%, relative_strength_btc 15%.
+onchain, capital_flows, btc_valuation, and macro_liquidity are 0%.
+```
+
+AAVE is evaluated as a DeFi protocol token. Protocol activity is represented
+by fundamentals such as TVL, fees, revenue, and token economics; ERC-20
+transfer activity is not a substitute for Aave protocol usage. Zero-weight
+factors resolve to `NOT_APPLICABLE`, not `MISSING`.
 
 ## Metric ownership
 
@@ -179,10 +191,11 @@ automatically bullish; cause, persistence, liquidity, and security context
 remain part of the bounded semantic judgment. Raw ETH ETF USD flow is evidence
 context; normalized ETH flow/AUM owns capital-flow scoring authority.
 
-The ETH/BTC factor remains part of the base score, while the current policy also applies
-it as a separate core-allocation opportunity-cost gate. This gate never mutates
-the base score. ETH FDV/market-cap is `NOT_APPLICABLE` and cannot contribute
-positive valuation evidence.
+The ETH/BTC factor remains part of the base score, while the current policy also
+uses it as a hard core-allocation opportunity-cost gate. The same relative
+signal is not applied again as a continuous strategic sizing multiplier. This
+gate never mutates the base score. ETH FDV/market-cap is `NOT_APPLICABLE` and
+cannot contribute positive valuation evidence.
 
 ## Capital flows
 
@@ -230,8 +243,13 @@ Satellite entry uses `satellite_entry_score=67`, existing holdings remain
 reached at `satellite_full_score=85`. A new/non-held satellite below 67 receives
 no new risk. A held satellite from 62 through 66 is held without adding risk;
 below 62 it becomes an ineligible/reduction candidate. Score strength is
-monotonic from 67 to 85 and is still multiplied by confidence, risk, event and
-relative-strength gates.
+monotonic from 67 to 85. Strategic satellite sizing uses score strength and
+structural risk; confidence, event risk, decision confidence, positioning, and
+execution overlays are deployment allowances.
+
+The current structural `risk_tier` is an assessment input rather than a
+continuous volatility/beta estimate. Allocation diagnostics label its default
+provenance as `MANUAL_ASSESSMENT`; empirical calibration is a separate task.
 
 Materially negative BTC-relative evidence overrides the hold band.
 `event_risk.state` is the sole event-risk input; SEVERE and CRITICAL block new risk.
@@ -262,7 +280,9 @@ Confidence measures evidence quality only; it does not treat a bullish trend
 and bearish valuation as bad data. Cross-factor disagreement is represented
 once in the separate Decision Confidence `signal_agreement` component.
 Redundancy compares independent observations of the same `(asset, metric,
-window)` fact; unrelated metrics from different providers are not redundant.
+Each dimension is calculated from its own metadata. If a dimension is not
+available, it is omitted and the remaining configured dimension weights are
+renormalized; no fixed redundancy value is injected.
 Scores are bounded in `[0, 1]` and reported with `LOW`/`MEDIUM`/`HIGH` bands.
 Missing, stale, conflict, fallback, and evidence IDs remain explicit. A
 hard-critical cap cannot be diluted by ordinary metrics.
@@ -280,6 +300,8 @@ Its `DecisionScope` is deterministic:
 
 Held-asset evidence is exposure-weighted with a concentration guard, so a
 material low-confidence position cannot disappear inside a portfolio average.
-Hard gates are scoped to `PORTFOLIO` or `ACTION:<name>`; partial governance or
-optional provider coverage is a bounded soft penalty. Unknown security or
-chain liveness for a risk-increasing target remains a fail-closed action gate.
+Hard gates are scoped to `PORTFOLIO` or `ACTION:<name>`. Automatic governance
+proposal scanning is not an input; important governance, tokenomics, legal, or
+protocol context may be supplied through `ManualAssetContext` with
+`source=MANUAL_USER_INPUT`. Unknown security or chain liveness for a
+risk-increasing target remains a fail-closed action gate.

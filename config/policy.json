@@ -72,10 +72,21 @@
       "relative_strength_btc": 0.0,
       "btc_valuation": 0.2,
       "macro_liquidity": 0.2
+    },
+    "defi_protocol": {
+      "trend": 0.30,
+      "valuation": 0.20,
+      "fundamentals": 0.35,
+      "onchain": 0.00,
+      "capital_flows": 0.00,
+      "relative_strength_btc": 0.15,
+      "btc_valuation": 0.00,
+      "macro_liquidity": 0.00
     }
   },
   "asset_scoring_profiles": {
-    "BTC": "btc"
+    "BTC": "btc",
+    "AAVE": "defi_protocol"
   },
   "scoring": {
     "high_confidence_min_coverage": 0.9,
@@ -161,12 +172,6 @@
     "satellite_entry_score": 67,
     "satellite_exit_score": 62,
     "satellite_full_score": 85,
-    "low_confidence_satellite_weight": 0.0,
-    "confidence_multipliers": {
-      "HIGH": 1.0,
-      "MEDIUM": 0.5,
-      "LOW": 0.0
-    },
     "risk_multipliers": {
       "normal": 1.0,
       "high_beta": 0.5,
@@ -189,12 +194,6 @@
       "HIGH": 1.0,
       "MEDIUM": 0.75,
       "LOW": 0.25
-    },
-    "relative_multipliers": {
-      "strong": 1.15,
-      "neutral": 1.0,
-      "weak": 0.75,
-      "materially_weak": 0.5
     }
   },
   "volume_profile": {
@@ -297,9 +296,9 @@
   },
   "events": {
     "lookback_days": {
-      "SNAPSHOT_REVIEW": {"security": 30, "governance": 30, "regulatory": 30},
-      "FULL_REVIEW": {"security": 90, "governance": 90, "regulatory": 90},
-      "EVENT_REVIEW": {"security": 30, "governance": 30, "regulatory": 30}
+      "SNAPSHOT_REVIEW": {"security": 30, "regulatory": 30},
+      "FULL_REVIEW": {"security": 90, "regulatory": 90},
+      "EVENT_REVIEW": {"security": 30, "regulatory": 30}
     },
     "coverage": {"medium_minimum": 0.5, "high_minimum": 1.0}
   },

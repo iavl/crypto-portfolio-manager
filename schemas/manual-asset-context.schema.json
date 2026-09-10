@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/crypto-portfolio-manager/manual-asset-context.schema.json",
+  "title": "Manual asset context",
+  "type": "object",
+  "required": ["asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"],
+  "properties": {
+    "asset": {"type": "string", "minLength": 1},
+    "category": {"enum": ["GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"]},
+    "summary": {"type": "string", "minLength": 1},
+    "impact": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"]},
+    "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+    "scope": {"enum": ["CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"]},
+    "as_of": {"type": "string", "format": "date-time"},
+    "source": {"const": "MANUAL_USER_INPUT"}
+  },
+  "additionalProperties": false
+}

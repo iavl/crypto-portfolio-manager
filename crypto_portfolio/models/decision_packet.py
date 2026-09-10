@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .confidence import ConfidenceResult, DecisionConfidence
-from .evidence import EventRiskAssessment
+from .evidence import EventRiskAssessment, ManualAssetContext
 from .factor_packet import freeze_packet_value, thaw_packet_value
 
 
@@ -71,6 +71,23 @@ def _ids(value: Any, field: str) -> tuple[str, ...]:
     result = tuple(_text(item, f"{field} item") for item in value)
     if len(result) != len(set(result)):
         raise ValueError(f"{field} must contain unique values")
+    return result
+
+
+def _manual_contexts(value: Any) -> tuple[ManualAssetContext, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, ManualAssetContext) or isinstance(value, Mapping):
+        value = (value,)
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("manual_asset_contexts must be a sequence of objects")
+    result = tuple(
+        item if isinstance(item, ManualAssetContext) else ManualAssetContext.from_mapping(item)
+        for item in value
+    )
+    identities = [(item.asset, item.category, item.as_of) for item in result]
+    if len(identities) != len(set(identities)):
+        raise ValueError("manual_asset_contexts must not contain duplicate contexts")
     return result
 
 
@@ -333,6 +350,7 @@ class DecisionReviewPacket:
     nav_performance: Mapping[str, Any] | None = None
     benchmark_performance: Mapping[str, Any] | None = None
     event_scan_summary: Mapping[str, Any] | None = None
+    manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -424,6 +442,7 @@ class DecisionReviewPacket:
                 if not isinstance(value, Mapping):
                     raise ValueError(f"{field_name} must be an object or null")
                 object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        object.__setattr__(self, "manual_asset_contexts", _manual_contexts(self.manual_asset_contexts))
         if self.no_trade_attribution is not None:
             value = (
                 self.no_trade_attribution
@@ -462,6 +481,7 @@ class DecisionReviewPacket:
             "nav_performance": thaw_packet_value(self.nav_performance) if self.nav_performance is not None else None,
             "benchmark_performance": thaw_packet_value(self.benchmark_performance) if self.benchmark_performance is not None else None,
             "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
+            "manual_asset_contexts": [item.as_dict() for item in self.manual_asset_contexts],
             "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
         }
 

@@ -195,7 +195,10 @@ class ScoringTests(unittest.TestCase):
         result = calculate_relative_strength(symbol="BTC")
         self.assertEqual(result.state, "NOT_APPLICABLE")
         self.assertEqual(result.coverage, 0.0)
-        self.assertEqual(score_factors({"trend": FactorScore("trend", 80)}, symbol="BTC").not_applicable_factors, ("relative_strength_btc",))
+        self.assertEqual(
+            set(score_factors({"trend": FactorScore("trend", 80)}, symbol="BTC").not_applicable_factors),
+            {"valuation", "fundamentals", "onchain", "relative_strength_btc"},
+        )
 
     def test_scored_assessment_persists_missing_factor_states(self):
         assessment, result = score_assessment(

@@ -17,6 +17,10 @@ AVAILABILITY_STATES = ("AVAILABLE", "MISSING", "NOT_APPLICABLE")
 _EVENT_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL")
 _ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
 _PRIVATE_REASONING_FIELDS = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
+_MANUAL_CONTEXT_CATEGORIES = {"GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"}
+_MANUAL_CONTEXT_IMPACTS = {"POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"}
+_MANUAL_CONTEXT_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+_MANUAL_CONTEXT_SCOPES = {"CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"}
 
 
 def _text(value: Any, field: str) -> str:
@@ -52,6 +56,71 @@ def contains_private_reasoning(value: Any) -> bool:
     if isinstance(value, (tuple, list)):
         return any(contains_private_reasoning(item) for item in value)
     return False
+
+
+@dataclass(frozen=True)
+class ManualAssetContext:
+    """A user-supplied fact retained without automatic interpretation."""
+
+    asset: str
+    category: str
+    summary: str
+    impact: str
+    severity: str
+    scope: str
+    as_of: str
+    source: str = "MANUAL_USER_INPUT"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "asset", _text(self.asset, "manual context asset").upper())
+        category = _text(self.category, "manual context category").upper()
+        impact = _text(self.impact, "manual context impact").upper()
+        severity = _text(self.severity, "manual context severity").upper()
+        scope = _text(self.scope, "manual context scope").upper()
+        if category not in _MANUAL_CONTEXT_CATEGORIES:
+            raise ValueError("manual context category is unsupported")
+        if impact not in _MANUAL_CONTEXT_IMPACTS:
+            raise ValueError("manual context impact is unsupported")
+        if severity not in _MANUAL_CONTEXT_SEVERITIES:
+            raise ValueError("manual context severity is unsupported")
+        if scope not in _MANUAL_CONTEXT_SCOPES:
+            raise ValueError("manual context scope is unsupported")
+        object.__setattr__(self, "category", category)
+        object.__setattr__(self, "summary", _text(self.summary, "manual context summary"))
+        object.__setattr__(self, "impact", impact)
+        object.__setattr__(self, "severity", severity)
+        object.__setattr__(self, "scope", scope)
+        object.__setattr__(self, "as_of", normalize_timestamp(self.as_of, "manual context as_of"))
+        source = _text(self.source, "manual context source").upper()
+        if source != "MANUAL_USER_INPUT":
+            raise ValueError("manual context source must be MANUAL_USER_INPUT")
+        object.__setattr__(self, "source", source)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ManualAssetContext":
+        if not isinstance(value, Mapping):
+            raise ValueError("manual asset context must be an object")
+        allowed = {"asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError("manual asset context contains unknown fields: " + ", ".join(sorted(unknown)))
+        required = allowed - {"source"}
+        missing = required - set(value)
+        if missing:
+            raise ValueError("manual asset context is missing fields: " + ", ".join(sorted(missing)))
+        return cls(**dict(value))
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "asset": self.asset,
+            "category": self.category,
+            "summary": self.summary,
+            "impact": self.impact,
+            "severity": self.severity,
+            "scope": self.scope,
+            "as_of": self.as_of,
+            "source": self.source,
+        }
 
 
 @dataclass(frozen=True)
@@ -207,6 +276,9 @@ class FactorScore:
     evidence_ids: tuple[str, ...] = ()
     availability: str = "AVAILABLE"
     reliability: float | None = None
+    freshness: str | None = None
+    source_quality: float | None = None
+    redundancy: float | None = None
 
     @classmethod
     def from_result(cls, factor: str, value: Mapping[str, Any]) -> "FactorScore":
@@ -223,18 +295,33 @@ class FactorScore:
         source = {"HIGH": 1.0, "MEDIUM": 0.75, "LOW": 0.5}.get(value.get("source_confidence", "HIGH"))
         if freshness is None or source is None:
             raise ValueError("factor result has invalid freshness or source confidence")
+        source_quality = value.get("source_quality", facts.get("source_quality"))
+        if source_quality is None and "source_confidence" in value:
+            source_quality = source
         validated = cls(
             factor,
             value.get("score") if availability == "AVAILABLE" else None,
             tuple(value.get("evidence_ids", facts.get("source_ids", ()))),
             availability,
             coverage if availability == "AVAILABLE" else 0.0,
+            str(facts.get("freshness")).strip().upper() if facts.get("freshness") is not None else None,
+            source_quality,
+            value.get("redundancy", facts.get("redundancy")),
         )
         reliability = validated.reliability * freshness * source
         if "reliability" in value:
             claimed = cls(factor, validated.score, availability=availability, reliability=value["reliability"])
             reliability = min(reliability, claimed.reliability)
-        return cls(factor, validated.score, validated.evidence_ids, availability, reliability)
+        return cls(
+            factor,
+            validated.score,
+            validated.evidence_ids,
+            availability,
+            reliability,
+            validated.freshness,
+            validated.source_quality,
+            validated.redundancy,
+        )
 
     def __post_init__(self) -> None:
         factor = _text(self.factor, "factor").lower()
@@ -265,6 +352,18 @@ class FactorScore:
         object.__setattr__(self, "score", score)
         object.__setattr__(self, "availability", availability)
         object.__setattr__(self, "reliability", reliability)
+        freshness = self.freshness
+        if freshness is not None:
+            freshness = _text(freshness, f"factor {factor}.freshness").upper()
+            if freshness not in _FRESHNESS:
+                raise ValueError(f"factor {factor}.freshness is unsupported")
+        object.__setattr__(self, "freshness", freshness)
+        for field_name in ("source_quality", "redundancy"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0 <= float(value) <= 1:
+                    raise ValueError(f"factor {factor}.{field_name} must be finite and in [0, 1] or null")
+                object.__setattr__(self, field_name, float(value))
         if isinstance(self.evidence_ids, (str, bytes)):
             raise ValueError(f"factor {factor}.evidence_ids must be a sequence")
         ids = tuple(_text(item, "evidence_id") for item in self.evidence_ids)
@@ -273,13 +372,18 @@ class FactorScore:
         object.__setattr__(self, "evidence_ids", ids)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "factor": self.factor,
             "score": self.score,
             "evidence_ids": list(self.evidence_ids),
             "availability": self.availability,
             "reliability": self.reliability,
         }
+        for field_name in ("freshness", "source_quality", "redundancy"):
+            value = getattr(self, field_name)
+            if value is not None:
+                result[field_name] = value
+        return result
 
 
 @dataclass(frozen=True)
@@ -338,6 +442,9 @@ class AssetAssessment:
                         "reliability",
                         1.0 if availability == "AVAILABLE" else 0.0,
                     ),
+                    value.get("freshness"),
+                    value.get("source_quality"),
+                    value.get("redundancy"),
                 )
             elif hasattr(value, "score"):
                 availability = str(
@@ -359,6 +466,9 @@ class AssetAssessment:
                         "reliability",
                         1.0 if availability == "AVAILABLE" else 0.0,
                     ),
+                    getattr(value, "freshness", None),
+                    getattr(value, "source_quality", None),
+                    getattr(value, "redundancy", None),
                 )
             else:
                 parsed[factor] = FactorScore(factor, value)
@@ -468,5 +578,6 @@ __all__ = [
     "EventRiskAssessment",
     "Evidence",
     "FactorScore",
+    "ManualAssetContext",
     "contains_private_reasoning",
 ]

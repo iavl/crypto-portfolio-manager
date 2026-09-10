@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .evidence import AssetAssessment, Evidence, FactorScore, contains_private_reasoning
+from .evidence import AssetAssessment, Evidence, FactorScore, ManualAssetContext, contains_private_reasoning
 from .confidence import ConfidenceResult, DecisionConfidence
 from .decision_packet import NoTradeAttribution
 from .execution import ExecutionPlan
@@ -68,6 +68,7 @@ class Decision:
     nav_performance: Mapping[str, Any] | None = None
     benchmark_performance: Mapping[str, Any] | None = None
     event_scan_summary: Mapping[str, Any] | None = None
+    manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -132,6 +133,18 @@ class Decision:
                 if not isinstance(value, Mapping):
                     raise ValueError(f"{field_name} must be an object or null")
                 object.__setattr__(self, field_name, freeze_packet_value(value, path=field_name))
+        contexts = self.manual_asset_contexts
+        if isinstance(contexts, ManualAssetContext) or isinstance(contexts, Mapping):
+            contexts = (contexts,)
+        if isinstance(contexts, (str, bytes)) or not isinstance(contexts, (list, tuple)):
+            raise ValueError("manual_asset_contexts must be a sequence of objects")
+        parsed_contexts = tuple(
+            item if isinstance(item, ManualAssetContext) else ManualAssetContext.from_mapping(item)
+            for item in contexts
+        )
+        if len({(item.asset, item.category, item.as_of) for item in parsed_contexts}) != len(parsed_contexts):
+            raise ValueError("manual_asset_contexts must not contain duplicate contexts")
+        object.__setattr__(self, "manual_asset_contexts", parsed_contexts)
         if self.no_trade_attribution is not None:
             value = (
                 self.no_trade_attribution
@@ -327,6 +340,7 @@ class Decision:
             "based_on_snapshot_id", "execution_plans", "routing_metadata", "market_overlays",
             "regime_confidence", "decision_confidence", "nav_performance",
             "benchmark_performance", "event_scan_summary",
+            "manual_asset_contexts",
             "no_trade_attribution",
         }
         unknown = set(data) - allowed
@@ -370,6 +384,7 @@ class Decision:
             nav_performance=data.get("nav_performance"),
             benchmark_performance=data.get("benchmark_performance"),
             event_scan_summary=data.get("event_scan_summary"),
+            manual_asset_contexts=tuple(data.get("manual_asset_contexts", ())),
             no_trade_attribution=data.get("no_trade_attribution"),
         )
 
@@ -418,6 +433,8 @@ class Decision:
             value = getattr(self, field_name)
             if value is not None:
                 result[field_name] = thaw_packet_value(value)
+        if self.manual_asset_contexts:
+            result["manual_asset_contexts"] = [item.as_dict() for item in self.manual_asset_contexts]
         if self.no_trade_attribution is not None:
             result["no_trade_attribution"] = self.no_trade_attribution.as_dict()
         return result

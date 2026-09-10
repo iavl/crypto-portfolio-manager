@@ -10,7 +10,7 @@ from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
 from .confidence import confidence_deployment_factor
-from .core_eligibility import eth_core_eligibility, relative_strength_score
+from .core_eligibility import eth_core_eligibility
 from .scoring import score_assessment
 
 
@@ -20,6 +20,18 @@ class AllocationResult:
     allocation_reasons: tuple[str, ...]
     constraints_applied: tuple[str, ...]
     stable_sleeve_target: float = 0.0
+    deployment_allowances: Mapping[str, Mapping[str, Any]] | None = None
+
+    @property
+    def strategic_target_weights(self) -> Mapping[str, float]:
+        return self.target_weights
+
+    @property
+    def deployment_factors(self) -> Mapping[str, float]:
+        return {
+            symbol: float(value["deployment_factor"])
+            for symbol, value in (self.deployment_allowances or {}).items()
+        }
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +39,11 @@ class AllocationResult:
             "allocation_reasons": list(self.allocation_reasons),
             "constraints_applied": list(self.constraints_applied),
             "stable_sleeve_target": self.stable_sleeve_target,
+            "strategic_target_weights": dict(self.strategic_target_weights),
+            "deployment_allowances": {
+                symbol: dict(value)
+                for symbol, value in (self.deployment_allowances or {}).items()
+            },
         }
 
 
@@ -92,15 +109,6 @@ def _relative_eligibility(value: Any) -> str:
     return "ELIGIBLE" if value >= 0 else "INELIGIBLE"
 
 
-def _relative_multiplier(value: Any) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return 0.5 + min(1.0, max(0.0, float(value))) * 0.5
-    state = str(value).strip().upper()
-    if state not in {"OUTPERFORM", "NEUTRAL", "UNDERPERFORM", "MATERIALLY_WEAK"}:
-        raise ValueError("relative_strength_vs_btc is unsupported")
-    return 1.0 if state == "OUTPERFORM" else 0.75
-
-
 def _core_quality_multiplier(score: float) -> float:
     return min(1.5, max(0.5, 0.5 + score / 100.0))
 
@@ -119,20 +127,6 @@ def _btc_core_state(assessment: Any) -> str:
     if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
         return "HOLD_ONLY"
     return "HOLD_ONLY" if _confidence(_field(assessment, "confidence", "MEDIUM")) == "LOW" else "ELIGIBLE_INCREASE"
-
-
-def _core_relative_multiplier(value: Any, policy: Policy) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        score = float(value)
-        if 0 <= score <= 1:
-            score *= 100.0
-        if not math.isfinite(score) or not 0 <= score <= 100:
-            raise ValueError("ETH relative score must be finite and in [0, 100]")
-        return min(1.25, max(0.75, 1.0 + 0.25 * ((score - 50.0) / 50.0)))
-    state = str(value or "neutral").strip().lower()
-    if state not in policy.core_allocation["relative_multipliers"]:
-        raise ValueError(f"unknown ETH relative-strength state: {state}")
-    return float(policy.core_allocation["relative_multipliers"][state])
 
 
 def _allocate_core(
@@ -166,15 +160,8 @@ def _allocate_core(
                 chain_liveness=(chain_liveness or {}).get(symbol),
                 structural_risk=supplied_structural,
             )
-            raw_relative = _field(assessment, "relative_strength_vs_btc") if assessment is not None else None
-            relative = relative_strength_score(assessment) if assessment is not None else None
-            relative_multiplier = _core_relative_multiplier(
-                raw_relative if isinstance(raw_relative, str) else relative,
-                policy,
-            ) if relative is not None else 1.0
         else:
             state = _btc_core_state(assessment)
-            relative_multiplier = 1.0
         states[symbol] = state
         if state == "INELIGIBLE":
             continue
@@ -182,7 +169,6 @@ def _allocate_core(
             anchor.get(symbol, 0.0)
             * _core_quality_multiplier(score)
             * confidence_multipliers[confidence]
-            * relative_multiplier
             * event_multiplier
         )
     positive = {symbol: value for symbol, value in raw.items() if value > 0}
@@ -337,9 +323,9 @@ def build_target_allocation(
     decision_confidence: Any | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
+    parsed_overlays = None
     if overlays is not None:
-        if not isinstance(overlays, MarketOverlays):
-            MarketOverlays.from_mapping(overlays)
+        parsed_overlays = overlays if isinstance(overlays, MarketOverlays) else MarketOverlays.from_mapping(overlays)
     regime_name = regime.regime if hasattr(regime, "regime") else str(regime).upper()
     limits: RegimeLimits = resolved.regime(regime_name)
     if not resolved.stable_symbols:
@@ -385,8 +371,9 @@ def build_target_allocation(
         f"single-asset cap {limits.single_asset_max:.2%}",
     ]
 
-    satellite_raw: dict[str, float] = {}
+    strategic_satellite_raw: dict[str, float] = {}
     satellite_hold: dict[str, float] = {}
+    deployment_allowances: dict[str, dict[str, Any]] = {}
     core_assessments: dict[str, Any] = {}
     for symbol in candidates:
         asset_type = resolved.classify(symbol)
@@ -409,8 +396,27 @@ def build_target_allocation(
         event_risk = _event_risk_state(assessment) if assessment is not None else "NORMAL"
         event_multiplier = _event_risk_multiplier(event_risk, resolved)
         risk_tier = str(_field(assessment, "risk_tier", "normal")).lower() if assessment is not None else "normal"
-        relative = _field(assessment, "relative_strength_vs_btc") if assessment is not None else None
         if asset_type == "satellite":
+            risk_multipliers = resolved.allocation["risk_multipliers"]
+            risk_multiplier = risk_multipliers.get(
+                risk_tier, risk_multipliers.get(risk_tier.replace("-", "_"), 1.0)
+            )
+            asset_confidence_factor = float(
+                resolved.execution["confidence_deployment_factor"].get(confidence, 1.0)
+            )
+            execution_overlay_factor = (
+                float(parsed_overlays.effective_deployment_caps.get(symbol, 1.0))
+                if parsed_overlays is not None else 1.0
+            )
+            risk_tier_source = _field(assessment, "risk_tier_source", "MANUAL_ASSESSMENT")
+            if not isinstance(risk_tier_source, str) or not risk_tier_source.strip():
+                raise ValueError("risk_tier_source must be a non-empty string")
+            deployment_factor = min(
+                asset_confidence_factor,
+                event_multiplier,
+                decision_confidence_factor,
+                execution_overlay_factor,
+            )
             relative_status = satellite_eligibility(
                 assessment,
                 resolved,
@@ -434,26 +440,34 @@ def build_target_allocation(
                         - entry_score
                     )),
                 )
-                confidence_multiplier = resolved.allocation["confidence_multipliers"][confidence]
-                risk_multipliers = resolved.allocation["risk_multipliers"]
-                risk_multiplier = risk_multipliers.get(
-                    risk_tier, risk_multipliers.get(risk_tier.replace("-", "_"), 1.0)
-                )
-                satellite_raw[symbol] = (
+                strategic_satellite_raw[symbol] = (
                     satellite_cap
                     * score_strength
-                    * confidence_multiplier
                     * risk_multiplier
-                    * event_multiplier
-                    * _relative_multiplier(relative)
-                    * decision_confidence_factor
                 )
+                deployment_allowances[symbol] = {
+                    "profile_name": resolved.scoring_profile_name(symbol),
+                    "satellite_cap": satellite_cap,
+                    "score": score,
+                    "score_strength": score_strength,
+                    "current_weight": normalized_current_weights.get(symbol, 0.0),
+                    "risk_tier": risk_tier,
+                    "risk_tier_source": risk_tier_source.strip(),
+                    "risk_multiplier": risk_multiplier,
+                    "asset_confidence": confidence,
+                    "confidence_deployment_factor": asset_confidence_factor,
+                    "event_risk": event_risk,
+                    "event_risk_deployment_factor": event_multiplier,
+                    "decision_confidence_factor": decision_confidence_factor,
+                    "execution_overlay_factor": execution_overlay_factor,
+                    "deployment_factor": deployment_factor,
+                }
                 if event_multiplier < 1.0:
                     reasons.append(
-                        f"{symbol} event-risk state {event_risk} limits new deployment to {event_multiplier:.0%}"
+                        f"{symbol} event-risk state {event_risk} limits immediate deployment to {event_multiplier:.0%}"
                     )
-                if confidence_multiplier == 0:
-                    reasons.append(f"{symbol} receives 0% satellite target because confidence is LOW")
+                if asset_confidence_factor < 1.0:
+                    reasons.append(f"{symbol} immediate deployment is capped by asset confidence at {asset_confidence_factor:.0%}")
                 if decision_confidence_factor < 1.0:
                     reasons.append(f"{symbol} new deployment is capped by portfolio decision confidence at {decision_confidence_factor:.0%}")
             else:
@@ -466,12 +480,16 @@ def build_target_allocation(
     )
     eligible_satellite_budget = max(0.0, satellite_cap - sum(held_satellite_weights.values()))
     satellite_weights, _ = _bounded_allocate(
-        satellite_raw, eligible_satellite_budget, limits.single_asset_max
+        strategic_satellite_raw, eligible_satellite_budget, limits.single_asset_max
     )
     satellite_weights = {
         symbol: held_satellite_weights.get(symbol, 0.0) + satellite_weights.get(symbol, 0.0)
         for symbol in set(held_satellite_weights) | set(satellite_weights)
     }
+    for symbol, details in deployment_allowances.items():
+        strategic_weight = satellite_weights.get(symbol, 0.0)
+        details["strategic_target_weight"] = strategic_weight
+        details["max_immediate_increase_weight"] = strategic_weight * details["deployment_factor"]
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight
     core_weights, residual_core, core_reasons = _allocate_core(
@@ -507,10 +525,10 @@ def build_target_allocation(
     if any(weight < -1e-9 or not math.isfinite(weight) for weight in target.values()):
         raise ValueError("allocation produced an invalid weight")
     target = {symbol: max(0.0, weight) for symbol, weight in target.items() if weight > 1e-12}
-    reasons.append("satellites are optional and receive capital only after score/confidence/risk gates")
+    reasons.append("satellite strategic targets are separated from immediate deployment allowances")
     if current_weights:
         reasons.append("current weights are inputs for later rebalance decisions, not allocation entitlement")
-    return AllocationResult(target, tuple(reasons), tuple(constraints), stable_target)
+    return AllocationResult(target, tuple(reasons), tuple(constraints), stable_target, deployment_allowances)
 
 
 def allocate(

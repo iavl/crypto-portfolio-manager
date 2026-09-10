@@ -43,53 +43,23 @@ class EventScannerTests(unittest.TestCase):
         btc = source_catalog("security", "BTC")
         eth = source_catalog("security", "ETH")
         aave_security = source_catalog("security", "AAVE")
-        aave_governance = source_catalog("governance", "AAVE")
         bnb_security = source_catalog("security", "BNB")
-        bnb_governance = source_catalog("governance", "BNB")
         regulatory = source_catalog("regulatory", "AAVE")
         self.assertEqual(len(btc), 3)
         self.assertEqual(len(eth), 3)
         self.assertGreaterEqual(len(aave_security), 1)
-        self.assertGreaterEqual(len(aave_governance), 1)
         self.assertGreaterEqual(len(bnb_security), 2)
-        self.assertGreaterEqual(len(bnb_governance), 2)
         self.assertEqual(len(regulatory), 3)
+        self.assertEqual({source.category for source in source_catalog()}, {"security", "regulatory"})
+        with self.assertRaises(ValueError):
+            source_catalog("governance")
         self.assertTrue(all(source.required_for_full_coverage for source in btc + eth + regulatory))
         self.assertTrue(all(source.tier == 1 for source in regulatory))
 
-    def test_aave_governance_requires_onchain_and_one_offchain_group(self):
+    def test_automatic_governance_category_is_rejected(self):
         scanner = EventScanner()
-        requests = scanner.build_requests("AAVE", "governance", AS_OF)
-        offchain_only = tuple(
-            EventSourceScanResponse(request.source_id, request.source_group == "aave-governance-offchain", AS_OF, (), None if request.source_group == "aave-governance-offchain" else "unavailable")
-            for request in requests
-        )
-        incomplete = scanner.scan("AAVE", "governance", AS_OF, responses=offchain_only)
-        self.assertEqual(incomplete.source_coverage["coverage_state"], "INSUFFICIENT_SOURCE_COVERAGE")
-        complete = scanner.scan(
-            "AAVE", "governance", AS_OF,
-            responses=tuple(EventSourceScanResponse(request.source_id, True, AS_OF, (), None) for request in requests),
-        )
-        self.assertEqual(complete.source_coverage["coverage_rule"], "ONCHAIN_AND_ONE_OFFCHAIN")
-        self.assertEqual(complete.source_coverage["coverage_state"], "SUFFICIENT")
-
-    def test_aave_governance_accepts_one_complete_offchain_url_per_group(self):
-        scanner = EventScanner()
-        requests = scanner.build_requests("AAVE", "governance", AS_OF)
-        offchain = [request for request in requests if request.source_group == "aave-governance-offchain"]
-        onchain = next(request for request in requests if request.source_group == "aave-governance-onchain")
-        responses = tuple(
-            EventSourceScanResponse(
-                request.source_id,
-                request is onchain or request is offchain[0],
-                AS_OF,
-                (),
-                None if request is onchain or request is offchain[0] else "source unavailable",
-            )
-            for request in requests
-        )
-        result = scanner.scan("AAVE", "governance", AS_OF, responses=responses)
-        self.assertEqual(result.source_coverage["coverage_state"], "SUFFICIENT")
+        with self.assertRaises(ValueError):
+            scanner.build_requests("AAVE", "governance", AS_OF)
 
     def test_excluded_asset_has_no_event_source_requests(self):
         scanner = EventScanner()
@@ -122,7 +92,6 @@ class EventScannerTests(unittest.TestCase):
         scanner = EventScanner()
         expected = (
             ("ETH", "security", "ethereum-foundation-security", "https://blog.ethereum.org/feed.xml", "RSS_ATOM", "ethereum-foundation-security"),
-            ("ETH", "governance", "ethereum-eips", "https://github.com/ethereum/EIPs", "GITHUB_COMMITS", "ethereum-eips"),
             ("AAVE", "security", "aave-security", "https://governance.aave.com/c/risk/7.json", "DISCOURSE_JSON", "aave-security"),
             ("MARKET", "regulatory", "esma-mica", "https://www.esma.europa.eu/rss.xml", "RSS_ATOM", "esma-regulatory"),
         )
@@ -134,7 +103,6 @@ class EventScannerTests(unittest.TestCase):
                 )
                 self.assertEqual(request.source_url, {
                     "ethereum-foundation-security": "https://ethereum.org/en/security/",
-                    "ethereum-eips": "https://eips.ethereum.org/",
                     "aave-security": "https://aave.com/security",
                     "esma-mica": "https://www.esma.europa.eu/press-news/esma-news",
                 }[source_id])
@@ -277,7 +245,6 @@ class EventScannerTests(unittest.TestCase):
     def test_acquisition_returns_event_source_plan_instead_of_web_fallback(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
             MetricRequest("ETH", "risk.security_event_status"),
-            MetricRequest("ETH", "risk.governance_event_status"),
             MetricRequest("ETH", "risk.regulatory_event_status"),
         ))
         with self.subTest(mode="AUTO"):
@@ -285,14 +252,14 @@ class EventScannerTests(unittest.TestCase):
                 plan, mode="AUTO", as_of=AS_OF, now=AS_OF,
             )
             self.assertEqual(result.web_fallbacks, ())
-            self.assertEqual(len(result.event_scan_requests), 9)
-            self.assertEqual({item.category for item in result.event_scan_requests}, {"security", "governance", "regulatory"})
+            self.assertEqual(len(result.event_scan_requests), 6)
+            self.assertEqual({item.category for item in result.event_scan_requests}, {"security", "regulatory"})
             self.assertTrue(all(item.status == "FAILED" for item in result.results))
             self.assertFalse(result.finalized)
-            self.assertEqual(result.pending_external_resolution, 9)
-            self.assertEqual(result.summary["pending_external_resolution"], 9)
+            self.assertEqual(result.pending_external_resolution, 6)
+            self.assertEqual(result.summary["pending_external_resolution"], 6)
             self.assertEqual(result.summary["counts"]["FAILED"], 0)
-            self.assertEqual(result.summary["counts"]["PENDING_EXTERNAL_RESOLUTION"], 3)
+            self.assertEqual(result.summary["counts"]["PENDING_EXTERNAL_RESOLUTION"], 2)
 
         result = AcquisitionManager(persist=False).run(
             plan, mode="CACHE_ONLY", as_of=AS_OF, now=AS_OF,

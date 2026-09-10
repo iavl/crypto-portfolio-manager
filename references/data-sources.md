@@ -34,7 +34,7 @@ fundamentals, Blockchair for ETH's rolling native transfer volume, Coin Metrics
 Community first for BTC realized-cap/holder-cost-basis valuation and
 catalog-checked on-chain context, FRED for official U.S.
 macro/liquidity data, and current official/Web
-scans for security, governance, and regulatory events. Optional API-key
+scans for security and regulatory events. Optional API-key
 providers may fill advanced ETF or social gaps; they are never required for a
 normal review. See
 `references/data-providers.md` for routing and cache details.
@@ -263,30 +263,22 @@ Check for:
 
 - exploits/security incidents;
 - chain outage/liveness issues;
-- governance actions;
+- manually supplied governance or protocol context;
 - regulatory decisions;
 - material token unlocks/emissions changes;
 - ETF/product changes;
 - protocol upgrades with economic consequences.
 
 The on-demand EventScanner uses a deterministic allowlist rather than a
-generic crawler. BTC security/protocol sources are Bitcoin Core security
-advisories, Core releases, and BIPs. ETH security sources are Ethereum
-Foundation Blog RSS, go-ethereum advisories, and consensus-spec advisories;
-Ethereum security is not represented by one client. ETH governance sources
-are EIPs (via `ethereum/EIPs` GitHub commits), AllCoreDevs coordination, and
-Ethereum Foundation protocol notices. AAVE security uses Aave Governance Risk
-Discourse JSON plus the Aave V3 repository advisories. AAVE governance is
-sufficient only when the on-chain Governance V3 source and at least one
-reachable, complete official off-chain source (forum/proposals) are both
-covered; general news does not satisfy either group.
-BNB security uses the BNB Smart Chain security-advisory repository and official
-release notes; BNB governance uses the BNB Evolution Proposals repository and
-the official BNB Chain governance page. Regulatory collection remains one
-shared MARKET scan mapped to affected assets, with ESMA/MiCA collected through
-the ESMA RSS feed.
-The compatible BTC metric key `risk.governance_event_status` means material
-protocol-development/governance-context changes, not DAO governance.
+generic crawler. BTC security sources are Bitcoin Core security advisories and
+Core releases. ETH security sources are Ethereum Foundation Blog RSS,
+go-ethereum advisories, and consensus-spec advisories; Ethereum security is not
+represented by one client. AAVE security uses Aave Risk Discourse JSON plus the
+Aave V3 repository advisories. BNB security uses the BNB Smart Chain
+security-advisory repository and official release notes. Regulatory collection
+remains one shared MARKET scan mapped to affected assets, with ESMA/MiCA
+collected through the ESMA RSS feed. Governance and protocol-change information
+is supplied only through explicit manual asset context.
 
 Structured event transports remain bounded and source-specific: GitHub commit
 requests use the review window as `since`/`until`, and Aave Discourse follows
@@ -427,7 +419,7 @@ truncate issuance, tokenomics, or full-history valuation inputs.
 | 365D tokenomics/issuance | 380D bounded history | `STRUCTURED_ONLY` |
 | BTC MVRV Z derivation | `FULL_AVAILABLE` | `STRUCTURED_ONLY` |
 | Qualitative structural risk | current bounded evidence | `WEB_ALLOWED` when no structured source exists; non-scoring |
-| Security/governance/regulatory event | source lookback | structured first, `WEB_ALLOWED` only when incomplete |
+| Security/regulatory event | source lookback | structured first, `WEB_ALLOWED` only when incomplete |
 
 Missing numeric history is unavailable evidence. It is never converted into a
 generic Web task or a zero.

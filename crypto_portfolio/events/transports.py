@@ -15,7 +15,6 @@ import xml.etree.ElementTree as ET
 from ..models.time import normalize_timestamp, parse_timestamp
 from ..providers.base import ProviderResponseError
 from ..providers.http import HttpClient, redact_log, redact_secrets
-from ..providers.rpc import MAX_RPC_TIMESTAMP_SEARCH, find_block_at_or_before_timestamp
 from ..state.market_data import _atomic_write
 from ..state.snapshots import runtime_data_dir
 from .scanner import EventSourceScanRequest, EventSourceScanResponse
@@ -27,33 +26,13 @@ TRANSPORT_KINDS = (
     "GITHUB_COMMITS",
     "RSS_ATOM",
     "DISCOURSE_JSON",
-    "RPC_LOGS",
     "WEB",
 )
+EVENT_CATEGORIES = ("security", "regulatory")
 MAX_CANDIDATES = 100
 MAX_GITHUB_PAGES = 3
 MAX_DISCOURSE_PAGES = 10
 GITHUB_PAGE_SIZE = 100
-MAX_RPC_BLOCK_RANGE = 5_000
-MAX_RPC_TIMESTAMP_REQUESTS = 64
-MAX_RPC_LOG_REQUESTS = 256
-BNB_GOVERNOR_ADDRESS = "0x0000000000000000000000000000000000002004"
-BNB_RPC_ENDPOINT = "https://bsc-dataseed.bnbchain.org"
-BNB_RPC_ENDPOINTS = (BNB_RPC_ENDPOINT, "https://bsc-dataseed-public.bnbchain.org")
-RPC_EVENT_TOPICS = (
-    "0x95f03e437e6d5037418f12bef80fc7e0a5f27754c078a1d5d3f62d39bac44e50",
-    "0x712ae1383f79ac853f8d882153778e0260ef8f03b504e2866e0593e04d2b291f",
-)
-AAVE_GOVERNANCE_V3_ADDRESS = "0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7"
-AAVE_GOVERNANCE_V3_RPC_ENDPOINT = "https://ethereum-rpc.publicnode.com"
-AAVE_GOVERNANCE_V3_RPC_ENDPOINTS = (AAVE_GOVERNANCE_V3_RPC_ENDPOINT, "https://rpc.flashbots.net")
-AAVE_GOVERNANCE_V3_EVENT_TOPICS = (
-    "0xcc914becfa276bbc067049bf8db2d34ebbdc1bafa851e4d4936aaed376c08dbe",
-    "0xe39e7fc9f2013b8ab01110f66610f9fb8675d3126e69b3752f0084afc72be19a",
-    "0x712ae1383f79ac853f8d882153778e0260ef8f03b504e2866e0593e04d2b291f",
-    "0x789cf55be980739dad1d0699b93b58e806b51c9d96619bfa8fe0a28abaa7b30c",
-    "0x2bed878481293fc7587c48352c8b09aeeca52bed666011d7f916706ec72d6d6d",
-)
 _MAX_EXCERPT = 2_000
 
 
@@ -104,7 +83,10 @@ class EventTransportSpec:
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "endpoint", _url(self.endpoint, "endpoint"))
         object.__setattr__(self, "asset", _text(self.asset, "asset").upper())
-        object.__setattr__(self, "category", _text(self.category, "category").lower())
+        category = _text(self.category, "category").lower()
+        if category not in EVENT_CATEGORIES:
+            raise ValueError("category must be security or regulatory")
+        object.__setattr__(self, "category", category)
         object.__setattr__(self, "source_group", _text(self.source_group, "source_group").lower())
         start = _timestamp(self.lookback_start, "lookback_start")
         end = _timestamp(self.as_of, "as_of")
@@ -249,17 +231,12 @@ class EventTransportResult:
 
 def infer_transport_kind(endpoint: str, source_id: str = "") -> str:
     path = urlsplit(endpoint).path.lower()
-    source = source_id.lower()
-    if source == "bnb-governor-rpc" or path.endswith("/rpc"):
-        return "RPC_LOGS"
-    if source == "aave-governance-v3" and urlsplit(endpoint).netloc in {"ethereum-rpc.publicnode.com", "rpc.flashbots.net"}:
-        return "RPC_LOGS"
     if urlsplit(endpoint).netloc in {"api.github.com", "github.com"}:
         if "/security-advisories" in path:
             return "GITHUB_SECURITY_ADVISORIES"
         if "/releases" in path:
             return "GITHUB_RELEASES"
-        if "/commits" in path or source in {"bitcoin-bips", "ethereum-eips", "ethereum-all-core-devs", "bnb-beps"}:
+        if "/commits" in path:
             return "GITHUB_COMMITS"
     if "discourse" in urlsplit(endpoint).netloc or path.endswith(".json"):
         return "DISCOURSE_JSON"
@@ -466,83 +443,6 @@ def _discourse_window_endpoint(endpoint: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_values), ""))
 
 
-def _rpc_candidates(
-    payload: Any,
-    spec: EventTransportSpec,
-    *,
-    block_timestamps: Mapping[str, str] | None = None,
-) -> tuple[EventCandidate, ...]:
-    if not isinstance(payload, list):
-        raise ProviderResponseError("RPC logs response must be an array")
-    candidates = []
-    if spec.source_id == "bnb-governor-rpc":
-        address = BNB_GOVERNOR_ADDRESS.lower()
-        allowed_topics = RPC_EVENT_TOPICS
-        label = "BNB Governor"
-        explorer = "https://bscscan.com/tx/"
-    elif spec.source_id == "aave-governance-v3":
-        address = AAVE_GOVERNANCE_V3_ADDRESS.lower()
-        allowed_topics = AAVE_GOVERNANCE_V3_EVENT_TOPICS
-        label = "Aave Governance V3"
-        explorer = "https://etherscan.io/tx/"
-    else:
-        raise ProviderResponseError("RPC source is not allowlisted")
-    for item in payload:
-        if not isinstance(item, Mapping):
-            continue
-        row_topics = item.get("topics")
-        if (
-            str(item.get("address", "")).lower() != address
-            or not isinstance(row_topics, list)
-            or not row_topics
-            or str(row_topics[0]).lower() not in {topic.lower() for topic in allowed_topics}
-        ):
-            continue
-        transaction_hash = item.get("transactionHash")
-        timestamp = _date_from(item.get("timestamp"))
-        if timestamp is None and block_timestamps is not None:
-            timestamp = _date_from(block_timestamps.get(str(item.get("blockNumber", ""))))
-        if timestamp is None:
-            raise ProviderResponseError("RPC event log has no usable block timestamp")
-        if not isinstance(transaction_hash, str) or not transaction_hash.strip():
-            raise ProviderResponseError("RPC event log has no transaction hash")
-        proposal = str(row_topics[1]) if len(row_topics) > 1 else transaction_hash
-        block = item.get("blockNumber", "")
-        candidates.append(EventCandidate(
-            f"{spec.source_id}:{proposal}",
-            f"{label} proposal {proposal}",
-            timestamp,
-            f"{explorer}{transaction_hash}",
-            f"allowlisted {label} event proposal_id={proposal} transaction={transaction_hash} block={block}",
-        ))
-    return _dedup(candidates, spec)
-
-
-def _rpc_block_timestamp(value: Any) -> str:
-    if not isinstance(value, str) or not value.startswith("0x"):
-        raise ProviderResponseError("RPC block timestamp is malformed")
-    try:
-        timestamp = int(value, 16)
-    except (TypeError, ValueError) as exc:
-        raise ProviderResponseError("RPC block timestamp is malformed") from exc
-    try:
-        return normalize_timestamp(datetime.fromtimestamp(timestamp, timezone.utc).isoformat(), "block timestamp")
-    except (OverflowError, OSError, ValueError) as exc:
-        raise ProviderResponseError("RPC block timestamp is malformed") from exc
-
-
-def _rpc_block_number(value: Any, field: str = "RPC block number") -> int:
-    if not isinstance(value, str) or not value.startswith("0x"):
-        raise ProviderResponseError(f"{field} is malformed")
-    try:
-        number = int(value, 16)
-    except ValueError as exc:
-        raise ProviderResponseError(f"{field} is malformed") from exc
-    if number < 0:
-        raise ProviderResponseError(f"{field} is malformed")
-    return number
-
-
 class EventTransportCache:
     """Small content-addressed cache for safe normalized transport results."""
 
@@ -706,107 +606,6 @@ class StructuredEventTransport:
                 except Exception as exc:
                     return incomplete(redact_log(f"DISCOURSE_PAGINATION_ERROR: {exc}") or "DISCOURSE_PAGINATION_ERROR")
             raise AssertionError("bounded Discourse pagination did not return a result")
-        if spec.kind == "RPC_LOGS":
-            endpoint = spec.endpoint
-            if spec.source_id == "bnb-governor-rpc":
-                contract_address = BNB_GOVERNOR_ADDRESS
-                event_topics = RPC_EVENT_TOPICS
-            elif spec.source_id == "aave-governance-v3":
-                contract_address = AAVE_GOVERNANCE_V3_ADDRESS
-                event_topics = AAVE_GOVERNANCE_V3_EVENT_TOPICS
-            else:
-                raise ProviderResponseError("RPC source is not allowlisted")
-            latest = self.client.post_json(
-                endpoint,
-                json_body={"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []},
-                idempotent=True,
-            )
-            if isinstance(latest, Mapping) and latest.get("error") is not None:
-                error = latest["error"] if isinstance(latest["error"], Mapping) else {}
-                raise ProviderResponseError(
-                    f"RPC latest block request rejected ({error.get('code', 'unknown')})"
-                )
-            if not isinstance(latest, Mapping) or not isinstance(latest.get("result"), str):
-                raise ProviderResponseError("RPC latest block response is malformed")
-            to_block = _rpc_block_number(latest["result"], "RPC latest block number")
-            from_block = find_block_at_or_before_timestamp(
-                endpoint,
-                spec.lookback_start,
-                to_block,
-                client=self.client,
-            )
-            logs: list[Any] = []
-            ranges = 0
-
-            def incomplete(error: str) -> EventTransportResult:
-                return EventTransportResult(
-                    spec.source_id,
-                    spec.kind,
-                    endpoint,
-                    True,
-                    False,
-                    checked_at,
-                    error=error,
-                )
-
-            for chunk_start in range(from_block, to_block + 1, MAX_RPC_BLOCK_RANGE):
-                if ranges >= MAX_RPC_LOG_REQUESTS:
-                    return incomplete("RPC_LOG_REQUEST_LIMIT")
-                chunk_end = min(to_block, chunk_start + MAX_RPC_BLOCK_RANGE - 1)
-                response = self.client.post_json(
-                    endpoint,
-                    json_body={
-                        "jsonrpc": "2.0", "id": 100 + ranges, "method": "eth_getLogs",
-                        "params": [{
-                            "address": contract_address,
-                            "fromBlock": hex(chunk_start),
-                            "toBlock": hex(chunk_end),
-                            "topics": [list(event_topics)],
-                        }],
-                    },
-                    idempotent=True,
-                )
-                if isinstance(response, Mapping) and response.get("error") is not None:
-                    error = response["error"] if isinstance(response["error"], Mapping) else {}
-                    return incomplete(f"RPC_LOGS_CHUNK_REJECTED:{error.get('code', 'unknown')}")
-                if not isinstance(response, Mapping) or not isinstance(response.get("result"), list):
-                    return incomplete("RPC_LOGS_CHUNK_MALFORMED")
-                logs.extend(response["result"])
-                ranges += 1
-            blocks = sorted({
-                str(item.get("blockNumber"))
-                for item in logs
-                if isinstance(item, Mapping)
-                and item.get("timestamp") is None
-                and item.get("blockNumber") is not None
-            })
-            if len(blocks) > MAX_RPC_TIMESTAMP_REQUESTS:
-                return incomplete("RPC_BLOCK_TIMESTAMP_LIMIT")
-            block_timestamps: dict[str, str] = {}
-            for block in blocks:
-                block_response = self.client.post_json(
-                    endpoint,
-                    json_body={
-                        "jsonrpc": "2.0", "id": 3, "method": "eth_getBlockByNumber",
-                        "params": [block, False],
-                    },
-                    idempotent=True,
-                )
-                if not isinstance(block_response, Mapping) or not isinstance(block_response.get("result"), Mapping):
-                    return incomplete("RPC_BLOCK_TIMESTAMP_MALFORMED")
-                try:
-                    block_timestamps[block] = _rpc_block_timestamp(block_response["result"].get("timestamp"))
-                except ProviderResponseError as exc:
-                    return incomplete(str(exc))
-            return EventTransportResult(
-                spec.source_id,
-                spec.kind,
-                endpoint,
-                True,
-                True,
-                checked_at,
-                _rpc_candidates(logs, spec, block_timestamps=block_timestamps),
-            )
         raise ProviderResponseError(f"unsupported event transport {spec.kind}")
 
     def fetch_result(
@@ -853,8 +652,6 @@ class StructuredEventTransport:
             if self.cache is not None:
                 self.cache.save(spec, result)
             results.append(result)
-            if result.complete_for_source and result.transport_kind == "RPC_LOGS":
-                break
         reachable = [item for item in results if item.reachable]
         complete = [item for item in reachable if item.complete_for_source]
         candidates: dict[str, EventCandidate] = {}
@@ -896,13 +693,6 @@ def structured_event_source_fetcher(
 
 
 __all__ = [
-    "AAVE_GOVERNANCE_V3_ADDRESS",
-    "AAVE_GOVERNANCE_V3_EVENT_TOPICS",
-    "AAVE_GOVERNANCE_V3_RPC_ENDPOINT",
-    "AAVE_GOVERNANCE_V3_RPC_ENDPOINTS",
-    "BNB_GOVERNOR_ADDRESS",
-    "BNB_RPC_ENDPOINT",
-    "BNB_RPC_ENDPOINTS",
     "EventCandidate",
     "EventTransportCache",
     "EventTransportResult",
@@ -910,14 +700,8 @@ __all__ = [
     "GITHUB_PAGE_SIZE",
     "MAX_DISCOURSE_PAGES",
     "MAX_CANDIDATES",
-    "MAX_RPC_BLOCK_RANGE",
-    "MAX_RPC_LOG_REQUESTS",
-    "MAX_RPC_TIMESTAMP_REQUESTS",
-    "MAX_RPC_TIMESTAMP_SEARCH",
-    "RPC_EVENT_TOPICS",
     "StructuredEventTransport",
     "TRANSPORT_KINDS",
     "infer_transport_kind",
-    "find_block_at_or_before_timestamp",
     "structured_event_source_fetcher",
 ]

@@ -36,6 +36,7 @@ def build_asset_factor_packet(
     previous_assessment: Any = None,
     coverage: float | None = None,
     evidence_ids: Iterable[str] = (),
+    manual_asset_contexts: Any = None,
     **factor_facts: Any,
 ) -> AssetFactorPacket:
     """Build a packet without forwarding raw source payloads."""
@@ -74,6 +75,7 @@ def build_asset_factor_packet(
         coverage=coverage,
         previous_assessment=previous_assessment,
         evidence_ids=tuple(dict.fromkeys(ids)),
+        manual_asset_contexts=manual_asset_contexts,
     )
 
 

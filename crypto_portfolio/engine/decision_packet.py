@@ -322,6 +322,7 @@ def build_decision_review_packet(
     nav_performance: Mapping[str, Any] | None = None,
     benchmark_performance: Mapping[str, Any] | None = None,
     event_scan_summary: Mapping[str, Any] | None = None,
+    manual_asset_contexts: Any = None,
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
@@ -516,6 +517,7 @@ def build_decision_review_packet(
         nav_performance=nav_value,
         benchmark_performance=benchmark_performance if benchmark_performance is not None else source.get("benchmark_performance"),
         event_scan_summary=event_scan_summary if event_scan_summary is not None else source.get("event_scan_summary"),
+        manual_asset_contexts=(manual_asset_contexts if manual_asset_contexts is not None else source.get("manual_asset_contexts", ())),
         no_trade_attribution=attribution,
     )
 

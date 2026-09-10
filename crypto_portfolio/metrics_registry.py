@@ -425,12 +425,6 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,
         decision_role="EVENT_RISK", context_group="event_risk", fallback_mode="WEB_ALLOWED",
     ),
-    "risk.governance_event_status": _definition(
-        "risk.governance_event_status", "event_risk", "string", None, "CONTEXTUAL",
-        critical=True, critical_review_types=("EVENT_REVIEW",), freshness="1d", asset_scope=_PROTOCOL_ASSETS,
-        decision_role="EVENT_RISK", context_group="event_risk", fallback_mode="WEB_ALLOWED",
-    ),
-
     # Positioning and social context are deliberately separate from scoring.
     "derivatives.funding_rate": _definition(
         "derivatives.funding_rate", "positioning", "number", "fraction", "CONTEXTUAL",

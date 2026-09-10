@@ -69,7 +69,9 @@ A practical qualitative mapping:
 - Default core assets are BTC and ETH; BTC remains the benchmark even when the user changes the core list.
 - high-conviction satellite: meaningful but clearly smaller than core.
 - moderate satellite: small allocation.
-- low-confidence or weak satellite: 0% / exit.
+- low-confidence satellite: strategic target may remain visible, but immediate
+  deployment is 0% until evidence improves; weak thesis/risk can still require
+  an explicit reduction or exit.
 
 Always account for correlation and aggregate satellite exposure.
 
@@ -158,7 +160,7 @@ Staged profit-taking is preferred when the thesis remains intact but position si
 `EXIT` is appropriate when the forward-looking case no longer justifies holding the asset, especially after:
 
 - thesis failure;
-- severe unresolved security/governance failure;
+- severe unresolved security or explicitly scoped manual risk;
 - structural liquidity deterioration;
 - persistent relative underperformance with deteriorating fundamentals;
 - tokenomics/supply change that invalidates expected return.
@@ -208,18 +210,18 @@ removes a crowding penalty; it is not a positive exposure signal.
 
 ## Rule 13 — Event scan semantics
 
-Security, governance, and regulatory event metrics use the fixed on-demand
-source catalog. Python determines source coverage, materiality status, and
-confidence from typed source responses. A shared regulatory scan is performed
-once at market scope and mapped to affected assets.
+Security and regulatory event metrics use the fixed on-demand source catalog.
+Python determines source coverage, materiality status, and confidence from
+typed source responses. A shared regulatory scan is performed once at market
+scope and mapped to affected assets. Governance and protocol-change context is
+provided explicitly through `ManualAssetContext`; it is not automatically
+classified or collected.
 
-Governance classification keeps these fields independent: `is_material`,
-`severity`, `impact_direction`, `magnitude`, `implementation_status`, and
-bounded classification `confidence`. `WATCH` and `ELEVATED` material events
-are retained by the scanner even when they are not critical. Positive material
-events are informational/catalyst evidence; negative severity drives risk
-escalation. Routine proposals may be resolved by the deterministic cheap
-screening stage and do not require semantic judgment.
+`ManualAssetContext` preserves the user-provided `impact`, `severity`, and
+`scope` with `source=MANUAL_USER_INPUT`. `CONTEXT_ONLY` changes explanation;
+only an explicitly selected `RISK` or `EXECUTION` scope can constrain its
+corresponding downstream decision. Absence of the context has no confidence
+penalty.
 
 `observed_at` is the current `scan_as_of`, so an old last incident does not
 make a successfully completed scan stale. Full configured primary coverage

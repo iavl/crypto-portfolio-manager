@@ -9,10 +9,10 @@ from crypto_portfolio.engine.confidence import (
 )
 from crypto_portfolio.engine.decision_packet import build_decision_review_packet
 from crypto_portfolio.engine.risk import run_risk_gate
-from crypto_portfolio.events import EventScanner, EventSourceScanResponse
 from crypto_portfolio.metric_availability import evaluate_factor_sufficiency, metric_availability
 from crypto_portfolio.models.metrics_history import CollectionEvent
 from crypto_portfolio.models.policy import load_policy
+from crypto_portfolio.models import ManualAssetContext
 
 
 AS_OF = "2026-09-09T00:00:00Z"
@@ -140,52 +140,25 @@ class ConfidenceRefactorTests(unittest.TestCase):
         )
         self.assertTrue(any(item.code == "SEVERE_EVENT_EXPOSURE" for item in gate.errors))
 
-    def test_governance_normalizes_materiality_and_direction(self):
-        response = EventSourceScanResponse(
-            "source", True, AS_OF,
-            ({
-                "title": "fee switch proposal",
-                "published_at": AS_OF,
-                "materiality": "WATCH",
-                "impact_direction": "POSITIVE",
-                "magnitude": "MEDIUM",
-                "implementation_status": "PROPOSED",
-                "confidence": 0.9,
-            },),
+    def test_manual_asset_context_is_optional_and_preserves_provenance(self):
+        context = ManualAssetContext(
+            "AAVE", "GOVERNANCE", "fee switch proposal", "MIXED", "MEDIUM", "CONTEXT_ONLY", AS_OF,
         )
-        item = response.items[0]
-        self.assertTrue(item["is_material"])
-        self.assertEqual(item["severity"], "WATCH")
-        self.assertEqual(item["impact_direction"], "POSITIVE")
-        self.assertEqual(item["implementation_status"], "PROPOSED")
-        with self.assertRaisesRegex(ValueError, "unknown event scan materiality"):
-            EventSourceScanResponse("source", True, AS_OF, ({"title": "bad", "materiality": "???"},))
+        packet = build_decision_review_packet(
+            current_weights={"BTC": 1.0},
+            target_weights={"BTC": 1.0},
+            assessments={"BTC": {"weighted_score": 70, "confidence": "HIGH", "confidence_score": 0.9}},
+            manual_asset_contexts=(context,),
+        )
+        self.assertEqual(packet.manual_asset_contexts[0].source, "MANUAL_USER_INPUT")
+        self.assertEqual(packet.as_dict()["manual_asset_contexts"][0]["source"], "MANUAL_USER_INPUT")
 
-    def test_positive_material_governance_event_is_retained_without_critical_state(self):
-        scanner = EventScanner()
-        requests = scanner.build_requests("AAVE", "governance", AS_OF)
-        response = EventSourceScanResponse(
-            requests[0].source_id, True, AS_OF,
-            ({
-                "title": "fee switch proposal",
-                "published_at": AS_OF,
-                "materiality": True,
-                "is_material": True,
-                "severity": "WATCH",
-                "impact_direction": "POSITIVE",
-                "magnitude": "MEDIUM",
-                "implementation_status": "PROPOSED",
-                "affected_assets": ["AAVE"],
-            },),
+        without_context = build_decision_review_packet(
+            current_weights={"BTC": 1.0},
+            target_weights={"BTC": 1.0},
+            assessments={"BTC": {"weighted_score": 70, "confidence": "HIGH", "confidence_score": 0.9}},
         )
-        all_responses = tuple(
-            response if request.source_id == requests[0].source_id
-            else EventSourceScanResponse(request.source_id, True, AS_OF, ())
-            for request in requests
-        )
-        result = scanner.scan("AAVE", "governance", AS_OF, responses=all_responses)
-        self.assertEqual(result.status, "MATERIAL_EVENT_FOUND")
-        self.assertEqual(result.state, "WATCH")
+        self.assertEqual(packet.decision_confidence.score, without_context.decision_confidence.score)
 
 
 if __name__ == "__main__":

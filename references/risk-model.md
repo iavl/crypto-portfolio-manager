@@ -236,12 +236,14 @@ critical. The canonical matrix is:
 |---|---|---|---|
 | Security | Critical | Critical | Critical |
 | Chain liveness | Critical | Critical | Critical |
-| Governance / protocol-change context | Context | Required | Critical |
+| Manual governance / protocol-change context | Optional manual input | Optional manual input | Optional manual input |
 | Regulatory | Context | Required | Critical |
 
-`Context` and `Required` failures lower coverage/confidence and remain in the
-collection log. `Critical` failures trigger hard-critical handling and block
-high-conviction action. A current scan with no material result is
+Automatic governance context has no collection failure state. A
+`ManualAssetContext` is retained with its explicit scope and provenance;
+absence does not lower confidence. `Context` and `Required` failures lower
+coverage/confidence and remain in the collection log. `Critical` failures trigger
+hard-critical handling and block high-conviction action. A current scan with no material result is
 `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; it is risk hygiene, not bullish
 evidence. The scan timestamp controls freshness, not the date of an older
 incident article.

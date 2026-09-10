@@ -174,11 +174,11 @@ class EventResolutionTests(unittest.TestCase):
         plan = MetricCollectionPlan("EVENT_REVIEW", tuple(
             MetricRequest(asset, f"risk.{category}_event_status")
             for asset in ("BTC", "ETH")
-            for category in ("security", "governance", "regulatory")
+            for category in ("security", "regulatory")
         ))
         result = AcquisitionManager(event_scanner=scanner, persist=False).run(plan, as_of=AS_OF, now=AS_OF)
         self.assertEqual(result.pending_event_scans, ())
-        self.assertEqual(len(result.event_scans), 6)
+        self.assertEqual(len(result.event_scans), 4)
         self.assertTrue(result.ready_for_scoring)
         self.assertTrue(all(item.status == "SUCCESS" for item in result.results))
 

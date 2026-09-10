@@ -357,7 +357,7 @@ class OnchainDataProvider(Protocol):
 
 class EventDataProvider(Protocol):
     def events(self, symbols: Sequence[str]) -> Mapping[str, Sequence[Mapping[str, Any]]]:
-        """Return normalized security, governance, and regulatory events."""
+        """Return normalized security and regulatory events."""
 
 
 class MetricDataProvider(Protocol):

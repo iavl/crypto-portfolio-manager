@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from ..facts.models import FactBase
-from .evidence import AssetAssessment
+from .evidence import AssetAssessment, ManualAssetContext
 
 
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
@@ -88,6 +88,25 @@ def _ids(value: Any, field_name: str) -> tuple[str, ...]:
     result = tuple(item.strip() for item in value)
     if len(result) != len(set(result)):
         raise ValueError(f"{field_name} must contain unique non-empty strings")
+    return result
+
+
+def _manual_contexts(value: Any, symbol: str) -> tuple[ManualAssetContext, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, ManualAssetContext) or isinstance(value, Mapping):
+        value = (value,)
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("manual_asset_contexts must be a sequence of objects")
+    result = tuple(
+        item if isinstance(item, ManualAssetContext) else ManualAssetContext.from_mapping(item)
+        for item in value
+    )
+    if any(item.asset != symbol for item in result):
+        raise ValueError("manual asset context asset does not match factor packet symbol")
+    identities = [(item.asset, item.category, item.as_of) for item in result]
+    if len(identities) != len(set(identities)):
+        raise ValueError("manual_asset_contexts must not contain duplicate contexts")
     return result
 
 
@@ -176,11 +195,13 @@ class AssetFactorPacket:
     coverage: float | None = None
     previous_assessment: AssetAssessment | Mapping[str, Any] | None = None
     evidence_ids: tuple[str, ...] = ()
+    manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or not self.symbol.strip():
             raise ValueError("factor packet symbol must be non-empty")
         object.__setattr__(self, "symbol", self.symbol.strip().upper())
+        object.__setattr__(self, "manual_asset_contexts", _manual_contexts(self.manual_asset_contexts, self.symbol))
         fact_fields = (
             "trend_facts", "valuation_facts", "btc_valuation_facts", "macro_liquidity_facts", "fundamental_facts", "onchain_facts",
             "flow_facts", "relative_strength_facts", "event_facts",
@@ -253,6 +274,7 @@ class AssetFactorPacket:
             result["previous_assessment"] = self.previous_assessment.as_dict() if isinstance(self.previous_assessment, AssetAssessment) else thaw_packet_value(self.previous_assessment)
         if self.evidence_ids:
             result["evidence_ids"] = list(self.evidence_ids)
+        result["manual_asset_contexts"] = [item.as_dict() for item in self.manual_asset_contexts]
         return result
 
     @classmethod

@@ -66,6 +66,7 @@ class DocumentationTests(unittest.TestCase):
             "schemas/decision-review-packet.schema.json",
             "schemas/report-packet.schema.json",
             "schemas/factor-judgment.schema.json",
+            "schemas/manual-asset-context.schema.json",
             "scripts",
             "scripts/run_with_debug.py",
             "scripts/events.py",
@@ -110,7 +111,6 @@ class DocumentationTests(unittest.TestCase):
             "volume_24h_approximate", "market_price_usd", "ethereum/stats",
             "freshness_reference_at", "completed_through", "RATED_SUBSCRIPTION_INACTIVE",
             "ENTITLEMENT_REQUIRED", "RATE_LIMITED", "UNAVAILABLE_BY_METHODOLOGY",
-            "ONCHAIN_AND_ONE_OFFCHAIN", "0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, provider_policy)
@@ -155,7 +155,7 @@ class DocumentationTests(unittest.TestCase):
             "Evidence ID",
             "MATERIAL_EVENT_FOUND",
             "协议提案/升级活动",
-            "治理提案/风险参数活动",
+            "ManualAssetContext",
             "无法确认",
         ):
             with self.subTest(text=text):
@@ -194,7 +194,7 @@ class DocumentationTests(unittest.TestCase):
             template.index("### 本轮数据抓取失败明细"),
             template.index("## 2. 组合诊断"),
         )
-        self.assertIn("MATERIAL_EVENT_FOUND` means a relevant proposal or announcement", skill)
+        self.assertIn("MATERIAL_EVENT_FOUND` means a relevant security or regulatory", skill)
         self.assertIn("result.pending_event_scans", skill)
         self.assertIn("result.finalized", skill)
         self.assertIn("policy.universe.excluded", skill)

@@ -17,13 +17,13 @@ from .time import normalize_timestamp, parse_timestamp
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _EVENT_STATES = {"CLEAR", "WATCH", "ELEVATED", "CRITICAL"}
 _EVENT_RELEVANCE = {"RELEVANT", "IRRELEVANT", "UNKNOWN"}
+_EVENT_CATEGORIES = {"security", "regulatory"}
 _EVENT_SEVERITY = {"CLEAR", "WATCH", "ELEVATED", "CRITICAL"}
 _EVENT_DIRECTIONS = {"POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL", "UNCERTAIN"}
 _EVENT_MAGNITUDES = {"LOW", "MEDIUM", "HIGH"}
 _IMPLEMENTATION_STATES = {"DISCUSSION", "PROPOSED", "VOTING", "PASSED", "EXECUTED", "REJECTED", "UNKNOWN"}
 _EVENT_METRICS = {
     "security": "risk.security_event_status",
-    "governance": "risk.governance_event_status",
     "regulatory": "risk.regulatory_event_status",
 }
 
@@ -206,7 +206,10 @@ class EventScanResult:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "asset", _text(self.asset, "event scan asset").upper())
-        object.__setattr__(self, "category", _text(self.category, "event scan category").lower())
+        category = _text(self.category, "event scan category").lower()
+        if category not in _EVENT_CATEGORIES:
+            raise ValueError("event scan category is unsupported")
+        object.__setattr__(self, "category", category)
         object.__setattr__(self, "scan_as_of", normalize_timestamp(self.scan_as_of, "scan_as_of"))
         if isinstance(self.lookback_days, bool) or not isinstance(self.lookback_days, int) or self.lookback_days < 1:
             raise ValueError("event scan lookback_days must be a positive integer")

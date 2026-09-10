@@ -174,6 +174,7 @@ def build_report_packet(
         nav_performance=packet.nav_performance,
         benchmark_performance=packet.benchmark_performance,
         event_scan_summary=packet.event_scan_summary,
+        manual_asset_contexts=packet.manual_asset_contexts,
         no_trade_attribution=packet.no_trade_attribution,
     )
 
@@ -235,6 +236,7 @@ def build_final_review_output(
             "flags": list(packet.risk_flags),
             "critical_missing_data": list(packet.critical_missing_data),
         },
+        "manual_asset_contexts": packet_value["manual_asset_contexts"],
         "rebalance": {
             "actions": packet_value["actions"],
             "approved_amounts": packet_value["approved_amounts"],

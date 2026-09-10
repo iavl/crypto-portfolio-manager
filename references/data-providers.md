@@ -32,7 +32,7 @@ those contracts; it is not a second schema or routing implementation.
 | Ethereum Beacon API | bounded Beacon node health/fallback | None | node version, genesis and finality checks | configurable `ETH_BEACON_API_URL`; no validator-registry scan |
 | Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` `EthSupply` | optional current-supply route |
 | Beaconchain | not registered | N/A | no stable aggregate contract verified | intentionally omitted; staking metrics remain optional |
-| EventScanner | current security/governance/regulatory scans | None | event status and source coverage | fixed source catalog; no generic fallback |
+| EventScanner | current security/regulatory scans | None | event status and source coverage | fixed source catalog; no generic fallback |
 | LunarCrush | social positioning context | `LUNARCRUSH_API_KEY` via Bearer header | completed daily social sentiment and attention metrics | optional API v4 route; credential and plan gated |
 
 ## Fetch modes and routing
@@ -420,27 +420,18 @@ accepted for the current-supply cross-check.
 
 ### Structured event transports
 
-The event catalog can use bounded GitHub releases/advisories/commits, RSS/Atom,
-Aave Discourse JSON, the allowlisted BNB Governor RPC contract
-`0x0000000000000000000000000000000000002004`, and Aave Governance V3 on
-Ethereum at `0x9AEE0B04504CeF83A65AC3f0e838D0593BCb2BC7`. Governance V3 uses
-the verified `ProposalCreated`, `ProposalQueued`, `ProposalExecuted`,
-`ProposalCanceled`, and `ProposalFailed` topics from the official
-`aave-dao/aave-governance-v3` interface. Transport code only returns
-metadata candidates. Python filters lookback and deduplicates; `LUNA_MAX`
-classifies bounded candidates for materiality. A complete reachable source with
-zero candidates is a valid empty response. Same-authority URLs share a
-`source_group`; independent security domains do not.
+The event catalog can use bounded GitHub releases/advisories, RSS/Atom, and
+Aave Risk Discourse JSON. Transport code only returns metadata candidates.
+Python filters lookback and deduplicates; `LUNA_MAX` classifies bounded
+candidates for materiality. A complete reachable source with zero candidates is
+a valid empty response. Same-authority URLs share a `source_group`; independent
+security domains do not.
 Discourse completeness is window-based: a reliable ordered `created_at` page
 crossing the requested lookback boundary is complete even when older forum
 history remains. A cap, malformed pagination URL, or later-page failure remains
-incomplete. AAVE governance records
-`coverage_rule=ONCHAIN_AND_ONE_OFFCHAIN` and is `SUFFICIENT` only when the
-on-chain and one official off-chain group are both reachable and complete. The
-current event mappings
-are Ethereum Foundation security -> Blog RSS, Ethereum EIPs -> `ethereum/EIPs`
-GitHub commits, Aave security -> Governance Risk Discourse JSON plus the Aave
-V3 advisory source, and ESMA/MiCA -> ESMA RSS. GitHub commit requests pass the
+incomplete. The current event mappings are Ethereum Foundation security -> Blog
+RSS, Aave security -> Risk Discourse JSON plus the Aave V3 advisory source, and
+ESMA/MiCA -> ESMA RSS. GitHub commit requests pass the
 review window as `since`/`until`; Discourse follows same-origin pagination until
 an ordered `created_at` page crosses the requested window or a bounded page cap
 is reached. A cap before the boundary, malformed next URL, or later-page
@@ -457,19 +448,16 @@ EventSourceScanRequest -> external source response -> Python coverage/materialit
                          -> pass 2 acquisition -> require_scoring_ready()
 ```
 
-It produces `risk.security_event_status`,
-`risk.governance_event_status`, and `risk.regulatory_event_status`. The catalog
+It produces `risk.security_event_status` and `risk.regulatory_event_status`. The catalog
 covers:
 
-- Bitcoin Core security/releases/BIPs;
-- Ethereum security guidance, go-ethereum and consensus-spec advisories, EIPs,
-  AllCoreDevs and Foundation protocol notices;
-- Aave security advisories and governance forum/proposals plus Governance V3
-  on-chain proposal events;
-- BNB Smart Chain security/release sources and BEPs/governance sources;
+- Bitcoin Core security/releases;
+- Ethereum security guidance, go-ethereum and consensus-spec advisories;
+- Aave security advisories;
+- BNB Smart Chain security/release sources;
 - shared MARKET regulatory scans over SEC, CFTC, and ESMA/MiCA sources.
 
-BNB security and governance are first-class catalog scopes. Regulatory scans
+Security is a first-class catalog scope. Regulatory scans
 run once at MARKET scope and map results to affected assets. A complete scan
 without a material item is `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`;
 incomplete reachability is `INSUFFICIENT_SOURCE_COVERAGE`; a

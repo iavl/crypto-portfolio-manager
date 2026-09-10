@@ -152,7 +152,12 @@ def read_collection_events(
     path: str | Path | None = None,
 ) -> list[CollectionEvent]:
     """Read and validate current-format collection events."""
-    return [CollectionEvent.from_mapping(item) for item in read_records(path or default_collection_events_path())]
+    return [
+        CollectionEvent.from_mapping(item)
+        for item in read_records(path or default_collection_events_path())
+        if not isinstance(item.get("metric_key"), str)
+        or item["metric_key"].strip().lower() in METRIC_REGISTRY
+    ]
 
 
 

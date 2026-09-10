@@ -95,8 +95,8 @@ INCREASE / HOLD / WATCH / REDUCE / EXIT / WAIT / NO_TRADE
 The score measures medium-term attractiveness. Confidence controls how much
 that evidence can support action. Regime and portfolio risk determine the
 available risk budget. Event and liveness gates can block otherwise attractive
-exposure. Allocation decides the total approved USD amount; execution decides
-whether and how much of that approved amount can be staged now.
+exposure. Allocation decides the strategic target; deployment and execution
+decide whether and how much of that target can be staged now.
 
 ## 6. Asset Attractiveness Is Not a Trade Signal
 
@@ -115,8 +115,18 @@ Later layers answer different questions:
   `WAIT`?
 
 Missing evidence does not become positive evidence. Low confidence can turn an
-otherwise reasonable score into `HOLD_ONLY`, a smaller allocation, or
-`NO_TRADE`.
+otherwise reasonable score into `HOLD_ONLY`, a restricted deployment, or
+`NO_TRADE`; it does not by itself lower the strategic target.
+
+### Strategic Target and Deployment Allowance
+
+`Strategic Target` answers how much the portfolio should want to own after
+score, regime, and structural-risk construction. `Deployment Allowance` is the
+maximum immediate new risk after asset confidence, event risk, Decision
+Confidence, and execution overlays. An `ELEVATED` or `HIGH` event state can
+restrict new deployment without shrinking the strategic target. A temporary
+deployment restriction cannot independently create `REDUCE`; confirmed hard
+risk or a broken thesis may do so through its own gate.
 
 ### Confidence is action-scoped
 
@@ -192,6 +202,25 @@ staking, L2/data-availability, realized-valuation, and normalized ETF-flow
 evidence is interpreted within the applicable factors. Ethereum L2 activity
 is bullish ETH evidence only when Ethereum settlement or data-availability
 value capture is demonstrated.
+
+### AAVE DeFi Protocol Profile
+
+AAVE uses the `defi_protocol` profile: trend 30%, valuation 20%, fundamentals
+35%, and `relative_strength_btc` 15%. `onchain`, `capital_flows`,
+`btc_valuation`, and `macro_liquidity` are zero-weight and resolve to
+`NOT_APPLICABLE`. Protocol activity belongs inside fundamentals through TVL,
+fees, revenue, and token economics; ERC-20 transfer activity is not Aave
+protocol usage. Relative strength has one scoring owner and is not applied a
+second time as a continuous strategic sizing multiplier.
+
+### Why is AAVE target weight low?
+
+Read the layers separately: AAVE base score and `defi_protocol` profile;
+active regime and satellite cap; structural risk tier and multiplier; the
+resulting strategic target; then asset/Decision Confidence and security/event
+deployment gates. A low immediate deployment allowance is not a lower
+strategic target, and a temporary allowance restriction cannot independently
+create `REDUCE`.
 
 When applicable evidence is missing, its configured weight stays in the
 denominator and the factor shrinks toward neutral 50 according to reliability.
@@ -323,6 +352,14 @@ Chain liveness is a separate operational gate for chain-native assets:
 
 Provider, RPC, DNS, TLS, timeout, or rate-limit failure is not evidence that a
 chain halted. It is unavailable critical evidence and must remain visible.
+
+Automatic governance proposal scanning is not part of review collection,
+confidence, event coverage, allocation, or rebalance decisions. Important
+governance or other asset context may be supplied explicitly as
+`ManualAssetContext` with `source=MANUAL_USER_INPUT`. `CONTEXT_ONLY` affects
+explanation; `FUNDAMENTALS`, `RISK`, and `EXECUTION` are explicit human scopes
+for the downstream review, and absence of manual context has zero confidence
+penalty.
 
 ## 15. Positioning and BTC Cycle Overlays
 

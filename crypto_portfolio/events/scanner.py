@@ -19,13 +19,12 @@ from .sources import EVENT_CATEGORIES, EVENT_SOURCE_CATALOG, EventSource
 
 _EVENT_METRICS = {
     "security": "risk.security_event_status",
-    "governance": "risk.governance_event_status",
     "regulatory": "risk.regulatory_event_status",
 }
 _DEFAULT_LOOKBACKS = {
-    "SNAPSHOT_REVIEW": {"security": 30, "governance": 30, "regulatory": 30},
-    "FULL_REVIEW": {"security": 90, "governance": 90, "regulatory": 90},
-    "EVENT_REVIEW": {"security": 30, "governance": 30, "regulatory": 30},
+    "SNAPSHOT_REVIEW": {"security": 30, "regulatory": 30},
+    "FULL_REVIEW": {"security": 90, "regulatory": 90},
+    "EVENT_REVIEW": {"security": 30, "regulatory": 30},
 }
 _DEFAULT_COVERAGE = {"medium_minimum": 0.5, "high_minimum": 1.0}
 _DIRECTIONS = {"POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL", "UNCERTAIN"}
@@ -113,7 +112,7 @@ class EventSourceScanRequest:
             kind = _text(self.transport_kind, "transport_kind").upper()
             if kind not in {
                 "GITHUB_RELEASES", "GITHUB_SECURITY_ADVISORIES", "GITHUB_COMMITS",
-                "RSS_ATOM", "DISCOURSE_JSON", "RPC_LOGS", "WEB",
+                "RSS_ATOM", "DISCOURSE_JSON", "WEB",
             }:
                 raise ValueError("transport_kind is unsupported")
             object.__setattr__(self, "transport_kind", kind)
@@ -618,16 +617,6 @@ class EventScanner:
                 for group in sorted(required_groups)
             },
         }
-        if asset == "AAVE" and category == "governance":
-            source_coverage.update({
-                "coverage_rule": "ONCHAIN_AND_ONE_OFFCHAIN",
-                "coverage_state": (
-                    "SUFFICIENT"
-                    if source_coverage["by_group"].get("aave-governance-onchain", False)
-                    and source_coverage["by_group"].get("aave-governance-offchain", False)
-                    else "INSUFFICIENT_SOURCE_COVERAGE"
-                ),
-            })
         source_quality = sum({1: 1.0, 2: 0.75, 3: 0.5}[source.tier] for source in required_groups.values()) / len(required_groups) if required_groups else 0.0
         return EventScanResult(
             asset=asset,

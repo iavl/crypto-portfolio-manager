@@ -10,7 +10,7 @@ from .benchmark import build_aligned_benchmark_result
 from .volume_profile import build_multi_horizon_profiles, build_volume_profile
 from .decision_packet import build_decision_review_packet, should_run_sol_final_review, validate_decision_review_packet
 from .factor_packet import build_asset_factor_packet, validate_asset_factor_packet
-from .metric_plan import build_metric_collection_plan, build_metric_collection_request
+from .metric_plan import build_metric_collection_plan, build_metric_collection_request, scoring_metric_enabled_for_asset
 from .metric_normalization import (
     normalize_collection_results,
     normalize_metric_observation,
@@ -64,6 +64,7 @@ __all__ = [
     "validate_decision_review_packet",
     "build_metric_collection_plan",
     "build_metric_collection_request",
+    "scoring_metric_enabled_for_asset",
     "build_regime_inputs",
     "build_positioning_facts",
     "build_btc_cycle_context",

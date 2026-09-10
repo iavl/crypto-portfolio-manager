@@ -17,7 +17,8 @@
     "relative_strength_facts": {"$ref": "#/$defs/facts"},
     "event_facts": {"$ref": "#/$defs/facts"},
     "previous_assessment": {"type": "object"},
-    "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+    "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "manual_asset_contexts": {"type": "array", "items": {"$ref": "#/$defs/manualAssetContext"}}
   },
   "additionalProperties": false,
   "$defs": {
@@ -34,6 +35,21 @@
         "freshness": {"enum": ["CURRENT", "STALE", "UNKNOWN"]},
         "source_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "data_quality_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "manualAssetContext": {
+      "type": "object",
+      "required": ["asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"],
+      "properties": {
+        "asset": {"type": "string", "minLength": 1},
+        "category": {"enum": ["GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"]},
+        "summary": {"type": "string", "minLength": 1},
+        "impact": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"]},
+        "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "scope": {"enum": ["CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"]},
+        "as_of": {"type": "string", "format": "date-time"},
+        "source": {"const": "MANUAL_USER_INPUT"}
       },
       "additionalProperties": false
     }

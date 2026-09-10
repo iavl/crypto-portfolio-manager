@@ -149,12 +149,11 @@ class StrategyRecalibrationTests(unittest.TestCase):
             "weighted_score": 100,
             "relative_strength_vs_btc": "OUTPERFORM",
         }
-        self.assertEqual(
-            build_target_allocation(
-                assessments={"SOL": {**common, "confidence": "LOW"}}
-            ).target_weights.get("SOL", 0),
-            0,
+        low_confidence = build_target_allocation(
+            assessments={"SOL": {**common, "confidence": "LOW"}}
         )
+        self.assertGreater(low_confidence.target_weights.get("SOL", 0), 0)
+        self.assertEqual(low_confidence.deployment_factors["SOL"], 0)
         self.assertEqual(
             build_target_allocation(
                 assessments={"SOL": {**common, "confidence": "HIGH", "event_risk": {"state": "SEVERE"}}}

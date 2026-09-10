@@ -23,11 +23,13 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         satellite_weight = sum(first.target_weights.get(symbol, 0) for symbol in ("SOL", "AAVE", "BNB", "LINK"))
         self.assertLessEqual(satellite_weight, 0.25)
 
-    def test_low_confidence_satellite_receives_zero(self):
+    def test_low_confidence_satellite_has_no_immediate_deployment(self):
         result = build_target_allocation(
-            assessments={"SOL": {"weighted_score": 95, "confidence": "LOW"}}
+            assessments={"SOL": {"weighted_score": 95, "confidence": "LOW", "relative_strength_vs_btc": "OUTPERFORM"}}
         )
-        self.assertEqual(result.target_weights.get("SOL", 0), 0)
+        self.assertGreater(result.target_weights.get("SOL", 0), 0)
+        self.assertEqual(result.deployment_factors["SOL"], 0)
+        self.assertEqual(result.deployment_allowances["SOL"]["max_immediate_increase_weight"], 0)
 
     def test_capital_preservation_reduces_risky_exposure(self):
         normal = build_target_allocation(
@@ -165,7 +167,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         )
         self.assertTrue(defensive.no_trade)
 
-    def test_satellite_sizing_scales_with_score_confidence_and_risk(self):
+    def test_satellite_target_and_deployment_scale_separately(self):
         def weight(score=85, confidence="HIGH", risk_tier="normal"):
             return build_target_allocation(
                 assessments={
@@ -176,14 +178,24 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
                         "relative_strength_vs_btc": "OUTPERFORM",
                     }
                 }
-            ).target_weights.get("SOL", 0)
+            )
 
-        self.assertEqual(weight(score=66), 0)
+        self.assertEqual(weight(score=66).target_weights.get("SOL", 0), 0)
         self.assertEqual(satellite_eligibility({"weighted_score": 67, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}), "ELIGIBLE")
-        self.assertLess(weight(score=70), weight(score=80))
-        self.assertLess(weight(confidence="MEDIUM"), weight(confidence="HIGH"))
-        self.assertLess(weight(risk_tier="high_beta"), weight(risk_tier="normal"))
-        self.assertLessEqual(weight(), 0.25)
+        self.assertLess(weight(score=70).target_weights["SOL"], weight(score=80).target_weights["SOL"])
+        self.assertEqual(weight(confidence="MEDIUM").target_weights["SOL"], weight(confidence="HIGH").target_weights["SOL"])
+        self.assertLess(weight(confidence="MEDIUM").deployment_factors["SOL"], weight(confidence="HIGH").deployment_factors["SOL"])
+        self.assertLess(weight(risk_tier="high_beta").target_weights["SOL"], weight(risk_tier="normal").target_weights["SOL"])
+        self.assertLessEqual(weight().target_weights["SOL"], 0.25)
+
+    def test_event_deployment_restriction_does_not_change_strategic_target(self):
+        common = {"weighted_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
+        normal = build_target_allocation(assessments={"AAVE": common})
+        elevated = build_target_allocation(
+            assessments={"AAVE": {**common, "event_risk": {"state": "ELEVATED"}}}
+        )
+        self.assertEqual(normal.target_weights["AAVE"], elevated.target_weights["AAVE"])
+        self.assertLess(elevated.deployment_factors["AAVE"], normal.deployment_factors["AAVE"])
 
     def test_satellite_score_hysteresis(self):
         assessment = {"weighted_score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
@@ -296,6 +308,17 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
             RebalanceAction("BTC", "INCREASE", 0, 0.5, 0, "NORMAL")
         with self.assertRaises(ValueError):
             RebalanceAction("BTC", "WAIT", 0.5, 0.5, 1, "WATCH")
+
+    def test_deployment_cap_only_restricts_increase(self):
+        result = recommend_rebalance(
+            {"AAVE": 0.0, "USDT": 1.0},
+            {"AAVE": 0.1, "USDT": 0.9},
+            1000,
+            deployment_caps={"AAVE": 0.5},
+        )
+        action = next(item for item in result if item.symbol == "AAVE")
+        self.assertEqual(action.action, "INCREASE")
+        self.assertAlmostEqual(action.amount_usd, 50)
 
 
 if __name__ == "__main__":

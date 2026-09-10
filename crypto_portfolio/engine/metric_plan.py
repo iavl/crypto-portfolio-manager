@@ -60,7 +60,6 @@ _ASSET_METRICS = (
     "risk.security_event_status",
     "risk.chain_liveness_status",
     "risk.regulatory_event_status",
-    "risk.governance_event_status",
 )
 _ETH_METRICS = (
     "flows.etf_net_1d",
@@ -133,7 +132,6 @@ _BTC_SCORING_METRICS = (
     "risk.security_event_status",
     "risk.chain_liveness_status",
     "risk.regulatory_event_status",
-    "risk.governance_event_status",
 )
 _BTC_CONTEXT_METRICS = (
     "onchain.btc.sopr",
@@ -589,6 +587,17 @@ def _latest_cached(
     ) if candidates else None
 
 
+def scoring_metric_enabled_for_asset(
+    policy: Policy,
+    asset: str,
+    definition: MetricDefinition,
+) -> bool:
+    """Return whether a scoring metric has positive weight for this asset."""
+    if definition.decision_role != "SCORING_FACTOR":
+        return True
+    return policy.scoring_profile(asset).get(definition.factor, 0.0) > 0.0
+
+
 def build_metric_collection_plan(
     portfolio: PortfolioSnapshot | Mapping[str, Any] | Iterable[str] | None,
     watchlist: Iterable[str] | Mapping[str, Any] | None = None,
@@ -641,6 +650,8 @@ def build_metric_collection_plan(
         if definition is None:
             return
         if not definition.applies_to(asset):
+            return
+        if not scoring_metric_enabled_for_asset(resolved, asset, definition):
             return
         latest = _latest_cached(cached, asset, key, definition, as_of)
         requests.append(
@@ -714,4 +725,5 @@ __all__ = [
     "RELATIVE_RETURN_DEPENDENCIES",
     "build_metric_collection_request",
     "build_metric_collection_plan",
+    "scoring_metric_enabled_for_asset",
 ]
