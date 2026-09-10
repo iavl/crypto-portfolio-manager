@@ -147,7 +147,7 @@ increases; low confidence cannot create a high-conviction ETH increase; ETH/BTC
 opportunity cost changes core sizing but not the base score.
 
 Ethereum L2 activity is bullish ETH evidence only when Ethereum settlement or
-DA value capture is demonstrated. Monetary, staking, burn, supply, ratio, and
+DA value capture is demonstrated. Monetary, staking, supply, ratio, and
 allocation arithmetic is Python-owned. Do not scrape unstable dashboards for
 deterministic structural-risk values; structural risk remains non-scoring.
 
@@ -247,6 +247,11 @@ hash against the resolved policy.
 Persisted timestamps are timezone-aware RFC3339 normalized to UTC and compared
 as datetimes, never raw strings. Date-only input must be rejected at domain boundaries; ambiguous timestamps must not be persisted.
 
+If the user does not disclose an external cash flow, normalize the snapshot to
+`ASSUMED_NONE / 0 / NONE` and treat valuation change as market performance.
+Explicit unresolved flow details remain `UNRESOLVED / PROVISIONAL`; explicit
+resolutions and baseline resets are append-only.
+
 Runtime portfolio data belongs outside Git, by default
 `~/.local/share/crypto-portfolio-manager/` or an explicitly configured local
 directory. Repository `data/` contains only fake fixtures, tests, or
@@ -275,6 +280,10 @@ must not depend on whether data came from Binance, Coinbase, CoinGecko, or
 another approved source; preserve provenance. Exchange integrations start with
 read-only balances, positions, and history, using adapters and canonical
 models. Never leak exchange-specific representations into the engine.
+
+A metric without a downstream scoring, risk, regime, allocation, cycle,
+positioning, or execution consumer does not belong in the registry. Do not
+retain provider integrations solely for report enrichment.
 
 Staking is secondary. Do not hold an unattractive asset solely for APY. Assess
 inflation, validator/slashing, contracts, custody, lockups/delays, liquid

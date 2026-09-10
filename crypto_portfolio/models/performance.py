@@ -241,6 +241,7 @@ class NAVHistoryResult:
     states: Sequence[Any] = ()
     segments: Sequence[Any] = ()
     unresolved_cash_flows: Sequence[Any] = ()
+    assumed_cash_flows: Sequence[Any] = ()
     cash_flow_adjusted_return: float | None = None
     nav_return: float | None = None
     current_drawdown: float | None = None
@@ -282,6 +283,7 @@ class NAVHistoryResult:
         states = tuple(self.states)
         segments = tuple(self.segments)
         unresolved = tuple(self.unresolved_cash_flows)
+        assumed = tuple(self.assumed_cash_flows)
         explanations = tuple(str(item).strip() for item in self.explanations)
         if any(not item for item in explanations):
             raise ValueError("explanations must contain non-empty strings")
@@ -291,6 +293,7 @@ class NAVHistoryResult:
         object.__setattr__(self, "states", states)
         object.__setattr__(self, "segments", segments)
         object.__setattr__(self, "unresolved_cash_flows", unresolved)
+        object.__setattr__(self, "assumed_cash_flows", assumed)
         object.__setattr__(self, "explanations", explanations)
 
     def as_dict(self) -> dict[str, Any]:
@@ -306,6 +309,7 @@ class NAVHistoryResult:
             "states": [render(item) for item in self.states],
             "segments": [render(item) for item in self.segments],
             "unresolved_cash_flows": [render(item) for item in self.unresolved_cash_flows],
+            "assumed_cash_flows": [render(item) for item in self.assumed_cash_flows],
             "cash_flow_adjusted_return": self.cash_flow_adjusted_return,
             "nav_return": self.nav_return,
             "current_drawdown": self.current_drawdown,

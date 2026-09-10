@@ -315,16 +315,12 @@ python3 scripts/providers.py --probe coinmetrics_community --asset ETH
 python3 scripts/providers.py --probe coinmetrics_community --asset BNB
 python3 scripts/providers.py --probe bgeometrics --asset BTC
 python3 scripts/providers.py --probe lunarcrush --asset BTC
-python3 scripts/providers.py --probe ethereum_protocol --asset ETH
 python3 scripts/providers.py --probe rated --asset ETH
-python3 scripts/providers.py --probe bnb_rpc --asset BNB
 python3 scripts/providers.py --probe ethereum_beacon --asset ETH
-python3 scripts/providers.py --probe ultrasound_money --asset ETH
 python3 scripts/providers.py --probe etherscan --asset ETH
 ```
 
-Coin Metrics 输出按 asset 显示真实 1D catalog；BNB RPC probe 只读取一个确认的
-block，不触发日级 backfill；LunarCrush 使用 API v4
+Coin Metrics 输出按 asset 显示真实 1D catalog；LunarCrush 使用 API v4
 Bearer credential，同一 asset 的 social metrics 共用一次 time-series request，
 并把 402/429/circuit 分别记录为 `ENTITLEMENT_REQUIRED`/`RATE_LIMITED`/`CIRCUIT_OPEN`。
 Rated 401 body `{"detail":"Subscription is not active."}` 记录为

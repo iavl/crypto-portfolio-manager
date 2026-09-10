@@ -31,7 +31,7 @@ from .providers.base import FetchMode
 from .providers.config import load_provider_config
 from .providers.http import redact_secrets
 from .providers.routes import current_delivery_basis, metric_is_mutable, metric_reuse_ttl_seconds, provider_chain
-from .providers.router import ProviderRouter, RouterResult
+from .providers.router import ProviderRouter
 from .state.metrics import latest_usable_observation, read_metric_observations
 
 
@@ -467,58 +467,6 @@ class AcquisitionManager:
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
             for item in routed.observations
         }
-        fallback_requests: list[MetricRequest] = []
-        for request in model.requests:
-            if request.metric_key != "eth.monetary.burn_30d_eth" or (request.asset, request.metric_key) in routed_values:
-                continue
-            cumulative_identity = (request.asset, "eth.monetary.cumulative_burn_eth")
-            if cumulative_identity in {(item.asset, item.metric_key) for item in model.requests}:
-                continue
-            cached_cumulative = latest_usable_observation(
-                request.asset,
-                cumulative_identity[1],
-                as_of=cutoff,
-                observations=local,
-                max_age_seconds=metric_reuse_ttl_seconds(
-                    cumulative_identity[1],
-                    self.router.config.get("cache_ttl_seconds"),
-                ),
-            )
-            if cached_cumulative is not None:
-                reusable[cumulative_identity] = cached_cumulative
-            else:
-                fallback_requests.append(MetricRequest(
-                    request.asset,
-                    cumulative_identity[1],
-                    review_type=model.review_type,
-                    reason="explicit cumulative-burn fallback for direct 30d burn",
-                ))
-        if fallback_requests:
-            fallback_routed = self.router.collect(
-                self.router.build_requests(
-                    fallback_requests,
-                    as_of=as_of,
-                    now=current,
-                    execution_history_days=self.policy.execution["preferred_history_days"],
-                ),
-                mode=selected_mode,
-                as_of=as_of,
-                now=current,
-            )
-            routed = RouterResult(
-                observations=(*routed.observations, *fallback_routed.observations),
-                attempts=(*routed.attempts, *fallback_routed.attempts),
-                unresolved=tuple(dict.fromkeys((*routed.unresolved, *fallback_routed.unresolved))),
-                provider_cache_hits=routed.provider_cache_hits + fallback_routed.provider_cache_hits,
-                api_requests=routed.api_requests + fallback_routed.api_requests,
-                api_derived_metrics=routed.api_derived_metrics + fallback_routed.api_derived_metrics,
-                provider_fallbacks=routed.provider_fallbacks + fallback_routed.provider_fallbacks,
-                unresolved_details=(*routed.unresolved_details, *fallback_routed.unresolved_details),
-            )
-            routed_values.update({
-                (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
-                for item in fallback_routed.observations
-            })
         relative_values, relative_reasons = self._derive_relative_observations(
             model.requests,
             reusable,
@@ -548,18 +496,10 @@ class AcquisitionManager:
             for item in routed.unresolved_details
         }
         routed_reasons.update(relative_reasons)
-        for request in fallback_requests:
-            burn_identity = (request.asset, "eth.monetary.burn_30d_eth")
-            cumulative_identity = (request.asset, request.metric_key)
-            if cumulative_identity in routed_reasons:
-                routed_reasons[burn_identity] = (
-                    f"{routed_reasons.get(burn_identity, 'direct burn unavailable')}; "
-                    f"cumulative fallback: {routed_reasons[cumulative_identity]}"
-                )
         for identity, reason in derived_reasons.items():
             routed_reasons[identity] = (
                 f"{routed_reasons[identity]}; fallback derivation: {reason}"
-                if identity in routed_reasons and identity[1] == "eth.monetary.burn_30d_eth"
+                if identity in routed_reasons
                 else reason
             )
         flow_state_identity = ("MARKET", "market.flow_state")

@@ -224,14 +224,7 @@ def _attempt_matches(attempt: Mapping[str, Any], event: CollectionEvent) -> bool
         and isinstance(metric_keys, (list, tuple))
         and event.metric_key in {str(key).strip().lower() for key in metric_keys}
     )
-    return direct or (
-        event.asset == "ETH"
-        and event.metric_key == "eth.monetary.burn_30d_eth"
-        and asset == "ETH"
-        and isinstance(metric_keys, (list, tuple))
-        and "eth.monetary.cumulative_burn_eth" in {str(key).strip().lower() for key in metric_keys}
-        and str(attempt.get("provider", "")).strip().lower() == "etherscan"
-    )
+    return direct
 
 
 def _event_category(metric_key: str) -> str | None:

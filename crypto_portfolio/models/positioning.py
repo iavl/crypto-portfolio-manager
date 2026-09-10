@@ -18,7 +18,6 @@ class _ValueEnum(str, Enum):
 
 
 class PositioningLeverageState(_ValueEnum):
-    DELEVERAGED = "DELEVERAGED"
     NORMAL = "NORMAL"
     BUILDING = "BUILDING"
     CROWDED = "CROWDED"
@@ -68,16 +67,9 @@ _METRIC_FIELDS = (
     "open_interest_to_market_cap",
     "long_short_account_ratio",
     "top_trader_long_short_ratio",
-    "long_liquidations_24h_usd",
-    "short_liquidations_24h_usd",
-    "total_liquidations_24h_usd",
-    "long_liquidations_7d_usd",
-    "short_liquidations_7d_usd",
     "futures_basis_annualized",
     "social_bullish_share",
-    "social_mentions_24h",
     "social_mentions_change_7d",
-    "social_sentiment_percentile",
     "social_attention_percentile",
     "market_fear_greed",
 )
@@ -158,18 +150,10 @@ class PositioningFacts:
     long_short_account_ratio: float | None = None
     top_trader_long_short_ratio: float | None = None
 
-    long_liquidations_24h_usd: float | None = None
-    short_liquidations_24h_usd: float | None = None
-    total_liquidations_24h_usd: float | None = None
-    long_liquidations_7d_usd: float | None = None
-    short_liquidations_7d_usd: float | None = None
-
     futures_basis_annualized: float | None = None
 
     social_bullish_share: float | None = None
-    social_mentions_24h: float | None = None
     social_mentions_change_7d: float | None = None
-    social_sentiment_percentile: float | None = None
     social_attention_percentile: float | None = None
     market_fear_greed: float | None = None
 
@@ -195,17 +179,13 @@ class PositioningFacts:
             number = float(value)
             if not math.isfinite(number):
                 raise ValueError(f"positioning {field_name} must be finite")
-            if field_name in {
-                "open_interest_usd", "long_liquidations_24h_usd", "short_liquidations_24h_usd",
-                "total_liquidations_24h_usd", "long_liquidations_7d_usd", "short_liquidations_7d_usd",
-                "social_mentions_24h",
-            } and number < 0:
+            if field_name in {"open_interest_usd"} and number < 0:
                 raise ValueError(f"positioning {field_name} must be non-negative")
             if field_name in {
                 "open_interest_to_market_cap", "long_short_account_ratio", "top_trader_long_short_ratio",
             } and number <= 0:
                 raise ValueError(f"positioning {field_name} must be > 0")
-            if field_name in {"funding_rate_percentile", "social_bullish_share", "social_sentiment_percentile", "social_attention_percentile"} and not 0 <= number <= 1:
+            if field_name in {"funding_rate_percentile", "social_bullish_share", "social_attention_percentile"} and not 0 <= number <= 1:
                 raise ValueError(f"positioning {field_name} must be in [0, 1]")
             if field_name == "market_fear_greed" and not 0 <= number <= 100:
                 raise ValueError("positioning market_fear_greed must be in [0, 100]")

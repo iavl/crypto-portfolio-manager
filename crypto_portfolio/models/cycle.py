@@ -71,11 +71,7 @@ _NUMERIC_FIELDS = (
     "realized_price",
     "market_to_realized_price",
     "sopr",
-    "lth_supply_pct",
     "lth_net_position_change",
-    "sth_realized_price",
-    "lth_realized_price",
-    "nupl",
 )
 
 
@@ -157,11 +153,7 @@ class BTCCycleContext:
     realized_price: float | None = None
     market_to_realized_price: float | None = None
     sopr: float | None = None
-    lth_supply_pct: float | None = None
     lth_net_position_change: float | None = None
-    sth_realized_price: float | None = None
-    lth_realized_price: float | None = None
-    nupl: float | None = None
 
     halving_context: str = HalvingContext.UNKNOWN.value
     valuation_state: str = CycleValuationState.UNKNOWN.value
@@ -196,10 +188,8 @@ class BTCCycleContext:
                 raise ValueError("cycle return_since_halving must be >= -1")
             if field_name == "drawdown" and value > 0:
                 raise ValueError("cycle drawdown must be <= 0")
-            if field_name in {"mvrv", "realized_price", "market_to_realized_price", "sopr", "sth_realized_price", "lth_realized_price"} and value <= 0:
+            if field_name in {"mvrv", "realized_price", "market_to_realized_price", "sopr"} and value <= 0:
                 raise ValueError(f"cycle {field_name} must be > 0")
-            if field_name == "lth_supply_pct" and not 0 <= value <= 1:
-                raise ValueError("cycle lth_supply_pct must be in [0, 1]")
             object.__setattr__(self, field_name, float(value))
         if self.halving_epoch_progress is not None:
             progress = self.halving_epoch_progress

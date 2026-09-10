@@ -243,10 +243,6 @@
       "optimistic_bullish_share": 0.6,
       "euphoric_bullish_share": 0.8,
       "attention_growth_extreme": 2.0
-    },
-    "deleveraging": {
-      "liquidation_to_open_interest": 0.1,
-      "normalized_funding_abs": 0.0003
     }
   },
   "btc_cycle": {

@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .cash_flow import CASH_FLOW_RESOLUTION_STATUSES
+from .cash_flow import CASH_FLOW_CLASSIFICATION_SOURCES, CASH_FLOW_RESOLUTION_STATUSES
 from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
@@ -135,7 +135,8 @@ class PortfolioSnapshot:
     policy_hash: str | None = None
     resolved_policy: Mapping[str, Any] | None = None
     snapshot_id: str | None = None
-    cash_flow_resolution_status: str = "UNRESOLVED"
+    cash_flow_resolution_status: str = "ASSUMED_NONE"
+    cash_flow_classification_source: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -156,6 +157,17 @@ class PortfolioSnapshot:
         if status not in CASH_FLOW_RESOLUTION_STATUSES:
             raise ValueError("cash_flow_resolution_status is unsupported")
         object.__setattr__(self, "cash_flow_resolution_status", status)
+        source = self.cash_flow_classification_source
+        if source is None:
+            source = "DEFAULT_ASSUMPTION" if status == "ASSUMED_NONE" else "USER_EXPLICIT"
+        source = str(source).strip().upper()
+        if source not in CASH_FLOW_CLASSIFICATION_SOURCES:
+            raise ValueError("cash_flow_classification_source is unsupported")
+        if status == "ASSUMED_NONE" and source not in {"DEFAULT_ASSUMPTION", "LEGACY"}:
+            raise ValueError("ASSUMED_NONE requires an assumption or legacy source")
+        if status != "ASSUMED_NONE" and source != "USER_EXPLICIT":
+            raise ValueError("explicit cash-flow status requires USER_EXPLICIT source")
+        object.__setattr__(self, "cash_flow_classification_source", source)
         amount = self.external_cash_flow
         if amount is not None:
             amount = _number(amount, "external_cash_flow")
@@ -166,7 +178,10 @@ class PortfolioSnapshot:
                 raise ValueError(f"external_cash_flow_type must be one of {sorted(EXTERNAL_CASH_FLOW_TYPES)}")
             flow_type = flow_type.strip().upper()
         object.__setattr__(self, "external_cash_flow_type", flow_type)
-        if status == "UNRESOLVED":
+        if status == "ASSUMED_NONE":
+            if amount != 0 or flow_type != "NONE":
+                raise ValueError("ASSUMED_NONE requires external_cash_flow 0 and type NONE")
+        elif status == "UNRESOLVED":
             if amount is not None or flow_type is not None:
                 raise ValueError("UNRESOLVED cash flow requires null amount and type")
         elif status in {"CONFIRMED_NONE", "BASELINE_RESET"}:
@@ -225,6 +240,7 @@ class PortfolioSnapshot:
             "external_cash_flow": self.external_cash_flow,
             "external_cash_flow_type": self.external_cash_flow_type,
             "cash_flow_resolution_status": self.cash_flow_resolution_status,
+            "cash_flow_classification_source": self.cash_flow_classification_source,
             "total_value": self.total_value,
             "policy_hash": self.policy_hash,
             "resolved_policy": self.resolved_policy,
@@ -286,7 +302,7 @@ def snapshot_from_mapping(
         raise ValueError("snapshot must be an object")
     allowed = {
         "timestamp", "source", "base_currency", "positions", "external_cash_flow",
-        "external_cash_flow_type", "cash_flow_resolution_status", "total_value", "config", "policy_hash", "resolved_policy", "snapshot_id",
+        "external_cash_flow_type", "cash_flow_resolution_status", "cash_flow_classification_source", "total_value", "config", "policy_hash", "resolved_policy", "snapshot_id",
         "reported_total_value_usd", "visible_positions_value_usd", "visible_value_coverage_ratio",
     }
     unknown = set(data) - allowed
@@ -315,7 +331,10 @@ def snapshot_from_mapping(
     reported_total_value = data.get("total_value")
     flow_value = data.get("external_cash_flow")
     flow_type = data.get("external_cash_flow_type")
-    flow_status = data.get("cash_flow_resolution_status", "UNRESOLVED")
+    flow_status = data.get("cash_flow_resolution_status", "ASSUMED_NONE")
+    if "cash_flow_resolution_status" not in data and "external_cash_flow" not in data and "external_cash_flow_type" not in data:
+        flow_value = 0.0
+        flow_type = "NONE"
     snapshot = PortfolioSnapshot(
         timestamp=timestamp,
         positions=positions,
@@ -323,6 +342,7 @@ def snapshot_from_mapping(
         external_cash_flow=flow_value,
         external_cash_flow_type=flow_type,
         cash_flow_resolution_status=flow_status,
+        cash_flow_classification_source=data.get("cash_flow_classification_source"),
         total_value=reported_total_value,
         source=data.get("source"),
         policy_hash=expected_policy_hash,
@@ -436,6 +456,7 @@ def normalize_snapshot(data: Mapping[str, Any], *, policy: Policy | None = None)
         "external_cash_flow": snapshot.external_cash_flow,
         "external_cash_flow_type": snapshot.external_cash_flow_type,
         "cash_flow_resolution_status": snapshot.cash_flow_resolution_status,
+        "cash_flow_classification_source": snapshot.cash_flow_classification_source,
         "cost_known_current_value_usd": performance.cost_known_current_value_usd,
         "cost_known_cost_basis_usd": performance.cost_known_cost_basis_usd,
         "total_unrealized_pnl_known_usd": performance.total_unrealized_pnl_known_usd,

@@ -161,7 +161,6 @@ python3 scripts/run_with_debug.py \
 - bgeometrics
 - rated
 - ethereum_beacon
-- ethereum_protocol
 - blobscan
 - defillama
 - github
@@ -267,14 +266,12 @@ python3 scripts/providers.py --probe chain_liveness --asset BNB
 Position P&L 是剩余仓位的未实现表现，不是已实现收益或组合终身收益。
 成本覆盖率表示当前价值中有可用成本数据的比例。
 
-外部存款和取款必须使用现金流调整后的 NAV 处理。若两个快照之间出现了
-未分类的明显余额变化，NAV、回撤和基准表现标记为 `PROVISIONAL`，不会把
-余额变化误认为投资收益。每个 snapshot 的唯一现金流状态是
-`CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、`UNRESOLVED` 或 `BASELINE_RESET`：
-只有用户确认金额/方向或明确执行 baseline reset，`performance_finality`
-才会变成 `FINAL`。确认结果作为 append-only `CashFlowResolution` 写入
-`cash-flow-resolutions.jsonl`；未知状态使用 `external_cash_flow=null` 和
-`external_cash_flow_type=null`，不能填 0。
+外部存款和取款必须使用现金流调整后的 NAV 处理。没有明确披露外部现金流时，
+snapshot 归一化为 `ASSUMED_NONE / 0 / NONE`，余额变化按市场表现计入，NAV
+保持 `FINAL`。明确披露但金额或方向未解决时使用 `UNRESOLVED / PROVISIONAL`；
+`CONFIRMED_NONE`、`CONFIRMED_AMOUNT` 和 `BASELINE_RESET` 仍是显式状态。确认结果
+作为 append-only `CashFlowResolution` 写入 `cash-flow-resolutions.jsonl`；旧
+snapshot 不被重写。
 
 `BASELINE_RESET` 必须带有该 snapshot 的 `snapshot_id`，它只建立新的记账
 基线；此前的 performance segment 保留为 archived history，不会重写旧记录。
@@ -386,7 +383,6 @@ export GITHUB_TOKEN='...'
 export RATED_API_KEY='...'
 export LUNARCRUSH_API_KEY='...'
 export ETH_BEACON_API_URL='https://ethereum-beacon-api.publicnode.com'
-export ETHEREUM_RPC_URL='https://ethereum-rpc.publicnode.com'
 ```
 
 配置存在不代表 provider 一定可用；应同时检查 adapter、credential、runtime
@@ -399,7 +395,7 @@ positioning context，可在 provider 配置中启用：
 {"optional_context": {"collect_optional_social": true}}
 ```
 
-Rated staking、BNB active-address 和 social 的不可用状态会在报告的
+Rated active-stake 和 social 的不可用状态会在报告的
 optional/context 区域显示，不会伪造成 required scoring failure。
 
 安全检查不会输出 key 值：
@@ -415,8 +411,6 @@ python3 scripts/providers.py --probe lunarcrush --asset BTC
 python3 scripts/providers.py --probe lunarcrush --asset ETH
 python3 scripts/providers.py --probe rated --asset ETH
 python3 scripts/providers.py --probe ethereum_beacon --asset ETH
-python3 scripts/providers.py --probe ethereum_protocol --asset ETH
-python3 scripts/providers.py --probe bnb_rpc --asset BNB
 
 ## 15. 开发检查
 

@@ -32,7 +32,6 @@ DEFAULT_TTL_SECONDS = {
     "open_interest": 3600,
     "ratios": 3600,
     "basis": 3600,
-    "liquidations": 3600,
     "etf": 86400,
     "sentiment": 43200,
     "protocol": 21600,
@@ -40,12 +39,11 @@ DEFAULT_TTL_SECONDS = {
     "macro": 86400,
     "github": 86400,
     "chain_liveness": 300,
-    "ethereum_protocol": 21600,
+    "ethereum_monetary": 21600,
     "ethereum_staking": 21600,
     "ethereum_l2": 21600,
     "ethereum_da": 21600,
     "ethereum_valuation": 86400,
-    "ultrasound": 21600,
     "etherscan": 86400,
     "default": 3600,
 }
@@ -55,7 +53,6 @@ PROVIDER_ROUTES = {
     "basis": ("binance",),
     "fundamentals": ("defillama",),
     "etf": ("sosovalue",),
-    "liquidations": (),
     "sentiment.market": ("alternative_me",),
     "sentiment.social": ("lunarcrush",),
     "btc_cycle": ("coinmetrics_community",),
@@ -97,28 +94,11 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("growthepie",)
     if key.startswith("eth.blobs."):
         return ("blobscan",)
-    if key == "eth.monetary.burn_30d_eth":
-        return ("ultrasound_money",)
-    if key in {"eth.monetary.burn_to_issuance_30d", "eth.monetary.burn_to_issuance_365d"}:
-        return ()
-    if key == "eth.monetary.burn_365d_eth":
-        return ()
-    if key == "eth.monetary.cumulative_burn_eth":
-        return ("etherscan",)
     if key.startswith("eth.monetary."):
         return ("coinmetrics_community", "etherscan")
     if key.startswith("eth.staking."):
-        if key in {
-            "eth.staking.active_effective_stake_eth",
-            "eth.staking.staking_apr_7d",
-            "eth.staking.staking_apr_30d",
-            "eth.staking.deposit_queue_eth",
-            "eth.staking.exit_queue_eth",
-            "eth.staking.withdrawal_backlog_eth",
-        }:
+        if key == "eth.staking.active_effective_stake_eth":
             return ("rated",)
-        return ()
-    if key.startswith("eth.structural."):
         return ()
     if key == "btc_valuation.price_to_realized_price":
         return ()
@@ -130,16 +110,12 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("sosovalue",)
     if key.startswith("flows.eth_etf_"):
         return ("sosovalue",)
-    if key.startswith(("flows.eth_exchange_", "flows.eth_active_stake_")):
-        return ()
-    if "liquidations" in key:
+    if key.startswith("flows.eth_active_stake_"):
         return ()
     if key == "derivatives.futures_basis_annualized":
         return PROVIDER_ROUTES["basis"]
     if key.startswith("derivatives."):
         return ("binance", "bybit")
-    if key == "flows.exchange_netflow":
-        return ("coinmetrics_community",)
     if key == "sentiment.market_fear_greed":
         return ("alternative_me",)
     if key.startswith("sentiment.social_"):
@@ -148,31 +124,26 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("github",)
     if key == "fundamentals.stablecoin_liquidity":
         return ("defillama",) if symbol in {"ETH", "SOL", "BNB"} else ()
-    if key == "fundamentals.active_users" and symbol in {"AAVE", "BNB"}:
-        return ()
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"}:
         return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH"} else ()
-    if key in {
-        "onchain.active_addresses", "onchain.transfer_volume",
-        "onchain.blockspace_fees", "onchain.transaction_count",
-    }:
-        if symbol == "ETH" and key == "onchain.blockspace_fees":
-            return ("growthepie", "coinmetrics_community")
+    if key == "onchain.blockspace_fees":
+        if symbol == "ETH":
+            return ("growthepie", "defillama", "coinmetrics_community")
+        if symbol == "BNB":
+            return ("defillama", "coinmetrics_community")
+        return ("coinmetrics_community",) if symbol in {"BTC", "SOL"} else ()
+    if key in {"onchain.active_addresses", "onchain.transfer_volume", "onchain.transaction_count"}:
         if symbol == "ETH" and key == "onchain.transfer_volume":
             return ("blockchair",)
-        if symbol == "BNB" and key == "onchain.transaction_count":
-            return ("bnb_rpc", "coinmetrics_community")
-        return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH", "BNB"} else ()
+        return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH", "SOL"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)
     if key.startswith("onchain.btc."):
         return ("coinmetrics_community",) if symbol in {None, "BTC"} else ()
-    if key.startswith("btc_network."):
-        return ("coinmetrics_community",) if symbol in {None, "BTC"} else ()
     if key.startswith("macro."):
         return PROVIDER_ROUTES["fred"] if symbol in {None, "BTC"} else ()
-    # Exchange netflow requires on-chain attribution and event metrics require
-    # current source scans; neither is fabricated from market endpoints.
+    # Event metrics require current source scans; numeric metrics are never
+    # fabricated from unrelated market endpoints.
     return ()
 
 
@@ -200,13 +171,8 @@ def dataset_for_metric(metric_key: str) -> str:
         return "valuation"
     if key == "valuation.fdv_market_cap_ratio":
         return "derived"
-    if key == "eth.monetary.burn_30d_eth":
-        return "ultrasound"
-    if key in {"eth.monetary.burn_365d_eth", "eth.monetary.cumulative_burn_eth"}:
-        return "etherscan"
     if key in {
         "eth_valuation.price_to_realized_price",
-        "flows.eth_exchange_netflow_to_market_cap",
         "flows.eth_active_stake_change_to_supply_30d",
     }:
         return "derived"
@@ -219,11 +185,9 @@ def dataset_for_metric(metric_key: str) -> str:
     if key.startswith("eth.l2."):
         return "ethereum_l2"
     if key.startswith("eth.monetary."):
-        return "ethereum_protocol"
+        return "ethereum_monetary"
     if key.startswith("eth.staking."):
         return "ethereum_staking"
-    if key.startswith("eth.structural."):
-        return "web"
     if key == "valuation.fee_revenue_multiple":
         return "protocol"
     if key.startswith("derivatives.open_interest"):
@@ -232,11 +196,9 @@ def dataset_for_metric(metric_key: str) -> str:
         return "ratios"
     if key.startswith("derivatives.futures_basis"):
         return "basis"
-    if key.startswith("derivatives.") and "liquidations" in key:
-        return "liquidations"
     if key.startswith(("flows.etf_", "flows.btc_etf_", "flows.eth_etf_")):
         return "etf"
-    if key == "flows.exchange_netflow" or key.startswith(("onchain.", "btc_valuation.", "btc_network.")) or key in {
+    if key.startswith(("onchain.", "btc_valuation.")) or key in {
         "tokenomics.annualized_emissions", "tokenomics.supply_growth",
     }:
         return "onchain"
@@ -247,8 +209,6 @@ def dataset_for_metric(metric_key: str) -> str:
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return "protocol"
     if key.startswith("onchain.btc."):
-        return "onchain"
-    if key.startswith("btc_network."):
         return "onchain"
     if key.startswith("macro."):
         return "macro"
@@ -333,8 +293,8 @@ def _parameters(
     if dataset == "ohlcv":
         result.update({"timeframe": "1D", "interval": "1d"})
     if dataset in {
-        "ohlcv", "funding", "open_interest", "ratios", "basis", "liquidations", "etf", "onchain",
-        "github", "macro", "sentiment", "ethereum_protocol", "ethereum_staking", "ethereum_l2", "ethereum_da",
+        "ohlcv", "funding", "open_interest", "ratios", "basis", "etf", "onchain",
+        "github", "macro", "sentiment", "ethereum_monetary", "ethereum_staking", "ethereum_l2", "ethereum_da",
         "ethereum_valuation",
     } or (
         dataset == "valuation" and as_of is not None

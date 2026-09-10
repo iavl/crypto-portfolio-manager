@@ -40,12 +40,13 @@ class HistoricalRecordTests(unittest.TestCase):
             with observations.open("w", encoding="utf-8") as handle:
                 handle.write(json.dumps(unknown_metric) + "\n")
                 handle.write(json.dumps(invalid_metric) + "\n")
-            with self.assertRaisesRegex(ValueError, "unknown metric key"):
-                build_history_context(
-                    snapshot_path=root / "missing-snapshots.jsonl",
-                    decision_path=root / "missing-decisions.jsonl",
-                    metrics_path=observations,
-                )
+            context = build_history_context(
+                snapshot_path=root / "missing-snapshots.jsonl",
+                decision_path=root / "missing-decisions.jsonl",
+                metrics_path=observations,
+            )
+            self.assertIn("ETH", context["metric_history_summary"])
+            self.assertNotIn("fundamentals.semantic", context["metric_history_summary"].get("BTC", {}))
 
 
 

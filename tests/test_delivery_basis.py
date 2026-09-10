@@ -203,20 +203,6 @@ class DeliveryBasisTests(unittest.TestCase):
                 self.assertEqual(result.summary["fresh_observation_hits"], 0)
                 self.assertEqual(result.observations, ())
 
-    def test_liquidation_no_route_keeps_null_and_existing_web_policy(self):
-        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("BTC", "derivatives.total_liquidations_24h_usd"),))
-        for mode, allow_web in (("AUTO", True), ("AUTO", False), ("CACHE_ONLY", True)):
-            with self.subTest(mode=mode, allow_web=allow_web):
-                self.router.config["fallback"]["allow_web"] = allow_web
-                result = self.manager.run(plan, mode=mode, now=NOW, cached_observations=())
-                self.assertEqual(result.results[0].status, "SKIPPED")
-                self.assertEqual(result.events[0].refresh_error_code, "NO_PROVIDER_ROUTE")
-                self.assertIn("no configured structured provider route", result.events[0].reason)
-                self.assertEqual(result.observations, ())
-                self.assertEqual(result.attempts, ())
-                self.assertEqual(len(result.web_fallbacks), 0)
-        self.assertEqual(self.client.calls, [])
-
     def test_unsupported_capability_and_bad_payload_have_distinct_diagnostics(self):
         self.provider.capabilities = ProviderCapabilities("binance")
         unsupported = self.manager.run(self.plan, now=NOW, cached_observations=())

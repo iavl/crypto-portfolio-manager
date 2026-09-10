@@ -11,11 +11,19 @@ from .time import normalize_timestamp
 
 _FLOW_TYPES = {"DEPOSIT", "WITHDRAWAL", "NONE"}
 CASH_FLOW_RESOLUTION_STATUSES = {
+    "ASSUMED_NONE",
     "CONFIRMED_NONE",
     "CONFIRMED_AMOUNT",
     "UNRESOLVED",
     "BASELINE_RESET",
 }
+EXPLICIT_CASH_FLOW_RESOLUTION_STATUSES = {
+    "CONFIRMED_NONE",
+    "CONFIRMED_AMOUNT",
+    "UNRESOLVED",
+    "BASELINE_RESET",
+}
+CASH_FLOW_CLASSIFICATION_SOURCES = {"DEFAULT_ASSUMPTION", "USER_EXPLICIT", "LEGACY"}
 
 
 @dataclass(frozen=True)
@@ -36,7 +44,7 @@ class CashFlowResolution:
             object.__setattr__(self, field_name, value.strip())
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp, "timestamp"))
         status = str(self.cash_flow_resolution_status).strip().upper()
-        if status not in CASH_FLOW_RESOLUTION_STATUSES:
+        if status not in EXPLICIT_CASH_FLOW_RESOLUTION_STATUSES:
             raise ValueError("cash_flow_resolution_status is unsupported")
         object.__setattr__(self, "cash_flow_resolution_status", status)
         if self.external_cash_flow is not None:
@@ -97,4 +105,9 @@ class CashFlowResolution:
         }
 
 
-__all__ = ["CASH_FLOW_RESOLUTION_STATUSES", "CashFlowResolution"]
+__all__ = [
+    "CASH_FLOW_CLASSIFICATION_SOURCES",
+    "CASH_FLOW_RESOLUTION_STATUSES",
+    "EXPLICIT_CASH_FLOW_RESOLUTION_STATUSES",
+    "CashFlowResolution",
+]

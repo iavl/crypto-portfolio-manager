@@ -26,9 +26,7 @@ BASE_URL = "https://lunarcrush.com/api4"
 SUPPORTED_ASSETS = frozenset({"BTC", "ETH", "SOL", "BNB", "LINK", "AAVE"})
 SUPPORTED_METRICS = (
     "sentiment.social_bullish_share",
-    "sentiment.social_mentions_24h",
     "sentiment.social_mentions_change_7d",
-    "sentiment.social_sentiment_percentile",
     "sentiment.social_attention_percentile",
 )
 _SOURCE_FIELDS = ("sentiment", "posts_active")
@@ -207,17 +205,6 @@ def parse_timeseries(
                     "bucket": "day",
                 },
             ))
-        elif key == "sentiment.social_mentions_24h":
-            result.append(_observation(
-                scope, key, _required(latest, "posts_active"), row=latest,
-                fetched_at=fetched_at, period="1d",
-                metadata={
-                    "source_metric": "posts_active",
-                    "methodology": "lunarcrush_daily_active_posts",
-                    "bucket": "day",
-                    "definition": "unique social posts with interactions for the bucket",
-                },
-            ))
         elif key == "sentiment.social_mentions_change_7d":
             prior = by_day.get(latest["day"] - timedelta(days=7))
             if prior is None:
@@ -236,7 +223,7 @@ def parse_timeseries(
                 },
             ))
         else:
-            field = "sentiment" if key == "sentiment.social_sentiment_percentile" else "posts_active"
+            field = "posts_active"
             window = rows[-90:]
             values = [_required(row, field) for row in window]
             current = _required(latest, field)

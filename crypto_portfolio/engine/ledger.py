@@ -55,11 +55,14 @@ class PortfolioSnapshot:
         if status is None:
             # Internal benchmark/ledger callers pass an explicit numeric flow;
             # persisted portfolio snapshots use the stricter model contract.
-            status = "CONFIRMED_NONE" if flow_amount in (None, 0) else "CONFIRMED_AMOUNT"
+            status = "ASSUMED_NONE" if flow_amount in (None, 0) else "CONFIRMED_AMOUNT"
+        if status == "ASSUMED_NONE" and flow_amount is None:
+            flow_amount = 0.0
+            object.__setattr__(self, "external_cash_flow", flow_amount)
         if status == "UNRESOLVED":
             if flow_amount is not None:
                 raise ValueError("UNRESOLVED cash flow requires null amount")
-        elif status in {"CONFIRMED_NONE", "BASELINE_RESET"}:
+        elif status in {"ASSUMED_NONE", "CONFIRMED_NONE", "BASELINE_RESET"}:
             if flow_amount != 0:
                 raise ValueError(f"{status} requires zero external_cash_flow")
         elif status == "CONFIRMED_AMOUNT" and (flow_amount is None or flow_amount == 0):
@@ -285,7 +288,7 @@ def _status(value: Any) -> str:
         amount = getattr(value, "external_cash_flow", 0.0)
     if isinstance(amount, ExternalCashFlow):
         amount = amount.amount
-    return "UNRESOLVED" if amount is None else "CONFIRMED_NONE" if amount == 0 else "CONFIRMED_AMOUNT"
+    return "ASSUMED_NONE" if amount is None or amount == 0 else "CONFIRMED_AMOUNT"
 
 
 def _unresolved_flow(value: Any, index: int) -> bool:
@@ -296,7 +299,7 @@ def _snapshot_id(value: Any) -> str | None:
     return value.get("snapshot_id") if isinstance(value, Mapping) else getattr(value, "snapshot_id", None)
 
 
-def _segment_result(values: Sequence[PortfolioSnapshot | Mapping[str, Any] | Any]) -> tuple[tuple[NAVState, ...], tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+def _segment_result(values: Sequence[PortfolioSnapshot | Mapping[str, Any] | Any]) -> tuple[tuple[NAVState, ...], tuple[dict[str, Any], ...], tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
     """Return confirmed states, segment metadata, and unresolved current gaps."""
     unresolved_indices = [index for index, value in enumerate(values) if _unresolved_flow(value, index)]
     first_gap = unresolved_indices[0] if unresolved_indices else len(values)
@@ -317,6 +320,17 @@ def _segment_result(values: Sequence[PortfolioSnapshot | Mapping[str, Any] | Any
         }
         for index in unresolved_indices
     )
+    assumed = tuple(
+        {
+            "index": index,
+            "snapshot_id": _snapshot_id(value),
+            "timestamp": value.get("timestamp") if isinstance(value, Mapping) else getattr(value, "timestamp", None),
+            "cash_flow_resolution_status": "ASSUMED_NONE",
+            "external_cash_flow": 0.0,
+        }
+        for index, value in enumerate(confirmed)
+        if _status(value) == "ASSUMED_NONE"
+    )
     status = "PROVISIONAL" if gaps else "FINAL"
     segment = ({
         "status": "AVAILABLE" if states else "UNAVAILABLE",
@@ -324,7 +338,7 @@ def _segment_result(values: Sequence[PortfolioSnapshot | Mapping[str, Any] | Any
         "start": states[0].timestamp if states else None,
         "end": states[-1].timestamp if states else None,
     },)
-    return states, segment, gaps
+    return states, segment, gaps, assumed
 
 
 def build_nav_history_result(
@@ -337,21 +351,25 @@ def build_nav_history_result(
     reset_indices = [index for index, value in enumerate(values) if index > 0 and value.cash_flow_resolution_status == "BASELINE_RESET"]
     current_start = reset_indices[-1] if reset_indices else 0
     prior_segments: list[dict[str, Any]] = []
+    assumed_cash_flows: list[dict[str, Any]] = []
     for start, end in zip((0, *reset_indices), (*reset_indices, len(values))):
         segment_values = values[start:end]
         if not segment_values:
             continue
-        segment_states, segment_meta, segment_gaps = _segment_result(segment_values)
+        segment_states, segment_meta, segment_gaps, segment_assumed = _segment_result(segment_values)
         if start != current_start:
+            assumed_cash_flows.extend(segment_assumed)
             prior_segments.append({**segment_meta[0], "archived": True, "unresolved_count": len(segment_gaps)})
     current_values = values[current_start:]
-    states, current_segment, unresolved = _segment_result(current_values)
+    states, current_segment, unresolved, current_assumed = _segment_result(current_values)
+    assumed_cash_flows.extend(current_assumed)
     if unresolved:
         return NAVHistoryResult(
             "PROVISIONAL",
             states=states,
             segments=tuple(prior_segments) + current_segment,
             unresolved_cash_flows=unresolved,
+            assumed_cash_flows=tuple(assumed_cash_flows),
             benchmark_status="PROVISIONAL",
             performance_finality="PROVISIONAL",
             explanations=("unresolved cash-flow resolution blocks current NAV and benchmark performance",),
@@ -365,6 +383,7 @@ def build_nav_history_result(
         nav_return=result,
         current_drawdown=states[-1].current_drawdown,
         max_drawdown=min(state.max_drawdown for state in states),
+        assumed_cash_flows=tuple(assumed_cash_flows),
         benchmark_status="UNAVAILABLE",
         performance_finality="FINAL",
     )

@@ -42,17 +42,14 @@ _ASSET_METRICS = (
     "market.realized_vol_90d",
     "market.relative_volume",
     "market.drawdown",
-    "flows.exchange_netflow",
     "fundamentals.tvl",
     "fundamentals.fees_30d",
     "fundamentals.revenue_30d",
     "fundamentals.stablecoin_liquidity",
-    "fundamentals.active_users",
     "fundamentals.developer_activity",
     "onchain.active_addresses",
     "onchain.transfer_volume",
     "onchain.blockspace_fees",
-    "onchain.transaction_count",
     "valuation.market_cap",
     "valuation.fdv",
     "valuation.fdv_market_cap_ratio",
@@ -78,20 +75,8 @@ _ETH_METRICS = (
     "eth.monetary.net_supply_growth_30d",
     "eth.monetary.net_supply_growth_90d",
     "eth.monetary.net_supply_growth_365d",
-    "eth.monetary.burn_30d_eth",
-    "eth.monetary.burn_365d_eth",
-    "eth.monetary.burn_to_issuance_30d",
-    "eth.monetary.burn_to_issuance_365d",
     "eth.staking.active_effective_stake_eth",
-    "eth.staking.active_effective_stake_pct",
     "eth.staking.active_effective_stake_change_30d",
-    "eth.staking.active_effective_stake_change_90d",
-    "eth.staking.staking_apr_7d",
-    "eth.staking.staking_apr_30d",
-    "eth.staking.participation_rate",
-    "eth.staking.deposit_queue_eth",
-    "eth.staking.exit_queue_eth",
-    "eth.staking.withdrawal_backlog_eth",
     "eth.l2.rent_paid_30d_usd",
     "eth.l2.rent_paid_90d_usd",
     "eth.l2.tvs_usd",
@@ -109,14 +94,7 @@ _ETH_METRICS = (
     "eth_valuation.realized_price",
     "eth_valuation.realized_cap_usd",
     "eth_valuation.price_to_realized_price",
-    "flows.eth_exchange_netflow_to_market_cap",
     "flows.eth_active_stake_change_to_supply_30d",
-    "eth.structural.consensus_client_largest_share",
-    "eth.structural.execution_client_largest_share",
-    "eth.structural.staking_entity_largest_share",
-    "eth.structural.liquid_staking_largest_share",
-    "eth.structural.builder_largest_share",
-    "eth.structural.finality_participation_rate",
 )
 _BTC_SCORING_METRICS = (
     "market.spot_price",
@@ -159,13 +137,7 @@ _BTC_SCORING_METRICS = (
 )
 _BTC_CONTEXT_METRICS = (
     "onchain.btc.sopr",
-    "onchain.btc.lth_supply_pct",
     "onchain.btc.lth_net_position_change",
-    "onchain.btc.sth_realized_price",
-    "onchain.btc.lth_realized_price",
-    "onchain.btc.nupl",
-    "btc_network.hashrate",
-    "btc_network.difficulty",
 )
 # One source of truth for relative-return inputs. The dependency key is
 # deliberately registered rather than reconstructed from a suffix at runtime.
@@ -183,15 +155,10 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "btc_valuation.price_to_realized_price": ("market.spot_price", "btc_valuation.realized_price"),
     "eth_valuation.price_to_realized_price": ("market.spot_price", "eth_valuation.realized_price"),
     "market.breadth_state": ("market.breadth",),
-    "eth.staking.active_effective_stake_pct": ("eth.staking.active_effective_stake_eth", "eth.monetary.current_supply_eth"),
     "eth.staking.active_effective_stake_change_30d": ("eth.staking.active_effective_stake_eth",),
-    "eth.staking.active_effective_stake_change_90d": ("eth.staking.active_effective_stake_eth",),
-    "flows.eth_exchange_netflow_to_market_cap": ("flows.exchange_netflow", "valuation.market_cap"),
     "flows.eth_active_stake_change_to_supply_30d": ("eth.staking.active_effective_stake_change_30d", "eth.monetary.current_supply_eth"),
     "flows.eth_etf_net_to_aum_7d": ("flows.etf_net_7d", "flows.eth_etf_aum_usd"),
     "flows.eth_etf_net_to_aum_30d": ("flows.etf_net_30d", "flows.eth_etf_aum_usd"),
-    "eth.monetary.burn_to_issuance_30d": ("eth.monetary.burn_30d_eth", "eth.monetary.issuance_30d_eth"),
-    "eth.monetary.burn_to_issuance_365d": ("eth.monetary.burn_365d_eth", "eth.monetary.issuance_365d_eth"),
     "market.flow_state": ("flows.etf_net_1d",),
     **{
         metric: (dependency,)
@@ -209,18 +176,11 @@ _DERIVATIVES_POSITIONING_METRICS = (
     "derivatives.open_interest_to_market_cap",
     "derivatives.long_short_account_ratio",
     "derivatives.top_trader_long_short_ratio",
-    "derivatives.long_liquidations_24h_usd",
-    "derivatives.short_liquidations_24h_usd",
-    "derivatives.total_liquidations_24h_usd",
-    "derivatives.long_liquidations_7d_usd",
-    "derivatives.short_liquidations_7d_usd",
     "derivatives.futures_basis_annualized",
 )
 _SOCIAL_POSITIONING_METRICS = (
     "sentiment.social_bullish_share",
-    "sentiment.social_mentions_24h",
     "sentiment.social_mentions_change_7d",
-    "sentiment.social_sentiment_percentile",
     "sentiment.social_attention_percentile",
 )
 _BTC_CYCLE_METRICS = (
@@ -229,11 +189,7 @@ _BTC_CYCLE_METRICS = (
     "onchain.btc.realized_price",
     "onchain.btc.market_to_realized_price",
     "onchain.btc.sopr",
-    "onchain.btc.lth_supply_pct",
     "onchain.btc.lth_net_position_change",
-    "onchain.btc.sth_realized_price",
-    "onchain.btc.lth_realized_price",
-    "onchain.btc.nupl",
 )
 
 

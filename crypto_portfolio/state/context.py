@@ -43,15 +43,31 @@ def _cash_flow_snapshots(
     for record in read_snapshots(path):
         snapshot, _, _ = snapshot_from_mapping(record)
         resolution = resolutions.get(snapshot.snapshot_id)
-        if resolution is not None:
+        legacy_unresolved = (
+            resolution is None
+            and str(record.get("cash_flow_resolution_status", "")).strip().upper() == "UNRESOLVED"
+            and "cash_flow_classification_source" not in record
+        )
+        if resolution is not None or legacy_unresolved:
             updated = snapshot.as_dict()
-            updated.update(
-                {
-                    "cash_flow_resolution_status": resolution.cash_flow_resolution_status,
-                    "external_cash_flow": resolution.external_cash_flow,
-                    "external_cash_flow_type": resolution.external_cash_flow_type,
-                }
-            )
+            if resolution is not None:
+                updated.update(
+                    {
+                        "cash_flow_resolution_status": resolution.cash_flow_resolution_status,
+                        "external_cash_flow": resolution.external_cash_flow,
+                        "external_cash_flow_type": resolution.external_cash_flow_type,
+                        "cash_flow_classification_source": "USER_EXPLICIT",
+                    }
+                )
+            else:
+                updated.update(
+                    {
+                        "cash_flow_resolution_status": "ASSUMED_NONE",
+                        "external_cash_flow": 0.0,
+                        "external_cash_flow_type": "NONE",
+                        "cash_flow_classification_source": "LEGACY",
+                    }
+                )
             snapshot = snapshot_from_mapping(updated)[0]
         snapshots.append(snapshot)
     return snapshots

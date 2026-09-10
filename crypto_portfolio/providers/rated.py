@@ -24,16 +24,9 @@ from .http import HttpClient, classify_transport_error
 
 BASE_URL = "https://api.rated.network"
 DAILY_REWARDS_PATH = "/v0/eth/network/dailyRewards"
-QUEUES_PATH = "/v1/eth/queues"
 GWEI_PER_ETH = Decimal(10**9)
 _ACTIVE_STAKE = "eth.staking.active_effective_stake_eth"
-_APR_KEYS = {"eth.staking.staking_apr_7d", "eth.staking.staking_apr_30d"}
-_QUEUE_KEYS = {
-    "eth.staking.deposit_queue_eth",
-    "eth.staking.exit_queue_eth",
-    "eth.staking.withdrawal_backlog_eth",
-}
-_KEYS = {_ACTIVE_STAKE, *_APR_KEYS, *_QUEUE_KEYS}
+_KEYS = {_ACTIVE_STAKE}
 
 
 def _now(clock: Any | None = None) -> str:
@@ -97,15 +90,6 @@ def _completed_daily_rows(payload: Any, as_of: str | None) -> list[tuple[date, M
     return result
 
 
-def _window(rows: list[tuple[date, Mapping[str, Any]]], days: int) -> list[tuple[date, Mapping[str, Any]]]:
-    latest = rows[-1][0]
-    start = latest - timedelta(days=days - 1)
-    selected = [(day, row) for day, row in rows if start <= day <= latest]
-    if len(selected) != days or {day for day, _ in selected} != {start + timedelta(days=i) for i in range(days)}:
-        raise ProviderInsufficientHistory(f"Rated daily rewards history is insufficient for {days}d")
-    return selected
-
-
 def _gwei_to_eth(value: Any, field: str) -> float:
     result = _number(value, field) / GWEI_PER_ETH
     if not result.is_finite():
@@ -121,7 +105,7 @@ def parse_daily_rewards(
     as_of: str | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
-    if not requested or any(key not in {_ACTIVE_STAKE, *_APR_KEYS} for key in requested):
+    if not requested or any(key not in _KEYS for key in requested):
         raise ProviderUnsupportedMetric("Rated daily rewards does not support the requested metrics")
     rows = _completed_daily_rows(payload, as_of)
     latest_day, latest = rows[-1]
@@ -142,91 +126,6 @@ def parse_daily_rewards(
                 "source_url": BASE_URL + DAILY_REWARDS_PATH,
                 "source_metric": "sumEffectiveBalance",
                 "methodology": "rated_sum_effective_balance",
-                "raw_unit": "Gwei",
-                "network": "mainnet",
-            },
-        })
-    for key in sorted(_APR_KEYS & set(requested)):
-        days = 7 if key.endswith("7d") else 30
-        selected = _window(rows, days)
-        rewards = Decimal(0)
-        balances: list[Decimal] = []
-        for day, row in selected:
-            consensus = _number(row.get("sumConsensusRewards"), f"{day} sumConsensusRewards")
-            execution = _number(row.get("sumExecutionRewards"), f"{day} sumExecutionRewards")
-            balance = _number(row.get("sumEffectiveBalance"), f"{day} sumEffectiveBalance")
-            if balance <= 0:
-                raise ProviderDataError("Rated APR cannot use a zero effective balance")
-            rewards += consensus + execution
-            balances.append(balance)
-        average_balance = sum(balances, Decimal(0)) / Decimal(days)
-        value = rewards / average_balance * Decimal(365) / Decimal(days)
-        result.append({
-            "asset": "ETH",
-            "metric_key": key,
-            "value": float(value),
-            "unit": metric_definition(key).unit,
-            "period": f"{days}d",
-            "observed_at": _observed_at(selected[-1][0]),
-            "fetched_at": normalize_timestamp(fetched_at, "fetched_at"),
-            "source": "rated",
-            "confidence": "MEDIUM",
-            "metadata": {
-                "source_dataset": "network/dailyRewards",
-                "source_url": BASE_URL + DAILY_REWARDS_PATH,
-                "source_metric": "sumConsensusRewards + sumExecutionRewards",
-                "methodology": "window_rewards_gwei / average_effective_balance_gwei * 365 / window_days",
-                "reward_components": ["consensus", "execution"],
-                "raw_unit": "Gwei",
-                "window": f"{days}d",
-                "rows_used": days,
-                "network": "mainnet",
-            },
-        })
-    return tuple(result)
-
-
-def parse_queues(
-    payload: Any,
-    metric_keys: Iterable[str],
-    *,
-    fetched_at: str,
-) -> tuple[Mapping[str, Any], ...]:
-    requested = tuple(dict.fromkeys(str(key).strip().lower() for key in metric_keys))
-    if not requested or any(key not in _QUEUE_KEYS for key in requested):
-        raise ProviderUnsupportedMetric("Rated queues does not support the requested metrics")
-    rows = _rows(payload)
-    if not rows:
-        raise ProviderInsufficientHistory("Rated queues returned no current row")
-    row = rows[-1]
-    mappings = {
-        "eth.staking.deposit_queue_eth": ("activatingStake", "activation_queue_stake_gwei", "deposit_queue_eth"),
-        "eth.staking.exit_queue_eth": ("exitingStake", "exit_queue_stake_gwei", "exit_queue_eth"),
-        "eth.staking.withdrawal_backlog_eth": ("totalWithdrawingBalance", "total_withdrawing_balance_gwei", "withdrawal_backlog_eth"),
-    }
-    source_timestamp = row.get("observed_at") or row.get("date")
-    if source_timestamp is None:
-        raise ProviderResponseError("Rated queue response has no observation timestamp")
-    observed = _source_date(source_timestamp)
-    result = []
-    for key in requested:
-        source_field, raw_field, methodology = mappings[key]
-        value = _gwei_to_eth(row.get(source_field), source_field)
-        result.append({
-            "asset": "ETH",
-            "metric_key": key,
-            "value": value,
-            "unit": metric_definition(key).unit,
-            "period": "current",
-            "observed_at": _observed_at(observed),
-            "fetched_at": normalize_timestamp(fetched_at, "fetched_at"),
-            "source": "rated",
-            "confidence": "MEDIUM",
-            "metadata": {
-                "source_dataset": "eth/queues",
-                "source_url": BASE_URL + QUEUES_PATH,
-                "source_metric": source_field,
-                "methodology": methodology,
                 "raw_unit": "Gwei",
                 "network": "mainnet",
             },
@@ -271,7 +170,7 @@ class RatedProvider:
         self.capabilities = ProviderCapabilities(
             provider=self.name,
             metric_keys=tuple(sorted(_KEYS)),
-            historical_series=tuple(sorted({_ACTIVE_STAKE, *_APR_KEYS})),
+            historical_series=(_ACTIVE_STAKE,),
             supports_batching=True,
             requires_api_key=True,
         )
@@ -283,18 +182,17 @@ class RatedProvider:
 
     def collect(self, request: ProviderRequest) -> ProviderResponse:
         if request.asset != "ETH" or any(key not in _KEYS for key in request.metric_keys):
-            raise ProviderUnsupportedMetric("Rated only supports the configured ETH staking metrics")
+            raise ProviderUnsupportedMetric("Rated only supports active effective ETH stake")
         fetched_at = _now(self.clock)
         requested = tuple(dict.fromkeys(request.metric_keys))
-        daily_keys = tuple(key for key in requested if key == _ACTIVE_STAKE or key in _APR_KEYS)
-        queue_keys = tuple(key for key in requested if key in _QUEUE_KEYS)
+        daily_keys = requested
         values: list[Mapping[str, Any]] = []
         diagnostics: dict[str, Mapping[str, Any]] = {}
         network_requests = 0
         if daily_keys:
             anchor = request.parameters.get("as_of") or request.parameters.get("end") or fetched_at
             anchor_day = parse_timestamp(anchor).date()
-            max_days = max((7 if key.endswith("7d") else 30 for key in daily_keys if key in _APR_KEYS), default=1)
+            max_days = 1
             try:
                 payload = self.client.get_json(
                     BASE_URL + DAILY_REWARDS_PATH,
@@ -315,27 +213,6 @@ class RatedProvider:
             except Exception as exc:
                 for key in daily_keys:
                     diagnostics[key] = _diagnostic(exc)
-        if queue_keys:
-            try:
-                payload = self.client.get_json(
-                    BASE_URL + QUEUES_PATH,
-                    params={"limit": 1, "offset": 0, "window": "1d"},
-                    headers=self._headers(),
-                )
-                network_requests += 1
-                if _subscription_inactive(payload):
-                    raise ProviderAuthenticationError(
-                        "Rated subscription is not active",
-                        diagnostic=ProviderDiagnostic(
-                            error_code="RATED_SUBSCRIPTION_INACTIVE",
-                            detail="Subscription is not active.",
-                            retryable=False,
-                        ),
-                    )
-                values.extend(parse_queues(payload, queue_keys, fetched_at=fetched_at))
-            except Exception as exc:
-                for key in queue_keys:
-                    diagnostics[key] = _diagnostic(exc)
         return ProviderResponse(tuple(values), diagnostics=diagnostics, network_requests=network_requests)
 
 
@@ -343,8 +220,6 @@ __all__ = [
     "BASE_URL",
     "DAILY_REWARDS_PATH",
     "GWEI_PER_ETH",
-    "QUEUES_PATH",
     "RatedProvider",
     "parse_daily_rewards",
-    "parse_queues",
 ]

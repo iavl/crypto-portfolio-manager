@@ -140,7 +140,7 @@ class DataAcquisitionTests(unittest.TestCase):
     def test_eth_transfer_volume_routes_only_to_blockchair(self):
         self.assertEqual(provider_chain("onchain.transfer_volume", "ETH"), ("blockchair",))
         self.assertEqual(provider_chain("onchain.transfer_volume", "BTC"), ("coinmetrics_community",))
-        self.assertEqual(provider_chain("onchain.transfer_volume", "BNB"), ("coinmetrics_community",))
+        self.assertEqual(provider_chain("onchain.transfer_volume", "BNB"), ())
         self.assertEqual(dataset_for_metric("onchain.transfer_volume"), "onchain")
 
     def test_eth_transfer_volume_does_not_fallback_to_coinmetrics(self):
@@ -1003,31 +1003,12 @@ class DataAcquisitionTests(unittest.TestCase):
             )
         self.assertNotIn("fake-secret", str(raised.exception.diagnostic))
 
-    def test_etf_routes_to_sosovalue_and_liquidations_have_no_structured_route(self):
+    def test_etf_routes_to_sosovalue(self):
         self.assertEqual(provider_chain("flows.etf_net_1d"), ("sosovalue",))
         self.assertEqual(provider_chain("flows.etf_net_7d"), ("sosovalue",))
         self.assertEqual(provider_chain("flows.etf_net_30d"), ("sosovalue",))
-        self.assertEqual(provider_chain("derivatives.total_liquidations_24h_usd"), ())
-        self.assertEqual(provider_chain("derivatives.long_liquidations_7d_usd"), ())
         self.assertEqual(load_provider_config()["providers"]["sosovalue"]["api_key_env"], "SOSOVALUE_API_KEY")
         self.assertNotIn("coinglass", load_provider_config()["providers"])
-
-        provider = StructuredProvider(value=7, source="sosovalue")
-        result = AcquisitionManager(
-            ProviderRouter({"sosovalue": provider}, config=config_for("sosovalue")),
-            persist=False,
-        ).run(
-            MetricCollectionPlan(
-                "SNAPSHOT_REVIEW",
-                (MetricRequest("BTC", "derivatives.total_liquidations_24h_usd"),),
-            ),
-            cached_observations=(),
-            as_of="2026-09-05T00:00:00Z",
-            now="2026-09-05T00:00:00Z",
-        )
-        self.assertEqual(provider.calls, 0)
-        self.assertEqual(result.results[0].status, "SKIPPED")
-        self.assertEqual(result.web_fallbacks, ())
 
     def test_sosovalue_registration_is_key_gated_and_ignores_old_key(self):
         config = config_for("sosovalue")
@@ -1399,7 +1380,7 @@ class DataAcquisitionTests(unittest.TestCase):
 
     def test_disabled_provider_failure_keeps_a_stable_diagnostic_code(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
-            MetricRequest("BTC", "sentiment.social_mentions_24h"),
+            MetricRequest("BTC", "sentiment.social_bullish_share"),
         ))
         config = config_for("lunarcrush")
         config["providers"]["lunarcrush"]["enabled"] = False
@@ -1432,7 +1413,7 @@ class DataAcquisitionTests(unittest.TestCase):
             persist=False,
         ).run(
             MetricCollectionPlan("SNAPSHOT_REVIEW", (
-                MetricRequest("BTC", "sentiment.social_mentions_24h"),
+                MetricRequest("BTC", "sentiment.social_bullish_share"),
             )),
             mode="REFRESH",
             cached_observations=(),
@@ -1628,7 +1609,6 @@ class DataAcquisitionTests(unittest.TestCase):
         config = load_provider_config()
         self.assertFalse(provider_enabled("lunarcrush", config, {}))
         self.assertTrue(provider_enabled("lunarcrush", config, {"LUNARCRUSH_API_KEY": "configured"}))
-        self.assertTrue(provider_enabled("ethereum_protocol", config, {}))
         self.assertFalse(provider_enabled("github", config, {}))
         self.assertTrue(provider_enabled("github", config, {"GITHUB_TOKEN": "configured"}))
         with patch.dict("os.environ", {}, clear=True):

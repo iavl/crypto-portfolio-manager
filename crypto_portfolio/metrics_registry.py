@@ -25,15 +25,19 @@ _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 _FRESHNESS_WINDOW = re.compile(r"^[1-9][0-9]*d$")
 _CHAIN_NATIVE_ASSETS = ("BTC", "ETH", "SOL", "BNB")
 CHAIN_NATIVE_ASSETS = _CHAIN_NATIVE_ASSETS
+_ACTIVE_ADDRESS_ASSETS = ("BTC", "ETH", "SOL")
+_TRANSFER_VOLUME_ASSETS = ("BTC", "ETH", "SOL")
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
 _APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
 _ETH_ASSETS = ("ETH",)
 _FDV_ASSETS = tuple(asset for asset in _PROTOCOL_ASSETS if asset != "ETH")
 _FDV_RATIO_ASSETS = tuple(asset for asset in _PROTOCOL_ASSETS if asset != "ETH")
-_ACTIVE_USER_ASSETS = tuple(asset for asset in _APPLICATION_ASSETS if asset != "ETH")
 _DEVELOPER_ACTIVITY_ASSETS = ("ETH", "AAVE")
 _UNLOCK_ASSETS: tuple[str, ...] = ()
 _DERIVATIVES_ASSETS = _PROTOCOL_ASSETS
+_TRANSACTION_COUNT_ASSETS = ("BTC", "ETH")
+_TOKENOMICS_ASSETS = ("BTC", "ETH")
+_DELIVERY_BASIS_ASSETS = ("BTC", "ETH")
 
 
 def _freshness(value: Any, field: str) -> str | int | float:
@@ -302,11 +306,6 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         "flows.eth_etf_aum_usd", "capital_flows", "number", "USD", "CONTEXTUAL",
         freshness="7d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_etf",
     ),
-    "flows.exchange_netflow": _definition("flows.exchange_netflow", "capital_flows", "number", "USD", "CONTEXTUAL", freshness="2d"),
-    "flows.eth_exchange_netflow_to_market_cap": _definition(
-        "flows.eth_exchange_netflow_to_market_cap", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
-        freshness="2d", asset_scope=_ETH_ASSETS,
-    ),
     "flows.eth_active_stake_change_to_supply_30d": _definition(
         "flows.eth_active_stake_change_to_supply_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
         freshness="2d", asset_scope=_ETH_ASSETS,
@@ -314,13 +313,12 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "fundamentals.tvl": _definition("fundamentals.tvl", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.fees_30d": _definition("fundamentals.fees_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.revenue_30d": _definition("fundamentals.revenue_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
-    "fundamentals.stablecoin_liquidity": _definition("fundamentals.stablecoin_liquidity", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
-    "fundamentals.active_users": _definition("fundamentals.active_users", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_ACTIVE_USER_ASSETS),
+    "fundamentals.stablecoin_liquidity": _definition("fundamentals.stablecoin_liquidity", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=("ETH", "SOL", "BNB")),
     "fundamentals.developer_activity": _definition("fundamentals.developer_activity", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="30d", asset_scope=_DEVELOPER_ACTIVITY_ASSETS),
-    "onchain.active_addresses": _definition("onchain.active_addresses", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
-    "onchain.transfer_volume": _definition("onchain.transfer_volume", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    "onchain.active_addresses": _definition("onchain.active_addresses", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_ACTIVE_ADDRESS_ASSETS),
+    "onchain.transfer_volume": _definition("onchain.transfer_volume", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_TRANSFER_VOLUME_ASSETS),
     "onchain.blockspace_fees": _definition("onchain.blockspace_fees", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_CHAIN_NATIVE_ASSETS),
-    "onchain.transaction_count": _definition("onchain.transaction_count", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    "onchain.transaction_count": _definition("onchain.transaction_count", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_TRANSACTION_COUNT_ASSETS),
     "valuation.market_cap": _definition("valuation.market_cap", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_FDV_ASSETS),
     "valuation.fdv_market_cap_ratio": _definition("valuation.fdv_market_cap_ratio", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="7d", asset_scope=_FDV_RATIO_ASSETS),
@@ -398,24 +396,8 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "eth.monetary.net_supply_growth_30d": _definition("eth.monetary.net_supply_growth_30d", "fundamentals", "number", "fraction", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth.monetary.net_supply_growth_90d": _definition("eth.monetary.net_supply_growth_90d", "fundamentals", "number", "fraction", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth.monetary.net_supply_growth_365d": _definition("eth.monetary.net_supply_growth_365d", "fundamentals", "number", "fraction", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.monetary.burn_30d_eth": _definition("eth.monetary.burn_30d_eth", "fundamentals", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.monetary.burn_365d_eth": _definition("eth.monetary.burn_365d_eth", "fundamentals", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.monetary.burn_to_issuance_30d": _definition("eth.monetary.burn_to_issuance_30d", "fundamentals", "number", "ratio", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.monetary.burn_to_issuance_365d": _definition("eth.monetary.burn_to_issuance_365d", "fundamentals", "number", "ratio", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.monetary.cumulative_burn_eth": _definition(
-        "eth.monetary.cumulative_burn_eth", "fundamentals", "number", "ETH", "CONTEXTUAL",
-        freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_monetary",
-    ),
     "eth.staking.active_effective_stake_eth": _definition("eth.staking.active_effective_stake_eth", "fundamentals", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.staking.active_effective_stake_pct": _definition("eth.staking.active_effective_stake_pct", "fundamentals", "number", "fraction", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth.staking.active_effective_stake_change_30d": _definition("eth.staking.active_effective_stake_change_30d", "fundamentals", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.staking.active_effective_stake_change_90d": _definition("eth.staking.active_effective_stake_change_90d", "fundamentals", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.staking.staking_apr_7d": _definition("eth.staking.staking_apr_7d", "fundamentals", "number", "fraction", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.staking.staking_apr_30d": _definition("eth.staking.staking_apr_30d", "fundamentals", "number", "fraction", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.staking.participation_rate": _definition("eth.staking.participation_rate", "fundamentals", "number", "fraction", "HIGHER_IS_BETTER", freshness="1d", asset_scope=_ETH_ASSETS),
-    "eth.staking.deposit_queue_eth": _definition("eth.staking.deposit_queue_eth", "capital_flows", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_staking"),
-    "eth.staking.exit_queue_eth": _definition("eth.staking.exit_queue_eth", "capital_flows", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_staking"),
-    "eth.staking.withdrawal_backlog_eth": _definition("eth.staking.withdrawal_backlog_eth", "capital_flows", "number", "ETH", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_staking"),
     "eth.l2.rent_paid_30d_usd": _definition("eth.l2.rent_paid_30d_usd", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth.l2.rent_paid_90d_usd": _definition("eth.l2.rent_paid_90d_usd", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth.l2.tvs_usd": _definition("eth.l2.tvs_usd", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
@@ -433,15 +415,9 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "eth_valuation.realized_price": _definition("eth_valuation.realized_price", "valuation", "number", "USD", "LOWER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth_valuation.realized_cap_usd": _definition("eth_valuation.realized_cap_usd", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_valuation"),
     "eth_valuation.price_to_realized_price": _definition("eth_valuation.price_to_realized_price", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth.structural.consensus_client_largest_share": _definition("eth.structural.consensus_client_largest_share", "structural_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="7d", asset_scope=_ETH_ASSETS, decision_role="STRUCTURAL_RISK", context_group="structural_risk", fallback_mode="WEB_ALLOWED"),
-    "eth.structural.execution_client_largest_share": _definition("eth.structural.execution_client_largest_share", "structural_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="7d", asset_scope=_ETH_ASSETS, decision_role="STRUCTURAL_RISK", context_group="structural_risk", fallback_mode="WEB_ALLOWED"),
-    "eth.structural.staking_entity_largest_share": _definition("eth.structural.staking_entity_largest_share", "structural_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="7d", asset_scope=_ETH_ASSETS, decision_role="STRUCTURAL_RISK", context_group="structural_risk", fallback_mode="WEB_ALLOWED"),
-    "eth.structural.liquid_staking_largest_share": _definition("eth.structural.liquid_staking_largest_share", "structural_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="7d", asset_scope=_ETH_ASSETS, decision_role="STRUCTURAL_RISK", context_group="structural_risk", fallback_mode="WEB_ALLOWED"),
-    "eth.structural.builder_largest_share": _definition("eth.structural.builder_largest_share", "structural_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="7d", asset_scope=_ETH_ASSETS, decision_role="STRUCTURAL_RISK", context_group="structural_risk", fallback_mode="WEB_ALLOWED"),
-    "eth.structural.finality_participation_rate": _definition("eth.structural.finality_participation_rate", "structural_risk", "number", "fraction", "HIGHER_IS_BETTER", freshness="1d", asset_scope=_ETH_ASSETS, decision_role="STRUCTURAL_RISK", context_group="structural_risk", fallback_mode="WEB_ALLOWED"),
     "tokenomics.next_unlock_pct": _definition("tokenomics.next_unlock_pct", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_UNLOCK_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
-    "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
-    "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_PROTOCOL_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
+    "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_TOKENOMICS_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
+    "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_TOKENOMICS_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
     "risk.security_event_status": _definition("risk.security_event_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_PROTOCOL_ASSETS, decision_role="EVENT_RISK", context_group="event_risk", fallback_mode="WEB_ALLOWED"),
     "risk.chain_liveness_status": _definition("risk.chain_liveness_status", "event_risk", "string", None, "CONTEXTUAL", critical=True, freshness="1d", asset_scope=_CHAIN_NATIVE_ASSETS, decision_role="EVENT_RISK", context_group="event_risk", fallback_mode="STRUCTURED_ONLY"),
     "risk.regulatory_event_status": _definition(
@@ -506,34 +482,9 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
         decision_role="POSITIONING_OVERLAY", context_group="positioning",
     ),
-    "derivatives.long_liquidations_24h_usd": _definition(
-        "derivatives.long_liquidations_24h_usd", "positioning", "number", "USD", "CONTEXTUAL",
-        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
-    "derivatives.short_liquidations_24h_usd": _definition(
-        "derivatives.short_liquidations_24h_usd", "positioning", "number", "USD", "CONTEXTUAL",
-        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
-    "derivatives.total_liquidations_24h_usd": _definition(
-        "derivatives.total_liquidations_24h_usd", "positioning", "number", "USD", "CONTEXTUAL",
-        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
-    "derivatives.long_liquidations_7d_usd": _definition(
-        "derivatives.long_liquidations_7d_usd", "positioning", "number", "USD", "CONTEXTUAL",
-        freshness="7d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
-    "derivatives.short_liquidations_7d_usd": _definition(
-        "derivatives.short_liquidations_7d_usd", "positioning", "number", "USD", "CONTEXTUAL",
-        freshness="7d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
     "derivatives.futures_basis_annualized": _definition(
         "derivatives.futures_basis_annualized", "positioning", "number", "fraction", "CONTEXTUAL",
-        freshness="1d", asset_scope=_DERIVATIVES_ASSETS,
+        freshness="1d", asset_scope=_DELIVERY_BASIS_ASSETS,
         decision_role="POSITIONING_OVERLAY", context_group="positioning",
     ),
     "sentiment.social_bullish_share": _definition(
@@ -541,18 +492,8 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
         decision_role="POSITIONING_OVERLAY", context_group="positioning",
     ),
-    "sentiment.social_mentions_24h": _definition(
-        "sentiment.social_mentions_24h", "sentiment", "number", "count", "CONTEXTUAL",
-        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
     "sentiment.social_mentions_change_7d": _definition(
         "sentiment.social_mentions_change_7d", "sentiment", "number", "fraction", "CONTEXTUAL",
-        freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
-        decision_role="POSITIONING_OVERLAY", context_group="positioning",
-    ),
-    "sentiment.social_sentiment_percentile": _definition(
-        "sentiment.social_sentiment_percentile", "sentiment", "number", "fraction", "CONTEXTUAL",
         freshness="2d", asset_scope=_DERIVATIVES_ASSETS,
         decision_role="POSITIONING_OVERLAY", context_group="positioning",
     ),
@@ -591,39 +532,24 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         freshness="7d", asset_scope=("BTC",),
         decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
     ),
-    "onchain.btc.lth_supply_pct": _definition(
-        "onchain.btc.lth_supply_pct", "cycle_context", "number", "fraction", "CONTEXTUAL",
-        freshness="7d", asset_scope=("BTC",),
-        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
-    ),
     "onchain.btc.lth_net_position_change": _definition(
         "onchain.btc.lth_net_position_change", "cycle_context", "number", "fraction", "CONTEXTUAL",
         freshness="7d", asset_scope=("BTC",),
         decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
     ),
-    "onchain.btc.sth_realized_price": _definition(
-        "onchain.btc.sth_realized_price", "cycle_context", "number", "USD", "CONTEXTUAL",
-        freshness="7d", asset_scope=("BTC",),
-        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
-    ),
-    "onchain.btc.lth_realized_price": _definition(
-        "onchain.btc.lth_realized_price", "cycle_context", "number", "USD", "CONTEXTUAL",
-        freshness="7d", asset_scope=("BTC",),
-        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
-    ),
-    "onchain.btc.nupl": _definition(
-        "onchain.btc.nupl", "cycle_context", "number", "fraction", "CONTEXTUAL",
-        freshness="7d", asset_scope=("BTC",),
-        decision_role="CYCLE_CONTEXT", context_group="btc_cycle",
-    ),
-    "btc_network.hashrate": _definition(
-        "btc_network.hashrate", "network", "number", "hashes", "CONTEXTUAL",
-        freshness="7d", asset_scope=("BTC",), decision_role="CYCLE_CONTEXT", context_group="btc_network",
-    ),
-    "btc_network.difficulty": _definition(
-        "btc_network.difficulty", "network", "number", "difficulty", "CONTEXTUAL",
-        freshness="14d", asset_scope=("BTC",), decision_role="CYCLE_CONTEXT", context_group="btc_network",
-    ),
+}
+
+_CONSUMER_BY_ROLE = {
+    "SCORING_FACTOR": "factor_engine",
+    "EVENT_RISK": "event_risk_gate",
+    "POSITIONING_OVERLAY": "positioning_engine",
+    "CYCLE_CONTEXT": "btc_cycle_engine",
+    "EXECUTION_CONTEXT": "execution_overlay",
+    "STRUCTURAL_RISK": "structural_risk_gate",
+}
+DECISION_CONSUMERS = {
+    key: frozenset({_CONSUMER_BY_ROLE[definition.decision_role]})
+    for key, definition in METRIC_REGISTRY.items()
 }
 
 def normalize_metric_key(value: Any) -> str:
@@ -660,7 +586,7 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         or definition.key.startswith(("eth.monetary.net_supply_growth", "eth.staking.active_effective_stake_change"))
         or definition.key.startswith("flows.eth_")
         or definition.key in {
-            "onchain.btc.mvrv_zscore", "onchain.btc.lth_net_position_change", "onchain.btc.nupl",
+            "onchain.btc.mvrv_zscore", "onchain.btc.lth_net_position_change",
             "btc_valuation.mvrv_zscore", "macro.fed_funds_change_90d", "macro.real_yield_change_90d",
             "macro.broad_dollar_change_90d", "macro.fed_balance_sheet_change_13w",
             "macro.m2_change_6m", "macro.m2_change_12m",
@@ -688,20 +614,11 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
     if definition.key in {
         "derivatives.funding_rate_percentile",
         "sentiment.social_bullish_share",
-        "sentiment.social_sentiment_percentile",
         "sentiment.social_attention_percentile",
-        "onchain.btc.lth_supply_pct",
         "eth.staking.active_effective_stake_pct",
-        "eth.staking.participation_rate",
         "eth.blobs.utilization_30d",
         "eth.da.ethereum_share_of_tracked_da_bytes_30d",
         "eth.da.ethereum_share_of_tracked_da_fees_30d",
-        "eth.structural.consensus_client_largest_share",
-        "eth.structural.execution_client_largest_share",
-        "eth.structural.staking_entity_largest_share",
-        "eth.structural.liquid_staking_largest_share",
-        "eth.structural.builder_largest_share",
-        "eth.structural.finality_participation_rate",
     } and not 0 <= number <= 1:
         raise ValueError(f"metric {definition.key} fraction must be <= 1")
     if definition.key == "sentiment.market_fear_greed" and not 0 <= number <= 100:
@@ -715,15 +632,10 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         "onchain.btc.sopr",
         "eth_valuation.mvrv",
         "eth_valuation.price_to_realized_price",
-        "eth.monetary.burn_to_issuance_30d",
-        "eth.monetary.burn_to_issuance_365d",
     } and number <= 0:
-        if definition.key.startswith("eth.monetary.burn_to_issuance") and number == 0:
-            return value
         raise ValueError(f"metric {definition.key} ratio must be > 0")
     if definition.key.startswith(("derivatives.open_interest_change_", "sentiment.social_mentions_change_")) or definition.key in {
         "onchain.btc.lth_net_position_change",
-        "onchain.btc.nupl",
     }:
         if number < -1:
             raise ValueError(f"metric {definition.key} change must be >= -1")
@@ -782,6 +694,8 @@ def validate_metric_ownership(
     for key, definition in values.items():
         if not isinstance(definition, MetricDefinition) or definition.key != normalize_metric_key(key):
             raise ValueError("metric registry keys must match MetricDefinition.key")
+        if not DECISION_CONSUMERS.get(definition.key):
+            raise ValueError(f"metric {definition.key} has no downstream decision consumer")
         if definition.is_scoring_factor and definition.factor not in {
             "trend", "valuation", "fundamentals", "onchain", "capital_flows", "relative_strength_btc",
             "btc_valuation", "macro_liquidity",
@@ -794,6 +708,7 @@ def validate_metric_ownership(
 
 __all__ = [
     "CHAIN_NATIVE_ASSETS",
+    "DECISION_CONSUMERS",
     "METRIC_REGISTRY",
     "DECISION_ROLES",
     "REVIEW_TYPES",

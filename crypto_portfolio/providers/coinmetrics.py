@@ -43,21 +43,13 @@ COINMETRICS_BTC_CYCLE_METRICS = {
     "onchain.btc.realized_price": "PriceRealizedUSD",
     "onchain.btc.market_to_realized_price": "CapMVRVCur",
     "onchain.btc.sopr": "SOPR",
-    "onchain.btc.lth_supply_pct": "SplyLTHPct",
     "onchain.btc.lth_net_position_change": "SplyLTHNetChange",
-    "onchain.btc.sth_realized_price": "PriceRealizedSthUSD",
-    "onchain.btc.lth_realized_price": "PriceRealizedLthUSD",
-    "onchain.btc.nupl": "NUPL",
 }
 COINMETRICS_BTC_VALUATION_METRICS = {
     "btc_valuation.mvrv": "CapMVRVCur",
     "btc_valuation.mvrv_zscore": "CapMVRVZ",
     "btc_valuation.realized_price": "PriceRealizedUSD",
     "btc_valuation.realized_cap_usd": "CapRealUSD",
-}
-COINMETRICS_BTC_NETWORK_METRICS = {
-    "btc_network.hashrate": "HashRate",
-    "btc_network.difficulty": "DiffMean",
 }
 COINMETRICS_BTC_VALUATION_INPUTS = {
     "btc_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
@@ -69,7 +61,6 @@ COINMETRICS_TOKENOMICS_INPUTS = {
     "tokenomics.annualized_emissions": ("IssTotNtv", "SplyCur"),
     "tokenomics.supply_growth": ("SplyCur",),
 }
-COINMETRICS_EXCHANGE_FLOW_INPUTS = ("FlowInExUSD", "FlowOutExUSD")
 COINMETRICS_ETH_INPUTS = {
     "eth.monetary.current_supply_eth": ("SplyCur",),
     "eth.monetary.issuance_30d_eth": ("IssTotNtv",),
@@ -87,12 +78,10 @@ COINMETRICS_METRIC_MAP = {
     **COINMETRICS_MARKET_VALUATION_METRICS,
     **COINMETRICS_BTC_CYCLE_METRICS,
     **COINMETRICS_BTC_VALUATION_METRICS,
-    **COINMETRICS_BTC_NETWORK_METRICS,
 }
 COINMETRICS_SUPPORTED_METRICS = tuple(dict.fromkeys((
     *COINMETRICS_METRIC_MAP,
     *COINMETRICS_TOKENOMICS_INPUTS,
-    "flows.exchange_netflow",
     *COINMETRICS_ETH_SUPPORTED_METRICS,
 )))
 SUPPLY_LOOKBACK_DAYS = 365
@@ -638,38 +627,6 @@ def parse_eth_metrics(
     } for key, (value, observed, methodology, metrics) in values.items())
 
 
-def parse_exchange_netflow(
-    payload: Mapping[str, Any],
-    asset: str,
-    *,
-    fetched_at: str,
-    as_of: str | None = None,
-    source: str = "coinmetrics_community",
-) -> Mapping[str, Any]:
-    rows = _series_rows(payload, fields=COINMETRICS_EXCHANGE_FLOW_INPUTS, as_of=as_of)
-    if not rows or not all(field in rows[-1]["values"] for field in COINMETRICS_EXCHANGE_FLOW_INPUTS):
-        raise ProviderUnsupportedMetric("Coin Metrics exchange-flow history has no complete current row")
-    row = rows[-1]
-    inflow = row["values"]["FlowInExUSD"]
-    outflow = row["values"]["FlowOutExUSD"]
-    return {
-        "asset": asset.strip().upper(),
-        "metric_key": "flows.exchange_netflow",
-        "value": inflow - outflow,
-        "unit": "USD",
-        "period": "1d",
-        "observed_at": row["observed_at"],
-        "fetched_at": fetched_at,
-        "source": source,
-        "confidence": "MEDIUM",
-        "metadata": {
-            "source_dataset": "timeseries/asset-metrics",
-            "coinmetrics_metrics": list(COINMETRICS_EXCHANGE_FLOW_INPUTS),
-            "methodology": "exchange_inflow_usd_minus_exchange_outflow_usd",
-        },
-    }
-
-
 class CoinMetricsProvider:
     name = "coinmetrics_community"
 
@@ -692,7 +649,6 @@ class CoinMetricsProvider:
                 *COINMETRICS_METRIC_MAP,
                 *COINMETRICS_TOKENOMICS_INPUTS,
                 *COINMETRICS_ETH_INPUTS,
-                "flows.exchange_netflow",
             ))),
             supports_batching=True,
             requires_api_key=False,
@@ -781,11 +737,6 @@ class CoinMetricsProvider:
                     values.extend(parse_eth_metrics(
                         payload, request.asset, (key,), {key: inputs},
                         source=self.name, fetched_at=timestamp, as_of=request.parameters.get("as_of"),
-                    ))
-                elif key == "flows.exchange_netflow":
-                    values.append(parse_exchange_netflow(
-                        payload, request.asset, source=self.name,
-                        fetched_at=timestamp, as_of=request.parameters.get("as_of"),
                     ))
                 else:
                     raise ProviderUnsupportedMetric(f"cached full-history payload does not support {key}")
@@ -876,7 +827,7 @@ class CoinMetricsProvider:
             elif key in COINMETRICS_TOKENOMICS_INPUTS:
                 required_inputs[key] = COINMETRICS_TOKENOMICS_INPUTS[key]
             else:
-                required_inputs[key] = COINMETRICS_EXCHANGE_FLOW_INPUTS
+                required_inputs[key] = ()
         available_requested = tuple(
             key for key in requested
             if required_inputs[key] and all(input_metric.lower() in available for input_metric in required_inputs[key])
@@ -977,17 +928,6 @@ class CoinMetricsProvider:
                 ))
             except (ProviderError, ValueError) as exc:
                 diagnostics[key] = _metric_diagnostic(exc)
-        if "flows.exchange_netflow" in available_requested:
-            try:
-                result.append(parse_exchange_netflow(
-                    payload,
-                    asset,
-                    source=self.name,
-                    fetched_at=fetched_at,
-                    as_of=request.parameters.get("as_of"),
-                ))
-            except (ProviderError, ValueError) as exc:
-                diagnostics["flows.exchange_netflow"] = _metric_diagnostic(exc)
         return ProviderResponse(
             observations=tuple(dict(item) for item in result),
             payload=payload,
@@ -999,7 +939,6 @@ __all__ = [
     "CATALOG_TTL_SECONDS",
     "COINMETRICS_ASSETS",
     "COINMETRICS_BTC_CYCLE_METRICS",
-    "COINMETRICS_BTC_NETWORK_METRICS",
     "COINMETRICS_BTC_VALUATION_INPUTS",
     "COINMETRICS_BTC_VALUATION_METRICS",
     "COINMETRICS_GENERIC_NETWORK_METRICS",
@@ -1013,7 +952,6 @@ __all__ = [
     "CoinMetricsProvider",
     "catalog_metrics",
     "catalog_metrics_by_asset",
-    "parse_exchange_netflow",
     "parse_eth_metrics",
     "parse_tokenomics",
     "parse_timeseries",

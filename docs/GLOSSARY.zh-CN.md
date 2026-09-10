@@ -64,7 +64,7 @@
 | **NAV** | 净资产值（Net Asset Value） | 某个时间点组合全部资产的总价值。 | 用来比较组合随时间的真实变化。 |
 | **unitized NAV** | 单位化净值 | 把外部存取款转换为单位数变化，从而把资金流与投资表现分开。 | 避免把“新存入的钱”误判成投资收益。 |
 | **external cash flow** | 外部现金流 | 存入组合或从组合取出的资金，而不是资产价格变化。 | 必须明确标记为 DEPOSIT、WITHDRAWAL 或 NONE。 |
-| **cash_flow_resolution_status** | 现金流解析状态 | `CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、`UNRESOLVED` 或 `BASELINE_RESET`，是现金流是否可用于记账的唯一状态字段。 | 只有明确确认或重置基线才允许 `FINAL`；未知状态保持 `PROVISIONAL`。 |
+| **cash_flow_resolution_status** | 现金流解析状态 | 未披露时为 `ASSUMED_NONE`（`0`、`NONE`）；也可为 `CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、`UNRESOLVED` 或 `BASELINE_RESET`。 | 无披露按市场表现记账并保持 `FINAL`；明确未解决才是 `PROVISIONAL`。 |
 | **cash-flow timing** | 现金流时点 | 本项目把附着在 snapshot 上的现金流视为发生在该 snapshot 估值之前。 | 影响 NAV、基准和回撤计算；时点不能被忽略。 |
 | **cost basis** | 成本基础 / 持仓成本 | 购买剩余仓位所对应的已知成本金额。 | 成本未知时保持未知，不会伪造为零。 |
 | **P&L** | 盈亏（Profit and Loss） | 当前价值与成本基础之间的差额或比例。 | 需要区分仓位盈亏与组合层面的 NAV Return。 |
@@ -113,8 +113,7 @@
 | **open interest** | 未平仓合约量 | 尚未关闭的衍生品合约规模。 | 增长或下降是定位背景，不单独表示方向。 |
 | **long/short ratio** | 多空比 | 多头与空头账户或仓位的比例。 | 不同交易所和统计口径不可直接混合；冲突会降低信心。 |
 | **futures basis** | 期货基差 | 期货标记价格相对指数价格的差异，当前可按到期时间年化。 | 反映衍生品定价和拥挤度，只作背景约束。 |
-| **liquidation** | 强平 | 杠杆仓位因保证金不足被强制关闭。 | 可用于判断去杠杆和压力；当前不会把 liquidation 归因给 SoSoValue。 |
-| **MVRV / SOPR / NUPL** | 链上周期指标 | 分别用于比较市值与实现价值、已花费输出盈利情况、以及未实现盈亏状态。 | 属于 BTC 周期/链上背景，缺失会降低周期信心，但不能单独触发交易。 |
+| **MVRV / SOPR / LTH net-position change** | 链上周期指标 | 用于比较市值与实现价值、观察已花费输出盈利和长期持有者净仓变化。 | 属于 BTC 周期/链上背景，缺失会降低周期信心，但不能单独触发交易。 |
 
 ## 5. 证据、评分与系统
 

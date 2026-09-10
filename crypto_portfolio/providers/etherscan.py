@@ -1,4 +1,4 @@
-"""Optional Etherscan v2 Ethereum supply/cumulative-burn adapter."""
+"""Optional Etherscan v2 Ethereum supply adapter."""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ BASE_URL = "https://api.etherscan.io/v2/api"
 CHAIN_ID = "1"
 ACTION = "ethsupply2"
 _CURRENT_SUPPLY = "eth.monetary.current_supply_eth"
-_CUMULATIVE_BURN = "eth.monetary.cumulative_burn_eth"
 WEI_PER_ETH = 10**18
 
 
@@ -66,8 +65,6 @@ def parse_ethsupply2(
     for key in requested:
         if key == _CURRENT_SUPPLY:
             field = "EthSupply"
-        elif key == _CUMULATIVE_BURN:
-            field = "BurntFees"
         else:
             raise ProviderUnsupportedMetric(f"Etherscan does not support {key}")
         if field not in result:
@@ -114,8 +111,8 @@ class EtherscanProvider:
         self.clock = clock
         self.capabilities = ProviderCapabilities(
             provider=self.name,
-            metric_keys=(_CURRENT_SUPPLY, _CUMULATIVE_BURN),
-            historical_series=(_CURRENT_SUPPLY, _CUMULATIVE_BURN),
+            metric_keys=(_CURRENT_SUPPLY,),
+            historical_series=(_CURRENT_SUPPLY,),
             supports_batching=True,
             requires_api_key=True,
         )

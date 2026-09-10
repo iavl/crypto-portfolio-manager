@@ -18,10 +18,9 @@ those contracts; it is not a second schema or routing implementation.
 | Bybit | market and derivatives fallback | None | spot candles, funding, OI, account ratio | second market/derivatives route; no delivery basis |
 | CoinGecko | broad market valuation | `COINGECKO_API_KEY` | market cap, FDV, historical market cap/FDV | primary valuation; credential-gated |
 | BGeometrics | latest BTC MVRV Z-score | None | `btc_valuation.mvrv_zscore` from `/v1/mvrv-zscore/last` | free/no-token; cache at least 24h; low quota |
-| DeFiLlama | protocol fundamentals | None | TVL, fees, revenue, fee/revenue multiple | protocol route; registered |
+| DeFiLlama | protocol and chain fundamentals | None | TVL, fees, revenue, fee/revenue multiple, ETH/BNB blockspace fees | structured route; registered |
 | Alternative.me | market sentiment context | None | Fear & Greed | market-context route; registered |
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
-| BNB RPC | completed BSC daily activity | None | `onchain.transaction_count` from canonical block transaction counts | primary BNB route; bounded batch RPC and incremental local history |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
 | Blockchair | ETH rolling 24h native transfer volume | None | `/ethereum/stats`: `volume_24h_approximate` × `market_price_usd` → USD | ETH `onchain.transfer_volume`; current snapshot only |
 | FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
@@ -29,11 +28,9 @@ those contracts; it is not a second schema or routing implementation.
 | SoSoValue | BTC/ETH ETF flows | `SOSOVALUE_API_KEY` | settled 1D/7D/30D ETF flow history | ETF route when configured; credential-gated |
 | growthepie | Ethereum L2 TVS, activity, fees, rent and DA economics | None | `eth.l2.tvs_usd` from `master.json` + `export/tvl.json`, `all_l2s` activity, Ethereum fees, L2 rent, DA/blob data and tracked-DA shares | ETH-specific public route; CC BY 4.0 attribution required |
 | Blobscan | Ethereum blob demand history | None | blob count, bytes, blob transactions, utilization | ETH-specific public route; RPC is a protocol cross-check |
-| Rated | Ethereum staking network aggregates | `RATED_API_KEY` via Bearer header | effective balance, daily rewards/APR, queue balances | optional Free-tier route; cache daily primitives; no count×32 conversion |
+| Rated | Ethereum staking network aggregate | `RATED_API_KEY` via Bearer header | active effective stake | optional route; cache daily primitives; no count×32 conversion |
 | Ethereum Beacon API | bounded Beacon node health/fallback | None | node version, genesis and finality checks | configurable `ETH_BEACON_API_URL`; no validator-registry scan |
-| Ethereum protocol | canonical execution fields and bounded burn parser | None | `baseFeePerGas`, `gasUsed`, `blobGasUsed`, `excessBlobGas` | enabled by default; one latest-block probe; no per-block review fan-out |
-| Ultrasound Money | ETH burn-rate history | None | public `d30.rate.eth_per_minute` | structured 30D burn route; medium confidence unless methodology changes |
-| Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` current fields | optional; not historical burn authority |
+| Etherscan v2 | current ETH supply cross-check | `ETHERSCAN_API_KEY` | `ethsupply2` `EthSupply` | optional current-supply route |
 | Beaconchain | not registered | N/A | no stable aggregate contract verified | intentionally omitted; staking metrics remain optional |
 | EventScanner | current security/governance/regulatory scans | None | event status and source coverage | fixed source catalog; no generic fallback |
 | LunarCrush | social positioning context | `LUNARCRUSH_API_KEY` via Bearer header | completed daily social sentiment and attention metrics | optional API v4 route; credential and plan gated |
@@ -57,25 +54,21 @@ rate limits, circuit breakers, authentication failures, and schema failures
 remain final diagnostics rather than being converted to success.
 
 Provider priority is deterministic: Binance then Bybit for spot/OHLCV and
-derivatives; Binance only for delivery basis; BNB `onchain.transaction_count`
-uses the public BSC RPC adapter; CoinGecko then catalog-aware Coin Metrics for
-market cap and BTC-native valuation; FRED for macro/liquidity;
-DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Blockchair for
-ETH rolling transfer volume; Coin Metrics for supported exchange attribution
-and BTC/BNB network data; and
-the fixed EventScanner catalog for events. BGeometrics is the no-key BTC MVRV Z
-route; ETH monetary/realized valuation routes
-use catalog-aware Coin Metrics for supply/valuation, Ultrasound as the direct
-30D burn source, and Etherscan cumulative counters only for an explicit aligned
-history fallback;
-staking routes require an exact aggregate source and are currently optional;
+derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
+Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
+DeFiLlama for protocol fundamentals and ETH/BNB blockspace fees; SoSoValue for
+ETF flows; Blockchair for ETH rolling transfer volume; Coin Metrics for
+catalog-supported network and BTC cycle data; and the fixed EventScanner catalog
+for events. BGeometrics is the no-key BTC MVRV Z route; ETH monetary/realized
+valuation uses catalog-aware Coin Metrics with Etherscan current-supply
+cross-check; staking retains only active effective stake;
 growthepie is the only active route for ETH L2 TVS and activity, and also
 supplies Ethereum fees and L2 rent/DA. Blobscan owns blob history, and
 SoSoValue owns structured ETH ETF flow/AUM. LunarCrush supplies lower-authority
 social context only and is not fetched by the normal plan unless
 `optional_context.collect_optional_social=true`. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
-ETH/BTC opportunity ratios, ETH staking/exchange-flow normalization, market
+ETH/BTC opportunity ratios, ETH staking normalization, market
 flow state, and BTC-relative returns are computed by Python and have no
 provider route.
 
@@ -109,9 +102,8 @@ calendar coverage, and an immutable OHLCV hash. For 1D-derived metrics,
 `observed_at` remains the candle data anchor while `freshness_reference_at` and
 `metadata.completed_through` are the latest completed close boundary. Binance
 validates its explicit close time against the interval; Bybit derives the
-boundary from normalized open time plus interval. Binance does not provide this
-project's historical liquidation aggregates, global exchange-address
-attribution, or broad protocol market valuation.
+boundary from normalized open time plus interval. Binance does not provide broad
+protocol market valuation.
 
 Delivery basis uses the exact `CURRENT_QUARTER` or `NEXT_QUARTER` contract:
 
@@ -213,23 +205,6 @@ evidence, not a halt. Chain-liveness responses use a 300-second cache TTL.
 Optional local URL/RPC overrides are redacted in diagnostics and never persist
 credentials.
 
-## BNB RPC transaction count
-
-The `bnb_rpc` adapter uses `BNB_RPC_URL` when configured, otherwise the public
-dataseed endpoint. It resolves the completed UTC-day block range by bounded
-timestamp binary searches, then sends bounded JSON-RPC batches of
-`eth_getBlockTransactionCountByNumber`. The daily value is the sum of those
-canonical block transaction counts; pending transactions and the current
-incomplete UTC day are excluded. A 15-block confirmation buffer is applied by
-default before a day is finalized.
-
-Validated daily values are stored under the provider cache's `series/bnb_rpc`
-directory with the ending block hash. A later scan checks that hash before
-extending the history; a continuity mismatch or an RPC range/batch failure is
-reported as unavailable rather than overwriting history. The provider probe
-only reads the current height and one confirmed block, and never backfills a
-day.
-
 ## Coin Metrics
 
 Coin Metrics Community uses `https://community-api.coinmetrics.io`. The provider
@@ -238,17 +213,16 @@ data; no authenticated Coin Metrics tier is part of the current contract.
 
 Current approved asset IDs include `btc`, `eth`, `bnb`, and `aave`. Catalog
 support, not this document, decides whether a particular asset/metric is usable.
-For BNB, `onchain.transaction_count` uses the dedicated public BSC RPC route;
-`onchain.active_addresses` remains optional because no exact Coin Metrics
-methodology is substituted.
+BNB on-chain demand uses blockspace fees through DeFiLlama with catalog-aware
+Coin Metrics fallback; the current plan does not request block-by-block
+transaction counts, active addresses, or transfer volume for BNB.
 
 | Data group | Implemented inputs |
 |---|---|
 | Market-cap fallback | `CapMrktEstUSD` → `valuation.market_cap` only |
 | Network | Catalog-checked `AdrActCnt`, `TxTfrValAdjUSD`, `FeeTotUSD`, `TxCnt` → on-chain metrics |
-| BTC cycle | MVRV, MVRV z-score, realized price, SOPR, LTH/STH, NUPL inputs |
+| BTC cycle | MVRV, MVRV z-score, realized price, SOPR and LTH net-position inputs |
 | Tokenomics | `IssTotNtv`, `SplyCur` for annualized emissions and supply growth |
-| Exchange attribution | `FlowInExUSD` and `FlowOutExUSD` for `flows.exchange_netflow` |
 
 `CapMrktEstUSD` is a methodology-compatible market-cap fallback after
 CoinGecko. `CapMrktCurUSD` and future-supply values are not silently substituted
@@ -259,8 +233,8 @@ For BTC-native valuation, the provider checks the Community catalog for
 `PriceRealizedUSD` at `btc`/`1d`. MVRV and realized price are derived in Python
 from free primitives when the exact metric is unavailable. MVRV Z is derived
 only when aligned `CapMrktCurUSD` and `CapRealUSD` history is present; otherwise
-it is optional and is never replaced by Web snippets. `SOPR` and `NUPL` are
-context-only holder/cycle inputs, not BTC base-score factors. Community is the
+it is optional and is never replaced by Web snippets. `SOPR` and LTH
+net-position change are context-only holder/cycle inputs, not BTC base-score factors. Community is the
 only active Coin Metrics provider.
 
 ## Blockchair
@@ -344,8 +318,7 @@ Rows are settled U.S. trading dates, normalized to `America/New_York` 16:00,
 and filtered locally by `as_of`. Up to 300 daily rows are accepted. If the
 history is too short, 1D/7D can still succeed while 30D reports
 `PROVIDER_INSUFFICIENT_HISTORY`; this is not unsupported capability. Negative
-flows are valid. The active contract does not provide liquidation history, so
-liquidation metrics remain optional/skipped and are never routed here.
+flows are valid. The active contract is only used for ETF flow/AUM evidence.
 The normalized BTC metrics divide completed net inflows by AUM on the same
 ending ETF date; missing AUM is unavailable and never zero-filled.
 
@@ -372,11 +345,9 @@ accepted. Growthepie is the only active structured route for the supported
 Ethereum L2 TVS and activity metrics; no unrelated metric is substituted.
 
 Coin Metrics Community is checked for catalog-supported ETH `SplyCur`,
-`IssTotNtv`, MVRV, realized-cap, and realized-price primitives. The current
-Community catalog does not provide the staking primitives required to name a
-value "active effective stake", so staking quantity/change/APR/participation
-metrics are optional until an exact aggregate source is configured. Python derives supply growth,
-exchange-flow/market-cap, active-stake-change/supply, and ETH flow/AUM ratios.
+`IssTotNtv`, MVRV, realized-cap, and realized-price primitives. Rated supplies
+the retained `active_effective_stake_eth`; Python derives supply growth,
+active-stake-change/supply, and ETH flow/AUM ratios.
 Provider failure, unsupported catalog metrics, missing denominators, and
 conflicting rows remain unavailable; they never become zero or neutral
 positive evidence.
@@ -405,14 +376,11 @@ normalized metrics are:
 | Local metric | LunarCrush source and deterministic method |
 |---|---|
 | `sentiment.social_bullish_share` | completed daily `sentiment / 100` |
-| `sentiment.social_mentions_24h` | completed daily `posts_active` |
 | `sentiment.social_mentions_change_7d` | exactly aligned `posts_active` 7D change |
-| `sentiment.social_sentiment_percentile` | same-asset trailing 90-day `sentiment` empirical midrank |
 | `sentiment.social_attention_percentile` | same-asset trailing 90-day `posts_active` empirical midrank |
 
-`posts_active` is the project's operational social-volume/mention proxy: unique
-social posts with interactions for the bucket, not a literal textual token
-mention count. Percentiles are same-asset trailing-history ranks, not
+`posts_active` is used only for the retained 7D change and attention overlay.
+It is not a literal textual token mention count. Percentiles are same-asset trailing-history ranks, not
 cross-sectional ranks across cryptocurrencies. Social metrics are lower-authority
 positioning context and cannot by themselves produce a strong allocation change.
 All requested social metrics for one asset share one daily time-series request;
@@ -430,19 +398,9 @@ social metrics by default; the explicit provider probe remains available.
 The current Rated OpenAPI document is OpenAPI `3.1.0` and uses an HTTP Bearer
 credential. Probes without `RATED_API_KEY` return HTTP 401. A bounded upstream
 body containing `{"detail":"Subscription is not active."}` is classified as
-`RATED_SUBSCRIPTION_INACTIVE` with `status_code=401`; the provider attempt
-remains diagnostic telemetry while affected optional metric events are
-`SKIPPED`. The adapter uses
-`/v0/eth/network/dailyRewards` for `sumEffectiveBalance`,
-`sumConsensusRewards`, and `sumExecutionRewards`, and `/v1/eth/queues` for
-`activatingStake`, `exitingStake`, and `totalWithdrawingBalance`. These source
-fields are Gwei and are converted to ETH by `1e9`; validator count is never
-multiplied by 32. APR is calculated as
-`window_rewards_gwei / average_effective_balance_gwei * 365 / window_days`
-and declares consensus plus execution rewards in metadata. Queue records must
-include an explicit source date/timestamp; a queue delay or validator count is
-not substituted for an ETH amount. `participation_rate` remains skipped until
-an exact bounded aggregate definition is available.
+`RATED_SUBSCRIPTION_INACTIVE` with `status_code=401`. The retained route uses
+`/v0/eth/network/dailyRewards` and `sumEffectiveBalance`, converting Gwei to ETH
+by `1e9`; validator count is never multiplied by 32.
 
 ## Ethereum Beacon API
 
@@ -453,29 +411,12 @@ provider is registered for diagnostics and future exact fallbacks, but it does
 not scan the validator registry during a normal review and does not expose a
 staking aggregate without a bounded, semantically exact source.
 
-## Ethereum protocol
+## ETH monetary providers
 
-`EthereumProtocolProvider` is enabled by default and uses
-`https://ethereum-rpc.publicnode.com`; `ETHEREUM_RPC_URL` is an optional local
-override and no API key is required. `--probe ethereum_protocol` performs one
-`POST` request using `eth_getBlockByNumber("latest", false)` and validates the
-execution fields `number`, `timestamp`, `baseFeePerGas`, and `gasUsed`.
-`blobGasUsed` and `excessBlobGas` are validated when present. Exact burn
-calculations still consume caller-supplied bounded block batches and retain the
-EIP-1559 plus EIP-4844 formula. A READY provider or a successful latest-block
-probe does not mean that a normal review has a 30D/365D historical block index;
-the project does not perform an unbounded per-block scan.
-
-### ETH monetary providers
-
-`UltrasoundMoneyProvider` uses the public
-`GET https://ultrasound.money/api/v2/fees/burn-rates` contract. The `d30.rate`
-`eth_per_minute` value is converted deterministically with
-`* 60 * 24 * 30`; `since_merge` and `since_burn` are never relabeled as 365D.
-Etherscan v2 is optional and uses `stats/ethsupply2` with `chainid=1`; only the
-documented `EthSupply` and `BurntFees` counters are accepted. Cumulative burn
-snapshots are persisted before any same-source, date-aligned window delta is
-derived. Missing history is `INSUFFICIENT_HISTORY`, not a fabricated value.
+ETH monetary supply/issuance and realized-valuation inputs use catalog-aware
+Coin Metrics. Etherscan v2 is an optional current-supply cross-check through
+`stats/ethsupply2` with `chainid=1`; only the documented `EthSupply` field is
+accepted for the current-supply cross-check.
 
 ### Structured event transports
 

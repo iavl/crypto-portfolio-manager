@@ -24,19 +24,8 @@ _OPTIONAL_METRICS = {
     "btc_valuation.mvrv_zscore": "OPTIONAL_SOURCE_UNAVAILABLE",
     "eth.monetary.issuance_365d_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
     "eth.monetary.net_supply_growth_365d": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.monetary.burn_365d_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.monetary.burn_to_issuance_365d": "DERIVED_INPUT_UNAVAILABLE",
-    "eth.monetary.cumulative_burn_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
     "eth.staking.active_effective_stake_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.active_effective_stake_pct": "DERIVED_INPUT_UNAVAILABLE",
     "eth.staking.active_effective_stake_change_30d": "DERIVED_INPUT_UNAVAILABLE",
-    "eth.staking.active_effective_stake_change_90d": "DERIVED_INPUT_UNAVAILABLE",
-    "eth.staking.staking_apr_7d": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.staking_apr_30d": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.participation_rate": "METHODOLOGY_NOT_DEFINED",
-    "eth.staking.deposit_queue_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.exit_queue_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.withdrawal_backlog_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
     "flows.eth_active_stake_change_to_supply_30d": "DERIVED_INPUT_UNAVAILABLE",
 }
 
@@ -78,22 +67,8 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
     key = definition.key
     if key in _OPTIONAL_METRICS:
         return MetricAvailabilityPolicy(key, "OPTIONAL", _OPTIONAL_METRICS[key])
-    if key == "flows.exchange_netflow":
-        return MetricAvailabilityPolicy(key, "PREMIUM_ONLY", "PREMIUM_PROVIDER_NOT_CONFIGURED")
     if key == "fundamentals.developer_activity":
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
-    if key == "fundamentals.stablecoin_liquidity" and asset not in {"ETH", "SOL", "BNB"}:
-        if asset == "AAVE":
-            return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNAVAILABLE")
-        return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
-    if key == "fundamentals.active_users" and asset in {"AAVE", "BNB"}:
-        return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
-    if asset == "BNB" and key in {"onchain.transfer_volume", "onchain.blockspace_fees"}:
-        return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNSUPPORTED")
-    if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"} and asset not in {"BTC", "ETH"}:
-        return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
-    if asset == "BNB" and key == "onchain.active_addresses":
-        return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNSUPPORTED")
     if definition.is_event_risk:
         return MetricAvailabilityPolicy(key)
     if definition.decision_role != "SCORING_FACTOR":

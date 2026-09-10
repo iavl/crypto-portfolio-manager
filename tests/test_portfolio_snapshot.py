@@ -18,9 +18,9 @@ class PortfolioSnapshotTests(unittest.TestCase):
             "positions": [{"symbol": "BTC", "value_usd": 10000}, {"symbol": "USDT", "value_usd": 15000}],
         }
         flagged = detect_external_cash_flow(previous, current)
-        self.assertEqual(flagged["status"], "UNRESOLVED")
-        self.assertTrue(flagged["requires_confirmation"])
-        self.assertIsNone(cash_flow_adjusted_performance((previous, current))["return"])
+        self.assertEqual(flagged["status"], "ASSUMED_NONE")
+        self.assertFalse(flagged["requires_confirmation"])
+        self.assertAlmostEqual(cash_flow_adjusted_performance((previous, current))["return"], 2 / 3)
         confirmed = {
             **current,
             "external_cash_flow": 10000,

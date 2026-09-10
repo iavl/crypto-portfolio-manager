@@ -185,7 +185,6 @@ _POSITIONING_FIELDS = {
     "long_short_ratio",
     "futures_basis",
     "social",
-    "deleveraging",
 }
 _FUNDING_FIELDS = {
     "elevated_positive",
@@ -202,7 +201,6 @@ _SOCIAL_FIELDS = {
     "euphoric_bullish_share",
     "attention_growth_extreme",
 }
-_DELEVERAGING_FIELDS = {"liquidation_to_open_interest", "normalized_funding_abs"}
 _BTC_CYCLE_FIELDS = {
     "enabled",
     "halving_context_days",
@@ -1244,19 +1242,6 @@ def _parse_positioning(value: Any) -> dict[str, Any]:
     ):
         raise PolicyError("positioning social bullish-share thresholds must be ordered")
 
-    deleveraging = value.get(
-        "deleveraging",
-        {"liquidation_to_open_interest": 0.10, "normalized_funding_abs": 0.0003},
-    )
-    if not isinstance(deleveraging, dict):
-        raise PolicyError("positioning.deleveraging must be an object")
-    _unknown_fields(deleveraging, _DELEVERAGING_FIELDS, "positioning.deleveraging")
-    deleveraging_parsed = {
-        "liquidation_to_open_interest": _number(deleveraging.get("liquidation_to_open_interest", 0.1), "positioning.deleveraging.liquidation_to_open_interest", minimum=0.0),
-        "normalized_funding_abs": _number(deleveraging.get("normalized_funding_abs", 0.0003), "positioning.deleveraging.normalized_funding_abs", minimum=0.0),
-    }
-    if deleveraging_parsed["liquidation_to_open_interest"] <= 0:
-        raise PolicyError("positioning.deleveraging.liquidation_to_open_interest must be > 0")
     return {
         "enabled": value["enabled"],
         "minimum_derivatives_confirmations_for_crowded": crowded,
@@ -1266,7 +1251,6 @@ def _parse_positioning(value: Any) -> dict[str, Any]:
         "long_short_ratio": ratios_parsed,
         "futures_basis": basis,
         "social": social_parsed,
-        "deleveraging": deleveraging_parsed,
     }
 
 

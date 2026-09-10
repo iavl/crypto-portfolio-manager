@@ -24,7 +24,7 @@ from crypto_portfolio.providers.growthepie import (
     parse_tvs_export_payload,
 )
 from crypto_portfolio.providers.ethereum_beacon import EthereumBeaconProvider
-from crypto_portfolio.providers.rated import RatedProvider, parse_daily_rewards, parse_queues
+from crypto_portfolio.providers.rated import RatedProvider, parse_daily_rewards
 from crypto_portfolio.providers.http import HttpClient
 from crypto_portfolio.providers.routes import build_provider_requests, provider_chain
 from crypto_portfolio.providers.cache import ProviderCache
@@ -73,9 +73,9 @@ class FreeProviderTests(unittest.TestCase):
             client=HttpClient(opener=opener, max_attempts=1),
             api_key="secret",
         ).collect(ProviderRequest(
-            "rated", "staking", "ETH", {"as_of": "2026-09-10T00:00:00Z"}, ("eth.staking.staking_apr_7d",),
+            "rated", "staking", "ETH", {"as_of": "2026-09-10T00:00:00Z"}, ("eth.staking.active_effective_stake_eth",),
         ))
-        diagnostic = result.diagnostics["eth.staking.staking_apr_7d"]
+        diagnostic = result.diagnostics["eth.staking.active_effective_stake_eth"]
         self.assertEqual(diagnostic["error_code"], "RATED_SUBSCRIPTION_INACTIVE")
         self.assertEqual(diagnostic["detail"], "Subscription is not active.")
         self.assertNotIn("secret", str(diagnostic))
@@ -296,7 +296,7 @@ class FreeProviderTests(unittest.TestCase):
         self.assertEqual(provider_chain("eth.l2.tvs_usd", "ETH"), ("growthepie",))
         self.assertEqual(provider_chain("onchain.transfer_volume", "ETH"), ("blockchair",))
 
-    def test_rated_uses_effective_balance_and_declares_reward_components(self):
+    def test_rated_uses_effective_balance(self):
         rows = []
         for index in range(31):
             rows.append({
@@ -310,36 +310,15 @@ class FreeProviderTests(unittest.TestCase):
             })
         values = parse_daily_rewards(
             {"data": rows},
-            ("eth.staking.active_effective_stake_eth", "eth.staking.staking_apr_7d", "eth.staking.staking_apr_30d"),
+            ("eth.staking.active_effective_stake_eth",),
             fetched_at="2026-09-02T00:00:00Z",
             as_of="2026-09-02T00:00:00Z",
         )
         by_key = {item["metric_key"]: item for item in values}
         self.assertEqual(by_key["eth.staking.active_effective_stake_eth"]["value"], 62)
-        self.assertEqual(by_key["eth.staking.staking_apr_30d"]["metadata"]["reward_components"], ["consensus", "execution"])
-        expected = (3 * 30) / (sum(range(33, 63)) / 30) * 365 / 30
-        self.assertAlmostEqual(by_key["eth.staking.staking_apr_30d"]["value"], expected)
+        self.assertEqual(set(by_key), {"eth.staking.active_effective_stake_eth"})
 
-    def test_rated_queues_require_explicit_eth_balance_and_timestamp(self):
-        payload = {"results": [{
-            "date": "2026-09-01",
-            "activatingStake": 40_000_000_000,
-            "exitingStake": 5_000_000_000,
-            "totalWithdrawingBalance": 7_000_000_000,
-        }]}
-        values = parse_queues(
-            payload,
-            ("eth.staking.deposit_queue_eth", "eth.staking.exit_queue_eth", "eth.staking.withdrawal_backlog_eth"),
-            fetched_at="2026-09-02T00:00:00Z",
-        )
-        self.assertEqual({item["value"] for item in values}, {40.0, 5.0, 7.0})
-        with self.assertRaises(ProviderResponseError):
-            parse_queues(
-                {"results": [{"activatingStake": 1, "exitingStake": 1, "totalWithdrawingBalance": 1}]},
-                ("eth.staking.deposit_queue_eth",), fetched_at="2026-09-02T00:00:00Z",
-            )
-
-    def test_rated_provider_batches_daily_rewards_and_queues(self):
+    def test_rated_provider_batches_active_stake(self):
         class Client:
             def __init__(self):
                 self.calls = []
@@ -353,23 +332,16 @@ class FreeProviderTests(unittest.TestCase):
                         "sumConsensusRewards": 1,
                         "sumExecutionRewards": 1,
                     }]}
-                return {"results": [{
-                    "date": "2026-09-01",
-                    "activatingStake": 1,
-                    "exitingStake": 2,
-                    "totalWithdrawingBalance": 3,
-                }]}
+                raise AssertionError(f"unexpected URL: {url}")
 
         client = Client()
         provider = RatedProvider(client=client, api_key="fake-key")
         result = provider.collect(ProviderRequest(
             "rated", "ethereum_staking", "ETH", {"as_of": "2026-09-02T00:00:00Z"},
-            ("eth.staking.active_effective_stake_eth", "eth.staking.deposit_queue_eth"),
+            ("eth.staking.active_effective_stake_eth",),
         ))
-        self.assertEqual(len(client.calls), 2)
-        self.assertEqual({item["metric_key"] for item in result.observations}, {
-            "eth.staking.active_effective_stake_eth", "eth.staking.deposit_queue_eth",
-        })
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual({item["metric_key"] for item in result.observations}, {"eth.staking.active_effective_stake_eth"})
         self.assertTrue(all(call[2]["Authorization"] == "Bearer fake-key" for call in client.calls))
 
     def test_active_stake_change_uses_cached_aligned_history(self):
@@ -399,9 +371,6 @@ class FreeProviderTests(unittest.TestCase):
         requests = build_provider_requests(tuple(
             MetricRequest("ETH", key) for key in (
                 "eth.staking.active_effective_stake_eth",
-                "eth.staking.staking_apr_7d",
-                "eth.staking.staking_apr_30d",
-                "eth.staking.deposit_queue_eth",
             )
         ), as_of="2026-09-09T00:00:00Z", now="2026-09-09T00:00:00Z")
         self.assertEqual(len(requests), 1)

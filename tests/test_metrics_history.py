@@ -60,11 +60,9 @@ class MetricHistoryTests(unittest.TestCase):
 
     def test_optional_fundamentals_observation_cannot_mask_required_gaps(self):
         optional = MetricObservation(
-            stable_observation_id(
-                "ETH", "eth.staking.staking_apr_7d", "2026-09-01T00:00:00Z", "rated", 0.03,
-            ),
-            "ETH", "eth.staking.staking_apr_7d", "fundamentals", 0.03, "fraction", "7d",
-            "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "rated", "CURRENT", "MEDIUM",
+            stable_observation_id("ETH", "fundamentals.developer_activity", "2026-09-01T00:00:00Z", "github", 3),
+            "ETH", "fundamentals.developer_activity", "fundamentals", 3, "count", "30d",
+            "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "github", "CURRENT", "MEDIUM",
         )
         from crypto_portfolio.engine.metric_history import build_facts_for_asset
 
@@ -140,18 +138,6 @@ class MetricHistoryTests(unittest.TestCase):
             comparison = compare_latest_metric("ETH", "fundamentals.tvl", path=path)
             self.assertIsNone(comparison["percentage_change"])
             self.assertEqual(comparison["trend"], "IMPROVING")
-            contextual = MetricObservation(
-                stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-03T00:00:00Z", "test", -5),
-                "MARKET", "flows.exchange_netflow", "capital_flows", -5, "USD", None,
-                "2026-09-03T00:00:00Z", "2026-09-03T00:00:00Z", "test", "CURRENT", "HIGH",
-            )
-            append_metric_observation(contextual, path)
-            append_metric_observation(MetricObservation(
-                stable_observation_id("MARKET", "flows.exchange_netflow", "2026-09-04T00:00:00Z", "test", 5),
-                "MARKET", "flows.exchange_netflow", "capital_flows", 5, "USD", None,
-                "2026-09-04T00:00:00Z", "2026-09-04T00:00:00Z", "test", "CURRENT", "HIGH",
-            ), path)
-            self.assertEqual(compare_latest_metric("MARKET", "flows.exchange_netflow", path=path)["trend"], "CONFLICTING")
             append_metric_observation(observation(120, "2026-09-04T00:00:00Z", freshness="STALE"), path)
             self.assertEqual(compare_latest_metric("ETH", "fundamentals.tvl", path=path)["trend"], "CONFLICTING")
             context = build_history_context(
@@ -226,7 +212,7 @@ class MetricHistoryTests(unittest.TestCase):
             reporter.record(CollectionEvent("e1", "2026-09-01T00:00:00Z", "ETH", "fundamentals.tvl", "SUCCESS", source="test", observed_at=current.observed_at, fetched_at=current.fetched_at), current)
             reporter.record(CollectionEvent("e2", "2026-09-01T00:00:00Z", "ETH", "fundamentals.revenue_30d", "FAILED", reason="source unavailable", source="test"))
             reporter.record(CollectionEvent("e3", "2026-09-01T00:00:00Z", "ETH", "fundamentals.fees_30d", "STALE", reason="last value is old", source="test"))
-            reporter.record(CollectionEvent("e4", "2026-09-01T00:00:00Z", "ETH", "fundamentals.active_users", "CONFLICT", reason="sources disagree", source="test"))
+            reporter.record(CollectionEvent("e4", "2026-09-01T00:00:00Z", "ETH", "fundamentals.developer_activity", "CONFLICT", reason="sources disagree", source="test"))
             reporter.record(CollectionEvent("e5", "2026-09-01T00:00:00Z", "BTC", "fundamentals.tvl", "NOT_APPLICABLE", reason="not an application metric"))
             summary = reporter.print_summary()
             self.assertEqual(len(read_metric_observations(observation_path)), 1)

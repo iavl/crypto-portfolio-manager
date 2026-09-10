@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from ..metrics_registry import metric_definition
+from ..metrics_registry import METRIC_REGISTRY, metric_definition
 from ..models.metrics_history import CollectionEvent, MetricObservation, observation_freshness_reference
 from ..models.time import normalize_timestamp, parse_timestamp
 from ._jsonl import append_record, read_records
@@ -126,7 +126,12 @@ def read_metric_observations(
     end: str | datetime | None = None,
 ) -> list[MetricObservation]:
     """Read and validate current-format observations."""
-    records = [MetricObservation.from_mapping(item) for item in read_records(path or default_observations_path())]
+    records = [
+        MetricObservation.from_mapping(item)
+        for item in read_records(path or default_observations_path())
+        if not isinstance(item.get("metric_key"), str)
+        or item["metric_key"].strip().lower() in METRIC_REGISTRY
+    ]
     if asset is not None and (not isinstance(asset, str) or not asset.strip()):
         raise ValueError("asset must be a non-empty string or null")
     normalized_asset = asset.strip().upper() if asset is not None else None

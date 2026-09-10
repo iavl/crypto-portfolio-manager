@@ -35,8 +35,8 @@ Community first for BTC realized-cap/holder-cost-basis valuation and
 catalog-checked on-chain context, FRED for official U.S.
 macro/liquidity data, and current official/Web
 scans for security, governance, and regulatory events. Optional API-key
-providers may fill advanced ETF, liquidation, social, or exchange-attribution
-gaps; they are never required for a normal review. See
+providers may fill advanced ETF or social gaps; they are never required for a
+normal review. See
 `references/data-providers.md` for routing and cache details.
 
 BTC MVRV Z uses the no-key BGeometrics latest-value endpoint when available.
@@ -185,9 +185,7 @@ The optional SoSoValue adapter provides U.S. BTC and ETH ETF products. Python
 derives absolute 1D/7D/30D values and BTC/ETH 7D/30D net-flow-to-AUM ratios from completed trading-date rows after local
 `as_of` filtering; `MARKET` is the complete-date BTC+ETH sum, not BTC-only
 flow. A short response is `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported
-capability. The current official SoSoValue API does not document liquidation
-history, so liquidation metrics remain context-only and are never sent to
-SoSoValue. See `references/data-providers.md` for the active endpoint and
+capability. See `references/data-providers.md` for the active endpoint and
 authentication contract.
 
 For ETH, normalized 7D/30D flow-to-AUM ratios are preferred over raw USD flow
@@ -219,25 +217,13 @@ to be included, and remains separate from Ethereum L2 statistics.
 BTC/BNB transfer volume remains the catalog-checked Coin Metrics
 `TxTfrValAdjUSD` route where supported; that methodology is not used for ETH.
 
-`BNB onchain.transaction_count` uses the public BSC JSON-RPC route. Python
-resolves the block range for the latest completed UTC day, applies the
-configured confirmation buffer, batches
-`eth_getBlockTransactionCountByNumber`, and sums one count per canonical block.
-This is exact block transaction count, not active-address or transfer-volume
-data. Pending transactions and the incomplete current day are excluded. The
-daily range, ending block hash, and completed boundary are cached so later
-requests extend and continuity-check the local history; failed continuity or
-insufficient bounded history remains unavailable.
+BNB on-chain demand uses DeFiLlama's chain-fees endpoint with catalog-aware Coin
+Metrics fallback. The current plan does not perform expensive per-block
+transaction-count collection for BNB.
 
-`eth.staking.active_effective_stake_pct` is
-`active_effective_stake_eth / current_supply_eth`, with time-aligned inputs.
-30D and 90D active-stake changes use the current observation minus the closest
-cached same-source observation at or before the target date, within the
-configured tolerance. Staking APR uses
-`window_rewards / average_effective_stake * 365 / window_days`; the current
-Rated implementation includes consensus and execution rewards and retains
-that component declaration in metadata. Queue metrics require source-provided
-ETH balances; validator counts are not converted with a 32 ETH shortcut.
+30D active-stake change uses the current observation minus the closest cached
+same-source observation at or before the target date, within the configured
+tolerance; validator counts are not converted with a 32 ETH shortcut.
 
 If a required primitive, timestamp, history segment, or methodology match is
 missing, the metric remains unavailable or `SKIPPED`. No provider outage is
@@ -345,7 +331,7 @@ methodologies are not comparable; mark the comparison `CONFLICT` or unavailable
 and lower confidence.
 
 Collect funding rate and compatible 24H/7D averages, open interest and its
-1D/7D changes, long/short ratios, liquidations, and annualized futures basis
+1D/7D changes, long/short ratios, and annualized futures basis
 when available. Open-interest growth or decline is context, not a standalone
 directional signal.
 
@@ -353,7 +339,7 @@ directional signal.
 
 Prefer transparent structured analytics with bot/spam filtering, unique-author
 counts, engagement quality, sample size, and methodology. Social bullish share,
-mention counts/changes, and market fear/greed are lower-authority context.
+aligned mention changes, attention, and market fear/greed are lower-authority context.
 Unstructured posts may support a short low-confidence narrative, but never
 become a fabricated numeric metric or a standalone trade trigger.
 
@@ -363,21 +349,19 @@ operational proxy for social volume/mentions. Sentiment and attention
 percentiles are empirical midranks inside each asset's trailing 90 completed
 daily observations, not cross-sectional cryptocurrency ranks.
 
-Ethereum protocol readiness is separate from historical metric availability.
-The default `ethereum_protocol` RPC probe reads one latest block; exact burn
-math still requires a bounded caller-supplied block batch, and normal reviews
-do not fan out over every block in a 30D or 365D window.
+Execution-block history is outside the current provider registry and normal
+reviews do not fan out over execution blocks.
 
 The normal metric plan does not request LunarCrush social metrics unless
-`optional_context.collect_optional_social` is enabled. Rated inactivity,
-LunarCrush entitlement/rate-limit errors, and BNB active-address unsupported
-results remain provider diagnostics or optional `SKIPPED` events; they do not
+`optional_context.collect_optional_social` is enabled. Rated inactivity and
+LunarCrush entitlement/rate-limit errors remain provider diagnostics or optional
+`SKIPPED` events; they do not
 reduce required scoring coverage.
 
 ### BTC cycle and on-chain context
 
 Use original or established on-chain analytics with explicit methodology for
-MVRV, realized price, SOPR, NUPL, and holder metrics. Halving timestamps are
+MVRV, realized price, SOPR, and retained holder metrics. Halving timestamps are
 static protocol facts; the next timestamp is an estimate and must be labeled as
 such. Missing proprietary cycle metrics lowers cycle confidence but does not
 block an otherwise valid portfolio review. Cycle timing alone is not a

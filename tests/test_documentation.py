@@ -95,7 +95,7 @@ class DocumentationTests(unittest.TestCase):
         for provider in (
             "Binance", "Bybit", "CoinGecko", "DeFiLlama", "Alternative.me",
             "Chain liveness", "Coin Metrics", "Blockchair", "BGeometrics", "LunarCrush",
-            "Rated", "Ethereum Beacon API", "Ethereum protocol", "GitHub", "SoSoValue", "EventScanner",
+            "Rated", "Ethereum Beacon API", "Etherscan v2", "GitHub", "SoSoValue", "EventScanner",
         ):
             with self.subTest(provider=provider):
                 self.assertIn(provider, provider_policy)
@@ -105,7 +105,6 @@ class DocumentationTests(unittest.TestCase):
             "`SKIPPED`", "`NOT_APPLICABLE`", "bitcoin-data.com",
             "sumEffectiveBalance", "LUNARCRUSH_API_KEY", "Authorization: Bearer",
             "/public/coins/:coin/time-series/v2", "posts_active", "same-asset",
-            "ETHEREUM_RPC_URL", "eth_getBlockByNumber(\"latest\", false)",
             "RATED_API_KEY", "ETH_BEACON_API_URL", "export/tvl.json",
             "latest common completed UTC day", "only active structured route",
             "volume_24h_approximate", "market_price_usd", "ethereum/stats",
@@ -369,7 +368,7 @@ class DocumentationTests(unittest.TestCase):
             "OHLCV",
             "ATR14",
             "Volume Profile",
-            "MVRV / SOPR / NUPL",
+            "MVRV / SOPR / LTH net-position change",
             "trend、valuation、fundamentals、onchain、capital_flows 和 relative_strength_btc",
             "NOT_APPLICABLE",
             "SKIPPED",

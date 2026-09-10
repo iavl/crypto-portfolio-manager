@@ -50,7 +50,6 @@ from .chain_liveness import (
     chain_liveness_sources,
 )
 from .binance import BinanceProvider
-from .bnb_rpc import BnbRPCProvider, BNBRPCProvider
 from .bybit import BybitProvider
 from .coinmetrics import CoinMetricsProvider
 from .blockchair import BlockchairProvider
@@ -61,8 +60,6 @@ from .sosovalue import SoSoValueProvider
 from .blobscan import BlobscanProvider
 from .growthepie import GrowthepieProvider
 from .lunarcrush import LunarCrushProvider
-from .ethereum_protocol import EthereumProtocolProvider
-from .ultrasound_money import UltrasoundMoneyProvider
 from .etherscan import EtherscanProvider
 
 __all__ = [
@@ -117,8 +114,6 @@ __all__ = [
     "ChainLivenessSource",
     "chain_liveness_sources",
     "BinanceProvider",
-    "BnbRPCProvider",
-    "BNBRPCProvider",
     "BybitProvider",
     "CoinMetricsProvider",
     "BlockchairProvider",
@@ -129,7 +124,5 @@ __all__ = [
     "BlobscanProvider",
     "GrowthepieProvider",
     "LunarCrushProvider",
-    "EthereumProtocolProvider",
-    "UltrasoundMoneyProvider",
     "EtherscanProvider",
 ]

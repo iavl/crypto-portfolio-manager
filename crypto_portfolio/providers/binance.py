@@ -498,6 +498,8 @@ class BinanceProvider:
         ]
 
     def _basis(self, request: ProviderRequest) -> list[Mapping[str, Any]]:
+        if request.asset not in {"BTC", "ETH"}:
+            raise ProviderNotApplicable(f"Binance delivery basis is not supported for {request.asset}")
         pair = binance_symbol(request.asset)
         started = parse_timestamp(_now(self.clock))
         as_of = request.parameters.get("as_of")

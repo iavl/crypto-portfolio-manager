@@ -23,6 +23,7 @@ from .http import HttpClient, classify_transport_error, redact_secrets
 
 
 BASE_URL = "https://api.llama.fi"
+CHAIN_FEES_PATH = "/overview/fees"
 STABLECOINS_BASE_URL = "https://stablecoins.llama.fi"
 STABLECOIN_CHARTS_PATH = "/stablecoincharts"
 ASSET_IDENTIFIERS = {
@@ -177,6 +178,48 @@ def parse_stablecoin_chart(
     }
 
 
+def parse_chain_fees(
+    payload: Any,
+    *,
+    asset: str,
+    metric_key: str,
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str,
+) -> Mapping[str, Any]:
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("totalDataChart"), list):
+        raise ProviderResponseError("DeFiLlama chain-fees response has no totalDataChart")
+    cutoff = parse_timestamp(as_of) if as_of else datetime.now(timezone.utc)
+    rows: list[tuple[str, float]] = []
+    for index, row in enumerate(payload["totalDataChart"]):
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            raise ProviderDataError(f"DeFiLlama chain-fees row {index} is malformed")
+        observed = _timestamp(row[0], "DeFiLlama chain-fees timestamp", fetched_at)
+        if parse_timestamp(observed).date() >= cutoff.date():
+            continue
+        rows.append((observed, _number(row[1], "DeFiLlama chain fees")))
+    if not rows:
+        raise ProviderInsufficientHistory("DeFiLlama chain-fees history has no completed day")
+    observed, value = max(rows, key=lambda item: parse_timestamp(item[0]))
+    return {
+        "asset": asset.strip().upper(),
+        "metric_key": metric_key,
+        "value": value,
+        "unit": metric_definition(metric_key).unit,
+        "period": "1d",
+        "observed_at": observed,
+        "fetched_at": fetched_at,
+        "source": "defillama",
+        "confidence": "MEDIUM",
+        "metadata": {
+            "source_dataset": "overview/fees",
+            "source_url": endpoint,
+            "methodology": "totalDataChart_latest_completed_utc_day",
+            "chain_scope": CHAIN_NAMES.get(asset.strip().upper()),
+        },
+    }
+
+
 def parse_protocol_payload(
     payload: Mapping[str, Any],
     asset: str,
@@ -264,13 +307,38 @@ class DeFiLlamaProvider:
             metric_keys=(
                 "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
                 "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "valuation.fee_revenue_multiple",
+                "onchain.blockspace_fees",
             ),
-            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "fundamentals.stablecoin_liquidity", "market.stablecoin_supply"),
+            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "onchain.blockspace_fees"),
             supports_batching=True,
             requires_api_key=False,
         )
 
     def collect(self, request: ProviderRequest) -> ProviderResponse:
+        if "onchain.blockspace_fees" in request.metric_keys:
+            asset = request.asset.strip().upper()
+            chain = CHAIN_NAMES.get(asset)
+            if chain is None or any(key != "onchain.blockspace_fees" for key in request.metric_keys):
+                raise ProviderUnsupportedMetric("DeFiLlama chain fees require one ETH or BNB blockspace metric")
+            endpoint = BASE_URL + CHAIN_FEES_PATH + "/" + quote(chain, safe="")
+            fetched_at = _now(self.clock)
+            try:
+                observation = parse_chain_fees(
+                    self.client.get_json(endpoint),
+                    asset=asset,
+                    metric_key="onchain.blockspace_fees",
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                    endpoint=endpoint,
+                )
+            except (ProviderDataError, ProviderResponseError, ProviderInsufficientHistory) as exc:
+                diagnostic = getattr(exc, "diagnostic", None)
+                details = dict(diagnostic.as_dict()) if hasattr(diagnostic, "as_dict") else {
+                    "error_code": classify_transport_error(exc),
+                    "detail": redact_secrets(str(exc)),
+                }
+                return ProviderResponse((), diagnostics={"onchain.blockspace_fees": details}, network_requests=1)
+            return ProviderResponse((observation,), network_requests=1)
         if request.dataset == "stablecoin":
             key = next((item for item in request.metric_keys if item in {"market.stablecoin_supply", "fundamentals.stablecoin_liquidity"}), None)
             if key is None:
@@ -373,7 +441,9 @@ __all__ = [
     "STABLECOINS_BASE_URL",
     "STABLECOIN_CHARTS_PATH",
     "DeFiLlamaProvider",
+    "CHAIN_FEES_PATH",
     "identifier_for_asset",
+    "parse_chain_fees",
     "parse_stablecoin_chart",
     "parse_protocol_payload",
 ]

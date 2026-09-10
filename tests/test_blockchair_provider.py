@@ -139,7 +139,6 @@ class BlockchairProviderTests(unittest.TestCase):
         for request in (
             ProviderRequest("blockchair", "onchain", "BTC", {}, ("onchain.transfer_volume",)),
             ProviderRequest("blockchair", "onchain", "ETH", {}, ("onchain.active_addresses",)),
-            ProviderRequest("blockchair", "onchain", "ETH", {}, ("onchain.transaction_count",)),
         ):
             with self.subTest(request=request):
                 with self.assertRaises(ProviderUnsupportedMetric):

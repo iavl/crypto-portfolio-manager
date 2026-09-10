@@ -237,7 +237,7 @@ runtime state.
 ## Positioning and BTC cycle overlays
 
 Python builds derivatives positioning and BTC cycle context after normalized
-observations. Funding, open interest, ratios, liquidations, basis, structured
+observations. Funding, open interest, ratios, basis, structured
 social metrics, halving timing, and optional BTC on-chain metrics retain their
 source, scope/methodology, observed time, and evidence IDs.
 
@@ -252,8 +252,7 @@ halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
 Allocation and risk remain authoritative for target weights and approved
 dollars. Execution may use `min(base, positioning, cycle)` to cap immediate
 deployment, retain the remainder as unallocated, reject chasing when extension
-and confirmed long crowding agree, or return `WAIT`. A deleveraged state only
-removes a crowding penalty; it never boosts exposure.
+and confirmed long crowding agree, or return `WAIT`.
 
 Structured ETF flow data is optional and comes from the current documented
 SoSoValue v2 POST /openapi/v2/etf/historicalInflowChart endpoint on
@@ -264,9 +263,8 @@ MARKET as the complete-date BTC+ETH aggregate before deriving 1D/7D/30D
 calendar windows. A short returned range is
 `PROVIDER_INSUFFICIENT_HISTORY`, not unsupported capability. If SoSoValue is
 unavailable, preserve an explicit fallback or UNKNOWN result; do not request
-duplicate ETF web data after a successful structured result. The current
-official SoSoValue API does not establish liquidation history, so liquidation
-metrics remain optional context and must not be routed to it.
+duplicate ETF web data after a successful structured result. SoSoValue is only
+an ETF-flow provider and is not routed for unrelated derivatives metrics.
 
 ## Visible evidence collection
 
@@ -419,15 +417,11 @@ coverage. Unknown factor keys fail validation, and missing BTC-relative
 evidence makes a satellite `HOLD_ONLY` rather than positive evidence for a
 new allocation.
 
-When a material change between snapshots has no explicit cash-flow
-classification, continue allocation/risk review if possible but mark NAV
-performance `PROVISIONAL`; do not infer a deposit or investment return from
-stablecoin growth alone. Use the single
-`cash_flow_resolution_status` (`CONFIRMED_NONE`, `CONFIRMED_AMOUNT`,
-`UNRESOLVED`, or `BASELINE_RESET`) with matching nullable
-`external_cash_flow`/`external_cash_flow_type`. Only explicit confirmation or
-baseline reset produces `performance_finality=FINAL`; append user resolutions
-to `cash-flow-resolutions.jsonl`.
+When no external cash flow is disclosed, normalize the snapshot to
+`ASSUMED_NONE / 0 / NONE` and treat the valuation change as market performance;
+NAV remains `FINAL`. Explicit unresolved flow details use `UNRESOLVED` and keep
+performance `PROVISIONAL`. Explicit confirmations and baseline resets remain
+append-only records in `cash-flow-resolutions.jsonl`.
 
 ## Runtime data boundary
 
@@ -481,9 +475,8 @@ their materiality. A complete reachable source with zero candidates returns a
 valid empty scan; same-authority URLs share a source group, and Discourse may
 complete once an ordered `created_at` page crosses the requested lookback.
 LunarCrush is an optional API v4 social-context provider and is not requested
-by the normal metric plan unless enabled explicitly. BNB transaction counts use
-bounded public-RPC daily block counts; missing credentials or history remain
-fail-closed.
+by the normal metric plan unless enabled explicitly. BNB on-chain demand uses
+blockspace fees; expensive per-block transaction counting is not requested.
 
 ## Confidence workflow
 

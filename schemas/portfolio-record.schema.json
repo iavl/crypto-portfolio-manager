@@ -3,7 +3,7 @@
   "$id": "https://example.local/crypto-portfolio-manager/portfolio-record.schema.json",
   "title": "Persisted Crypto Portfolio Snapshot",
   "type": "object",
-  "required": ["snapshot_id", "timestamp", "base_currency", "positions", "external_cash_flow", "external_cash_flow_type", "cash_flow_resolution_status", "policy_hash", "resolved_policy"],
+  "required": ["snapshot_id", "timestamp", "base_currency", "positions", "external_cash_flow", "external_cash_flow_type", "cash_flow_resolution_status", "cash_flow_classification_source", "policy_hash", "resolved_policy"],
   "properties": {
     "snapshot_id": {"type": "string", "minLength": 1},
     "timestamp": {"type": "string", "format": "date-time"},
@@ -13,7 +13,8 @@
     "resolved_policy": {"type": "object"},
     "external_cash_flow": {"type": ["number", "null"]},
     "external_cash_flow_type": {"type": ["string", "null"], "enum": ["NONE", "DEPOSIT", "WITHDRAWAL", null]},
-    "cash_flow_resolution_status": {"enum": ["CONFIRMED_NONE", "CONFIRMED_AMOUNT", "UNRESOLVED", "BASELINE_RESET"]},
+    "cash_flow_resolution_status": {"enum": ["ASSUMED_NONE", "CONFIRMED_NONE", "CONFIRMED_AMOUNT", "UNRESOLVED", "BASELINE_RESET"]},
+    "cash_flow_classification_source": {"enum": ["DEFAULT_ASSUMPTION", "USER_EXPLICIT", "LEGACY"]},
     "total_value": {"type": ["number", "null"], "minimum": 0},
     "reported_total_value_usd": {"type": ["number", "null"], "minimum": 0},
     "visible_positions_value_usd": {"type": "number", "minimum": 0},
@@ -73,7 +74,7 @@
     }
   },
   "allOf": [
-    {"if": {"properties": {"cash_flow_resolution_status": {"enum": ["CONFIRMED_NONE", "BASELINE_RESET"]}}}, "then": {"properties": {"external_cash_flow": {"const": 0}, "external_cash_flow_type": {"const": "NONE"}}}},
+    {"if": {"properties": {"cash_flow_resolution_status": {"enum": ["ASSUMED_NONE", "CONFIRMED_NONE", "BASELINE_RESET"]}}}, "then": {"properties": {"external_cash_flow": {"const": 0}, "external_cash_flow_type": {"const": "NONE"}}}},
     {"if": {"properties": {"cash_flow_resolution_status": {"const": "CONFIRMED_AMOUNT"}}}, "then": {"properties": {"external_cash_flow": {"type": "number", "not": {"const": 0}}, "external_cash_flow_type": {"enum": ["DEPOSIT", "WITHDRAWAL"]}}}},
     {"if": {"properties": {"cash_flow_resolution_status": {"const": "UNRESOLVED"}}}, "then": {"properties": {"external_cash_flow": {"type": "null"}, "external_cash_flow_type": {"type": "null"}}}}
     ,{"if": {"properties": {"cash_flow_resolution_status": {"const": "CONFIRMED_AMOUNT"}, "external_cash_flow_type": {"const": "DEPOSIT"}}}, "then": {"properties": {"external_cash_flow": {"exclusiveMinimum": 0}}}}

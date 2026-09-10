@@ -65,18 +65,6 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(extreme.leverage_state, "EXTREME")
         self.assertEqual(extreme.risk, "EXTREME")
 
-        deleveraged = build_positioning_facts(
-            {
-                "derivatives.funding_rate_7d_avg": 0.0,
-                "derivatives.open_interest_usd": 1000,
-                "derivatives.open_interest_change_7d": -0.3,
-                "derivatives.long_liquidations_24h_usd": 200,
-            },
-            as_of=AS_OF,
-        )
-        self.assertEqual(deleveraged.leverage_state, "DELEVERAGED")
-        self.assertEqual(deleveraged.risk, "LOW")
-
         social = build_positioning_facts(
             {"sentiment.social_bullish_share": 0.85, "sentiment.social_mentions_change_7d": 2.1},
             as_of=AS_OF,
@@ -138,12 +126,6 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(deployment.effective_factor, 0.5)
         self.assertEqual(deployment.planned_amount_usd, 1000)
         self.assertEqual(deployment.unallocated_amount_usd, 1000)
-
-        deleveraged = build_positioning_facts(
-            {"derivatives.open_interest_change_7d": -0.3, "derivatives.long_liquidations_24h_usd": 1},
-            as_of=AS_OF,
-        )
-        self.assertEqual(effective_deployment_factor(1.0, positioning=deleveraged), 1.0)
 
     def test_entry_planner_caps_only_staged_dollars(self):
         snapshot = build_technical_snapshot(

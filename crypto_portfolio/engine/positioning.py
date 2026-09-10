@@ -30,16 +30,9 @@ _METRIC_FIELDS = {
     "derivatives.open_interest_to_market_cap": "open_interest_to_market_cap",
     "derivatives.long_short_account_ratio": "long_short_account_ratio",
     "derivatives.top_trader_long_short_ratio": "top_trader_long_short_ratio",
-    "derivatives.long_liquidations_24h_usd": "long_liquidations_24h_usd",
-    "derivatives.short_liquidations_24h_usd": "short_liquidations_24h_usd",
-    "derivatives.total_liquidations_24h_usd": "total_liquidations_24h_usd",
-    "derivatives.long_liquidations_7d_usd": "long_liquidations_7d_usd",
-    "derivatives.short_liquidations_7d_usd": "short_liquidations_7d_usd",
     "derivatives.futures_basis_annualized": "futures_basis_annualized",
     "sentiment.social_bullish_share": "social_bullish_share",
-    "sentiment.social_mentions_24h": "social_mentions_24h",
     "sentiment.social_mentions_change_7d": "social_mentions_change_7d",
-    "sentiment.social_sentiment_percentile": "social_sentiment_percentile",
     "sentiment.social_attention_percentile": "social_attention_percentile",
     "sentiment.market_fear_greed": "market_fear_greed",
 }
@@ -249,13 +242,6 @@ def build_positioning_facts(
     normalized_as_of = normalize_timestamp(raw_as_of, "positioning as_of")
     selected, conflicts = _latest(point_values, normalized_as_of)
     values = {field: _value(selected, key) for key, field in _METRIC_FIELDS.items()}
-    if values["total_liquidations_24h_usd"] is None and (
-        values["long_liquidations_24h_usd"] is not None
-        and values["short_liquidations_24h_usd"] is not None
-    ):
-        values["total_liquidations_24h_usd"] = (
-            values["long_liquidations_24h_usd"] + values["short_liquidations_24h_usd"]
-        )
     settings = _settings(policy)
     configured_policy = getattr(policy or resolve_policy(), "positioning", {})
     if isinstance(configured_policy, Mapping) and configured_policy.get("enabled") is False:
@@ -294,7 +280,6 @@ def build_positioning_facts(
     oi_cfg = settings["open_interest_change_7d"]
     oi_building = oi_change is not None and oi_change >= oi_cfg["building"]
     oi_rapid = oi_change is not None and oi_change >= oi_cfg["rapid"]
-    oi_declining = oi_change is not None and oi_change <= -oi_cfg["building"]
 
     ratio_key = next(
         (
@@ -346,23 +331,7 @@ def build_positioning_facts(
     long_extreme_count = sum((funding_long_extreme, oi_rapid, ratio_long_extreme, basis_long_extreme))
     short_extreme_count = sum((funding_short_extreme, oi_rapid, ratio_short_extreme, basis_short_extreme))
 
-    liquidation_ratio = None
-    if values["open_interest_usd"] and values["open_interest_usd"] > 0:
-        liquidation_ratio = max(
-            values["long_liquidations_24h_usd"] or 0.0,
-            values["short_liquidations_24h_usd"] or 0.0,
-        ) / values["open_interest_usd"]
-    deleveraging = (
-        oi_declining
-        and (values["long_liquidations_24h_usd"] or 0.0) > 0
-        and (liquidation_ratio is None or liquidation_ratio >= settings["deleveraging"]["liquidation_to_open_interest"])
-        and funding is not None
-        and abs(funding) <= settings["deleveraging"]["normalized_funding_abs"]
-    )
-
-    if deleveraging:
-        leverage_state = PositioningLeverageState.DELEVERAGED.value
-    elif len(long_signals) >= min_extreme and long_extreme_count >= min_extreme:
+    if len(long_signals) >= min_extreme and long_extreme_count >= min_extreme:
         leverage_state = PositioningLeverageState.EXTREME.value
     elif len(short_signals) >= min_extreme and short_extreme_count >= min_extreme:
         leverage_state = PositioningLeverageState.EXTREME.value
@@ -401,8 +370,6 @@ def build_positioning_facts(
         risk = PositioningRisk.HIGH.value
     elif leverage_state == PositioningLeverageState.BUILDING.value:
         risk = PositioningRisk.ELEVATED.value
-    elif leverage_state == PositioningLeverageState.DELEVERAGED.value:
-        risk = PositioningRisk.LOW.value
     elif social_state == SocialSentimentState.EUPHORIC.value:
         risk = PositioningRisk.ELEVATED.value
     elif leverage_state == PositioningLeverageState.NORMAL.value:
@@ -417,8 +384,6 @@ def build_positioning_facts(
         "derivatives.long_short_account_ratio",
         "derivatives.top_trader_long_short_ratio",
         "derivatives.futures_basis_annualized",
-        "derivatives.long_liquidations_24h_usd",
-        "derivatives.short_liquidations_24h_usd",
     } & derivative_metric_keys)
     if conflicts or not derivatives_present:
         confidence = "LOW"
@@ -432,8 +397,6 @@ def build_positioning_facts(
         notes.append("social euphoria is confirmation only and cannot create an extreme positioning state")
     if long_signals or short_signals:
         notes.append(f"derivatives confirmations: {', '.join(long_signals or short_signals)}")
-    if deleveraging:
-        notes.append("open-interest decline, liquidation activity, and normalized funding indicate leverage removal")
     if not derivatives_present:
         notes.append("no compatible derivatives observations; positioning risk remains UNKNOWN")
 

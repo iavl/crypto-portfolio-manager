@@ -6,16 +6,15 @@ from tempfile import TemporaryDirectory
 
 from crypto_portfolio.acquisition import AcquisitionManager
 from crypto_portfolio.data_collection import build_failed_data_fetches
-from crypto_portfolio.engine.derived_metrics import derive_active_effective_stake_change, derive_cumulative_burn_delta
+from crypto_portfolio.engine.derived_metrics import derive_active_effective_stake_change
 from crypto_portfolio.engine.metric_plan import MetricRequest
-from crypto_portfolio.metric_availability import fallback_mode, metric_availability
+from crypto_portfolio.metric_availability import fallback_mode
 from crypto_portfolio.metric_history_requirements import history_requirement
 from crypto_portfolio.models.metrics_history import CollectionEvent
 from crypto_portfolio.providers.base import ProviderRequest, ProviderResponse
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider
 from crypto_portfolio.providers.routes import build_provider_requests, provider_chain
-from crypto_portfolio.providers.etherscan import parse_ethsupply2
-from crypto_portfolio.providers.ultrasound_money import parse_burn_rates
+from crypto_portfolio.metrics_registry import metric_definition
 
 
 NOW = "2026-09-09T00:00:00Z"
@@ -57,8 +56,8 @@ class PlanRepairTests(unittest.TestCase):
         built = build_provider_requests(requests, as_of=NOW, now=NOW)
         by_dataset = {request.dataset: request for request in built}
         self.assertEqual((datetime.fromisoformat(by_dataset["ohlcv"].parameters["end"].replace("Z", "+00:00")) - datetime.fromisoformat(by_dataset["ohlcv"].parameters["start"].replace("Z", "+00:00"))).days, 240)
-        self.assertEqual((datetime.fromisoformat(by_dataset["ethereum_protocol"].parameters["end"].replace("Z", "+00:00")) - datetime.fromisoformat(by_dataset["ethereum_protocol"].parameters["start"].replace("Z", "+00:00"))).days, 380)
-        self.assertNotEqual(by_dataset["ohlcv"].history_cohort, by_dataset["ethereum_protocol"].history_cohort)
+        self.assertEqual((datetime.fromisoformat(by_dataset["ethereum_monetary"].parameters["end"].replace("Z", "+00:00")) - datetime.fromisoformat(by_dataset["ethereum_monetary"].parameters["start"].replace("Z", "+00:00"))).days, 380)
+        self.assertNotEqual(by_dataset["ohlcv"].history_cohort, by_dataset["ethereum_monetary"].history_cohort)
         full = build_provider_requests((MetricRequest("BTC", "btc_valuation.mvrv_zscore"),), as_of=NOW, now=NOW)[0]
         self.assertEqual(full.parameters["history_mode"], "FULL_AVAILABLE")
         self.assertNotIn("start", full.parameters)
@@ -66,7 +65,7 @@ class PlanRepairTests(unittest.TestCase):
     def test_coinmetrics_partial_success_keeps_siblings(self):
         response = CoinMetricsProvider(client=_CoinMetricsClient()).collect(ProviderRequest(
             "coinmetrics_community",
-            "ethereum_protocol",
+            "ethereum_monetary",
             "ETH",
             {"start": "2026-06-01T00:00:00Z", "end": NOW, "as_of": NOW},
             ("eth.monetary.current_supply_eth", "eth.monetary.issuance_30d_eth", "eth.monetary.issuance_365d_eth"),
@@ -134,45 +133,24 @@ class PlanRepairTests(unittest.TestCase):
         self.assertEqual(response.observations[0]["metadata"]["source_mode"], "DIRECT")
 
     def test_bnb_routes_to_catalog_aware_coinmetrics(self):
-        self.assertEqual(provider_chain("onchain.active_addresses", "BNB"), ("coinmetrics_community",))
-        self.assertEqual(provider_chain("fundamentals.active_users", "BNB"), ())
-        self.assertEqual(metric_availability("BNB", "fundamentals.active_users").requirement, "OPTIONAL")
-        self.assertEqual(metric_availability("BNB", "onchain.transfer_volume").requirement, "OPTIONAL")
-        self.assertEqual(metric_availability("BNB", "onchain.blockspace_fees").reason_code, "OPTIONAL_PROVIDER_UNSUPPORTED")
+        self.assertEqual(provider_chain("onchain.blockspace_fees", "BNB"), ("defillama", "coinmetrics_community"))
+        with self.assertRaises(ValueError):
+            metric_definition("fundamentals.active_users")
+        self.assertFalse(metric_definition("onchain.transaction_count").applies_to("BNB"))
 
     def test_numeric_fallback_is_structured_only(self):
         for key in ("onchain.active_addresses", "eth.monetary.issuance_365d_eth", "eth.l2.tvs_usd"):
             self.assertEqual(fallback_mode(key), "STRUCTURED_ONLY")
         self.assertEqual(fallback_mode("risk.security_event_status"), "WEB_ALLOWED")
-        self.assertEqual(fallback_mode("eth.structural.builder_largest_share"), "WEB_ALLOWED")
         self.assertEqual(MetricRequest("BTC", "risk.security_event_status").as_dict()["fallback_mode"], "WEB_ALLOWED")
-
-    def test_cumulative_burn_requires_same_source_and_aligned_history(self):
-        current = {"value": 120, "observed_at": "2026-09-01T00:00:00Z", "source": "etherscan", "metadata": {"methodology": "counter"}}
-        prior = {"value": 100, "observed_at": "2026-08-01T00:00:00Z", "source": "etherscan", "metadata": {"methodology": "counter"}}
-        result = derive_cumulative_burn_delta("ETH", current, prior, days=30, fetched_at="2026-09-01T01:00:00Z")
-        self.assertEqual(result["value"], 20)
-        self.assertIsNone(derive_cumulative_burn_delta(
-            "ETH", current, {**prior, "source": "other"}, days=30, fetched_at="2026-09-01T01:00:00Z",
-        ))
 
     def test_active_effective_stake_history_is_date_aligned(self):
         current = {"value": 32, "observed_at": "2026-09-09T00:00:00Z", "source": "fixture", "metadata": {"methodology": "effective_balance"}}
         prior = {"value": 30, "observed_at": "2026-08-10T00:00:00Z", "source": "fixture", "metadata": {"methodology": "effective_balance"}}
         result = derive_active_effective_stake_change("ETH", current, prior, days=30, fetched_at=NOW)
         self.assertEqual(result["value"], 2)
-        self.assertIsNone(derive_active_effective_stake_change("ETH", current, prior, days=90, fetched_at=NOW))
-
-    def test_public_eth_burn_and_supply_parsers_keep_units_and_fields(self):
-        burn = parse_burn_rates({
-            "d30": {"rate": {"eth_per_minute": 2}, "timestamp": NOW, "block_number": 10},
-        }, ("eth.monetary.burn_30d_eth",), fetched_at=NOW)[0]
-        self.assertEqual(burn["value"], 2 * 60 * 24 * 30)
-        supply = parse_ethsupply2({
-            "status": "1", "message": "OK",
-            "result": {"EthSupply": str(10**18), "BurntFees": str(2 * 10**18)},
-        }, ("eth.monetary.current_supply_eth", "eth.monetary.cumulative_burn_eth"), fetched_at=NOW)
-        self.assertEqual([item["value"] for item in supply], [1.0, 2.0])
+        with self.assertRaises(ValueError):
+            derive_active_effective_stake_change("ETH", current, prior, days=90, fetched_at=NOW)
 
     def test_etherscan_errors_redact_the_api_key(self):
         from crypto_portfolio.providers.etherscan import EtherscanProvider

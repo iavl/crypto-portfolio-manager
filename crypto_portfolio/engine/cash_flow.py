@@ -38,7 +38,7 @@ def _flow(value: PortfolioSnapshot | Mapping[str, Any]) -> tuple[float, str, boo
         return (0.0 if amount is None else float(amount)), value.cash_flow_resolution_status, value.cash_flow_resolution_status != "UNRESOLVED"
     if not isinstance(value, Mapping):
         raise ValueError("snapshot must be a PortfolioSnapshot or mapping")
-    status = str(value.get("cash_flow_resolution_status", "UNRESOLVED")).strip().upper()
+    status = str(value.get("cash_flow_resolution_status", "ASSUMED_NONE")).strip().upper()
     if status not in CASH_FLOW_RESOLUTION_STATUSES:
         raise ValueError("cash_flow_resolution_status is unsupported")
     raw_amount = value.get("external_cash_flow")
@@ -51,6 +51,12 @@ def _flow(value: PortfolioSnapshot | Mapping[str, Any]) -> tuple[float, str, boo
         raise ValueError("external cash flow must be finite numeric or null")
     amount = None if raw_amount is None else float(raw_amount)
     kind = None if raw_kind is None else str(raw_kind).strip().upper()
+    if status == "ASSUMED_NONE":
+        if amount is None and kind is None:
+            amount, kind = 0.0, "NONE"
+        if amount != 0 or kind != "NONE":
+            raise ValueError("ASSUMED_NONE cash flow requires zero amount and type NONE")
+        return 0.0, status, True
     if status == "UNRESOLVED":
         if amount is not None or kind is not None:
             raise ValueError("UNRESOLVED cash flow requires null amount and type")
@@ -100,6 +106,16 @@ def detect_external_cash_flow(
     if status == "BASELINE_RESET":
         return {
             "status": "BASELINE_RESET",
+            "performance_status": "AVAILABLE",
+            "requires_confirmation": False,
+            "delta_usd": delta,
+            "external_cash_flow": 0.0,
+            "external_cash_flow_type": "NONE",
+            "cash_flow_resolution_status": status,
+        }
+    if status == "ASSUMED_NONE":
+        return {
+            "status": "ASSUMED_NONE",
             "performance_status": "AVAILABLE",
             "requires_confirmation": False,
             "delta_usd": delta,

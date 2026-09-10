@@ -116,11 +116,11 @@ snapshot 和 decision 是 append-only。状态变更写入独立 status event，
 
 现金流调整后的 NAV 使用 unitized NAV。一个 snapshot 附着的外部现金流被视为
 发生在该 snapshot valuation 之前。snapshot 使用唯一的
-`cash_flow_resolution_status`：`CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、
-`UNRESOLVED` 或 `BASELINE_RESET`。只有用户明确确认或执行 baseline reset
-时 `performance_finality` 才是 `FINAL`；未知流量保持 `PROVISIONAL`，不把
-余额变化猜成存款、取款或零流量。确认记录追加到
-`cash-flow-resolutions.jsonl`，旧 snapshot 不被重写。
+`cash_flow_resolution_status`：未披露时为 `ASSUMED_NONE`（`0`、`NONE`，NAV
+保持 `FINAL`），也可使用 `CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、
+`UNRESOLVED` 或 `BASELINE_RESET`。明确披露但未解决的流量保持
+`PROVISIONAL`；确认记录追加到 `cash-flow-resolutions.jsonl`，旧 snapshot
+不被重写。
 
 ## 6. 指标注册表与采集计划
 
@@ -409,9 +409,9 @@ OHLCV，不会截断货币、tokenomics 或 valuation 历史。
 
 Coin Metrics 在一个 bundle 中按 metric 保留成功值和独立 diagnostics；
 Community 是 no-key 首选，Pro 只是可选 fallback。数值指标使用
-`STRUCTURED_ONLY`，不会被转换成随机 Web fallback。ETH 30D burn 使用
-Ultrasound 的 `d30.rate.eth_per_minute`，Etherscan 只作为可选当前 supply/
-cumulative burn 来源；缺少同源、日期对齐的累计快照时不制造窗口值。
+`STRUCTURED_ONLY`，不会被转换成随机 Web fallback。ETH monetary 只保留
+供应、发行和净供应增长等决策输入；Etherscan 只作为可选 current-supply
+cross-check。
 
 EventScanner 可注入 `StructuredEventTransport`，使用 bounded GitHub、RSS/Atom、
 Discourse JSON 和 allowlisted BNB Governor RPC。Transport 只发现并去重候选，

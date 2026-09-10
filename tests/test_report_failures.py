@@ -290,8 +290,8 @@ class ReportFailureTests(unittest.TestCase):
     def test_report_separates_decision_required_optional_and_provider_failures(self):
         failed = result("ETH", "fundamentals.tvl", reason="required provider unavailable")
         skipped = result(
-            "ETH", "eth.staking.staking_apr_7d", "SKIPPED",
-            reason="OPTIONAL_PROVIDER_UNAVAILABLE: Rated subscription is not active",
+            "ETH", "fundamentals.developer_activity", "SKIPPED",
+            reason="OPTIONAL_PROVIDER_UNAVAILABLE: GitHub is not configured",
         )
         acq = AcquisitionResult(
             MetricCollectionPlan("SNAPSHOT_REVIEW", tuple(
@@ -301,14 +301,14 @@ class ReportFailureTests(unittest.TestCase):
             summary={
                 "optional_data": [{
                     "asset": "ETH",
-                    "metric_key": "eth.staking.staking_apr_7d",
+                    "metric_key": "fundamentals.developer_activity",
                     "status": "SKIPPED",
-                    "reason": "Rated subscription is not active",
+                    "reason": "GitHub is not configured",
                 }],
                 "provider_operational_failures": [{
-                    "provider": "rated",
+                    "provider": "github",
                     "status": "PROVIDERUNAVAILABLE",
-                    "error_code": "RATED_SUBSCRIPTION_INACTIVE",
+                    "error_code": "CREDENTIAL_MISSING",
                 }],
             },
         )
@@ -316,7 +316,7 @@ class ReportFailureTests(unittest.TestCase):
         self.assertEqual(len(packet.decision_blocking_failures), 0)
         self.assertEqual(len(packet.required_scoring_failures), 1)
         self.assertEqual(len(packet.optional_data_unavailable), 1)
-        self.assertEqual(packet.provider_operational_failures[0]["error_code"], "RATED_SUBSCRIPTION_INACTIVE")
+        self.assertEqual(packet.provider_operational_failures[0]["error_code"], "CREDENTIAL_MISSING")
         output = build_final_review_output(packet, acquisition=acq)
         self.assertIn("optional_data_unavailable", output["debug_report"])
         self.assertIn("provider_operational_failures", output["debug_report"])

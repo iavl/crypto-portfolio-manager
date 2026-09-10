@@ -9,7 +9,6 @@ from typing import Any, Callable, Iterable, Mapping
 from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
 from .bgeometrics import BASE_URL as BGEOMETRICS_BASE_URL, MVRV_ZSCORE_PATH, BGeometricsProvider
 from .blockchair import BASE_URL as BLOCKCHAIR_BASE_URL, ETHEREUM_STATS_PATH, BlockchairProvider
-from .bnb_rpc import BNBRPCProvider
 from .ethereum_beacon import EthereumBeaconProvider, NODE_VERSION_PATH
 from .rated import DAILY_REWARDS_PATH, RatedProvider
 from .base import ProviderRequest, ProviderResponseError
@@ -24,9 +23,7 @@ from .http import HttpClient
 from .fred import FREDProvider, FRED_SERIES, BASE_URL as FRED_BASE_URL, OBSERVATIONS_PATH
 from .router import ProviderRouter
 from .sosovalue import BASE_URL as SOSOVALUE_BASE_URL, ETF_HISTORICAL_INFLOW_PATH, SoSoValueProvider
-from .ethereum_protocol import EthereumProtocolProvider
 from .lunarcrush import BASE_URL as LUNARCRUSH_BASE_URL, LunarCrushProvider, SUPPORTED_ASSETS as LUNARCRUSH_ASSETS
-from .ultrasound_money import BASE_URL as ULTRASOUND_BASE_URL, BURN_RATES_PATH, UltrasoundMoneyProvider
 from .etherscan import BASE_URL as ETHERSCAN_BASE_URL, EtherscanProvider
 from .growthepie import (
     BASE_URL as GROWTHEPIE_BASE_URL,
@@ -235,7 +232,7 @@ def _lunarcrush_probe(provider: LunarCrushProvider, asset: str = "BTC") -> dict[
             "sentiment",
             target,
             {"as_of": _now()},
-            ("sentiment.social_mentions_24h",),
+            ("sentiment.social_bullish_share",),
         ))
         captured["value"] = response
         return response
@@ -249,7 +246,7 @@ def _lunarcrush_probe(provider: LunarCrushProvider, asset: str = "BTC") -> dict[
     )
     result.update({
         "asset": target,
-        "metric": "sentiment.social_mentions_24h",
+        "metric": "sentiment.social_bullish_share",
         "api_version": "v4",
         "bucket": "day",
         "endpoint_name": "public coin time-series",
@@ -321,52 +318,6 @@ def probe_provider(
     if name == "chain_liveness" and isinstance(provider, ChainLivenessProvider):
         assets = (asset.strip().upper(),) if asset is not None else CHAIN_NATIVE_ASSETS
         return tuple(_with_config(_chain_liveness_probe(provider, item), client) for item in assets)
-    if name == "ethereum_protocol" and isinstance(provider, EthereumProtocolProvider):
-        endpoint = provider.rpc_url
-        captured: dict[str, Any] = {}
-
-        def call() -> Any:
-            value = provider.probe()
-            captured["value"] = value
-            return value
-
-        result = _probe_call(
-            "ethereum_protocol",
-            endpoint,
-            call,
-            method="POST",
-            validate=_require_mapping,
-        )
-        if "error_code" not in result:
-            result.update({
-                "rpc_method": "eth_getBlockByNumber",
-                "latest_block_number": captured["value"]["latest_block_number"],
-                "latest_block_timestamp": captured["value"]["latest_block_timestamp"],
-                "required_execution_fields": True,
-                "blob_fields_present": captured["value"]["blob_fields_present"],
-                "normalization": "OK",
-            })
-        return (_with_config(result, client),)
-    if name == "bnb_rpc" and isinstance(provider, BNBRPCProvider):
-        endpoint = provider.rpc_url
-
-        def call() -> Any:
-            return provider.probe()
-
-        result = _probe_call(
-            "bnb_rpc",
-            endpoint,
-            call,
-            method="POST",
-            validate=_require_mapping,
-        )
-        if "error_code" not in result:
-            result.update({
-                "asset": "BNB",
-                "metric": "onchain.transaction_count",
-                "completed_day_excluded": True,
-            })
-        return (_with_config(result, client),)
     if client is None or not hasattr(client, "get_json"):
         return ({"provider": name, "config": "READY", "tested": True, "network": "SKIPPED", "error_code": "PROVIDER_UNSUPPORTED"},)
     if name == "sosovalue" and isinstance(provider, SoSoValueProvider):
@@ -466,28 +417,6 @@ def probe_provider(
                 "validator_registry_scan": False,
             })
         return (_with_config(result, client),)
-    if name == "ultrasound_money" and isinstance(provider, UltrasoundMoneyProvider):
-        endpoint = ULTRASOUND_BASE_URL + BURN_RATES_PATH
-        captured: dict[str, Any] = {}
-
-        def call() -> Any:
-            response = provider.collect(ProviderRequest(
-                "ultrasound_money", "ultrasound", "ETH", {"as_of": _now()},
-                ("eth.monetary.burn_30d_eth",),
-            ))
-            captured["value"] = response
-            return response
-
-        result = _probe_call("ultrasound_money", endpoint, call, validate=_require_observations)
-        if "error_code" not in result:
-            observation = tuple(getattr(captured["value"], "observations", ()))
-            result.update({
-                "asset": "ETH",
-                "metric": "eth.monetary.burn_30d_eth",
-                "observed_at": observation[0].get("observed_at") if observation else None,
-                "methodology": "d30.rate.eth_per_minute * 60 * 24 * 30",
-            })
-        return (_with_config(result, client),)
     if name == "etherscan" and isinstance(provider, EtherscanProvider):
         endpoint = ETHERSCAN_BASE_URL
         captured: dict[str, Any] = {}
@@ -495,7 +424,7 @@ def probe_provider(
         def call() -> Any:
             response = provider.collect(ProviderRequest(
                 "etherscan", "etherscan", "ETH", {},
-                ("eth.monetary.current_supply_eth", "eth.monetary.cumulative_burn_eth"),
+                ("eth.monetary.current_supply_eth",),
             ))
             captured["value"] = response
             return response
@@ -705,7 +634,7 @@ def probe_provider(
                 item for item in (
                     "AdrActCnt", "TxTfrValAdjUSD", "FeeTotUSD", "TxCnt", "IssTotNtv",
                     "CapMVRVCur", "CapMVRVZ", "CapRealUSD", "CapMrktCurUSD", "SplyCur",
-                    "PriceRealizedUSD", "SOPR", "NUPL", "HashRate", "DiffMean",
+                    "PriceRealizedUSD", "SOPR", "SplyLTHNetChange",
                 ) if item.lower() in available
             )
         return (_with_config(result, client),)

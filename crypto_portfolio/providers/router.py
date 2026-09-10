@@ -183,7 +183,6 @@ class ProviderRouter:
     def _default_providers(self) -> dict[str, Any]:
         from .alternative_me import AlternativeMeProvider
         from .bgeometrics import BGeometricsProvider
-        from .bnb_rpc import BASE_URL as BNB_RPC_DEFAULT_URL, BNBRPCProvider
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
@@ -198,8 +197,6 @@ class ProviderRouter:
         from .growthepie import GrowthepieProvider
         from .rated import RatedProvider
         from .ethereum_beacon import DEFAULT_BASE_URL, EthereumBeaconProvider
-        from .ethereum_protocol import DEFAULT_RPC_URL, EthereumProtocolProvider
-        from .ultrasound_money import UltrasoundMoneyProvider
         from .etherscan import EtherscanProvider
         from .lunarcrush import LunarCrushProvider
 
@@ -216,29 +213,7 @@ class ProviderRouter:
             "chain_liveness": ChainLivenessProvider(client=client),
             "blobscan": BlobscanProvider(client=client),
             "growthepie": GrowthepieProvider(client=client),
-            "ultrasound_money": UltrasoundMoneyProvider(client=client),
         }
-        if provider_enabled("bnb_rpc", self.config):
-            settings = self.config.get("providers", {}).get("bnb_rpc", {})
-            base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
-            rpc_url = os.environ.get(base_url_env) if base_url_env else None
-            providers["bnb_rpc"] = BNBRPCProvider(
-                client=client,
-                rpc_url=rpc_url or (
-                    settings.get("base_url_default") if isinstance(settings, Mapping) else None
-                ) or BNB_RPC_DEFAULT_URL,
-                cache=self.cache,
-            )
-        if provider_enabled("ethereum_protocol", self.config):
-            settings = self.config.get("providers", {}).get("ethereum_protocol", {})
-            base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
-            rpc_url = os.environ.get(base_url_env) if base_url_env else None
-            providers["ethereum_protocol"] = EthereumProtocolProvider(
-                client=client,
-                rpc_url=rpc_url or (
-                    settings.get("base_url_default") if isinstance(settings, Mapping) else None
-                ) or DEFAULT_RPC_URL,
-            )
         if provider_enabled("ethereum_beacon", self.config):
             settings = self.config.get("providers", {}).get("ethereum_beacon", {})
             base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None

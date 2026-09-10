@@ -189,7 +189,7 @@ overlays. They never add a weighted scoring factor, change the base score, or
 create a target allocation. The base model still answers whether the exposure
 is wanted; overlays answer whether now is a cautious time to deploy it.
 
-Use compatible funding, open-interest, ratio, liquidation, and basis series.
+Use compatible funding, open-interest, ratio, and basis series.
 Persistent funding and multiple derivatives confirmations are required before
 calling positioning `CROWDED` or `EXTREME`; one print or one social signal is
 not enough. Social-only euphoria remains low-authority context and cannot

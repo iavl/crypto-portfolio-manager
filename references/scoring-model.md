@@ -167,7 +167,7 @@ does not invent a deterministic macro score to force that interpretation.
 ETH keeps the default six-factor weights: trend 30%, valuation 15%,
 fundamentals 20%, on-chain 10%, capital flows 10%, and BTC-relative strength
 15%. The current policy enriches the evidence inside those factors with monetary supply
-and burn/issuance context, proof-of-stake security and staking flows, Ethereum
+and monetary supply context, proof-of-stake security and staking flows, Ethereum
 L2 settlement rent, blob/data-availability demand, DeFi/stablecoin economics,
 realized valuation where supported, and ETH ETF flow/AUM ratios.
 
@@ -247,14 +247,10 @@ BTC `btc_valuation.mvrv_zscore` is optional unless Community exposes a direct
 `CapMVRVZ` or the exact full-history `(CapMrktCurUSD - CapRealUSD) /
 population_std(CapMrktCurUSD)` derivation inputs. ETH 365D monetary values are
 long-structure context and do not block a 3–6 month decision when history is
-unavailable. ETH staking uses exact `active_effective_stake_*` names only;
-staking quantity/change/APR/participation remains optional until a documented
-aggregate source proves the denominator. `fundamentals.active_users` for BNB
-is optional because active addresses are not users, and BNB
-`onchain.active_addresses` is optional because no exact provider methodology is
-substituted. ETH `eth.monetary.burn_30d_eth` and its required
-`burn_to_issuance_30d` dependency remain required scoring evidence; optional
-staking enrichment cannot mask either gap.
+unavailable. ETH staking retains only exact `active_effective_stake_eth` and
+30D change/normalized-flow evidence when available. BNB on-chain demand is
+represented by blockspace fees; no user-count or per-block transaction proxy is
+requested.
 
 ### Data Confidence
 

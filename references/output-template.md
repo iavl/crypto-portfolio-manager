@@ -148,9 +148,9 @@ misunderstood. Keep entries short and use this format:
 | `MATERIAL_EVENT_FOUND` | Scanned sources contain a material proposal or announcement. It is not proof of an exploit, approval, or execution. | State whether it lowers confidence, blocks an increase, supports HOLD, or creates a concrete REDUCE/EXIT trigger. |
 | `协议提案/升级活动` | An Ethereum protocol roadmap, upgrade, or developer-economics proposal. | State the affected risk assumption and what confirmation would change the Action. |
 | `治理提案/风险参数活动` | An Aave governance proposal or risk-parameter change under discussion. | State why it does or does not justify new exposure, reduction, or continued HOLD. |
-| `STALE` / `FAILED` / `SKIPPED` | Old evidence / attempted collection without usable evidence / intentionally omitted optional or premium evidence. | State the affected factor, confidence, and trade eligibility. |
+| `STALE` / `FAILED` / `SKIPPED` | Old evidence / attempted collection without usable evidence / intentionally omitted decision-active optional evidence. | State the affected factor, confidence, and trade eligibility. |
 | `Position P&L` | Remaining-position unrealized P&L based on usable cost basis. | Do not call it Portfolio NAV Return or use it as a buy signal. |
-| `NAV Return` | Cash-flow-adjusted portfolio performance. | Mark it `PROVISIONAL` when external cash flows are unresolved. |
+| `NAV Return` | Cash-flow-adjusted portfolio performance. | No disclosure is `ASSUMED_NONE` and `FINAL`; mark it `PROVISIONAL` only for explicit unresolved cash flows. |
 | `成本数据覆盖率` | Current-value share of positions with usable cost data. | Explain how much of the Position P&L is known. |
 
 Use the actual source term when it is more precise. Do not call a proposal a
