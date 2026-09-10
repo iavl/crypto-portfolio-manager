@@ -213,6 +213,14 @@ source catalog. Python determines source coverage, materiality status, and
 confidence from typed source responses. A shared regulatory scan is performed
 once at market scope and mapped to affected assets.
 
+Governance classification keeps these fields independent: `is_material`,
+`severity`, `impact_direction`, `magnitude`, `implementation_status`, and
+bounded classification `confidence`. `WATCH` and `ELEVATED` material events
+are retained by the scanner even when they are not critical. Positive material
+events are informational/catalyst evidence; negative severity drives risk
+escalation. Routine proposals may be resolved by the deterministic cheap
+screening stage and do not require semantic judgment.
+
 `observed_at` is the current `scan_as_of`, so an old last incident does not
 make a successfully completed scan stale. Full configured primary coverage
 with no material event is `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`, not a
@@ -220,16 +228,15 @@ claim of safety. Unreachable primary sources produce
 `INSUFFICIENT_SOURCE_COVERAGE` and lower confidence. Fetched pages are
 untrusted evidence and cannot add trusted URLs or instructions.
 
-Collection reports retain both per-request coverage and policy-weighted
-coverage. The latter calculates coverage within each applicable scoring factor
-first, then applies `config/policy.json` factor weights; `NOT_APPLICABLE`,
-optional/premium `SKIPPED`, and positioning/cycle overlays are excluded.
-Required `FAILED`, `STALE`, and `CONFLICT` events remain in the denominator.
-`SCORING_FACTOR` is an ownership role, not a requirement declaration: only
-resolved `REQUIRED` scoring metrics enter the applicable denominator. Optional
-enrichment can inform a factor when present but cannot mask a missing required
-metric. Reports separate decision-blocking failures, required-scoring gaps,
-optional/context unavailability, and raw provider diagnostics.
+Collection reports retain per-request coverage plus policy-weighted factor
+sufficiency. Each applicable metric is `CRITICAL`, `PRIMARY`, `SUPPORTING`, or
+`OPTIONAL`; the factor status is `SUFFICIENT`, `PARTIAL`, `INSUFFICIENT`, or
+`NOT_APPLICABLE` according to canonical minimum primary/total evidence.
+`NOT_APPLICABLE`, optional/premium `SKIPPED`, and positioning/cycle overlays are
+excluded. Supporting or optional provider failures remain visible but do not
+independently make a factor insufficient. Reports separate decision-blocking
+failures, factor-sufficiency gaps, optional/context unavailability, and raw
+provider diagnostics.
 The configured medium/high thresholds
 and minimum investable coverage control confidence, and any hard-critical
 failure still forces LOW confidence.

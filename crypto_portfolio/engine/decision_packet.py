@@ -6,13 +6,13 @@ import math
 from typing import Any, Iterable, Mapping
 
 from ..models.decision_packet import AssetDecisionSummary, DecisionReviewPacket, NoTradeAttribution
-from ..models.confidence import ConfidenceCap
+from ..models.confidence import ConfidenceCap, DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 from ..model_routing import ModelRouting, validate_model_routing
-from .confidence import calculate_decision_confidence, calculate_regime_confidence
+from .confidence import DecisionScope, calculate_decision_confidence, calculate_regime_confidence
 from .rebalance import build_no_trade_attribution
 
 
@@ -257,6 +257,44 @@ def _overlay_summary(value: MarketOverlays | Mapping[str, Any] | None) -> dict[s
     return summary
 
 
+def _asset_confidence(summary: AssetDecisionSummary) -> float:
+    if summary.confidence_score is not None:
+        return float(summary.confidence_score)
+    return {"HIGH": 0.9, "MEDIUM": 0.7, "LOW": 0.3}[summary.confidence]
+
+
+def _decision_scope(
+    assets: tuple[AssetDecisionSummary, ...],
+    current_weights: Mapping[str, float],
+    target_weights: Mapping[str, float],
+    *,
+    excluded_assets: Iterable[str] = (),
+) -> DecisionScope:
+    excluded = {str(item).strip().upper() for item in excluded_assets}
+    actionable = [item for item in assets if item.symbol not in excluded and item.action in {"INCREASE", "REDUCE", "EXIT"}]
+    if any(item.action == "INCREASE" for item in actionable):
+        action = "INCREASE"
+        relevant = [item for item in actionable if item.action == action]
+        weights = {item.symbol: item.target_weight for item in relevant}
+    elif any(item.action in {"REDUCE", "EXIT"} for item in actionable):
+        action = "REDUCE" if any(item.action == "REDUCE" for item in actionable) else "EXIT"
+        relevant = [item for item in actionable if item.action in {"REDUCE", "EXIT"}]
+        weights = {item.symbol: item.current_weight for item in relevant}
+    else:
+        action = "NO_TRADE" if any(item.action == "NO_TRADE" for item in assets) else "HOLD"
+        relevant = [
+            item for item in assets
+            if item.symbol not in excluded and current_weights.get(item.symbol, item.current_weight) > 0
+        ]
+        if not relevant:
+            relevant = [
+                item for item in assets
+                if item.symbol not in excluded and target_weights.get(item.symbol, item.target_weight) > 0
+            ]
+        weights = {item.symbol: current_weights.get(item.symbol, item.current_weight) for item in relevant}
+    return DecisionScope(action, tuple(item.symbol for item in relevant), weights)
+
+
 def build_decision_review_packet(
     decision: Mapping[str, Any] | None = None,
     *,
@@ -363,37 +401,80 @@ def build_decision_review_packet(
     if regime_confidence_value is None:
         regime_confidence_value = calculate_regime_confidence(
             {name: 0.5 for name in ("trend", "volatility", "breadth", "flows", "portfolio_drawdown", "systemic_risk")},
-            caps=(ConfidenceCap("MISSING_REGIME_PROVENANCE", 0.79, "PORTFOLIO", "decision packet has no regime provenance"),),
+            caps=(ConfidenceCap(
+                "MISSING_REGIME_PROVENANCE",
+                math.nextafter(DEFAULT_HIGH_MIN, 0.0),
+                "PORTFOLIO",
+                "decision packet has no regime provenance",
+            ),),
         )
     decision_confidence_value = decision_confidence if decision_confidence is not None else source.get("decision_confidence")
     nav_value = nav_performance if nav_performance is not None else source.get("nav_performance")
     if decision_confidence_value is None:
-        confidence_values = {"HIGH": 0.9, "MEDIUM": 0.7, "LOW": 0.3}
-        asset_scores = [
-            item.confidence_score
-            if item.confidence_score is not None
-            else confidence_values.get(item.confidence, 0.3)
+        resolved_policy = resolve_policy()
+        scope = _decision_scope(assets, current, target, excluded_assets=resolved_policy.stable_symbols)
+        scoped_assets = {
+            item.symbol: _asset_confidence(item)
             for item in assets
-        ]
+            if item.symbol in scope.relevant_assets
+        }
         accounting = 0.5
         if nav_value is not None:
             accounting = {"AVAILABLE": 1.0, "PROVISIONAL": 0.5, "UNAVAILABLE": 0.0}.get(
                 str(nav_value.get("status", "UNAVAILABLE")).upper(), 0.0
             )
+        portfolio_data = source.get("portfolio_data_confidence", 1.0 if current else 0.5)
+        if not isinstance(portfolio_data, (int, float)) or isinstance(portfolio_data, bool):
+            raise ValueError("portfolio_data_confidence must be numeric")
+        portfolio_data = float(portfolio_data)
+        if not math.isfinite(portfolio_data) or not 0 <= portfolio_data <= 1:
+            raise ValueError("portfolio_data_confidence must be finite and in [0, 1]")
+        if any(
+            marker in str(item).upper()
+            for item in critical_missing_data
+            for marker in ("PORTFOLIO", "HOLDINGS", "VALUATION")
+        ):
+            portfolio_data = 0.0
         caps = []
-        if critical_missing_data or major_conflicts:
-            caps.append(ConfidenceCap("CRITICAL_EVIDENCE_INCOMPLETE", 0.59, "PORTFOLIO", "critical evidence is incomplete"))
+        if critical_missing_data:
+            applies_to = "PORTFOLIO" if any(
+                marker in str(item).upper()
+                for item in critical_missing_data
+                for marker in ("PORTFOLIO", "HOLDINGS", "VALUATION", "CASH_FLOW")
+            ) else f"ACTION:{scope.action}"
+            ceiling = resolved_policy.confidence.get("caps", {}).get(
+                "hard_critical_missing", math.nextafter(DEFAULT_MEDIUM_MIN, 0.0)
+            )
+            caps.append(ConfidenceCap("CRITICAL_EVIDENCE_INCOMPLETE", ceiling, applies_to, "critical evidence is incomplete"))
         if nav_value is not None and str(nav_value.get("status", "")).upper() != "AVAILABLE":
-            caps.append(ConfidenceCap("PORTFOLIO_DRAWDOWN_PROVISIONAL", 0.79, "PORTFOLIO", "NAV history is provisional"))
+            ceiling = resolved_policy.confidence.get("caps", {}).get(
+                "drawdown_provisional", math.nextafter(DEFAULT_HIGH_MIN, 0.0)
+            )
+            caps.append(ConfidenceCap("PORTFOLIO_DRAWDOWN_PROVISIONAL", ceiling, "PORTFOLIO", "NAV history is provisional"))
+        soft_penalties = []
+        if major_conflicts:
+            soft_penalties.append({
+                "source": "evidence",
+                "reason": "material source conflict",
+                "penalty": 0.03,
+            })
+        supplied_signal_agreement = source.get("signal_agreement", 0.0 if major_conflicts else 1.0)
         decision_confidence_value = calculate_decision_confidence(
             {
-                "portfolio_data": min(asset_scores) if asset_scores else 0.0,
+                "portfolio_data": portfolio_data,
                 "regime_confidence": regime_confidence_value,
-                "asset_evidence": min(asset_scores) if asset_scores else 0.0,
+                "asset_evidence": {
+                    "assets": scoped_assets,
+                    "weights": scope.exposure_weights,
+                    "explanation": f"action scope: {scope.action}",
+                },
                 "portfolio_accounting": accounting,
-                "signal_agreement": 0.0 if major_conflicts else 1.0,
+                "signal_agreement": supplied_signal_agreement,
             },
             caps=caps,
+            scope=scope,
+            soft_penalties=soft_penalties,
+            policy=resolved_policy,
         )
     attribution = no_trade_attribution
     if attribution is None:

@@ -18,6 +18,9 @@ _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _EVENT_STATES = {"CLEAR", "WATCH", "ELEVATED", "CRITICAL"}
 _EVENT_RELEVANCE = {"RELEVANT", "IRRELEVANT", "UNKNOWN"}
 _EVENT_SEVERITY = {"CLEAR", "WATCH", "ELEVATED", "CRITICAL"}
+_EVENT_DIRECTIONS = {"POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL", "UNCERTAIN"}
+_EVENT_MAGNITUDES = {"LOW", "MEDIUM", "HIGH"}
+_IMPLEMENTATION_STATES = {"DISCUSSION", "PROPOSED", "VOTING", "PASSED", "EXECUTED", "REJECTED", "UNKNOWN"}
 _EVENT_METRICS = {
     "security": "risk.security_event_status",
     "governance": "risk.governance_event_status",
@@ -49,7 +52,13 @@ class EventItem:
     source_groups: tuple[str, ...] = ()
     affected_assets: tuple[str, ...] = ()
     relevance: str = "RELEVANT"
+    relevance_metadata: Mapping[str, Any] | None = None
+    is_material: bool = True
     severity: str = "WATCH"
+    impact_direction: str = "UNCERTAIN"
+    magnitude: str = "MEDIUM"
+    implementation_status: str = "UNKNOWN"
+    confidence: float = 0.5
     materiality_source: str = "STRUCTURED_EVENT"
     evidence_ids: tuple[str, ...] = ()
     external_id: str | None = None
@@ -76,10 +85,31 @@ class EventItem:
             object.__setattr__(self, field_name, values)
         relevance = _text(self.relevance, "event relevance").upper()
         severity = _text(self.severity, "event severity").upper()
+        direction = _text(self.impact_direction, "event impact_direction").upper()
+        magnitude = _text(self.magnitude, "event magnitude").upper()
+        implementation = _text(self.implementation_status, "event implementation_status").upper()
         if relevance not in _EVENT_RELEVANCE or severity not in _EVENT_SEVERITY:
             raise ValueError("event relevance or severity is unsupported")
+        if direction not in _EVENT_DIRECTIONS or magnitude not in _EVENT_MAGNITUDES:
+            raise ValueError("event direction or magnitude is unsupported")
+        if implementation not in _IMPLEMENTATION_STATES:
+            raise ValueError("event implementation_status is unsupported")
+        if not isinstance(self.is_material, bool):
+            raise ValueError("event is_material must be boolean")
+        confidence = float(self.confidence)
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError("event confidence must be finite and in [0, 1]")
         object.__setattr__(self, "relevance", relevance)
+        if self.relevance_metadata is not None:
+            if not isinstance(self.relevance_metadata, Mapping):
+                raise ValueError("event relevance_metadata must be an object or null")
+            object.__setattr__(self, "relevance_metadata", dict(self.relevance_metadata))
         object.__setattr__(self, "severity", severity)
+        object.__setattr__(self, "is_material", self.is_material)
+        object.__setattr__(self, "impact_direction", direction)
+        object.__setattr__(self, "magnitude", magnitude)
+        object.__setattr__(self, "implementation_status", implementation)
+        object.__setattr__(self, "confidence", confidence)
         object.__setattr__(self, "materiality_source", _text(self.materiality_source, "materiality_source"))
         if self.canonical_url is not None:
             object.__setattr__(self, "canonical_url", _text(self.canonical_url, "canonical_url"))
@@ -101,10 +131,29 @@ class EventItem:
         data.setdefault("source_ids", (data.get("source_id"),) if data.get("source_id") else ())
         data.setdefault("affected_assets", tuple(data.get("affected_assets", ())))
         data.setdefault("evidence_ids", tuple(data.get("evidence_ids", ())))
+        if "is_material" not in data:
+            materiality = data.get("materiality", True)
+            if isinstance(materiality, bool):
+                data["is_material"] = materiality
+            elif isinstance(materiality, str) and materiality.strip().upper() in {
+                "WATCH", "ELEVATED", "CRITICAL", "MATERIAL", "MATERIAL_EVENT", "HIGH", "SEVERE", "TRUE", "YES"
+            }:
+                data["is_material"] = True
+            elif isinstance(materiality, str) and materiality.strip().upper() in {
+                "CLEAR", "FALSE", "NO", "NOT_MATERIAL", "IRRELEVANT"
+            }:
+                data["is_material"] = False
+            else:
+                raise ValueError("unknown event materiality value")
+        if isinstance(data.get("relevance"), Mapping):
+            data["relevance_metadata"] = data["relevance"]
+            data["relevance"] = "RELEVANT"
+        data.pop("materiality", None)
         return cls(**{key: data[key] for key in {
             "event_id", "category", "title", "external_id", "summary", "published_at", "canonical_url",
             "source_ids", "source_groups", "affected_assets", "relevance", "severity",
-            "materiality_source", "evidence_ids",
+            "is_material", "impact_direction", "magnitude", "implementation_status", "confidence",
+            "relevance_metadata", "materiality_source", "evidence_ids",
         } if key in data})
 
     def as_dict(self) -> dict[str, Any]:
@@ -121,7 +170,13 @@ class EventItem:
             "source_groups": list(self.source_groups),
             "affected_assets": list(self.affected_assets),
             "relevance": self.relevance,
+            "relevance_metadata": dict(self.relevance_metadata) if self.relevance_metadata is not None else None,
+            "is_material": self.is_material,
             "severity": self.severity,
+            "impact_direction": self.impact_direction,
+            "magnitude": self.magnitude,
+            "implementation_status": self.implementation_status,
+            "confidence": self.confidence,
             "materiality_source": self.materiality_source,
             "evidence_ids": list(self.evidence_ids),
         }

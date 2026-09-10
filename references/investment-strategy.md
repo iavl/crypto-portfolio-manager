@@ -118,6 +118,20 @@ Missing evidence does not become positive evidence. Low confidence can turn an
 otherwise reasonable score into `HOLD_ONLY`, a smaller allocation, or
 `NO_TRADE`.
 
+### Confidence is action-scoped
+
+Decision Confidence describes the evidence for the contemplated action, not the
+weakest asset anywhere in the watchlist. A `HOLD` review uses current exposure;
+an `INCREASE` uses the target asset and portfolio constraints. Watchlist-only
+assets with zero exposure do not contaminate a held-portfolio decision.
+
+Data Confidence measures coverage, freshness, source quality, and same-metric
+redundancy. Mixed factor directions are market information and are represented
+once as Signal Agreement. Factor evidence is judged by policy-configured
+minimum primary/total evidence, so supporting or optional provider outages do
+not automatically force `LOW`. Security, chain liveness, unresolved required
+cash flow, and confirmed severe events remain conservative gates.
+
 ## 7. BTC-Specific Strategy
 
 Under the current/default BTC profile, the positive-weight factors are:
@@ -278,6 +292,10 @@ actionability. Missing security or liveness evidence does not mean “no
 problem”; it can block a high-conviction increase. The system fails closed by
 preserving uncertainty as `HOLD_ONLY`, `WAIT`, `NO_TRADE`, `PROVISIONAL`, or
 `BLOCKED` rather than guessing a reassuring value.
+
+Data Confidence does not include cross-factor signal consistency. Decision
+Confidence keeps that disagreement in its separate `signal_agreement`
+component and scopes asset evidence to the contemplated action.
 
 ## 14. Event Risk and Chain Liveness
 

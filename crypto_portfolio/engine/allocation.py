@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
+from .confidence import confidence_deployment_factor
 from .core_eligibility import eth_core_eligibility, relative_strength_score
 from .scoring import score_assessment
 
@@ -351,7 +352,7 @@ def build_target_allocation(
             score = float(score)
             if not math.isfinite(score) or not 0 <= score <= 1:
                 raise ValueError("decision_confidence score must be finite and in [0, 1]")
-            decision_confidence_factor = 0.0 if score < 0.60 else 0.70 if score < 0.80 else 1.0
+            decision_confidence_factor = confidence_deployment_factor(score, resolved)
     current_weights = current_weights or {}
     normalized_current_weights: dict[str, float] = {}
     for raw_symbol, raw_weight in current_weights.items():

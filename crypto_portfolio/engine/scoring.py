@@ -6,7 +6,14 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..models.confidence import ConfidenceCap, ConfidenceDimension, ConfidenceResult, confidence_band
+from ..models.confidence import (
+    ConfidenceCap,
+    ConfidenceDimension,
+    ConfidenceResult,
+    DEFAULT_HIGH_MIN,
+    DEFAULT_MEDIUM_MIN,
+    confidence_band,
+)
 from ..models.evidence import AVAILABILITY_STATES, AssetAssessment, FactorScore
 from ..models.policy import Policy, SCORING_FACTORS, resolve_policy
 
@@ -299,28 +306,37 @@ def _score_factors(
     confidence_caps: tuple[ConfidenceCap, ...] = ()
     reason_codes = set(f"MISSING_FACTOR:{factor}" for factor in missing)
     if not critical_data_complete:
-        confidence_caps = (ConfidenceCap("HARD_CRITICAL_DATA_INCOMPLETE", 0.59, "ASSET", "critical factor data is incomplete"),)
-        data_score = min(data_score, 0.59)
+        cap = policy.confidence.get("caps", {}).get("hard_critical_missing", math.nextafter(DEFAULT_MEDIUM_MIN, 0.0))
+        confidence_caps = (ConfidenceCap("HARD_CRITICAL_DATA_INCOMPLETE", cap, "ASSET", "critical factor data is incomplete"),)
+        data_score = min(data_score, cap)
         reason_codes.add("HARD_CRITICAL_DATA_INCOMPLETE")
+    dimension_weights = policy.confidence.get("data_dimension_weights", {}) if policy.confidence else {}
+    dimension_weights = dimension_weights or {
+        "coverage": 0.30,
+        "freshness": 0.20,
+        "source_quality": 0.20,
+        "redundancy": 0.30,
+    }
     data_dimensions = {
-        "coverage": ConfidenceDimension("coverage", coverage, 0.30, tuple(sorted(reason_codes))),
-        "freshness": ConfidenceDimension("freshness", coverage, 0.20),
-        "source_quality": ConfidenceDimension("source_quality", coverage, 0.20),
-        "redundancy": ConfidenceDimension("redundancy", 0.5 if any(reliabilities.values()) else 0.0, 0.10),
-        "signal_consistency": ConfidenceDimension("signal_consistency", 1.0 if not reason_codes else 0.5, 0.20),
+        "coverage": ConfidenceDimension("coverage", coverage, dimension_weights["coverage"], tuple(sorted(reason_codes))),
+        "freshness": ConfidenceDimension("freshness", coverage, dimension_weights["freshness"]),
+        "source_quality": ConfidenceDimension("source_quality", coverage, dimension_weights["source_quality"]),
+        "redundancy": ConfidenceDimension("redundancy", 0.5 if any(reliabilities.values()) else 0.0, dimension_weights["redundancy"]),
     }
     raw_data_score = sum(item.score * item.weight for item in data_dimensions.values())
-    data_score = min(raw_data_score, 0.59) if confidence_caps else raw_data_score
+    data_score = min(raw_data_score, confidence_caps[0].ceiling) if confidence_caps else raw_data_score
+    medium = policy.confidence.get("band_thresholds", {}).get("medium_min", DEFAULT_MEDIUM_MIN) if policy.confidence else DEFAULT_MEDIUM_MIN
+    high = policy.confidence.get("band_thresholds", {}).get("high_min", DEFAULT_HIGH_MIN) if policy.confidence else DEFAULT_HIGH_MIN
     factor_data_confidence = ConfidenceResult(
         raw_score=raw_data_score,
         score=data_score,
-        band=confidence_band(data_score),
+        band=confidence_band(data_score, medium_min=medium, high_min=high),
         dimensions=data_dimensions,
         caps=confidence_caps,
         reasons=tuple(sorted(reason_codes)),
         status="BLOCKED" if confidence_caps else "PROVISIONAL" if reason_codes else "AVAILABLE",
-        medium_min=(policy.confidence.get("band_thresholds", {}).get("medium_min", 0.60) if policy.confidence else 0.60),
-        high_min=(policy.confidence.get("band_thresholds", {}).get("high_min", 0.80) if policy.confidence else 0.80),
+        medium_min=medium,
+        high_min=high,
     )
     return ScoreResult(
         score=result_score,

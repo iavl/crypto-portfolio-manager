@@ -198,6 +198,22 @@ python3 scripts/providers.py --doctor coingecko
 
 凭证存在不代表 Provider 健康：DNS、TLS、plan 权限或上游规范化仍可能不可用。
 
+## Why is Decision Confidence LOW?
+
+Decision Confidence is action-scoped. Inspect the persisted component breakdown
+before changing thresholds:
+
+```bash
+python3 scripts/confidence.py --json
+python3 scripts/confidence.py --explain --json
+```
+
+The JSON contains `scope`, component scores, hard `caps`, one-time
+`soft_penalties`, `why_low`, and the bounded conditions that can increase
+confidence. A low-confidence watchlist asset with zero exposure should not
+appear in a HOLD scope. Conversely, unknown target security or chain liveness
+must remain an action blocker even if other components are HIGH.
+
 ## 代理与 TLS 排查
 
 客户端要求证书和主机名校验。如果本地信任库不完整，请提供可信 CA bundle：

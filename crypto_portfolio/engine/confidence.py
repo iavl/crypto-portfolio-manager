@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
+from dataclasses import dataclass, field as dataclass_field
 import math
 from typing import Any
 
@@ -11,6 +12,8 @@ from ..models.confidence import (
     ConfidenceCap,
     ConfidenceDimension,
     ConfidenceResult,
+    DEFAULT_HIGH_MIN,
+    DEFAULT_MEDIUM_MIN,
     DecisionConfidence,
     confidence_band,
 )
@@ -21,8 +24,7 @@ DATA_DIMENSION_WEIGHTS = {
     "coverage": 0.30,
     "freshness": 0.20,
     "source_quality": 0.20,
-    "redundancy": 0.10,
-    "signal_consistency": 0.20,
+    "redundancy": 0.30,
 }
 REGIME_DOMAIN_WEIGHTS = {
     "trend": 0.20,
@@ -69,6 +71,39 @@ _DIRECTIONAL_SIGNS = {
     "UNKNOWN": None,
     "UNAVAILABLE": None,
 }
+_ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
+
+
+@dataclass(frozen=True)
+class DecisionScope:
+    """Assets whose evidence can change the contemplated portfolio action."""
+
+    action: str
+    relevant_assets: tuple[str, ...] = ()
+    exposure_weights: Mapping[str, float] = dataclass_field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        action = str(self.action).strip().upper()
+        if action not in _ACTIONS:
+            raise ValueError(f"decision scope action must be one of {sorted(_ACTIONS)}")
+        assets = tuple(dict.fromkeys(str(item).strip().upper() for item in self.relevant_assets if str(item).strip()))
+        weights: dict[str, float] = {}
+        for raw_asset, raw_weight in self.exposure_weights.items():
+            asset = str(raw_asset).strip().upper()
+            if not asset:
+                raise ValueError("decision scope exposure_weights contains an empty asset")
+            weight = _bounded(raw_weight, f"decision scope exposure_weights.{asset}")
+            weights[asset] = weight
+        object.__setattr__(self, "action", action)
+        object.__setattr__(self, "relevant_assets", assets)
+        object.__setattr__(self, "exposure_weights", weights)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "relevant_assets": list(self.relevant_assets),
+            "exposure_weights": dict(self.exposure_weights),
+        }
 
 
 def _bounded(value: Any, field: str) -> float:
@@ -108,7 +143,35 @@ def _band_for_policy(score: float, policy: Any | None) -> str:
 def _thresholds_for_policy(policy: Any | None) -> tuple[float, float]:
     confidence = _policy_mapping(policy, "confidence", {})
     thresholds = confidence.get("band_thresholds", {}) if isinstance(confidence, Mapping) else {}
-    return float(thresholds.get("medium_min", 0.60)), float(thresholds.get("high_min", 0.80))
+    return float(thresholds.get("medium_min", DEFAULT_MEDIUM_MIN)), float(thresholds.get("high_min", DEFAULT_HIGH_MIN))
+
+
+def _policy_cap(policy: Any | None, name: str, default: float) -> float:
+    confidence = _policy_mapping(policy, "confidence", {})
+    caps = confidence.get("caps", {}) if isinstance(confidence, Mapping) else {}
+    value = caps.get(name, default) if isinstance(caps, Mapping) else default
+    return _bounded(value, f"confidence cap {name}")
+
+
+def _asset_evidence_policy(policy: Any | None) -> Mapping[str, Any]:
+    confidence = _policy_mapping(policy, "confidence", {})
+    value = confidence.get("asset_evidence", {}) if isinstance(confidence, Mapping) else {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def confidence_deployment_factor(score: Any, policy: Any | None = None) -> float:
+    """Resolve deployment sizing from the canonical confidence band policy."""
+    value = _bounded(score, "confidence score")
+    band = _band_for_policy(value, policy)
+    execution = getattr(policy, "execution", None) if policy is not None else None
+    if execution is None and isinstance(policy, Mapping):
+        execution = policy.get("execution")
+    configured = execution.get("confidence_deployment_factor", {}) if isinstance(execution, Mapping) else {}
+    if not configured:
+        from ..models.policy import resolve_policy
+
+        configured = resolve_policy().execution["confidence_deployment_factor"]
+    return _bounded(configured[band], f"confidence deployment factor {band}")
 
 
 def _as_record(value: Any) -> Mapping[str, Any]:
@@ -209,7 +272,7 @@ def calculate_freshness(
     return score, status
 
 
-def redundancy_score(source_groups: Iterable[Any]) -> float:
+def redundancy_score(source_groups: Iterable[Any], *, expected: bool = True) -> float:
     groups = {
         str(item).strip().lower()
         for item in source_groups
@@ -219,7 +282,7 @@ def redundancy_score(source_groups: Iterable[Any]) -> float:
     if count == 0:
         return 0.0
     if count == 1:
-        return 0.5
+        return 0.5 if expected else 1.0
     if count == 2:
         return 0.8
     return 1.0
@@ -327,7 +390,7 @@ def calculate_data_confidence(
     dimension_weights: Mapping[str, float] | None = None,
     source_quality: Mapping[str, Any] | None = None,
     hard_critical_metrics: Iterable[str] = (),
-    hard_critical_ceiling: float = 0.59,
+    hard_critical_ceiling: float | None = None,
     applies_to: str = "DATA",
     policy: Any | None = None,
 ) -> ConfidenceResult:
@@ -365,6 +428,11 @@ def calculate_data_confidence(
     reasons: set[str] = set()
     evidence_ids: set[str] = set()
     critical = {str(item).strip() for item in hard_critical_metrics}
+    hard_critical_ceiling = _policy_cap(
+        policy,
+        "hard_critical_missing",
+        math.nextafter(DEFAULT_MEDIUM_MIN, 0.0) if hard_critical_ceiling is None else hard_critical_ceiling,
+    )
     caps: list[ConfidenceCap] = []
     for key, weight in weights.items():
         rows = by_metric[key]
@@ -408,7 +476,8 @@ def calculate_data_confidence(
         if freshness_status != "CURRENT":
             reasons.add(f"{freshness_status}:{key}")
             if key in critical:
-                caps.append(ConfidenceCap("HARD_CRITICAL_STALE", hard_critical_ceiling, applies_to, f"hard-critical metric {key} is {freshness_status}"))
+                stale_ceiling = _policy_cap(policy, "hard_critical_stale", hard_critical_ceiling)
+                caps.append(ConfidenceCap("HARD_CRITICAL_STALE", stale_ceiling, applies_to, f"hard-critical metric {key} is {freshness_status}"))
         quality = source_quality_score(
             latest.get("source"),
             tier=latest.get("authority_tier", latest.get("tier")),
@@ -422,25 +491,44 @@ def calculate_data_confidence(
     coverage = coverage_numerator / denominator
     freshness = sum(value * weight for value, weight in freshness_values) / denominator
     quality = sum(value * weight for value, weight in quality_values) / denominator
-    groups = [
-        row.get("source_group", row.get("source"))
-        for row in valid_records
-        if row.get("source_group", row.get("source")) is not None
-    ]
-    redundancy = redundancy_score(groups)
-    consistency = signal_consistency_score(valid_records)
+    redundancy_values: list[tuple[float, float]] = []
+    for key, weight in weights.items():
+        rows = [row for row in valid_records if str(row.get("metric_key", row.get("factor", ""))).strip() == key]
+        facts: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+        for row in rows:
+            fact_key = (
+                str(row.get("asset", "")).strip().upper(),
+                str(row.get("metric_key", row.get("factor", key))).strip().lower(),
+                str(row.get("window", row.get("horizon", ""))).strip().lower(),
+            )
+            facts.setdefault(fact_key, []).append(row)
+        if not facts:
+            continue
+        fact_scores = []
+        for fact_rows in facts.values():
+            groups = [
+                row.get("source_group", row.get("source"))
+                for row in fact_rows
+                if row.get("source_group", row.get("source")) is not None
+            ]
+            expected = all(row.get("redundancy_expected", True) is not False for row in fact_rows)
+            fact_scores.append(redundancy_score(groups, expected=expected))
+        redundancy_values.append((sum(fact_scores) / len(fact_scores), weight))
+    redundancy = (
+        sum(value * weight for value, weight in redundancy_values) / sum(weight for _, weight in redundancy_values)
+        if redundancy_values else 0.0
+    )
     dimensions = {
         "coverage": ConfidenceDimension("coverage", coverage, dim_weights["coverage"], tuple(sorted(reasons))),
         "freshness": ConfidenceDimension("freshness", freshness, dim_weights["freshness"], tuple(sorted(reason for reason in reasons if reason.startswith(("STALE:", "UNKNOWN:"))))),
         "source_quality": ConfidenceDimension("source_quality", quality, dim_weights["source_quality"], tuple(sorted(reason for reason in reasons if reason.startswith("FALLBACK_SOURCE:")))),
         "redundancy": ConfidenceDimension("redundancy", redundancy, dim_weights["redundancy"]),
-        "signal_consistency": ConfidenceDimension("signal_consistency", consistency, dim_weights["signal_consistency"], tuple(sorted(reason for reason in reasons if reason.startswith("CONFLICT:")))),
     }
     raw = sum(item.score * item.weight for item in dimensions.values())
     merged_caps = tuple(caps)
     score = min([raw, *(cap.ceiling for cap in merged_caps)])
-    status = "BLOCKED" if any(cap.ceiling < 0.60 for cap in merged_caps) else "PROVISIONAL" if reasons else "AVAILABLE"
     medium, high = _thresholds_for_policy(policy)
+    status = "BLOCKED" if any(cap.ceiling < medium for cap in merged_caps) else "PROVISIONAL" if reasons else "AVAILABLE"
     return ConfidenceResult(
         raw_score=raw,
         score=score,
@@ -503,21 +591,69 @@ def calculate_regime_confidence(
         caps=parsed_caps,
         reasons=tuple(sorted(all_reasons)),
         evidence_ids=tuple(sorted(all_evidence)),
-        status="BLOCKED" if any(cap.ceiling < 0.60 for cap in parsed_caps) else "PROVISIONAL" if all_reasons else "AVAILABLE",
+        status="BLOCKED" if any(cap.ceiling < medium for cap in parsed_caps) else "PROVISIONAL" if all_reasons else "AVAILABLE",
         medium_min=medium,
         high_min=high,
     )
 
 
-def _component_score(value: Any, name: str) -> tuple[float, str]:
+def _scalar_component_score(value: Any, name: str) -> float:
+    if isinstance(value, ConfidenceResult):
+        return value.score
+    if isinstance(value, Mapping):
+        return _bounded(value.get("score", value.get("confidence_score", 0.0)), f"component {name}.score")
+    return _bounded(value, f"component {name}")
+
+
+def aggregate_asset_evidence_confidence(
+    asset_scores: Mapping[str, Any],
+    exposure_weights: Mapping[str, float] | None = None,
+    *,
+    policy: Any | None = None,
+) -> float:
+    """Aggregate only action-scoped asset evidence, with a concentration guard."""
+    if not isinstance(asset_scores, Mapping):
+        raise ValueError("asset_scores must be an object")
+    scores = {
+        str(asset).strip().upper(): _scalar_component_score(value, f"asset {asset}")
+        for asset, value in asset_scores.items()
+    }
+    if not scores:
+        return 0.0
+    weights = {
+        asset: _bounded((exposure_weights or {}).get(asset, 0.0), f"asset weight {asset}")
+        for asset in scores
+    }
+    total = sum(weights.values())
+    if total <= 0:
+        weights = {asset: 1.0 for asset in scores}
+        total = float(len(scores))
+    score = sum(scores[asset] * weights[asset] for asset in scores) / total
+    settings = _asset_evidence_policy(policy)
+    threshold = float(settings.get("material_exposure_threshold", 0.10))
+    floor = float(settings.get("low_confidence_position_floor", DEFAULT_MEDIUM_MIN))
+    for asset, weight in weights.items():
+        if weight / total >= threshold and scores[asset] < floor:
+            score = min(score, scores[asset])
+    return score
+
+
+def _component_score(
+    value: Any,
+    name: str,
+    *,
+    policy: Any | None = None,
+    scope: DecisionScope | None = None,
+) -> tuple[float, str]:
+    if isinstance(value, Mapping) and isinstance(value.get("assets"), Mapping):
+        assets = value["assets"]
+        weights = value.get("weights")
+        if weights is None and scope is not None:
+            weights = scope.exposure_weights
+        return aggregate_asset_evidence_confidence(assets, weights, policy=policy), str(value.get("explanation", ""))
     if isinstance(value, ConfidenceResult):
         return value.score, f"{name} confidence"
-    if isinstance(value, Mapping):
-        if "assets" in value and isinstance(value["assets"], Mapping):
-            scores = [_component_score(item, name)[0] for item in value["assets"].values()]
-            return (min(scores) if scores else 0.0, str(value.get("explanation", "")))
-        return _bounded(value.get("score", 0.0), f"component {name}.score"), str(value.get("explanation", ""))
-    return _bounded(value, f"component {name}"), ""
+    return _scalar_component_score(value, name), ""
 
 
 def calculate_decision_confidence(
@@ -527,29 +663,44 @@ def calculate_decision_confidence(
     caps: Iterable[ConfidenceCap | Mapping[str, Any]] = (),
     blocked_actions: Iterable[str] = (),
     evidence_ids: Iterable[str] = (),
+    scope: DecisionScope | Mapping[str, Any] | None = None,
+    soft_penalties: Iterable[Mapping[str, Any]] = (),
     policy: Any | None = None,
 ) -> DecisionConfidence:
     configured = component_weights or _policy_mapping(policy, "confidence", {}).get("decision_component_weights", DECISION_COMPONENT_WEIGHTS)
     weights = _weights(configured, "decision component weights")
+    decision_scope = (
+        scope if isinstance(scope, DecisionScope)
+        else DecisionScope(**scope) if isinstance(scope, Mapping)
+        else None
+    )
     details: dict[str, Mapping[str, Any]] = {}
     reasons: set[str] = set()
     raw = 0.0
     for name, weight in weights.items():
-        score, explanation = _component_score(components.get(name, 0.0), name)
+        score, explanation = _component_score(components.get(name, 0.0), name, policy=policy, scope=decision_scope)
         details[name] = {"score": score, "weight": weight, "explanation": explanation}
         raw += score * weight
     parsed_caps = tuple(cap if isinstance(cap, ConfidenceCap) else ConfidenceCap.from_mapping(cap) for cap in caps)
-    score = apply_confidence_caps(raw, parsed_caps)
+    parsed_penalties = []
+    for item in soft_penalties:
+        if not isinstance(item, Mapping):
+            raise ValueError("soft penalties must be objects")
+        amount = _bounded(item.get("penalty", item.get("amount", 0.0)), "soft penalty")
+        parsed_penalties.append({"penalty": amount, **{str(key): value for key, value in item.items() if key not in {"penalty", "amount"}}})
+    score = max(0.0, apply_confidence_caps(raw, parsed_caps) - sum(item["penalty"] for item in parsed_penalties))
     blockers = tuple(cap.code for cap in parsed_caps)
     scoped_blockers = {
         cap.applies_to for cap in parsed_caps if cap.applies_to.startswith("ACTION:")
     }
     blocked = tuple(sorted({str(item).strip().upper() for item in blocked_actions} | set(blockers) | scoped_blockers))
-    allowed = ("HOLD", "NO_TRADE") if score < 0.80 else ("HOLD", "NO_TRADE", "INCREASE", "REDUCE", "EXIT")
+    medium, high = _thresholds_for_policy(policy)
+    allowed = ("HOLD", "NO_TRADE") if score < high else ("HOLD", "NO_TRADE", "INCREASE", "REDUCE", "EXIT")
     if parsed_caps:
         reasons.update(cap.code for cap in parsed_caps)
-    explanation = "confidence is capped by hard evidence constraints" if parsed_caps else "confidence is the fixed-denominator weighted evidence score"
-    medium, high = _thresholds_for_policy(policy)
+    explanation = "confidence is capped by hard evidence constraints" if parsed_caps else "confidence is the action-scoped weighted evidence score"
+    if parsed_penalties:
+        explanation += "; soft evidence penalties are applied once"
     return DecisionConfidence(
         raw_score=raw,
         score=score,
@@ -558,12 +709,14 @@ def calculate_decision_confidence(
         caps=parsed_caps,
         reasons=tuple(sorted(reasons)),
         evidence_ids=tuple(sorted({str(item) for item in evidence_ids})),
-        status="BLOCKED" if any(cap.ceiling < 0.60 for cap in parsed_caps) else "PROVISIONAL" if parsed_caps else "AVAILABLE",
+        status="BLOCKED" if any(cap.ceiling < medium for cap in parsed_caps) else "PROVISIONAL" if parsed_caps or parsed_penalties else "AVAILABLE",
         components=details,
         critical_blockers=blockers,
         allowed_actions=allowed,
         blocked_actions=blocked,
         explanation=explanation,
+        scope=decision_scope.as_dict() if decision_scope is not None else None,
+        soft_penalties=tuple(parsed_penalties),
         medium_min=medium,
         high_min=high,
     )
@@ -572,15 +725,18 @@ def calculate_decision_confidence(
 __all__ = [
     "DATA_DIMENSION_WEIGHTS",
     "DECISION_COMPONENT_WEIGHTS",
+    "DecisionScope",
     "REGIME_DOMAIN_WEIGHTS",
     "apply_confidence_caps",
     "calculate_data_confidence",
     "calculate_decision_confidence",
+    "confidence_deployment_factor",
     "calculate_freshness",
     "calculate_regime_confidence",
     "calculate_signal_consistency",
     "freshness_score",
     "redundancy_score",
+    "aggregate_asset_evidence_confidence",
     "signal_consistency_score",
     "source_quality_score",
 ]

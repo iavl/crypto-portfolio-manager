@@ -392,6 +392,10 @@ Evidence -> fact meaning -> portfolio constraint -> risk gate
 每一层都会保留有界分数、等级、原因、上限和证据 ID。缺失数据保持缺失；即使
 regime 标签为正常，也不会因此获得增加风险的权限。
 
+Data Confidence 不再使用跨因子信号一致性或全局最弱资产；Decision Confidence
+先构造 action scope，再按当前暴露聚合相关资产证据。watchlist-only 资产不会污染
+HOLD；安全、链活性、现金流和目标资产的 hard gate 仍然 fail-closed。
+
 运行检查：
 
 ```bash

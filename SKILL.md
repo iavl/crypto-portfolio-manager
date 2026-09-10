@@ -461,7 +461,7 @@ private model reasoning.
 ## Current acquisition contracts
 
 Numeric/time-series metrics are `STRUCTURED_ONLY`; missing numeric providers
-become `REQUIRED FAILED` or optional `SKIPPED`, never generic Web work. Metric
+become `CRITICAL`/`PRIMARY`/`SUPPORTING FAILED` or optional `SKIPPED`, never generic Web work. Metric
 history is explicit and independent from the 240D execution OHLCV preference:
 30D/90D/180D use bounded 45D/105D/195D cohorts, 365D uses about 380D, and
 BTC MVRV Z uses `FULL_AVAILABLE` when exact derivation inputs exist.

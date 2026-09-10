@@ -23,6 +23,22 @@ def build_output(data_dir: str | None = None) -> dict:
     history = build_history_context()
     decision = history.get("latest_decision") or {}
     nav = history.get("nav_history_result") or {}
+    decision_confidence = decision.get("decision_confidence") or {}
+    components = decision_confidence.get("components", {}) if isinstance(decision_confidence, dict) else {}
+    band = str(decision_confidence.get("band", "")).upper() if isinstance(decision_confidence, dict) else ""
+    why_low = []
+    if band == "LOW":
+        why_low.extend(decision_confidence.get("reasons", ()))
+        why_low.extend(
+            f"{name}={value.get('score')}"
+            for name, value in components.items()
+            if isinstance(value, dict) and value.get("score", 1) < decision_confidence.get("medium_min", 0.60)
+        )
+        why_low.extend(
+            str(item.get("reason"))
+            for item in decision_confidence.get("caps", ())
+            if isinstance(item, dict) and item.get("reason")
+        )
     return {
         "policy_hash": policy.canonical_hash,
         "history": {
@@ -39,7 +55,13 @@ def build_output(data_dir: str | None = None) -> dict:
             "full_review_due": history.get("full_review_due"),
         },
         "regime_confidence": decision.get("regime_confidence"),
-        "decision_confidence": decision.get("decision_confidence"),
+        "decision_confidence": decision_confidence,
+        "why_low": list(dict.fromkeys(why_low)),
+        "what_would_increase_confidence": [
+            "resolve hard gates or missing portfolio data",
+            "restore sufficient primary evidence for the scoped factor",
+            "refresh stale or conflicting evidence",
+        ] if band == "LOW" else [],
         "status": "AVAILABLE" if decision.get("decision_confidence") else "PROVISIONAL",
     }
 

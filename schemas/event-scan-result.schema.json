@@ -10,7 +10,35 @@
     "scan_as_of": {"type": "string", "format": "date-time"},
     "lookback_days": {"type": "integer", "minimum": 1},
     "sources_checked": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "material_events": {"type": "array"},
+    "material_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {"type": "string"},
+          "source_group": {"type": "string"},
+          "external_id": {"type": "string"},
+          "title": {"type": "string"},
+          "summary": {"type": "string"},
+          "published_at": {"type": "string", "format": "date-time"},
+          "canonical_url": {"type": "string", "format": "uri"},
+          "materiality": {"oneOf": [{"type": "boolean"}, {"type": "string"}]},
+          "is_material": {"type": "boolean"},
+          "affected_assets": {"type": "array", "items": {"type": "string"}},
+          "severity": {"enum": ["CLEAR", "WATCH", "ELEVATED", "CRITICAL"]},
+          "impact_direction": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL", "UNCERTAIN"]},
+          "magnitude": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+          "implementation_status": {"enum": ["DISCUSSION", "PROPOSED", "VOTING", "PASSED", "EXECUTED", "REJECTED", "UNKNOWN"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "relevance": {"oneOf": [{"enum": ["RELEVANT", "IRRELEVANT", "UNKNOWN"]}, {"type": "object"}]},
+          "relevance_metadata": {"type": "object"},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}},
+          "source_ids": {"type": "array", "items": {"type": "string"}},
+          "source_groups": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
     "coverage": {"type": "number", "minimum": 0, "maximum": 1},
     "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
     "status": {"enum": ["NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES", "MATERIAL_EVENT_FOUND", "INSUFFICIENT_SOURCE_COVERAGE"]},

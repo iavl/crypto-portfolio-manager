@@ -8,7 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, TextIO
 
-from .metric_availability import contributes_to_scoring_coverage, metric_availability
+from .metric_availability import contributes_to_scoring_coverage, evaluate_factor_sufficiency, metric_availability
 from .engine.metric_plan import DERIVED_METRIC_DEPENDENCIES
 from .metrics_registry import REVIEW_TYPES, metric_definition
 from .models.metrics_history import CollectionEvent, MetricObservation
@@ -549,6 +549,21 @@ def collection_summary(
         sum(factor_weights[factor] * weighted_factors[factor] for factor in weighted_factors) / total_factor_weight
         if total_factor_weight else 0.0
     )
+    factor_sufficiency = {
+        factor: evaluate_factor_sufficiency(factor, values, policy=resolved_policy, asset=asset)
+        for factor, weight in factor_weights.items()
+        if weight > 0
+    }
+    sufficient_factors = {
+        factor: item
+        for factor, item in factor_sufficiency.items()
+        if item.status != "NOT_APPLICABLE"
+    }
+    factor_sufficiency_coverage = (
+        sum(factor_weights[factor] * item.confidence for factor, item in sufficient_factors.items())
+        / sum(factor_weights[factor] for factor in sufficient_factors)
+        if sufficient_factors else 0.0
+    )
     critical_failures = sum(
         event.status in {"FAILED", "STALE", "CONFLICT"}
         and (
@@ -561,9 +576,9 @@ def collection_summary(
     minimum = float(scoring_policy["minimum_investable_coverage"])
     medium = float(scoring_policy["medium_confidence_min_coverage"])
     high = float(scoring_policy["high_confidence_min_coverage"])
-    if critical_failures or policy_weighted_coverage < minimum or policy_weighted_coverage < medium:
+    if critical_failures or factor_sufficiency_coverage < minimum or factor_sufficiency_coverage < medium:
         confidence = "LOW"
-    elif policy_weighted_coverage < high:
+    elif factor_sufficiency_coverage < high:
         confidence = "MEDIUM"
     else:
         confidence = "HIGH"
@@ -585,7 +600,11 @@ def collection_summary(
         "evidence_coverage": policy_weighted_coverage,
         "per_request_coverage": per_request_coverage,
         "policy_weighted_coverage": policy_weighted_coverage,
+        "factor_sufficiency_coverage": factor_sufficiency_coverage,
         "factor_coverage": factor_coverage,
+        "factor_sufficiency": {
+            factor: item.as_dict() for factor, item in factor_sufficiency.items()
+        },
         "policy_factor_weights": {factor: factor_weights[factor] for factor in weighted_factors},
         "hard_critical_failure": bool(critical_failures),
         "confidence": confidence,
@@ -658,6 +677,7 @@ def format_collection_summary(summary: Mapping[str, Any]) -> str:
             f"Critical failures: {summary['critical_failures']}",
             f"Per-request coverage: {summary.get('per_request_coverage', summary['coverage']):.0%}",
             f"Policy-weighted coverage: {summary.get('policy_weighted_coverage', summary['coverage']):.0%}",
+            f"Factor-sufficiency coverage: {summary.get('factor_sufficiency_coverage', summary.get('policy_weighted_coverage', summary['coverage'])):.0%}",
             f"Decision confidence: {summary['confidence']}",
             f"Pending external resolution: {summary.get('pending_external_resolution', 0)}",
             f"Overlay context metrics: {summary.get('overlay_requested', 0)}",

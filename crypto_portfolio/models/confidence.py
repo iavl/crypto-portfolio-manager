@@ -219,7 +219,10 @@ class ConfidenceResult:
             "evidence_ids", "status", "medium_min", "high_min",
         }
         if cls.__name__ == "DecisionConfidence":
-            allowed |= {"components", "critical_blockers", "allowed_actions", "blocked_actions", "explanation"}
+            allowed |= {
+                "components", "critical_blockers", "allowed_actions", "blocked_actions",
+                "explanation", "scope", "soft_penalties",
+            }
         unknown = set(data) - allowed
         if unknown:
             raise ValueError("confidence result contains unknown fields: " + ", ".join(sorted(unknown)))
@@ -265,6 +268,8 @@ class DecisionConfidence(ConfidenceResult):
     allowed_actions: tuple[str, ...] = ()
     blocked_actions: tuple[str, ...] = ()
     explanation: str = ""
+    scope: Mapping[str, Any] | None = None
+    soft_penalties: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -287,6 +292,21 @@ class DecisionConfidence(ConfidenceResult):
         object.__setattr__(self, "blocked_actions", tuple(sorted({_text(item, "blocked_action").upper() for item in self.blocked_actions})))
         if self.explanation:
             object.__setattr__(self, "explanation", _text(self.explanation, "decision confidence explanation"))
+        if self.scope is not None:
+            if not isinstance(self.scope, Mapping):
+                raise ValueError("decision confidence scope must be an object or null")
+            _reject_private(self.scope, "decision confidence scope")
+            object.__setattr__(self, "scope", dict(self.scope))
+        penalties: list[dict[str, Any]] = []
+        for item in self.soft_penalties:
+            if not isinstance(item, Mapping):
+                raise ValueError("decision confidence soft penalties must be objects")
+            penalty = _finite_fraction(item.get("penalty", item.get("amount", 0.0)), "soft penalty")
+            value = {str(key): raw for key, raw in item.items() if key not in {"penalty", "amount"}}
+            value["penalty"] = penalty
+            _reject_private(value, "decision confidence soft penalties")
+            penalties.append(value)
+        object.__setattr__(self, "soft_penalties", tuple(penalties))
 
     def as_dict(self) -> dict[str, Any]:
         result = super().as_dict()
@@ -296,6 +316,8 @@ class DecisionConfidence(ConfidenceResult):
             "allowed_actions": list(self.allowed_actions),
             "blocked_actions": list(self.blocked_actions),
             "explanation": self.explanation,
+            "scope": dict(self.scope) if self.scope is not None else None,
+            "soft_penalties": [dict(item) for item in self.soft_penalties],
         })
         return result
 

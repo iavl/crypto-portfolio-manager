@@ -180,9 +180,10 @@
 高分不保证 INCREASE：稳定资金底线、集中度、风险状态、事件风险、BTC 相对机会成本、
 数据覆盖率和技术执行条件都可能让最终结果成为 HOLD、WAIT、HOLD_ONLY 或 NO_TRADE。
 
-`Data Confidence` 衡量证据覆盖、新鲜度、来源质量、独立来源冗余和信号一致性；
-`Regime Confidence` 衡量市场状态判断的证据把握；`Decision Confidence` 衡量当前
-动作结论的证据把握。三者都是 Python 派生值，不能由 LLM 重算或抬高。`PROVISIONAL`
+`Data Confidence` 只衡量证据覆盖、新鲜度、来源质量和同一事实的独立来源冗余；
+跨因子方向差异只进入 `Decision Confidence` 的 `signal_agreement`。`Regime Confidence`
+衡量市场状态判断的证据把握；`Decision Confidence` 衡量当前动作范围内的证据把握。
+三者都是 Python 派生值，不能由 LLM 重算或抬高。`PROVISIONAL`
 和 `BLOCKED` 是显式状态，不等于零分或安全。
 
 ## 进一步阅读

@@ -19,7 +19,9 @@
     "critical_blockers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "allowed_actions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "blocked_actions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "explanation": {"type": "string"}
+    "explanation": {"type": "string"},
+    "scope": {"type": ["object", "null"]},
+    "soft_penalties": {"type": "array", "items": {"type": "object"}}
   },
   "additionalProperties": false,
   "$defs": {

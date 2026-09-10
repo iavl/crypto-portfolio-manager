@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from ..models.decision_packet import NoTradeAttribution
+from ..models.confidence import DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.policy import Policy, resolve_policy
+from .confidence import confidence_deployment_factor
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"}
@@ -115,10 +117,14 @@ def build_no_trade_attribution(
             reasons.add("CONFIDENCE_TOO_LOW")
     decision_score = _decision_score(decision_confidence)
     decision_band = str(_value_field(decision_confidence, "band", "")).strip().upper()
-    if decision_score is not None and decision_score < 0.60 or decision_band == "LOW":
+    medium, high = (
+        resolved.confidence.get("band_thresholds", {}).get("medium_min", DEFAULT_MEDIUM_MIN),
+        resolved.confidence.get("band_thresholds", {}).get("high_min", DEFAULT_HIGH_MIN),
+    )
+    if decision_score is not None and decision_score < medium or decision_band == "LOW":
         confidence_gate = "BLOCKED"
         reasons.add("CONFIDENCE_TOO_LOW")
-    elif decision_score is not None and decision_score < 0.80 or decision_band == "MEDIUM":
+    elif decision_score is not None and decision_score < high or decision_band == "MEDIUM":
         if confidence_gate != "BLOCKED":
             confidence_gate = "WATCH"
         reasons.add("DECISION_CONFIDENCE_MEDIUM")
@@ -525,7 +531,7 @@ def recommend_rebalance(
             confidence_score = float(confidence_score)
             if not math.isfinite(confidence_score) or not 0 <= confidence_score <= 1:
                 raise ValueError("decision_confidence score must be finite and in [0, 1]")
-            factor = 0.0 if confidence_score < 0.60 else 0.70 if confidence_score < 0.80 else 1.0
+            factor = confidence_deployment_factor(confidence_score, resolved)
             if factor < 1.0:
                 for item in candidates:
                     if item["action"] == "INCREASE":

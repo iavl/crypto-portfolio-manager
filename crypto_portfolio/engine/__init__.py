@@ -20,11 +20,14 @@ from .metric_normalization import (
 from .report_packet import build_final_review_output, build_report_packet, validate_final_review_output, validate_report_packet
 from .scoring import calculate_factor_reliability, ensure_acquisition_ready
 from .confidence import (
+    DecisionScope,
+    aggregate_asset_evidence_confidence,
     calculate_data_confidence,
     calculate_decision_confidence,
     calculate_freshness,
     calculate_regime_confidence,
     calculate_signal_consistency,
+    confidence_deployment_factor,
     freshness_score,
     redundancy_score,
     signal_consistency_score,
@@ -83,8 +86,11 @@ __all__ = [
     "validate_final_review_output",
     "ensure_acquisition_ready",
     "calculate_factor_reliability",
+    "DecisionScope",
+    "aggregate_asset_evidence_confidence",
     "calculate_data_confidence",
     "calculate_decision_confidence",
+    "confidence_deployment_factor",
     "calculate_freshness",
     "calculate_regime_confidence",
     "calculate_signal_consistency",

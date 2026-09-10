@@ -233,10 +233,12 @@ _CONFIDENCE_FIELDS = {
     "data_dimension_weights",
     "regime_domain_weights",
     "decision_component_weights",
+    "factor_sufficiency",
+    "asset_evidence",
     "caps",
 }
 _CONFIDENCE_BAND_FIELDS = {"medium_min", "high_min"}
-_DATA_DIMENSIONS = {"coverage", "freshness", "source_quality", "redundancy", "signal_consistency"}
+_DATA_DIMENSIONS = {"coverage", "freshness", "source_quality", "redundancy"}
 _REGIME_DOMAINS = {"trend", "volatility", "breadth", "flows", "portfolio_drawdown", "systemic_risk"}
 _DECISION_COMPONENTS = {
     "portfolio_data", "regime_confidence", "asset_evidence", "portfolio_accounting", "signal_agreement"
@@ -1447,6 +1449,46 @@ def _parse_confidence(value: Any) -> dict[str, Any]:
             raise PolicyError(f"{name} weights must sum to 1")
         return {key: parsed[key] for key in sorted(parsed)}
 
+    factor_sufficiency = value["factor_sufficiency"]
+    if not isinstance(factor_sufficiency, dict) or set(factor_sufficiency) != set(SCORING_FACTORS):
+        raise PolicyError("confidence.factor_sufficiency must contain every scoring factor")
+    parsed_factor_sufficiency: dict[str, dict[str, int]] = {}
+    for factor in SCORING_FACTORS:
+        entry = factor_sufficiency[factor]
+        if not isinstance(entry, dict) or set(entry) != {"min_primary_available", "min_total_available"}:
+            raise PolicyError(f"confidence.factor_sufficiency.{factor} must contain primary and total minima")
+        primary = _positive_integer(
+            entry["min_primary_available"],
+            f"confidence.factor_sufficiency.{factor}.min_primary_available",
+        )
+        total = _positive_integer(
+            entry["min_total_available"],
+            f"confidence.factor_sufficiency.{factor}.min_total_available",
+        )
+        if primary > total:
+            raise PolicyError(f"confidence.factor_sufficiency.{factor} primary minimum must not exceed total minimum")
+        parsed_factor_sufficiency[factor] = {
+            "min_primary_available": primary,
+            "min_total_available": total,
+        }
+
+    asset_evidence = value["asset_evidence"]
+    if not isinstance(asset_evidence, dict) or set(asset_evidence) != {
+        "aggregation", "low_confidence_position_floor", "material_exposure_threshold"
+    }:
+        raise PolicyError("confidence.asset_evidence fields are incomplete")
+    aggregation = str(asset_evidence["aggregation"]).strip().lower()
+    if aggregation != "exposure_weighted":
+        raise PolicyError("confidence.asset_evidence.aggregation must be exposure_weighted")
+    low_floor = _fraction(
+        asset_evidence["low_confidence_position_floor"],
+        "confidence.asset_evidence.low_confidence_position_floor",
+    )
+    exposure_threshold = _fraction(
+        asset_evidence["material_exposure_threshold"],
+        "confidence.asset_evidence.material_exposure_threshold",
+    )
+
     caps = value["caps"]
     if not isinstance(caps, dict) or not caps:
         raise PolicyError("confidence.caps must be a non-empty object")
@@ -1462,6 +1504,12 @@ def _parse_confidence(value: Any) -> dict[str, Any]:
         "data_dimension_weights": weights(value["data_dimension_weights"], "confidence.data_dimension_weights", _DATA_DIMENSIONS),
         "regime_domain_weights": weights(value["regime_domain_weights"], "confidence.regime_domain_weights", _REGIME_DOMAINS),
         "decision_component_weights": weights(value["decision_component_weights"], "confidence.decision_component_weights", _DECISION_COMPONENTS),
+        "factor_sufficiency": parsed_factor_sufficiency,
+        "asset_evidence": {
+            "aggregation": aggregation,
+            "low_confidence_position_floor": low_floor,
+            "material_exposure_threshold": exposure_threshold,
+        },
         "caps": parsed_caps,
     }
 

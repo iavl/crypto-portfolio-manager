@@ -382,7 +382,7 @@ or:
 
 Finalized reports show Data Confidence dimensions, Regime Confidence, Decision
 Confidence, raw/final scores, bands, caps, evidence IDs, and their action
-effects. They also show NAV status, `performance_finality`,
+effects, action scope, component breakdown, and soft penalties. They also show NAV status, `performance_finality`,
 `cash_flow_resolution_status`, cash-flow-adjusted return, current/max drawdown,
 BTC benchmark/excess return, and EventScanner state. Only
 `CONFIRMED_NONE`/`CONFIRMED_AMOUNT` or `BASELINE_RESET` can produce

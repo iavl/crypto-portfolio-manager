@@ -17,13 +17,15 @@ regime, and technical execution timing are separate gates or overlays. They may
 reduce eligibility, confidence, target size, or deployment, but cannot change
 the base score.
 
-`SCORING_FACTOR` is an ownership role, not a requirement declaration. The
-scoring coverage denominator contains only metrics whose resolved availability
-is `REQUIRED`; optional metrics are enrichment when present and missing
-optional/premium data is excluded. Positioning, cycle, execution, structural,
-and event-risk metrics are context or gate evidence and never enter base-score
-coverage. A factor remains incomplete when its required evidence is missing,
-even if optional enrichment is available.
+`SCORING_FACTOR` is an ownership role, not a requirement declaration. Each
+applicable metric is classified as `CRITICAL`, `PRIMARY`, `SUPPORTING`, or
+`OPTIONAL` (with `PREMIUM_ONLY` retained for entitlement-gated enrichment).
+The resolved policy defines minimum primary and total evidence per factor.
+Factor sufficiency is `SUFFICIENT`, `PARTIAL`, `INSUFFICIENT`, or
+`NOT_APPLICABLE`; one missing supporting provider cannot independently make a
+factor insufficient. Positioning, cycle, execution, structural, and
+event-risk metrics remain context or gate evidence and never enter base-score
+coverage.
 
 ## Scoring profiles
 
@@ -255,7 +257,29 @@ requested.
 ### Data Confidence
 
 Each applicable metric/factor retains fixed-denominator `coverage`, exponential
-`freshness`, `source_quality`, independent-source `redundancy`, and
-`signal_consistency`. Scores are bounded in `[0, 1]` and reported with
-`LOW`/`MEDIUM`/`HIGH` bands. Missing, stale, conflict, fallback, and evidence
-IDs remain explicit. A hard-critical cap cannot be diluted by ordinary metrics.
+`freshness`, `source_quality`, and independent-source `redundancy`. Data
+Confidence measures evidence quality only; it does not treat a bullish trend
+and bearish valuation as bad data. Cross-factor disagreement is represented
+once in the separate Decision Confidence `signal_agreement` component.
+Redundancy compares independent observations of the same `(asset, metric,
+window)` fact; unrelated metrics from different providers are not redundant.
+Scores are bounded in `[0, 1]` and reported with `LOW`/`MEDIUM`/`HIGH` bands.
+Missing, stale, conflict, fallback, and evidence IDs remain explicit. A
+hard-critical cap cannot be diluted by ordinary metrics.
+
+### Action-scoped Decision Confidence
+
+Decision Confidence combines independent `portfolio_data`, `regime_confidence`,
+`asset_evidence`, `portfolio_accounting`, and `signal_agreement` components.
+Its `DecisionScope` is deterministic:
+
+- `HOLD`/`NO_TRADE` uses current held assets and ignores zero-exposure watchlist assets;
+- `INCREASE` uses the target asset and portfolio constraints;
+- `REDUCE`/`EXIT` uses the affected holding and execution evidence;
+- rebalance uses only materially participating assets.
+
+Held-asset evidence is exposure-weighted with a concentration guard, so a
+material low-confidence position cannot disappear inside a portfolio average.
+Hard gates are scoped to `PORTFOLIO` or `ACTION:<name>`; partial governance or
+optional provider coverage is a bounded soft penalty. Unknown security or
+chain liveness for a risk-increasing target remains a fail-closed action gate.

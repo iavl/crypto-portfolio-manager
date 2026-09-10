@@ -7,6 +7,7 @@ from dataclasses import dataclass, field as dataclass_field
 from typing import Any, Iterable, Mapping
 
 from ..models.evidence import AssetAssessment, EventRiskAssessment
+from ..models.confidence import DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
 
@@ -452,7 +453,8 @@ def run_risk_gate(
             confidence_score = float(confidence_score)
             if not math.isfinite(confidence_score) or not 0 <= confidence_score <= 1:
                 raise ValueError("decision_confidence score must be finite and in [0, 1]")
-            if increase_symbols and confidence_score < 0.60:
+            medium = resolved.confidence.get("band_thresholds", {}).get("medium_min", DEFAULT_MEDIUM_MIN)
+            if increase_symbols and confidence_score < medium:
                 violations.append(
                     RiskViolation(
                         "ERROR",
@@ -460,7 +462,7 @@ def run_risk_gate(
                         "decision confidence is LOW; new INCREASE exposure is blocked",
                     )
                 )
-            elif confidence_score < 0.80:
+            elif confidence_score < resolved.confidence.get("band_thresholds", {}).get("high_min", DEFAULT_HIGH_MIN):
                 violations.append(
                     RiskViolation(
                         "WARNING",

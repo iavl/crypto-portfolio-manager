@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..models.confidence import ConfidenceCap, ConfidenceResult
+from ..models.confidence import ConfidenceCap, ConfidenceResult, DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.policy import Policy, resolve_policy
 from .confidence import REGIME_DOMAIN_WEIGHTS, calculate_regime_confidence
 
@@ -202,12 +202,27 @@ def _regime_confidence(
     if scalar_input and inputs.provenance_complete and not (
         inputs.systemic_event_risk is True or _state(inputs.systemic_event_risk) in _SEVERE_EVENT
     ):
-        caps.append(ConfidenceCap("SCALAR_INPUT_NO_PROVENANCE", 0.79, "PORTFOLIO", "regime caller supplied scalar states without provenance"))
+        caps.append(ConfidenceCap(
+            "SCALAR_INPUT_NO_PROVENANCE",
+            math.nextafter(DEFAULT_HIGH_MIN, 0.0),
+            "PORTFOLIO",
+            "regime caller supplied scalar states without provenance",
+        ))
         reasons.add("SCALAR_INPUT_NO_PROVENANCE")
     if "portfolio_drawdown" in unknown and "systemic_risk" in unknown:
-        caps.append(ConfidenceCap("DRAWDOWN_SYSTEMIC_UNKNOWN", 0.59, "PORTFOLIO", "portfolio drawdown and systemic evidence are unknown"))
+        caps.append(ConfidenceCap(
+            "DRAWDOWN_SYSTEMIC_UNKNOWN",
+            resolved.confidence.get("caps", {}).get("regime_drawdown_systemic_unknown", math.nextafter(DEFAULT_MEDIUM_MIN, 0.0)),
+            "PORTFOLIO",
+            "portfolio drawdown and systemic evidence are unknown",
+        ))
     elif unknown & {"portfolio_drawdown", "systemic_risk"}:
-        caps.append(ConfidenceCap("CRITICAL_DOMAIN_UNKNOWN", 0.79, "PORTFOLIO", "a critical regime domain is unknown"))
+        caps.append(ConfidenceCap(
+            "CRITICAL_DOMAIN_UNKNOWN",
+            resolved.confidence.get("caps", {}).get("regime_unknown_critical", math.nextafter(DEFAULT_HIGH_MIN, 0.0)),
+            "PORTFOLIO",
+            "a critical regime domain is unknown",
+        ))
     return calculate_regime_confidence(
         scores,
         domain_weights=configured,

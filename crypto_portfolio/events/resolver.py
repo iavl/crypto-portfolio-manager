@@ -11,6 +11,7 @@ from ..providers.http import redact_log, redact_url
 from .classifier import (
     EventClassificationError,
     EventMaterialityClassifier,
+    cheap_screen_response,
     validate_classified_response,
 )
 from .scanner import EventSourceScanRequest, EventSourceScanResponse
@@ -192,6 +193,11 @@ class EventResolver:
         if not candidates:
             self._record(request, response, status="FETCHED")
             return response
+        screened, unresolved = cheap_screen_response(response)
+        if not unresolved:
+            screened_response = replace(response, items=screened)
+            self._record(request, screened_response, status="SCREENED")
+            return screened_response
         if self.classifier is None:
             pending = replace(response, error="EVENT_CLASSIFICATION_REQUIRED")
             self._record(
@@ -203,7 +209,24 @@ class EventResolver:
             )
             return pending
         try:
-            classified = self.classifier.classify(request=request, response=response)
+            classification_response = replace(response, items=unresolved)
+            classified = self.classifier.classify(request=request, response=classification_response)
+            classified = validate_classified_response(request, classification_response, classified)
+            classified_by_identity = {
+                (item.get("external_id"), item.get("canonical_url"), item.get("published_at")): item
+                for item in classified.items
+            }
+            merged_items = []
+            for item in response.items:
+                identity = (item.get("external_id"), item.get("canonical_url"), item.get("published_at"))
+                if identity in classified_by_identity:
+                    merged_items.append(classified_by_identity[identity])
+                else:
+                    merged_items.append(next(
+                        screened_item for screened_item in screened
+                        if (screened_item.get("external_id"), screened_item.get("canonical_url"), screened_item.get("published_at")) == identity
+                    ))
+            classified = replace(classified, items=tuple(merged_items))
             classified = validate_classified_response(request, response, classified)
         except EventClassificationError as exc:
             failed = replace(response, error=str(exc))
