@@ -34,6 +34,19 @@ as `freshness_reference_at` and verify it equals `metadata.completed_through`.
 
 ### Debug 报告
 
+Render the finalized failure categories separately when present:
+
+```text
+Decision-blocking failures: ReportPacket.decision_blocking_failures
+Required scoring data unavailable: ReportPacket.required_scoring_failures
+Optional/context data unavailable: ReportPacket.optional_data_unavailable
+Provider diagnostics: ReportPacket.provider_operational_failures
+```
+
+`SKIPPED` optional/premium metrics belong in the optional/context section, not
+the final failure table. A provider error code remains visible in provider
+diagnostics even when the affected metric is non-blocking.
+
 ### 本轮数据抓取失败明细
 
 Render every item from `ReportPacket.failed_data_fetches` using this table. The

@@ -6,6 +6,7 @@ from crypto_portfolio.data_collection import collection_summary
 from crypto_portfolio.engine.derived_metrics import derive_open_interest_to_market_cap
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
+from crypto_portfolio.metric_availability import contributes_to_scoring_coverage, metric_availability
 from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.models.metrics_history import CollectionEvent
 from crypto_portfolio.providers.base import ProviderRequest
@@ -18,12 +19,40 @@ from crypto_portfolio.providers.coinmetrics import (
 )
 from crypto_portfolio.providers.github_activity import GitHubActivityProvider, count_commits
 from crypto_portfolio.providers.router import ProviderRouter
+from crypto_portfolio.providers.routes import provider_chain
 
 
 NOW = "2026-09-06T00:00:00Z"
 
 
 class MetricAvailabilityTests(unittest.TestCase):
+    def test_required_scoring_coverage_excludes_optional_and_context_metrics(self):
+        self.assertTrue(contributes_to_scoring_coverage("BNB", "onchain.transaction_count"))
+        self.assertFalse(contributes_to_scoring_coverage("BNB", "onchain.active_addresses"))
+        self.assertFalse(contributes_to_scoring_coverage("BTC", "sentiment.social_mentions_24h"))
+        self.assertEqual(
+            metric_availability("BNB", "onchain.active_addresses").reason_code,
+            "OPTIONAL_PROVIDER_UNSUPPORTED",
+        )
+        self.assertEqual(provider_chain("onchain.active_addresses", "BNB"), ("coinmetrics_community",))
+        self.assertEqual(
+            provider_chain("onchain.transaction_count", "BNB"),
+            ("bnb_rpc", "coinmetrics_community"),
+        )
+
+    def test_optional_failed_event_does_not_reduce_coverage(self):
+        required = CollectionEvent(
+            "required", NOW, "BNB", "onchain.transaction_count", "SUCCESS",
+            source="test", observed_at=NOW, fetched_at=NOW,
+        )
+        optional = CollectionEvent(
+            "optional", NOW, "BNB", "onchain.active_addresses", "FAILED",
+            source="test", reason="PROVIDER_UNSUPPORTED",
+        )
+        summary = collection_summary((required, optional))
+        self.assertEqual(summary["per_request_coverage"], 1.0)
+        self.assertEqual(summary["policy_weighted_coverage"], 1.0)
+
     def test_skipped_is_event_only_and_excluded_from_coverage(self):
         skipped = normalize_metric_result({
             "asset": "ETH",
@@ -143,7 +172,7 @@ class MetricAvailabilityTests(unittest.TestCase):
         self.assertEqual(client.calls[1][1]["params"]["assets"], "eth")
         self.assertEqual(client.calls[1][1]["params"]["metrics"], "AdrActCnt")
 
-    def test_community_provider_failure_remains_failed(self):
+    def test_premium_provider_failure_is_nonblocking_skip(self):
         class FailingProvider:
             def collect(self, _request):
                 raise ProviderUnavailable("premium provider unavailable")
@@ -168,7 +197,7 @@ class MetricAvailabilityTests(unittest.TestCase):
             )),
             cached_observations=(), now=NOW,
         )
-        self.assertEqual(result.results[0].status, "FAILED")
+        self.assertEqual(result.results[0].status, "SKIPPED")
 
     def test_github_activity_is_bounded_and_allowlisted(self):
         page = [{

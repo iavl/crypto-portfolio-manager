@@ -92,6 +92,8 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
         return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNSUPPORTED")
     if key in {"tokenomics.annualized_emissions", "tokenomics.supply_growth"} and asset not in {"BTC", "ETH"}:
         return MetricAvailabilityPolicy(key, "OPTIONAL", "METHODOLOGY_NOT_DEFINED")
+    if asset == "BNB" and key == "onchain.active_addresses":
+        return MetricAvailabilityPolicy(key, "OPTIONAL", "OPTIONAL_PROVIDER_UNSUPPORTED")
     if definition.is_event_risk:
         return MetricAvailabilityPolicy(key)
     if definition.decision_role != "SCORING_FACTOR":
@@ -126,6 +128,16 @@ def is_skippable(metric_key: str, asset: str) -> bool:
     return metric_availability(asset, metric_key).is_skippable
 
 
+def contributes_to_scoring_coverage(asset: str, metric_key: str) -> bool:
+    """Return whether one asset/metric belongs in the scoring denominator."""
+    definition = metric_definition(metric_key)
+    return (
+        definition.applies_to(asset)
+        and definition.decision_role == "SCORING_FACTOR"
+        and metric_availability(asset, metric_key).requirement == "REQUIRED"
+    )
+
+
 __all__ = [
     "MetricAvailabilityPolicy",
     "FALLBACK_MODES",
@@ -133,6 +145,7 @@ __all__ = [
     "REQUIREMENTS",
     "is_skippable",
     "fallback_mode",
+    "contributes_to_scoring_coverage",
     "metric_fallback_mode",
     "metric_availability",
     "skip_reason",

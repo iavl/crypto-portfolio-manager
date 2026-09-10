@@ -14,6 +14,9 @@ from crypto_portfolio.engine.derived_metrics import (
 from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
 from crypto_portfolio.engine.factors.flows import calculate_flow_factor
 from crypto_portfolio.engine.metric_plan import build_metric_collection_plan
+from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
+from crypto_portfolio.engine.derived_metrics import derive_metric_observations
+from crypto_portfolio.acquisition import AcquisitionManager, _expand_derived_dependencies
 from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.models.policy import load_policy
 from crypto_portfolio.providers.base import ProviderRequest
@@ -21,6 +24,11 @@ from crypto_portfolio.providers.blobscan import parse_timeseries as parse_blobsc
 from crypto_portfolio.providers.coinmetrics import CoinMetricsProvider
 from crypto_portfolio.providers.growthepie import parse_da_payload, parse_fundamentals_payload, parse_rent_payload
 from crypto_portfolio.providers.ethereum_protocol import block_burn_eth, execution_base_fee_burn
+from crypto_portfolio.providers.router import ProviderRouter
+from crypto_portfolio.providers.ultrasound_money import UltrasoundMoneyProvider
+from crypto_portfolio.providers.cache import ProviderCache
+from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
+from tempfile import TemporaryDirectory
 from crypto_portfolio.providers.sosovalue import parse_etf_flow_history
 
 
@@ -38,6 +46,147 @@ class _CoinMetricsClient:
 
 
 class EthMetricsTests(unittest.TestCase):
+    def test_ultrasound_is_direct_primary_for_burn_30d(self):
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def get_json(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return {"d30": {"rate": {"eth_per_minute": "0.1"}, "timestamp": "2026-09-01T00:00:00Z"}}
+
+        request = MetricRequest("ETH", "eth.monetary.burn_30d_eth")
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (request,))
+        expanded = _expand_derived_dependencies(plan)
+        self.assertEqual({item.metric_key for item in expanded.requests}, {request.metric_key})
+        client = Client()
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"ultrasound_money": UltrasoundMoneyProvider(client=client)},
+                    config={
+                        "providers": {"ultrasound_money": {"enabled": True}},
+                        "cache_ttl_seconds": {"default": 3600},
+                        "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
+                        "fallback": {"allow_web": False},
+                    },
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(plan, mode="REFRESH", as_of="2026-09-01T00:00:00Z", now="2026-09-01T00:00:00Z", cached_observations=())
+        self.assertEqual(result.results[0].status, "SUCCESS")
+        self.assertEqual(len(client.calls), 1)
+        normal_plan = build_metric_collection_plan(["ETH"])
+        self.assertNotIn("eth.monetary.cumulative_burn_eth", {
+            item.metric_key for item in normal_plan.for_asset("ETH")
+        })
+
+    def test_burn_fallback_requires_aligned_cumulative_history(self):
+        def cumulative(value, observed_at):
+            return MetricObservation(
+                stable_observation_id("ETH", "eth.monetary.cumulative_burn_eth", observed_at, "etherscan", value),
+                "ETH", "eth.monetary.cumulative_burn_eth", "fundamentals", value, "ETH", "current",
+                observed_at, observed_at, "etherscan", "CURRENT", "MEDIUM",
+                metadata={"methodology": "Etherscan documented wei counter converted to ETH"},
+            )
+
+        current = cumulative(100, "2026-09-01T00:00:00Z")
+        prior = cumulative(80, "2026-08-02T00:00:00Z")
+        values, unresolved = derive_metric_observations(
+            (MetricRequest("ETH", "eth.monetary.burn_30d_eth"),),
+            {("ETH", "eth.monetary.cumulative_burn_eth"): current},
+            {},
+            fetched_at="2026-09-01T00:00:00Z",
+            as_of="2026-09-01T00:00:00Z",
+            historical_observations=(prior,),
+        )
+        self.assertEqual(values[("ETH", "eth.monetary.burn_30d_eth")]["value"], 20)
+        self.assertEqual(unresolved, {})
+        missing_values, missing = derive_metric_observations(
+            (MetricRequest("ETH", "eth.monetary.burn_30d_eth"),),
+            {("ETH", "eth.monetary.cumulative_burn_eth"): current},
+            {},
+            fetched_at="2026-09-01T00:00:00Z",
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(missing_values, {})
+        self.assertIn(("ETH", "eth.monetary.burn_30d_eth"), missing)
+
+    def test_failed_direct_burn_uses_cumulative_fallback_only_on_demand(self):
+        class DirectFailure:
+            def collect(self, _request):
+                from crypto_portfolio.providers.base import ProviderDiagnostic, ProviderUnavailable
+
+                raise ProviderUnavailable(
+                    "Ultrasound unavailable",
+                    diagnostic=ProviderDiagnostic(error_code="HTTP_429", status_code=429, detail="rate limited"),
+                )
+
+        class CumulativeProvider:
+            def collect(self, request):
+                return [{
+                    "asset": request.asset,
+                    "metric_key": "eth.monetary.cumulative_burn_eth",
+                    "value": 100,
+                    "unit": "ETH",
+                    "period": "current",
+                    "observed_at": "2026-09-01T00:00:00Z",
+                    "fetched_at": "2026-09-01T00:00:00Z",
+                    "source": "etherscan",
+                    "confidence": "MEDIUM",
+                    "metadata": {"methodology": "Etherscan documented wei counter converted to ETH"},
+                }]
+
+        prior = MetricObservation(
+            stable_observation_id("ETH", "eth.monetary.cumulative_burn_eth", "2026-08-02T00:00:00Z", "etherscan", 80),
+            "ETH", "eth.monetary.cumulative_burn_eth", "fundamentals", 80, "ETH", "current",
+            "2026-08-02T00:00:00Z", "2026-08-02T00:00:00Z", "etherscan", "CURRENT", "MEDIUM",
+            metadata={"methodology": "Etherscan documented wei counter converted to ETH"},
+        )
+        plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
+            MetricRequest("ETH", "eth.monetary.burn_30d_eth"),
+        ))
+        config = {
+            "providers": {
+                "ultrasound_money": {"enabled": True},
+                "etherscan": {"enabled": True},
+            },
+            "cache_ttl_seconds": {"default": 3600},
+            "network": {"max_requests_per_review": 60, "max_requests_per_provider": 30},
+            "fallback": {"allow_web": False},
+        }
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"ultrasound_money": DirectFailure(), "etherscan": CumulativeProvider()},
+                    config=config,
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(
+                plan,
+                mode="REFRESH",
+                as_of="2026-09-01T00:00:00Z",
+                now="2026-09-01T00:00:00Z",
+                cached_observations=(prior,),
+            )
+        self.assertEqual(result.results[0].status, "SUCCESS")
+        self.assertEqual(result.observations[0].source, "python-derived")
+        self.assertEqual([item["provider"] for item in result.attempts], ["ultrasound_money", "etherscan"])
+
+    def test_burn_to_issuance_is_python_derived_only(self):
+        from crypto_portfolio.providers.routes import provider_chain
+
+        self.assertEqual(provider_chain("eth.monetary.burn_to_issuance_30d", "ETH"), ())
+        expanded = _expand_derived_dependencies(MetricCollectionPlan(
+            "SNAPSHOT_REVIEW",
+            (MetricRequest("ETH", "eth.monetary.burn_to_issuance_30d"),),
+        ))
+        self.assertEqual(
+            {item.metric_key for item in expanded.requests},
+            {"eth.monetary.burn_to_issuance_30d", "eth.monetary.burn_30d_eth", "eth.monetary.issuance_30d_eth"},
+        )
+
     def test_registry_scope_and_fdv_not_applicable(self):
         self.assertEqual(metric_definition("eth.monetary.current_supply_eth").asset_scope, ("ETH",))
         self.assertFalse(metric_definition("valuation.fdv").applies_to("ETH"))

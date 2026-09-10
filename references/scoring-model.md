@@ -17,6 +17,14 @@ regime, and technical execution timing are separate gates or overlays. They may
 reduce eligibility, confidence, target size, or deployment, but cannot change
 the base score.
 
+`SCORING_FACTOR` is an ownership role, not a requirement declaration. The
+scoring coverage denominator contains only metrics whose resolved availability
+is `REQUIRED`; optional metrics are enrichment when present and missing
+optional/premium data is excluded. Positioning, cycle, execution, structural,
+and event-risk metrics are context or gate evidence and never enter base-score
+coverage. A factor remains incomplete when its required evidence is missing,
+even if optional enrichment is available.
+
 ## Scoring profiles
 
 The default profiles share eight canonical factor keys:
@@ -242,7 +250,11 @@ long-structure context and do not block a 3–6 month decision when history is
 unavailable. ETH staking uses exact `active_effective_stake_*` names only;
 staking quantity/change/APR/participation remains optional until a documented
 aggregate source proves the denominator. `fundamentals.active_users` for BNB
-is optional because active addresses are not users.
+is optional because active addresses are not users, and BNB
+`onchain.active_addresses` is optional because no exact provider methodology is
+substituted. ETH `eth.monetary.burn_30d_eth` and its required
+`burn_to_issuance_30d` dependency remain required scoring evidence; optional
+staking enrichment cannot mask either gap.
 
 ### Data Confidence
 

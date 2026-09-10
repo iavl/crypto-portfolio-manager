@@ -219,6 +219,16 @@ to be included, and remains separate from Ethereum L2 statistics.
 BTC/BNB transfer volume remains the catalog-checked Coin Metrics
 `TxTfrValAdjUSD` route where supported; that methodology is not used for ETH.
 
+`BNB onchain.transaction_count` uses the public BSC JSON-RPC route. Python
+resolves the block range for the latest completed UTC day, applies the
+configured confirmation buffer, batches
+`eth_getBlockTransactionCountByNumber`, and sums one count per canonical block.
+This is exact block transaction count, not active-address or transfer-volume
+data. Pending transactions and the incomplete current day are excluded. The
+daily range, ending block hash, and completed boundary are cached so later
+requests extend and continuity-check the local history; failed continuity or
+insufficient bounded history remains unavailable.
+
 `eth.staking.active_effective_stake_pct` is
 `active_effective_stake_eth / current_supply_eth`, with time-aligned inputs.
 30D and 90D active-stake changes use the current observation minus the closest
@@ -294,8 +304,10 @@ protocol-development/governance-context changes, not DAO governance.
 
 Structured event transports remain bounded and source-specific: GitHub commit
 requests use the review window as `since`/`until`, and Aave Discourse follows
-same-origin `more_topics_url` pagination only up to its configured page cap.
-Reaching that cap leaves the source incomplete. `NO_STRUCTURED_TRANSPORT` means
+same-origin `more_topics_url` pagination until a reliable ordered `created_at`
+page crosses the requested lookback boundary or until its configured page cap.
+Reaching that cap before window coverage leaves the source incomplete.
+`NO_STRUCTURED_TRANSPORT` means
 the fixed source has no configured supported structured endpoint; it is not a
 DNS, TLS, HTTP, or provider transport failure.
 
@@ -345,7 +357,7 @@ mention counts/changes, and market fear/greed are lower-authority context.
 Unstructured posts may support a short low-confidence narrative, but never
 become a fabricated numeric metric or a standalone trade trigger.
 
-LunarCrush v4 supplies the active structured social route when
+LunarCrush v4 supplies the optional structured social route when
 `LUNARCRUSH_API_KEY` has endpoint entitlement. `posts_active` is the explicit
 operational proxy for social volume/mentions. Sentiment and attention
 percentiles are empirical midranks inside each asset's trailing 90 completed
@@ -355,6 +367,12 @@ Ethereum protocol readiness is separate from historical metric availability.
 The default `ethereum_protocol` RPC probe reads one latest block; exact burn
 math still requires a bounded caller-supplied block batch, and normal reviews
 do not fan out over every block in a 30D or 365D window.
+
+The normal metric plan does not request LunarCrush social metrics unless
+`optional_context.collect_optional_social` is enabled. Rated inactivity,
+LunarCrush entitlement/rate-limit errors, and BNB active-address unsupported
+results remain provider diagnostics or optional `SKIPPED` events; they do not
+reduce required scoring coverage.
 
 ### BTC cycle and on-chain context
 

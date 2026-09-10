@@ -63,6 +63,10 @@
       }
     },
     "optional_data": {"type": "array", "items": {"type": "object"}},
+    "decision_blocking_failures": {"type": "array", "items": {"type": "object"}},
+    "required_scoring_failures": {"type": "array", "items": {"type": "object"}},
+    "optional_data_unavailable": {"type": "array", "items": {"type": "object"}},
+    "provider_operational_failures": {"type": "array", "items": {"type": "object"}},
     "script_failures": {
       "type": "array",
       "items": {

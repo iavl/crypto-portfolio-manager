@@ -287,6 +287,40 @@ class ReportFailureTests(unittest.TestCase):
         self.assertNotIn("raw-provider-body", encoded)
         self.assertNotIn("Authorization", encoded)
 
+    def test_report_separates_decision_required_optional_and_provider_failures(self):
+        failed = result("ETH", "fundamentals.tvl", reason="required provider unavailable")
+        skipped = result(
+            "ETH", "eth.staking.staking_apr_7d", "SKIPPED",
+            reason="OPTIONAL_PROVIDER_UNAVAILABLE: Rated subscription is not active",
+        )
+        acq = AcquisitionResult(
+            MetricCollectionPlan("SNAPSHOT_REVIEW", tuple(
+                MetricRequest(item.event.asset, item.event.metric_key) for item in (failed, skipped)
+            )),
+            (failed, skipped),
+            summary={
+                "optional_data": [{
+                    "asset": "ETH",
+                    "metric_key": "eth.staking.staking_apr_7d",
+                    "status": "SKIPPED",
+                    "reason": "Rated subscription is not active",
+                }],
+                "provider_operational_failures": [{
+                    "provider": "rated",
+                    "status": "PROVIDERUNAVAILABLE",
+                    "error_code": "RATED_SUBSCRIPTION_INACTIVE",
+                }],
+            },
+        )
+        packet = build_report_packet(report_decision(), acquisition=acq)
+        self.assertEqual(len(packet.decision_blocking_failures), 0)
+        self.assertEqual(len(packet.required_scoring_failures), 1)
+        self.assertEqual(len(packet.optional_data_unavailable), 1)
+        self.assertEqual(packet.provider_operational_failures[0]["error_code"], "RATED_SUBSCRIPTION_INACTIVE")
+        output = build_final_review_output(packet, acquisition=acq)
+        self.assertIn("optional_data_unavailable", output["debug_report"])
+        self.assertIn("provider_operational_failures", output["debug_report"])
+
 
 if __name__ == "__main__":
     unittest.main()

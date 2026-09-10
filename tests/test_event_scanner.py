@@ -73,6 +73,24 @@ class EventScannerTests(unittest.TestCase):
         self.assertEqual(complete.source_coverage["coverage_rule"], "ONCHAIN_AND_ONE_OFFCHAIN")
         self.assertEqual(complete.source_coverage["coverage_state"], "SUFFICIENT")
 
+    def test_aave_governance_accepts_one_complete_offchain_url_per_group(self):
+        scanner = EventScanner()
+        requests = scanner.build_requests("AAVE", "governance", AS_OF)
+        offchain = [request for request in requests if request.source_group == "aave-governance-offchain"]
+        onchain = next(request for request in requests if request.source_group == "aave-governance-onchain")
+        responses = tuple(
+            EventSourceScanResponse(
+                request.source_id,
+                request is onchain or request is offchain[0],
+                AS_OF,
+                (),
+                None if request is onchain or request is offchain[0] else "source unavailable",
+            )
+            for request in requests
+        )
+        result = scanner.scan("AAVE", "governance", AS_OF, responses=responses)
+        self.assertEqual(result.source_coverage["coverage_state"], "SUFFICIENT")
+
     def test_excluded_asset_has_no_event_source_requests(self):
         scanner = EventScanner()
         self.assertEqual(scanner.build_requests("LUNC", "security", AS_OF), ())

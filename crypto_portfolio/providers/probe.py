@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable, Mapping
 from .alternative_me import BASE_URL as ALTERNATIVE_BASE_URL
 from .bgeometrics import BASE_URL as BGEOMETRICS_BASE_URL, MVRV_ZSCORE_PATH, BGeometricsProvider
 from .blockchair import BASE_URL as BLOCKCHAIR_BASE_URL, ETHEREUM_STATS_PATH, BlockchairProvider
+from .bnb_rpc import BNBRPCProvider
 from .ethereum_beacon import EthereumBeaconProvider, NODE_VERSION_PATH
 from .rated import DAILY_REWARDS_PATH, RatedProvider
 from .base import ProviderRequest, ProviderResponseError
@@ -344,6 +345,26 @@ def probe_provider(
                 "required_execution_fields": True,
                 "blob_fields_present": captured["value"]["blob_fields_present"],
                 "normalization": "OK",
+            })
+        return (_with_config(result, client),)
+    if name == "bnb_rpc" and isinstance(provider, BNBRPCProvider):
+        endpoint = provider.rpc_url
+
+        def call() -> Any:
+            return provider.probe()
+
+        result = _probe_call(
+            "bnb_rpc",
+            endpoint,
+            call,
+            method="POST",
+            validate=_require_mapping,
+        )
+        if "error_code" not in result:
+            result.update({
+                "asset": "BNB",
+                "metric": "onchain.transaction_count",
+                "completed_day_excluded": True,
             })
         return (_with_config(result, client),)
     if client is None or not hasattr(client, "get_json"):

@@ -143,10 +143,10 @@ HTTP_5XX / CONNECTION_RESET
   -> 临时上游/网络故障
 
 HTTP_402 / ENTITLEMENT_REQUIRED / PROVIDER_PLAN_RESTRICTED
-  -> 订阅或 Provider 权限不足；只有明确 optional/premium social metric 才可 SKIPPED
+  -> 订阅或 Provider 权限不足；只有明确 optional/premium metric 才可 SKIPPED
 
 RATED_SUBSCRIPTION_INACTIVE
-  -> Rated 返回 401 Subscription is not active；仍是 FAILED，须由用户激活后再 probe
+  -> Rated 返回 401 Subscription is not active；affected staking metrics 为 optional SKIPPED，provider attempt 保留诊断
 
 RATE_LIMITED / HTTP_429
   -> provider rate limit；保留 retryable，不填零、不当作成功
@@ -317,16 +317,20 @@ python3 scripts/providers.py --probe bgeometrics --asset BTC
 python3 scripts/providers.py --probe lunarcrush --asset BTC
 python3 scripts/providers.py --probe ethereum_protocol --asset ETH
 python3 scripts/providers.py --probe rated --asset ETH
+python3 scripts/providers.py --probe bnb_rpc --asset BNB
 python3 scripts/providers.py --probe ethereum_beacon --asset ETH
 python3 scripts/providers.py --probe ultrasound_money --asset ETH
 python3 scripts/providers.py --probe etherscan --asset ETH
 ```
 
-Coin Metrics 输出按 asset 显示真实 1D catalog；LunarCrush 使用 API v4
+Coin Metrics 输出按 asset 显示真实 1D catalog；BNB RPC probe 只读取一个确认的
+block，不触发日级 backfill；LunarCrush 使用 API v4
 Bearer credential，同一 asset 的 social metrics 共用一次 time-series request，
 并把 402/429/circuit 分别记录为 `ENTITLEMENT_REQUIRED`/`RATE_LIMITED`/`CIRCUIT_OPEN`。
 Rated 401 body `{"detail":"Subscription is not active."}` 记录为
-`RATED_SUBSCRIPTION_INACTIVE`，不会伪造成 `SKIPPED_PREMIUM`。Ethereum protocol probe 只读取一个 latest block。数值历史缺失保持
+`RATED_SUBSCRIPTION_INACTIVE`，对应 optional staking metric 归一化为
+`SKIPPED`；provider attempt 仍保留诊断。普通 metric plan 默认不请求
+LunarCrush，显式 `--probe` 仍保留真实错误诊断。Ethereum protocol probe 只读取一个 latest block。数值历史缺失保持
 `PROVIDER_INSUFFICIENT_HISTORY`，不会生成 Web 请求。
 
 BGeometrics 不需要 key；LunarCrush 需要 `LUNARCRUSH_API_KEY`；Rated 需要
@@ -334,6 +338,11 @@ BGeometrics 不需要 key；LunarCrush 需要 `LUNARCRUSH_API_KEY`；Rated 需�
 `ETHEREUM_RPC_URL` 或默认 PublicNode 地址。
 缺少这些可选配置时，`--status`/`--doctor` 会显示未准备状态，不会将
 provider failure 变成零值。
+
+报告调试栏按四类展示：`decision_blocking_failures`、
+`required_scoring_failures`、`optional_data_unavailable` 和
+`provider_operational_failures`。只有前两类进入决策语义；optional/context
+缺口不会进入适用评分分母。
 
 ## 合并前检查清单
 

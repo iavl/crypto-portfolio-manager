@@ -183,6 +183,7 @@ class ProviderRouter:
     def _default_providers(self) -> dict[str, Any]:
         from .alternative_me import AlternativeMeProvider
         from .bgeometrics import BGeometricsProvider
+        from .bnb_rpc import BASE_URL as BNB_RPC_DEFAULT_URL, BNBRPCProvider
         from .binance import BinanceProvider
         from .bybit import BybitProvider
         from .coinmetrics import CoinMetricsProvider
@@ -217,6 +218,17 @@ class ProviderRouter:
             "growthepie": GrowthepieProvider(client=client),
             "ultrasound_money": UltrasoundMoneyProvider(client=client),
         }
+        if provider_enabled("bnb_rpc", self.config):
+            settings = self.config.get("providers", {}).get("bnb_rpc", {})
+            base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
+            rpc_url = os.environ.get(base_url_env) if base_url_env else None
+            providers["bnb_rpc"] = BNBRPCProvider(
+                client=client,
+                rpc_url=rpc_url or (
+                    settings.get("base_url_default") if isinstance(settings, Mapping) else None
+                ) or BNB_RPC_DEFAULT_URL,
+                cache=self.cache,
+            )
         if provider_enabled("ethereum_protocol", self.config):
             settings = self.config.get("providers", {}).get("ethereum_protocol", {})
             base_url_env = settings.get("base_url_env") if isinstance(settings, Mapping) else None
@@ -517,7 +529,7 @@ class ProviderRouter:
                         method=str(diagnostic.get("method", "GET")),
                         attempt=int(diagnostic.get("attempt", 1)),
                         error_code=str(diagnostic.get("error_code")) if diagnostic.get("error_code") else classify_transport_error(exc),
-                        exception_class=str(diagnostic.get("exception_class", exc.__class__.__name__)),
+                        exception_class=str(diagnostic.get("exception_class") or exc.__class__.__name__),
                         detail=str(diagnostic.get("detail", reason)),
                         retryable=diagnostic.get("retryable"),
                         status_code=diagnostic.get("status_code"),

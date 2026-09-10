@@ -16,7 +16,7 @@ _SECRET_FIELDS = {
     "api_key", "api_secret", "authorization", "password", "token",
     "x_soso_api_key", "x_cg_demo_api_key", "coingecko_api_key",
 }
-_CONFIG_FIELDS = {"providers", "cache_ttl_seconds", "network", "fallback"}
+_CONFIG_FIELDS = {"providers", "cache_ttl_seconds", "network", "fallback", "optional_context"}
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -105,6 +105,13 @@ def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(fallback, Mapping) or not isinstance(fallback.get("allow_web", True), bool):
         raise ValueError("provider fallback allow_web must be boolean")
     result["fallback"] = {"allow_web": fallback.get("allow_web", True)}
+    optional_context = result.get("optional_context", {})
+    if not isinstance(optional_context, Mapping):
+        raise ValueError("provider optional_context must be an object")
+    collect_optional_social = optional_context.get("collect_optional_social", False)
+    if not isinstance(collect_optional_social, bool):
+        raise ValueError("provider optional_context.collect_optional_social must be boolean")
+    result["optional_context"] = {"collect_optional_social": collect_optional_social}
     return result
 
 

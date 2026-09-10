@@ -8,7 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, TextIO
 
-from .metric_availability import metric_availability
+from .metric_availability import contributes_to_scoring_coverage, metric_availability
 from .engine.metric_plan import DERIVED_METRIC_DEPENDENCIES
 from .metrics_registry import REVIEW_TYPES, metric_definition
 from .models.metrics_history import CollectionEvent, MetricObservation
@@ -60,7 +60,7 @@ _ERROR_CODE_DESCRIPTIONS = {
     "INSUFFICIENT_SOURCE_COVERAGE": "required event sources were not all reachable",
     "NO_PROVIDER_ROUTE": "no structured provider route was configured",
     "PROVIDER_DISABLED": "provider is disabled or unavailable",
-    "PROVIDER_INSUFFICIENT_HISTORY": "provider returned insufficient history",
+    "PROVIDER_INSUFFICIENT_HISTORY": "provider could not provide the bounded history required by the methodology",
     "PROVIDER_NOT_APPLICABLE": "provider does not apply to this metric",
     "PROVIDER_PLAN_RESTRICTED": "provider plan does not permit this metric",
     "UNAVAILABLE_BY_METHODOLOGY": "provider data cannot support the required methodology",
@@ -72,6 +72,9 @@ _ERROR_CODE_DESCRIPTIONS = {
     "TLS_CERTIFICATE_VERIFY_FAILED": "provider TLS certificate verification failed",
     "CIRCUIT_OPEN": "provider circuit is open after transient failures",
     "REQUEST_BUDGET_EXHAUSTED": "provider request budget was exhausted",
+    "RPC_BLOCK_TIMESTAMP_SEARCH_LIMIT": "RPC block timestamp search exceeded its safety bound",
+    "RPC_BLOCK_TIMESTAMP_LIMIT": "RPC returned too many blocks requiring timestamp resolution",
+    "RPC_LOG_REQUEST_LIMIT": "RPC log range exceeded its safety bound",
 }
 
 
@@ -216,10 +219,18 @@ def _attempt_matches(attempt: Mapping[str, Any], event: CollectionEvent) -> bool
     metric_keys = attempt.get("metric_keys", ())
     if isinstance(metric_keys, str):
         metric_keys = (metric_keys,)
-    return (
+    direct = (
         asset == event.asset
         and isinstance(metric_keys, (list, tuple))
         and event.metric_key in {str(key).strip().lower() for key in metric_keys}
+    )
+    return direct or (
+        event.asset == "ETH"
+        and event.metric_key == "eth.monetary.burn_30d_eth"
+        and asset == "ETH"
+        and isinstance(metric_keys, (list, tuple))
+        and "eth.monetary.cumulative_burn_eth" in {str(key).strip().lower() for key in metric_keys}
+        and str(attempt.get("provider", "")).strip().lower() == "etherscan"
     )
 
 
@@ -493,8 +504,8 @@ def collection_summary(
     ]
     applicable = [
         event for event in scoring_events
-        if event.status != "NOT_APPLICABLE"
-        and not (event.status == "SKIPPED" and metric_availability(event.asset, event.metric_key).is_skippable)
+        if contributes_to_scoring_coverage(event.asset, event.metric_key)
+        and event.status != "NOT_APPLICABLE"
     ]
     if isinstance(resolved_policy, Mapping):
         policy_weights = dict(resolved_policy["scoring_profiles"]["default"])

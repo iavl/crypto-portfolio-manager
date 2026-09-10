@@ -8,6 +8,11 @@
     },
     "coinmetrics_community": {"enabled": true},
     "blockchair": {"enabled": true},
+    "bnb_rpc": {
+      "enabled": true,
+      "base_url_env": "BNB_RPC_URL",
+      "base_url_default": "https://bsc-dataseed.bnbchain.org"
+    },
     "bgeometrics": {"enabled": true},
     "defillama": {"enabled": true},
     "growthepie": {"enabled": true},
@@ -78,5 +83,8 @@
   },
   "fallback": {
     "allow_web": true
+  },
+  "optional_context": {
+    "collect_optional_social": false
   }
 }

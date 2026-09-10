@@ -58,6 +58,12 @@ class Client:
         self.calls.append(("POST", url, json_body, idempotent))
         if json_body["method"] == "eth_blockNumber":
             return {"jsonrpc": "2.0", "id": 1, "result": "0x100"}
+        if json_body["method"] == "eth_getBlockByNumber":
+            return {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {"number": json_body["params"][0], "timestamp": hex(1788912000)},
+            }
         return {"jsonrpc": "2.0", "id": 2, "result": [{
             "address": BNB_GOVERNOR_ADDRESS,
             "topics": [RPC_EVENT_TOPICS[0], "0x01"],
@@ -119,7 +125,7 @@ class StructuredTransportTests(unittest.TestCase):
         self.assertTrue(result.complete_for_source)
         self.assertEqual(set(ids), {"discourse:101", "discourse:102"})
         self.assertEqual(ids.count("discourse:101"), 1)
-        self.assertIn("https://governance.aave.com/c/risk/7.json?page=1", urls)
+        self.assertTrue(any("https://governance.aave.com/c/risk/7.json" in url and "page=1" in url for url in urls))
         self.assertNotIn("https://evil.example/", " ".join(urls))
 
     def test_discourse_page_bound_is_incomplete_and_cached_as_incomplete(self):
@@ -151,6 +157,42 @@ class StructuredTransportTests(unittest.TestCase):
         self.assertIn("DISCOURSE_PAGINATION_LIMIT", first.error or "")
         self.assertFalse(second.complete_for_source)
         self.assertEqual(len(client.calls), calls)
+
+    def test_discourse_stops_when_ordered_created_window_is_covered(self):
+        class Window(Client):
+            def get_json(self, url, *, params=None, headers=None):
+                self.calls.append(("GET", url, params, headers))
+                if "page=1" in url:
+                    return {
+                        "topic_list": {
+                            "topics": [{
+                                "id": 401,
+                                "title": "Boundary",
+                                "created_at": "2026-08-09T00:00:00Z",
+                                "url": "/t/boundary/401",
+                            }],
+                            "more_topics_url": "/c/risk/7?page=2",
+                        }
+                    }
+                return {
+                    "topic_list": {
+                        "topics": [{
+                            "id": 400,
+                            "title": "Recent",
+                            "created_at": "2026-09-08T00:00:00Z",
+                            "url": "/t/recent/400",
+                        }],
+                        "more_topics_url": "/c/risk/7?page=1",
+                    }
+                }
+
+        client = Window()
+        request = self.request("AAVE", "security", "aave-security")
+        result = StructuredEventTransport(client=client).fetch_result(request)
+        urls = [call[1] for call in client.calls]
+        self.assertTrue(result.complete_for_source)
+        self.assertEqual(len(urls), 4)
+        self.assertFalse(any("page=2" in url for url in urls))
 
     def test_cross_origin_discourse_pagination_is_rejected(self):
         class Evil(Client):
@@ -215,6 +257,12 @@ class StructuredTransportTests(unittest.TestCase):
                 self.calls.append(("POST", url, json_body, idempotent))
                 if json_body["method"] == "eth_blockNumber":
                     return {"jsonrpc": "2.0", "id": 1, "result": "0x100"}
+                if json_body["method"] == "eth_getBlockByNumber":
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "result": {"number": json_body["params"][0], "timestamp": hex(1788912000)},
+                    }
                 return {"jsonrpc": "2.0", "id": 2, "result": [{
                     "address": AAVE_GOVERNANCE_V3_ADDRESS,
                     "topics": [AAVE_GOVERNANCE_V3_EVENT_TOPICS[0], "0x07"],

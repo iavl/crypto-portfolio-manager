@@ -392,6 +392,16 @@ export ETHEREUM_RPC_URL='https://ethereum-rpc.publicnode.com'
 配置存在不代表 provider 一定可用；应同时检查 adapter、credential、runtime
 status 和实际 probe 结果。
 
+普通复盘默认不请求 LunarCrush social metrics。若确实需要这类 optional
+positioning context，可在 provider 配置中启用：
+
+```json
+{"optional_context": {"collect_optional_social": true}}
+```
+
+Rated staking、BNB active-address 和 social 的不可用状态会在报告的
+optional/context 区域显示，不会伪造成 required scoring failure。
+
 安全检查不会输出 key 值：
 
 python3 scripts/providers.py --status
@@ -406,6 +416,7 @@ python3 scripts/providers.py --probe lunarcrush --asset ETH
 python3 scripts/providers.py --probe rated --asset ETH
 python3 scripts/providers.py --probe ethereum_beacon --asset ETH
 python3 scripts/providers.py --probe ethereum_protocol --asset ETH
+python3 scripts/providers.py --probe bnb_rpc --asset BNB
 
 ## 15. 开发检查
 

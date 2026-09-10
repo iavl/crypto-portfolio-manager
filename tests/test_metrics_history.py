@@ -58,6 +58,20 @@ class MetricHistoryTests(unittest.TestCase):
         self.assertAlmostEqual(summary["policy_weighted_coverage"], 0.70)
         self.assertNotEqual(summary["per_request_coverage"], summary["policy_weighted_coverage"])
 
+    def test_optional_fundamentals_observation_cannot_mask_required_gaps(self):
+        optional = MetricObservation(
+            stable_observation_id(
+                "ETH", "eth.staking.staking_apr_7d", "2026-09-01T00:00:00Z", "rated", 0.03,
+            ),
+            "ETH", "eth.staking.staking_apr_7d", "fundamentals", 0.03, "fraction", "7d",
+            "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "rated", "CURRENT", "MEDIUM",
+        )
+        from crypto_portfolio.engine.metric_history import build_facts_for_asset
+
+        facts = build_facts_for_asset((optional,), "ETH")["fundamentals"]
+        self.assertEqual(facts.coverage, 0.0)
+        self.assertTrue(any(item.startswith("MISSING_REQUIRED:") for item in facts.data_quality_flags))
+
     def test_model_validation_and_stable_identity(self):
         first_id = stable_observation_id("eth", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100)
         self.assertEqual(first_id, stable_observation_id("ETH", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100.0))

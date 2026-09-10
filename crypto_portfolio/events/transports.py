@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from ..models.time import normalize_timestamp, parse_timestamp
 from ..providers.base import ProviderResponseError
 from ..providers.http import HttpClient, redact_log, redact_secrets
+from ..providers.rpc import MAX_RPC_TIMESTAMP_SEARCH, find_block_at_or_before_timestamp
 from ..state.market_data import _atomic_write
 from ..state.snapshots import runtime_data_dir
 from .scanner import EventSourceScanRequest, EventSourceScanResponse
@@ -33,8 +34,9 @@ MAX_CANDIDATES = 100
 MAX_GITHUB_PAGES = 3
 MAX_DISCOURSE_PAGES = 10
 GITHUB_PAGE_SIZE = 100
-MAX_RPC_BLOCK_RANGE = 500
+MAX_RPC_BLOCK_RANGE = 5_000
 MAX_RPC_TIMESTAMP_REQUESTS = 64
+MAX_RPC_LOG_REQUESTS = 256
 BNB_GOVERNOR_ADDRESS = "0x0000000000000000000000000000000000002004"
 BNB_RPC_ENDPOINT = "https://bsc-dataseed.bnbchain.org"
 BNB_RPC_ENDPOINTS = (BNB_RPC_ENDPOINT, "https://bsc-dataseed-public.bnbchain.org")
@@ -398,7 +400,10 @@ def _rss_candidates(text: str, spec: EventTransportSpec) -> tuple[EventCandidate
     return _dedup(candidates, spec)
 
 
-def _discourse_page(payload: Any, spec: EventTransportSpec) -> tuple[tuple[EventCandidate, ...], object | None]:
+def _discourse_page(
+    payload: Any,
+    spec: EventTransportSpec,
+) -> tuple[tuple[EventCandidate, ...], object | None, str | None, bool]:
     if not isinstance(payload, Mapping) or not isinstance(payload.get("topic_list"), Mapping):
         raise ProviderResponseError("Discourse response has no topic_list")
     topic_list = payload["topic_list"]
@@ -406,10 +411,13 @@ def _discourse_page(payload: Any, spec: EventTransportSpec) -> tuple[tuple[Event
     if not isinstance(topics, list):
         raise ProviderResponseError("Discourse response has no topic array")
     candidates = []
+    created_timestamps: list[str] = []
     for item in topics:
         if not isinstance(item, Mapping):
             continue
-        published = _date_from(item.get("created_at") or item.get("last_posted_at"))
+        published = _date_from(item.get("created_at"))
+        if published is not None:
+            created_timestamps.append(published)
         topic_id = item.get("id")
         title = item.get("title")
         url = item.get("url")
@@ -421,7 +429,11 @@ def _discourse_page(payload: Any, spec: EventTransportSpec) -> tuple[tuple[Event
             f"discourse:{topic_id}", title, published, url,
             _bounded(item.get("excerpt") or item.get("fancy_title")),
         ))
-    return _dedup(candidates, spec), topic_list.get("more_topics_url")
+    oldest = min(created_timestamps, key=parse_timestamp) if created_timestamps else None
+    ordered_descending = all(
+        left >= right for left, right in zip(created_timestamps, created_timestamps[1:])
+    )
+    return _dedup(candidates, spec), topic_list.get("more_topics_url"), oldest, ordered_descending
 
 
 def _discourse_pagination_endpoint(value: Any, base_endpoint: str) -> str:
@@ -434,8 +446,24 @@ def _discourse_pagination_endpoint(value: Any, base_endpoint: str) -> str:
     path = candidate.path.rstrip("/") or "/"
     if not path.lower().endswith(".json"):
         path += ".json"
-    query = urlencode(parse_qsl(candidate.query, keep_blank_values=True))
+    query_values = [
+        (key, value)
+        for key, value in parse_qsl(candidate.query, keep_blank_values=True)
+        if key not in {"order", "ascending"}
+    ]
+    query = urlencode((*query_values, ("order", "created"), ("ascending", "false")))
     return urlunsplit((base.scheme, base.netloc, path, query, ""))
+
+
+def _discourse_window_endpoint(endpoint: str) -> str:
+    parts = urlsplit(endpoint)
+    query_values = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key not in {"order", "ascending"}
+    ]
+    query_values.extend((("order", "created"), ("ascending", "false")))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_values), ""))
 
 
 def _rpc_candidates(
@@ -495,9 +523,24 @@ def _rpc_block_timestamp(value: Any) -> str:
         raise ProviderResponseError("RPC block timestamp is malformed")
     try:
         timestamp = int(value, 16)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise ProviderResponseError("RPC block timestamp is malformed") from exc
-    return normalize_timestamp(datetime.fromtimestamp(timestamp, timezone.utc).isoformat(), "block timestamp")
+    try:
+        return normalize_timestamp(datetime.fromtimestamp(timestamp, timezone.utc).isoformat(), "block timestamp")
+    except (OverflowError, OSError, ValueError) as exc:
+        raise ProviderResponseError("RPC block timestamp is malformed") from exc
+
+
+def _rpc_block_number(value: Any, field: str = "RPC block number") -> int:
+    if not isinstance(value, str) or not value.startswith("0x"):
+        raise ProviderResponseError(f"{field} is malformed")
+    try:
+        number = int(value, 16)
+    except ValueError as exc:
+        raise ProviderResponseError(f"{field} is malformed") from exc
+    if number < 0:
+        raise ProviderResponseError(f"{field} is malformed")
+    return number
 
 
 class EventTransportCache:
@@ -595,8 +638,10 @@ class StructuredEventTransport:
             return EventTransportResult(spec.source_id, spec.kind, spec.endpoint, True, True, checked_at, _rss_candidates(text, spec))
         if spec.kind == "DISCOURSE_JSON":
             endpoint = spec.endpoint if spec.endpoint.endswith(".json") else spec.endpoint.rstrip("/") + ".json"
+            endpoint = _discourse_window_endpoint(endpoint)
             current_endpoint = endpoint
             candidates: list[EventCandidate] = []
+            previous_oldest_created: str | None = None
 
             def incomplete(error: str) -> EventTransportResult:
                 return EventTransportResult(
@@ -618,7 +663,7 @@ class StructuredEventTransport:
                         raise
                     return incomplete(redact_log(f"PROVIDER_TRANSPORT_ERROR: {exc}") or "PROVIDER_TRANSPORT_ERROR")
                 try:
-                    page_candidates, more_topics_url = _discourse_page(payload, spec)
+                    page_candidates, more_topics_url, oldest_created, ordered_descending = _discourse_page(payload, spec)
                 except Exception as exc:
                     if page == 0:
                         raise
@@ -634,6 +679,26 @@ class StructuredEventTransport:
                         checked_at,
                         _dedup(candidates, spec),
                     )
+                page_ordered = (
+                    oldest_created is not None
+                    and ordered_descending
+                    and (
+                        previous_oldest_created is None
+                        or parse_timestamp(oldest_created) <= parse_timestamp(previous_oldest_created)
+                    )
+                )
+                if oldest_created is not None and page_ordered and parse_timestamp(oldest_created) <= parse_timestamp(spec.lookback_start):
+                    return EventTransportResult(
+                        spec.source_id,
+                        spec.kind,
+                        endpoint,
+                        True,
+                        True,
+                        checked_at,
+                        _dedup(candidates, spec),
+                    )
+                if oldest_created is not None:
+                    previous_oldest_created = oldest_created
                 if page == self.max_discourse_pages - 1:
                     return incomplete("DISCOURSE_PAGINATION_LIMIT")
                 try:
@@ -663,29 +728,51 @@ class StructuredEventTransport:
                 )
             if not isinstance(latest, Mapping) or not isinstance(latest.get("result"), str):
                 raise ProviderResponseError("RPC latest block response is malformed")
-            to_block = int(latest["result"], 16)
-            from_block = max(0, to_block - MAX_RPC_BLOCK_RANGE)
-            response = self.client.post_json(
+            to_block = _rpc_block_number(latest["result"], "RPC latest block number")
+            from_block = find_block_at_or_before_timestamp(
                 endpoint,
-                json_body={
-                    "jsonrpc": "2.0", "id": 2, "method": "eth_getLogs",
-                    "params": [{
-                        "address": contract_address,
-                        "fromBlock": hex(from_block),
-                        "toBlock": hex(to_block),
-                        "topics": [list(event_topics)],
-                    }],
-                },
-                idempotent=True,
+                spec.lookback_start,
+                to_block,
+                client=self.client,
             )
-            if isinstance(response, Mapping) and response.get("error") is not None:
-                error = response["error"] if isinstance(response["error"], Mapping) else {}
-                raise ProviderResponseError(
-                    f"RPC logs request rejected ({error.get('code', 'unknown')})"
+            logs: list[Any] = []
+            ranges = 0
+
+            def incomplete(error: str) -> EventTransportResult:
+                return EventTransportResult(
+                    spec.source_id,
+                    spec.kind,
+                    endpoint,
+                    True,
+                    False,
+                    checked_at,
+                    error=error,
                 )
-            if not isinstance(response, Mapping) or not isinstance(response.get("result"), list):
-                raise ProviderResponseError("RPC logs response is malformed")
-            logs = response["result"]
+
+            for chunk_start in range(from_block, to_block + 1, MAX_RPC_BLOCK_RANGE):
+                if ranges >= MAX_RPC_LOG_REQUESTS:
+                    return incomplete("RPC_LOG_REQUEST_LIMIT")
+                chunk_end = min(to_block, chunk_start + MAX_RPC_BLOCK_RANGE - 1)
+                response = self.client.post_json(
+                    endpoint,
+                    json_body={
+                        "jsonrpc": "2.0", "id": 100 + ranges, "method": "eth_getLogs",
+                        "params": [{
+                            "address": contract_address,
+                            "fromBlock": hex(chunk_start),
+                            "toBlock": hex(chunk_end),
+                            "topics": [list(event_topics)],
+                        }],
+                    },
+                    idempotent=True,
+                )
+                if isinstance(response, Mapping) and response.get("error") is not None:
+                    error = response["error"] if isinstance(response["error"], Mapping) else {}
+                    return incomplete(f"RPC_LOGS_CHUNK_REJECTED:{error.get('code', 'unknown')}")
+                if not isinstance(response, Mapping) or not isinstance(response.get("result"), list):
+                    return incomplete("RPC_LOGS_CHUNK_MALFORMED")
+                logs.extend(response["result"])
+                ranges += 1
             blocks = sorted({
                 str(item.get("blockNumber"))
                 for item in logs
@@ -694,15 +781,7 @@ class StructuredEventTransport:
                 and item.get("blockNumber") is not None
             })
             if len(blocks) > MAX_RPC_TIMESTAMP_REQUESTS:
-                return EventTransportResult(
-                    spec.source_id,
-                    spec.kind,
-                    endpoint,
-                    True,
-                    False,
-                    checked_at,
-                    error="RPC_BLOCK_TIMESTAMP_LIMIT",
-                )
+                return incomplete("RPC_BLOCK_TIMESTAMP_LIMIT")
             block_timestamps: dict[str, str] = {}
             for block in blocks:
                 block_response = self.client.post_json(
@@ -714,8 +793,11 @@ class StructuredEventTransport:
                     idempotent=True,
                 )
                 if not isinstance(block_response, Mapping) or not isinstance(block_response.get("result"), Mapping):
-                    raise ProviderResponseError("RPC block response is malformed")
-                block_timestamps[block] = _rpc_block_timestamp(block_response["result"].get("timestamp"))
+                    return incomplete("RPC_BLOCK_TIMESTAMP_MALFORMED")
+                try:
+                    block_timestamps[block] = _rpc_block_timestamp(block_response["result"].get("timestamp"))
+                except ProviderResponseError as exc:
+                    return incomplete(str(exc))
             return EventTransportResult(
                 spec.source_id,
                 spec.kind,
@@ -771,6 +853,8 @@ class StructuredEventTransport:
             if self.cache is not None:
                 self.cache.save(spec, result)
             results.append(result)
+            if result.complete_for_source and result.transport_kind == "RPC_LOGS":
+                break
         reachable = [item for item in results if item.reachable]
         complete = [item for item in reachable if item.complete_for_source]
         candidates: dict[str, EventCandidate] = {}
@@ -827,10 +911,13 @@ __all__ = [
     "MAX_DISCOURSE_PAGES",
     "MAX_CANDIDATES",
     "MAX_RPC_BLOCK_RANGE",
+    "MAX_RPC_LOG_REQUESTS",
     "MAX_RPC_TIMESTAMP_REQUESTS",
+    "MAX_RPC_TIMESTAMP_SEARCH",
     "RPC_EVENT_TOPICS",
     "StructuredEventTransport",
     "TRANSPORT_KINDS",
     "infer_transport_kind",
+    "find_block_at_or_before_timestamp",
     "structured_event_source_fetcher",
 ]

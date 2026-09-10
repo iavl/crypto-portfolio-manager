@@ -118,6 +118,25 @@ def build_report_packet(
     acquisition_summary = getattr(acquisition, "summary", None) if acquisition is not None else None
     if not isinstance(acquisition_summary, Mapping) and isinstance(acquisition, Mapping):
         acquisition_summary = acquisition.get("summary")
+    failed_data_fetches = build_failed_data_fetches(acquisition, review_type=packet.review_type)
+    optional_data = (
+        tuple(acquisition_summary.get("optional_data_unavailable", acquisition_summary.get("optional_data", ())))
+        if isinstance(acquisition_summary, Mapping) else ()
+    )
+    decision_blocking_failures = (
+        tuple(acquisition_summary.get("decision_blocking_failures", ()))
+        if isinstance(acquisition_summary, Mapping) and "decision_blocking_failures" in acquisition_summary
+        else tuple(item for item in failed_data_fetches if item.get("critical"))
+    )
+    required_scoring_failures = (
+        tuple(acquisition_summary.get("required_scoring_failures", ()))
+        if isinstance(acquisition_summary, Mapping) and "required_scoring_failures" in acquisition_summary
+        else tuple(item for item in failed_data_fetches if item.get("decision_role") == "SCORING_FACTOR")
+    )
+    provider_operational_failures = (
+        tuple(acquisition_summary.get("provider_operational_failures", ()))
+        if isinstance(acquisition_summary, Mapping) else ()
+    )
 
     return ReportPacket(
         review_type=packet.review_type,
@@ -133,8 +152,12 @@ def build_report_packet(
         sol_review=sol_review,
         critical_missing_data=packet.critical_missing_data,
         data_quality=data_quality or {},
-        failed_data_fetches=build_failed_data_fetches(acquisition, review_type=packet.review_type),
-        optional_data=tuple(acquisition_summary.get("optional_data", ())) if isinstance(acquisition_summary, Mapping) else (),
+        failed_data_fetches=failed_data_fetches,
+        optional_data=optional_data,
+        decision_blocking_failures=decision_blocking_failures,
+        required_scoring_failures=required_scoring_failures,
+        optional_data_unavailable=optional_data,
+        provider_operational_failures=provider_operational_failures,
         script_failures=_failed_script_executions(script_executions),
         positioning_summaries=positioning_summaries,
         btc_cycle_summary=btc_cycle_summary,
@@ -186,6 +209,10 @@ def build_final_review_output(
     collection = dict(acquisition_value.get("summary", {}))
     collection["failed_data_fetches"] = packet_value["failed_data_fetches"]
     collection["optional_data"] = packet_value["optional_data"]
+    collection["decision_blocking_failures"] = packet_value["decision_blocking_failures"]
+    collection["required_scoring_failures"] = packet_value["required_scoring_failures"]
+    collection["optional_data_unavailable"] = packet_value["optional_data_unavailable"]
+    collection["provider_operational_failures"] = packet_value["provider_operational_failures"]
     result = {
         "portfolio": {
             "current_weights": packet_value["current_weights"],
@@ -195,6 +222,10 @@ def build_final_review_output(
         "collection": collection,
         "debug_report": {
             "data_fetch_failures": packet_value["failed_data_fetches"],
+            "decision_blocking_failures": packet_value["decision_blocking_failures"],
+            "required_scoring_failures": packet_value["required_scoring_failures"],
+            "optional_data_unavailable": packet_value["optional_data_unavailable"],
+            "provider_operational_failures": packet_value["provider_operational_failures"],
             "script_failures": packet_value["script_failures"],
         },
         "scores": packet_value["scores"],

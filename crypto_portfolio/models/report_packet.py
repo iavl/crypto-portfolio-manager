@@ -341,6 +341,10 @@ class ReportPacket:
     effective_deployment_caps: Mapping[str, float] = field(default_factory=dict)
     failed_data_fetches: tuple[Mapping[str, Any], ...] = ()
     optional_data: tuple[Mapping[str, Any], ...] = ()
+    decision_blocking_failures: tuple[Mapping[str, Any], ...] = ()
+    required_scoring_failures: tuple[Mapping[str, Any], ...] = ()
+    optional_data_unavailable: tuple[Mapping[str, Any], ...] = ()
+    provider_operational_failures: tuple[Mapping[str, Any], ...] = ()
     script_failures: tuple[Mapping[str, Any], ...] = ()
     regime_confidence: ConfidenceResult | Mapping[str, Any] | None = None
     decision_confidence: DecisionConfidence | Mapping[str, Any] | None = None
@@ -392,6 +396,13 @@ class ReportPacket:
             object.__setattr__(self, field_name, freeze_packet_value(getattr(self, field_name), path=field_name))
         object.__setattr__(self, "failed_data_fetches", _failed_data_fetches(self.failed_data_fetches, review_type=review))
         object.__setattr__(self, "optional_data", _sequence(self.optional_data, "optional_data"))
+        for field_name in (
+            "decision_blocking_failures",
+            "required_scoring_failures",
+            "optional_data_unavailable",
+            "provider_operational_failures",
+        ):
+            object.__setattr__(self, field_name, _sequence(getattr(self, field_name), field_name))
         object.__setattr__(self, "script_failures", _script_failures(self.script_failures))
         if not isinstance(self.positioning_summaries, Mapping):
             raise ValueError("positioning_summaries must be an object")
@@ -485,6 +496,10 @@ class ReportPacket:
             "data_quality": thaw_packet_value(self.data_quality),
             "failed_data_fetches": thaw_packet_value(self.failed_data_fetches),
             "optional_data": thaw_packet_value(self.optional_data),
+            "decision_blocking_failures": thaw_packet_value(self.decision_blocking_failures),
+            "required_scoring_failures": thaw_packet_value(self.required_scoring_failures),
+            "optional_data_unavailable": thaw_packet_value(self.optional_data_unavailable),
+            "provider_operational_failures": thaw_packet_value(self.provider_operational_failures),
             "script_failures": thaw_packet_value(self.script_failures),
             "positioning_summaries": {
                 symbol: thaw_packet_value(summary)

@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from .data_collection import collection_summary
+from .data_collection import build_failed_data_fetches, collection_summary
 from .engine.factors.flows import classify_flow_state
 from .metric_availability import fallback_mode, metric_availability, skip_reason
 from .engine.derived_metrics import derive_metric_observations
@@ -31,7 +31,7 @@ from .providers.base import FetchMode
 from .providers.config import load_provider_config
 from .providers.http import redact_secrets
 from .providers.routes import current_delivery_basis, metric_is_mutable, metric_reuse_ttl_seconds, provider_chain
-from .providers.router import ProviderRouter
+from .providers.router import ProviderRouter, RouterResult
 from .state.metrics import latest_usable_observation, read_metric_observations
 
 
@@ -39,26 +39,6 @@ _EVENT_METRIC_KEYS = {
     "security": "risk.security_event_status",
     "governance": "risk.governance_event_status",
     "regulatory": "risk.regulatory_event_status",
-}
-_PROVIDER_SKIP_ERROR_CODES = {
-    "NO_PROVIDER_ROUTE",
-    "PROVIDER_DISABLED",
-    "PROVIDER_UNSUPPORTED",
-    "OPTIONAL_PROVIDER_UNSUPPORTED",
-    "OPTIONAL_SOURCE_UNAVAILABLE",
-    "PROVIDER_PLAN_RESTRICTED",
-    "PROVIDER_NOT_APPLICABLE",
-    "CACHE_MISS",
-    "CACHE_EXPIRED",
-    "CACHE_CORRUPT",
-    "PROVIDER_INSUFFICIENT_HISTORY",
-    "CONFIG_DISABLED",
-    "CREDENTIAL_MISSING",
-    "ADAPTER_UNAVAILABLE",
-    "UNAVAILABLE_BY_METHODOLOGY",
-}
-_OPTIONAL_NONBLOCKING_ERROR_CODES = _PROVIDER_SKIP_ERROR_CODES | {
-    "DERIVED_INPUT_UNAVAILABLE",
 }
 class AcquisitionResolutionRequired(RuntimeError):
     """Control-flow signal that hard-critical external evidence is pending."""
@@ -283,6 +263,8 @@ def format_acquisition_summary(summary: Mapping[str, Any]) -> str:
         f"Provider failures: {summary.get('provider_failures_by_error_code', {})}",
         f"Failed after all fallbacks: {summary.get('failed_after_fallbacks', 0)}",
         f"Optional data not collected: {len(summary.get('optional_data', ())) if isinstance(summary.get('optional_data', ()), (list, tuple)) else 0}",
+        f"Decision-blocking failures: {len(summary.get('decision_blocking_failures', ())) if isinstance(summary.get('decision_blocking_failures', ()), (list, tuple)) else 0}",
+        f"Required scoring failures: {len(summary.get('required_scoring_failures', ())) if isinstance(summary.get('required_scoring_failures', ()), (list, tuple)) else 0}",
     ))
 
 
@@ -485,6 +467,58 @@ class AcquisitionManager:
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
             for item in routed.observations
         }
+        fallback_requests: list[MetricRequest] = []
+        for request in model.requests:
+            if request.metric_key != "eth.monetary.burn_30d_eth" or (request.asset, request.metric_key) in routed_values:
+                continue
+            cumulative_identity = (request.asset, "eth.monetary.cumulative_burn_eth")
+            if cumulative_identity in {(item.asset, item.metric_key) for item in model.requests}:
+                continue
+            cached_cumulative = latest_usable_observation(
+                request.asset,
+                cumulative_identity[1],
+                as_of=cutoff,
+                observations=local,
+                max_age_seconds=metric_reuse_ttl_seconds(
+                    cumulative_identity[1],
+                    self.router.config.get("cache_ttl_seconds"),
+                ),
+            )
+            if cached_cumulative is not None:
+                reusable[cumulative_identity] = cached_cumulative
+            else:
+                fallback_requests.append(MetricRequest(
+                    request.asset,
+                    cumulative_identity[1],
+                    review_type=model.review_type,
+                    reason="explicit cumulative-burn fallback for direct 30d burn",
+                ))
+        if fallback_requests:
+            fallback_routed = self.router.collect(
+                self.router.build_requests(
+                    fallback_requests,
+                    as_of=as_of,
+                    now=current,
+                    execution_history_days=self.policy.execution["preferred_history_days"],
+                ),
+                mode=selected_mode,
+                as_of=as_of,
+                now=current,
+            )
+            routed = RouterResult(
+                observations=(*routed.observations, *fallback_routed.observations),
+                attempts=(*routed.attempts, *fallback_routed.attempts),
+                unresolved=tuple(dict.fromkeys((*routed.unresolved, *fallback_routed.unresolved))),
+                provider_cache_hits=routed.provider_cache_hits + fallback_routed.provider_cache_hits,
+                api_requests=routed.api_requests + fallback_routed.api_requests,
+                api_derived_metrics=routed.api_derived_metrics + fallback_routed.api_derived_metrics,
+                provider_fallbacks=routed.provider_fallbacks + fallback_routed.provider_fallbacks,
+                unresolved_details=(*routed.unresolved_details, *fallback_routed.unresolved_details),
+            )
+            routed_values.update({
+                (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
+                for item in fallback_routed.observations
+            })
         relative_values, relative_reasons = self._derive_relative_observations(
             model.requests,
             reusable,
@@ -514,7 +548,20 @@ class AcquisitionManager:
             for item in routed.unresolved_details
         }
         routed_reasons.update(relative_reasons)
-        routed_reasons.update(derived_reasons)
+        for request in fallback_requests:
+            burn_identity = (request.asset, "eth.monetary.burn_30d_eth")
+            cumulative_identity = (request.asset, request.metric_key)
+            if cumulative_identity in routed_reasons:
+                routed_reasons[burn_identity] = (
+                    f"{routed_reasons.get(burn_identity, 'direct burn unavailable')}; "
+                    f"cumulative fallback: {routed_reasons[cumulative_identity]}"
+                )
+        for identity, reason in derived_reasons.items():
+            routed_reasons[identity] = (
+                f"{routed_reasons[identity]}; fallback derivation: {reason}"
+                if identity in routed_reasons and identity[1] == "eth.monetary.burn_30d_eth"
+                else reason
+            )
         flow_state_identity = ("MARKET", "market.flow_state")
         if (
             any((request.asset, request.metric_key) == flow_state_identity for request in model.requests)
@@ -528,12 +575,6 @@ class AcquisitionManager:
             (str(item.get("asset", "")).strip().upper(), str(item.get("metric_key", "")).strip().lower()): item
             for item in routed.unresolved_details
             if isinstance(item, Mapping)
-        }
-        provider_failure_identities = {
-            (attempt.asset, metric_key)
-            for attempt in routed.attempts
-            if attempt.error_code not in (None, *_PROVIDER_SKIP_ERROR_CODES)
-            for metric_key in attempt.metric_keys
         }
         scanner = self.event_scanner
         if event_scan_results is not None and event_source_scan_responses is not None:
@@ -824,31 +865,7 @@ class AcquisitionManager:
                     }, now=current)
                 else:
                     availability = metric_availability(request.asset, request.metric_key)
-                    provider_failed = (
-                        identity in provider_failure_identities
-                        or (
-                            diagnostic is not None
-                            and diagnostic.get("error_code") not in _PROVIDER_SKIP_ERROR_CODES
-                        )
-                    )
-                    diagnostic_code = str((diagnostic or {}).get("error_code", "")).upper()
-                    entitlement_skip = (
-                        diagnostic_code == "ENTITLEMENT_REQUIRED"
-                        and request.metric_key.startswith("sentiment.social_")
-                    )
-                    if availability.is_skippable and provider_failed and (
-                        diagnostic_code not in _OPTIONAL_NONBLOCKING_ERROR_CODES
-                        and not entitlement_skip
-                    ):
-                        normalized = self._failure(
-                            request,
-                            current,
-                            reason,
-                            stale=old is not None,
-                            diagnostic=diagnostic,
-                            previous=old,
-                        )
-                    elif availability.is_skippable:
+                    if availability.is_skippable:
                         normalized = self._skipped(
                             request,
                             current,
@@ -930,6 +947,11 @@ class AcquisitionManager:
             for attempt in routed.attempts
             if attempt.error_code
         )
+        provider_operational_failures = tuple(
+            attempt.as_dict()
+            for attempt in routed.attempts
+            if attempt.error_code and attempt.status != "SUCCESS"
+        )
         completed_event_groups = {
             ("MARKET" if scan.category == "regulatory" else scan.asset, scan.category)
             for scan in event_scans.values()
@@ -971,10 +993,11 @@ class AcquisitionManager:
             "pending_web_metrics": len(pending_web_identities),
             "finalized": not event_scan_requests and not web_fallbacks,
             "provider_failures_by_error_code": dict(sorted(provider_failures.items())),
+            "provider_operational_failures": provider_operational_failures,
             "event_sources_reachable": event_sources_reachable,
             "event_sources_required": event_sources_required,
         })
-        return AcquisitionResult(
+        acquisition = AcquisitionResult(
             requested_model,
             tuple(results),
             tuple(web_fallbacks),
@@ -984,6 +1007,15 @@ class AcquisitionManager:
             tuple(event_scans.values()),
             tuple(event_diagnostics.values()),
         )
+        final_failures = build_failed_data_fetches(acquisition, review_type=model.review_type)
+        summary.update({
+            "decision_blocking_failures": tuple(item for item in final_failures if item.get("critical")),
+            "required_scoring_failures": tuple(
+                item for item in final_failures if item.get("decision_role") == "SCORING_FACTOR"
+            ),
+            "optional_data_unavailable": tuple(optional_data),
+        })
+        return acquisition
 
     @staticmethod
     def _failure(

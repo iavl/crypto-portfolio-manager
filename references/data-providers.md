@@ -21,6 +21,7 @@ those contracts; it is not a second schema or routing implementation.
 | DeFiLlama | protocol fundamentals | None | TVL, fees, revenue, fee/revenue multiple | protocol route; registered |
 | Alternative.me | market sentiment context | None | Fear & Greed | market-context route; registered |
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
+| BNB RPC | completed BSC daily activity | None | `onchain.transaction_count` from canonical block transaction counts | primary BNB route; bounded batch RPC and incremental local history |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
 | Blockchair | ETH rolling 24h native transfer volume | None | `/ethereum/stats`: `volume_24h_approximate` × `market_price_usd` → USD | ETH `onchain.transfer_volume`; current snapshot only |
 | FRED | official U.S. macro/liquidity series | `FRED_API_KEY` | DFF, DFII10, DTWEXBGS, WALCL, M2SL and Python-derived changes | BTC macro factor route; credential-gated |
@@ -56,19 +57,23 @@ rate limits, circuit breakers, authentication failures, and schema failures
 remain final diagnostics rather than being converted to success.
 
 Provider priority is deterministic: Binance then Bybit for spot/OHLCV and
-derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
-Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
+derivatives; Binance only for delivery basis; BNB `onchain.transaction_count`
+uses the public BSC RPC adapter; CoinGecko then catalog-aware Coin Metrics for
+market cap and BTC-native valuation; FRED for macro/liquidity;
 DeFiLlama for protocol fundamentals; SoSoValue for ETF flows; Blockchair for
 ETH rolling transfer volume; Coin Metrics for supported exchange attribution
 and BTC/BNB network data; and
 the fixed EventScanner catalog for events. BGeometrics is the no-key BTC MVRV Z
 route; ETH monetary/realized valuation routes
-use catalog-aware Coin Metrics with Ultrasound and optional Etherscan fallbacks;
+use catalog-aware Coin Metrics for supply/valuation, Ultrasound as the direct
+30D burn source, and Etherscan cumulative counters only for an explicit aligned
+history fallback;
 staking routes require an exact aggregate source and are currently optional;
 growthepie is the only active route for ETH L2 TVS and activity, and also
 supplies Ethereum fees and L2 rent/DA. Blobscan owns blob history, and
 SoSoValue owns structured ETH ETF flow/AUM. LunarCrush supplies lower-authority
-social context only. Derived metrics such as
+social context only and is not fetched by the normal plan unless
+`optional_context.collect_optional_social=true`. Derived metrics such as
 `valuation.fdv_market_cap_ratio`, `derivatives.open_interest_to_market_cap`,
 ETH/BTC opportunity ratios, ETH staking/exchange-flow normalization, market
 flow state, and BTC-relative returns are computed by Python and have no
@@ -208,6 +213,23 @@ evidence, not a halt. Chain-liveness responses use a 300-second cache TTL.
 Optional local URL/RPC overrides are redacted in diagnostics and never persist
 credentials.
 
+## BNB RPC transaction count
+
+The `bnb_rpc` adapter uses `BNB_RPC_URL` when configured, otherwise the public
+dataseed endpoint. It resolves the completed UTC-day block range by bounded
+timestamp binary searches, then sends bounded JSON-RPC batches of
+`eth_getBlockTransactionCountByNumber`. The daily value is the sum of those
+canonical block transaction counts; pending transactions and the current
+incomplete UTC day are excluded. A 15-block confirmation buffer is applied by
+default before a day is finalized.
+
+Validated daily values are stored under the provider cache's `series/bnb_rpc`
+directory with the ending block hash. A later scan checks that hash before
+extending the history; a continuity mismatch or an RPC range/batch failure is
+reported as unavailable rather than overwriting history. The provider probe
+only reads the current height and one confirmed block, and never backfills a
+day.
+
 ## Coin Metrics
 
 Coin Metrics Community uses `https://community-api.coinmetrics.io`. The provider
@@ -216,6 +238,9 @@ data; no authenticated Coin Metrics tier is part of the current contract.
 
 Current approved asset IDs include `btc`, `eth`, `bnb`, and `aave`. Catalog
 support, not this document, decides whether a particular asset/metric is usable.
+For BNB, `onchain.transaction_count` uses the dedicated public BSC RPC route;
+`onchain.active_addresses` remains optional because no exact Coin Metrics
+methodology is substituted.
 
 | Data group | Implemented inputs |
 |---|---|
@@ -395,16 +420,19 @@ the cache identity includes the asset, metric bundle, and time window. No
 cross-asset batch endpoint is assumed without a verified current contract. A
 402/plan response is `ENTITLEMENT_REQUIRED`, 429 or Retry-After is
 `RATE_LIMITED`, and an open circuit is `CIRCUIT_OPEN`; each keeps status and
-retryability. Only an explicitly optional/premium social metric may become
-`SKIPPED`; these errors never become zero or successful observations.
+retryability and remains in provider-attempt diagnostics. When a social metric
+is explicitly requested but no usable value is returned, its metric event is
+`SKIPPED` and excluded from applicable coverage. Normal plans do not request
+social metrics by default; the explicit provider probe remains available.
 
 ## Rated Free tier
 
 The current Rated OpenAPI document is OpenAPI `3.1.0` and uses an HTTP Bearer
 credential. Probes without `RATED_API_KEY` return HTTP 401. A bounded upstream
 body containing `{"detail":"Subscription is not active."}` is classified as
-`RATED_SUBSCRIPTION_INACTIVE` with `status_code=401`; it remains a failure until
-the user activates the subscription, and is never `SKIPPED_PREMIUM`. The adapter uses
+`RATED_SUBSCRIPTION_INACTIVE` with `status_code=401`; the provider attempt
+remains diagnostic telemetry while affected optional metric events are
+`SKIPPED`. The adapter uses
 `/v0/eth/network/dailyRewards` for `sumEffectiveBalance`,
 `sumConsensusRewards`, and `sumExecutionRewards`, and `/v1/eth/queues` for
 `activatingStake`, `exitingStake`, and `totalWithdrawingBalance`. These source
@@ -461,16 +489,21 @@ the verified `ProposalCreated`, `ProposalQueued`, `ProposalExecuted`,
 metadata candidates. Python filters lookback and deduplicates; `LUNA_MAX`
 classifies bounded candidates for materiality. A complete reachable source with
 zero candidates is a valid empty response. Same-authority URLs share a
-`source_group`; independent security domains do not. AAVE governance records
+`source_group`; independent security domains do not.
+Discourse completeness is window-based: a reliable ordered `created_at` page
+crossing the requested lookback boundary is complete even when older forum
+history remains. A cap, malformed pagination URL, or later-page failure remains
+incomplete. AAVE governance records
 `coverage_rule=ONCHAIN_AND_ONE_OFFCHAIN` and is `SUFFICIENT` only when the
 on-chain and one official off-chain group are both reachable and complete. The
 current event mappings
 are Ethereum Foundation security -> Blog RSS, Ethereum EIPs -> `ethereum/EIPs`
 GitHub commits, Aave security -> Governance Risk Discourse JSON plus the Aave
 V3 advisory source, and ESMA/MiCA -> ESMA RSS. GitHub commit requests pass the
-review window as `since`/`until`; Discourse follows same-origin pagination only
-within a bounded page cap. A cap, malformed next URL, or later-page failure
-keeps the source incomplete. `NO_STRUCTURED_TRANSPORT` means no supported
+review window as `since`/`until`; Discourse follows same-origin pagination until
+an ordered `created_at` page crosses the requested window or a bounded page cap
+is reached. A cap before the boundary, malformed next URL, or later-page
+failure keeps the source incomplete. `NO_STRUCTURED_TRANSPORT` means no supported
 structured endpoint is configured, not DNS/TLS/HTTP/provider failure.
 
 ## EventScanner

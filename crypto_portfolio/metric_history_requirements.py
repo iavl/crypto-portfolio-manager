@@ -104,6 +104,7 @@ _REQUIREMENTS: dict[str, MetricHistoryRequirement] = {
     "eth.blobs.data_bytes_30d": BOUNDED_45D,
     "eth.blobs.blob_transactions_30d": BOUNDED_45D,
     "eth.blobs.utilization_30d": BOUNDED_45D,
+    "onchain.transaction_count": BOUNDED_14D,
     "sentiment.social_mentions_change_7d": BOUNDED_14D,
     "sentiment.social_sentiment_percentile": BOUNDED_105D,
     "sentiment.social_attention_percentile": BOUNDED_105D,

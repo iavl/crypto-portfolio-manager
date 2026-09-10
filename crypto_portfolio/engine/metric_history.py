@@ -7,7 +7,8 @@ from collections import defaultdict
 from typing import Any, Iterable, Mapping, Type
 
 from ..facts.models import FACT_TYPES, FactBase
-from ..metrics_registry import metric_definition
+from ..metric_availability import contributes_to_scoring_coverage
+from ..metrics_registry import METRIC_REGISTRY, metric_definition
 from ..models.metrics_history import MetricObservation
 from ..models.time import parse_timestamp
 from ..state.metrics import classify_metric_change
@@ -103,6 +104,7 @@ def build_factor_facts(
     factor: str | None = None,
     previous_observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
     fact_type: Type[FactBase] | None = None,
+    required_metric_keys: Iterable[str] | None = None,
 ) -> FactBase:
     """Build compact facts; all numeric changes stay in Python."""
     values = _observations(observations)
@@ -111,8 +113,8 @@ def build_factor_facts(
     if normalized_symbol is not None:
         values = tuple(item for item in values if item.asset == normalized_symbol)
         previous_values = tuple(item for item in previous_values if item.asset == normalized_symbol)
+    factor_name = factor.strip().lower() if factor is not None else None
     if factor is not None:
-        factor_name = factor.strip().lower()
         values = tuple(item for item in values if item.factor.lower() == factor_name)
         previous_values = tuple(item for item in previous_values if item.factor.lower() == factor_name)
         if factor_name not in FACT_TYPES:
@@ -186,7 +188,27 @@ def build_factor_facts(
         else:
             flags.append(f"NO_PREVIOUS:{key}")
         flags.extend(comparison["data_quality_flags"])
-    if latest_values:
+    supplied_required_keys = None if required_metric_keys is None else tuple(required_metric_keys)
+    required_keys = tuple(supplied_required_keys or ())
+    if supplied_required_keys is not None:
+        required_keys = tuple(dict.fromkeys(metric_definition(key).key for key in required_keys))
+    latest_by_key = {item.metric_key: item for item in latest_values}
+    required_values = [latest_by_key[key] for key in required_keys if key in latest_by_key]
+    if supplied_required_keys is not None and required_keys:
+        coverage = sum(item.freshness == "CURRENT" for item in required_values) / len(required_keys)
+        if len(required_values) != len(required_keys):
+            freshness = "UNKNOWN"
+        elif any(item.freshness == "STALE" for item in required_values):
+            freshness = "STALE"
+        elif any(item.freshness == "UNKNOWN" for item in required_values):
+            freshness = "UNKNOWN"
+        else:
+            freshness = "CURRENT"
+        flags.extend(f"MISSING_REQUIRED:{key}" for key in required_keys if key not in current_map)
+    elif supplied_required_keys is not None:
+        coverage = 0.0
+        freshness = "UNKNOWN"
+    elif latest_values:
         coverage = sum(item.freshness == "CURRENT" for item in latest_values) / len(latest_values)
         freshness = "STALE" if any(item.freshness == "STALE" for item in latest_values) else "UNKNOWN" if any(item.freshness == "UNKNOWN" for item in latest_values) else "CURRENT"
     else:
@@ -227,6 +249,18 @@ def build_facts_for_asset(
             symbol=symbol,
             factor=factor,
             previous_observations=previous,
+            required_metric_keys=(
+                tuple(
+                    key for key, definition in METRIC_REGISTRY.items()
+                    if definition.factor == factor
+                    and contributes_to_scoring_coverage(symbol.strip().upper(), key)
+                )
+                if any(
+                    definition.factor == factor and definition.decision_role == "SCORING_FACTOR"
+                    for definition in METRIC_REGISTRY.values()
+                )
+                else None
+            ),
         )
         for factor in factors
     }

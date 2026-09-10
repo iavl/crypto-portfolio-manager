@@ -98,7 +98,9 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
     if key.startswith("eth.blobs."):
         return ("blobscan",)
     if key == "eth.monetary.burn_30d_eth":
-        return ("ultrasound_money", "ethereum_protocol")
+        return ("ultrasound_money",)
+    if key in {"eth.monetary.burn_to_issuance_30d", "eth.monetary.burn_to_issuance_365d"}:
+        return ()
     if key == "eth.monetary.burn_365d_eth":
         return ()
     if key == "eth.monetary.cumulative_burn_eth":
@@ -158,6 +160,8 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
             return ("growthepie", "coinmetrics_community")
         if symbol == "ETH" and key == "onchain.transfer_volume":
             return ("blockchair",)
+        if symbol == "BNB" and key == "onchain.transaction_count":
+            return ("bnb_rpc", "coinmetrics_community")
         return ("coinmetrics_community",) if symbol in {None, "BTC", "ETH", "BNB"} else ()
     if key.startswith(("fundamentals.", "valuation.", "tokenomics.")):
         return ("defillama",)

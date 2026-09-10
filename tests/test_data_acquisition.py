@@ -1411,6 +1411,39 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(result.results[0].event.refresh_error_code, "CONFIG_DISABLED")
         self.assertEqual(result.attempts[0]["error_code"], "CONFIG_DISABLED")
 
+    def test_optional_network_failure_is_skipped_but_attempt_is_retained(self):
+        class FailingProvider:
+            def collect(self, _request):
+                raise ProviderUnavailable(
+                    "rate limited",
+                    diagnostic=ProviderDiagnostic(
+                        error_code="HTTP_429",
+                        status_code=429,
+                        detail="retry later",
+                        retryable=True,
+                    ),
+                )
+
+        result = AcquisitionManager(
+            ProviderRouter(
+                {"lunarcrush": FailingProvider()},
+                config=config_for("lunarcrush"),
+            ),
+            persist=False,
+        ).run(
+            MetricCollectionPlan("SNAPSHOT_REVIEW", (
+                MetricRequest("BTC", "sentiment.social_mentions_24h"),
+            )),
+            mode="REFRESH",
+            cached_observations=(),
+            now="2026-09-06T00:00:00Z",
+        )
+        self.assertEqual(result.results[0].status, "SKIPPED")
+        self.assertEqual(result.results[0].event.refresh_error_code, "HTTP_429")
+        self.assertEqual(result.attempts[0]["error_code"], "HTTP_429")
+        self.assertEqual(result.summary["provider_failures_by_error_code"], {"HTTP_429": 1})
+        self.assertEqual(result.summary["policy_weighted_coverage"], 0.0)
+
     def test_chain_liveness_failure_keeps_a_stable_diagnostic_code(self):
         plan = MetricCollectionPlan("SNAPSHOT_REVIEW", (
             MetricRequest("BTC", "risk.chain_liveness_status"),

@@ -50,6 +50,7 @@ from .chain_liveness import (
     chain_liveness_sources,
 )
 from .binance import BinanceProvider
+from .bnb_rpc import BnbRPCProvider, BNBRPCProvider
 from .bybit import BybitProvider
 from .coinmetrics import CoinMetricsProvider
 from .blockchair import BlockchairProvider
@@ -116,6 +117,8 @@ __all__ = [
     "ChainLivenessSource",
     "chain_liveness_sources",
     "BinanceProvider",
+    "BnbRPCProvider",
+    "BNBRPCProvider",
     "BybitProvider",
     "CoinMetricsProvider",
     "BlockchairProvider",

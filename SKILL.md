@@ -478,9 +478,11 @@ Events are structured-first. An injected `StructuredEventTransport` may use
 bounded GitHub, RSS/Atom, Discourse JSON, and allowlisted RPC transports;
 Python filters and deduplicates candidates, while `LUNA_MAX` only classifies
 their materiality. A complete reachable source with zero candidates returns a
-valid empty scan; same-authority URLs share a source group. LunarCrush is an
-optional API v4 social-context provider, and Ethereum protocol readiness uses
-one bounded latest-block RPC probe; missing credentials or history remain
+valid empty scan; same-authority URLs share a source group, and Discourse may
+complete once an ordered `created_at` page crosses the requested lookback.
+LunarCrush is an optional API v4 social-context provider and is not requested
+by the normal metric plan unless enabled explicitly. BNB transaction counts use
+bounded public-RPC daily block counts; missing credentials or history remain
 fail-closed.
 
 ## Confidence workflow

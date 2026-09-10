@@ -68,6 +68,12 @@ class _EmptyMarketHistoryProvider(_MarketHistoryProvider):
 
 
 class MetricDependencyTests(unittest.TestCase):
+    def test_social_positioning_is_opt_in(self):
+        default = build_metric_collection_plan(["BTC"])
+        self.assertFalse(any(item.metric_key.startswith("sentiment.social_") for item in default.requests))
+        enabled = build_metric_collection_plan(["BTC"], collect_optional_social=True)
+        self.assertTrue(any(item.metric_key.startswith("sentiment.social_") for item in enabled.requests))
+
     def test_every_declared_derived_edge_is_registered(self):
         scope_examples = {
             "valuation.fdv_market_cap_ratio": "AAVE",

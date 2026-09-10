@@ -80,7 +80,6 @@ _ETH_METRICS = (
     "eth.monetary.net_supply_growth_365d",
     "eth.monetary.burn_30d_eth",
     "eth.monetary.burn_365d_eth",
-    "eth.monetary.cumulative_burn_eth",
     "eth.monetary.burn_to_issuance_30d",
     "eth.monetary.burn_to_issuance_365d",
     "eth.staking.active_effective_stake_eth",
@@ -193,15 +192,13 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "flows.eth_etf_net_to_aum_30d": ("flows.etf_net_30d", "flows.eth_etf_aum_usd"),
     "eth.monetary.burn_to_issuance_30d": ("eth.monetary.burn_30d_eth", "eth.monetary.issuance_30d_eth"),
     "eth.monetary.burn_to_issuance_365d": ("eth.monetary.burn_365d_eth", "eth.monetary.issuance_365d_eth"),
-    "eth.monetary.burn_30d_eth": ("eth.monetary.cumulative_burn_eth",),
-    "eth.monetary.burn_365d_eth": ("eth.monetary.cumulative_burn_eth",),
     "market.flow_state": ("flows.etf_net_1d",),
     **{
         metric: (dependency,)
         for metric, dependency in RELATIVE_RETURN_DEPENDENCIES.items()
     },
 }
-_POSITIONING_METRICS = (
+_DERIVATIVES_POSITIONING_METRICS = (
     "derivatives.funding_rate",
     "derivatives.funding_rate_24h_avg",
     "derivatives.funding_rate_7d_avg",
@@ -218,6 +215,8 @@ _POSITIONING_METRICS = (
     "derivatives.long_liquidations_7d_usd",
     "derivatives.short_liquidations_7d_usd",
     "derivatives.futures_basis_annualized",
+)
+_SOCIAL_POSITIONING_METRICS = (
     "sentiment.social_bullish_share",
     "sentiment.social_mentions_24h",
     "sentiment.social_mentions_change_7d",
@@ -643,9 +642,22 @@ def build_metric_collection_plan(
     *,
     cached_observations: Iterable[MetricObservation | Mapping[str, Any]] | None = None,
     as_of: str | datetime | None = None,
+    collect_optional_social: bool | None = None,
 ) -> MetricCollectionPlan:
     """Build all applicable requests without asking a model to choose metrics."""
     resolved = policy or resolve_policy()
+    if collect_optional_social is None:
+        from ..providers.config import load_provider_config
+
+        provider_config = load_provider_config()
+        optional_context = provider_config.get("optional_context", {})
+        collect_optional_social = bool(
+            optional_context.get("collect_optional_social", False)
+            if isinstance(optional_context, Mapping)
+            else False
+        )
+    elif not isinstance(collect_optional_social, bool):
+        raise ValueError("collect_optional_social must be boolean or null")
     registry = METRIC_REGISTRY if metric_registry is None else metric_registry
     if not isinstance(registry, Mapping) or not registry:
         raise ValueError("metric_registry must be a non-empty mapping")
@@ -710,8 +722,11 @@ def build_metric_collection_plan(
         if symbol == "ETH":
             for key in _ETH_METRICS:
                 add(symbol, key, "Ethereum monetary, staking, settlement, DA, and structural context")
-        for key in _POSITIONING_METRICS:
+        for key in _DERIVATIVES_POSITIONING_METRICS:
             add(symbol, key, "derivatives positioning and social context")
+        if collect_optional_social:
+            for key in _SOCIAL_POSITIONING_METRICS:
+                add(symbol, key, "derivatives positioning and social context")
         if symbol == "BTC":
             for key in _BTC_CONTEXT_METRICS:
                 add(symbol, key, "BTC cycle and on-chain context")

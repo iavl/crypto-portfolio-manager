@@ -225,6 +225,11 @@ coverage. The latter calculates coverage within each applicable scoring factor
 first, then applies `config/policy.json` factor weights; `NOT_APPLICABLE`,
 optional/premium `SKIPPED`, and positioning/cycle overlays are excluded.
 Required `FAILED`, `STALE`, and `CONFLICT` events remain in the denominator.
+`SCORING_FACTOR` is an ownership role, not a requirement declaration: only
+resolved `REQUIRED` scoring metrics enter the applicable denominator. Optional
+enrichment can inform a factor when present but cannot mask a missing required
+metric. Reports separate decision-blocking failures, required-scoring gaps,
+optional/context unavailability, and raw provider diagnostics.
 The configured medium/high thresholds
 and minimum investable coverage control confidence, and any hard-critical
 failure still forces LOW confidence.
