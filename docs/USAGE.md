@@ -19,6 +19,24 @@
 .agents/skills/crypto-portfolio-manager/SKILL.md
 ```
 
+### 一键安装
+
+在仓库根目录运行：
+
+```bash
+./install.sh --target all
+```
+
+可选目标为 `codex`、`claude`、`zcode`，例如：
+
+```bash
+./install.sh --target claude
+```
+
+脚本只创建指向当前仓库 Skill 目录的用户级 symlink，不复制运行时代码、配置或
+参考资料；已有文件、目录和未知 symlink 会被拒绝覆盖。当前仓库根目录的旧 Codex
+symlink 会被定向修复。需要重新安装时，请先确认并手动处理其他目标路径，再重新运行脚本。
+
 ### Codex：仓库级自动发现
 
 首次使用或从新检出开始时：

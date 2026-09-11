@@ -12,7 +12,7 @@ class RepositorySkillLayoutTests(unittest.TestCase):
         self.assertTrue(SKILL_PATH.is_file())
         self.assertFalse(SKILL_PATH.is_symlink())
         self.assertFalse((ROOT / "SKILL.md").exists())
-        self.assertFalse((ROOT / "install.sh").exists())
+        self.assertTrue((ROOT / "install.sh").is_file())
 
         skill = SKILL_PATH.read_text(encoding="utf-8")
         self.assertTrue(skill.startswith("---\n"))

@@ -60,6 +60,7 @@ Skill：   .agents/skills/crypto-portfolio-manager/SKILL.md
 ```bash
 git clone https://github.com/iavl/crypto-portfolio-manager.git
 cd crypto-portfolio-manager
+./install.sh --target all
 ```
 
 仓库唯一 source of truth 是：
@@ -71,6 +72,10 @@ cd crypto-portfolio-manager
 Codex 从仓库根目录或其子目录启动即可自动发现该 Skill；Claude Code 和 ZCode
 需要各自的 Skill 目录或 Import 操作。所有宿主都应使用 symlink 指向上述目录，
 避免产生过期副本。完整命令、旧版迁移和运行时数据边界请参阅[多宿主安装指南](docs/USAGE.md#多宿主-skill-使用与安装)。
+
+`install.sh` 默认同时为 Codex、Claude Code 和 ZCode 创建用户级 symlink；也可用
+`--target codex|claude|zcode` 只安装一个宿主。脚本不会复制 payload，也不会覆盖未知已有路径；
+当前仓库根目录的旧 Codex symlink 会被定向修复。
 
 仓库 Skill 不需要单独的 Python 安装；如果需要运行开发检查，再执行：
 

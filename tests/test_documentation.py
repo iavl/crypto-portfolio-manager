@@ -222,6 +222,7 @@ class DocumentationTests(unittest.TestCase):
         for text in (
             "git clone https://github.com/iavl/crypto-portfolio-manager.git",
             "cd crypto-portfolio-manager",
+            "./install.sh --target all",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, readme)
@@ -247,7 +248,6 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIn(text, guide)
         for content in (readme, guide):
-            self.assertNotIn("./install.sh", content)
             self.assertNotIn("安装到：", content)
 
     def test_glossary_covers_current_terms_and_boundaries(self):
