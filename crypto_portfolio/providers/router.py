@@ -23,7 +23,7 @@ from .base import (
     ProviderUnsupportedMetric,
     ProviderNotApplicable,
 )
-from .cache import CacheCorruption, CacheExpired, ProviderCache, merge_ohlcv_series, missing_series_range, request_hash
+from .cache import CacheCorruption, CacheExpired, ProviderCache, cached_series_is_complete_for_as_of, merge_ohlcv_series, missing_series_range, request_hash
 from .config import load_provider_config, provider_api_key, provider_enabled
 from .circuit_breaker import CircuitBreaker
 from .http import HttpClient, classify_transport_error, is_retryable_error_code, redact_log, redact_secrets
@@ -883,6 +883,16 @@ class ProviderRouter:
             start=parameters.get("start"),
             end=parameters.get("end"),
         )
+        # A cache hit on the requested range can still miss the newest closed
+        # daily candle when the request carries no explicit end; refresh that
+        # tail instead of serving a series whose content is stale for as_of.
+        tail_incomplete = existing is not None and not cached_series_is_complete_for_as_of(
+            existing,
+            as_of=effective_as_of,
+        )
+        if tail_incomplete and missing is None:
+            tail_start = parse_timestamp(existing.candles[-1].timestamp) + timedelta(seconds=existing.interval_seconds)
+            missing = (tail_start.isoformat().replace("+00:00", "Z"), None)
         if existing is not None and missing is None:
             values = self._series_values(provider, request, existing, as_of=effective_as_of)
             return values, "CACHE_PROVIDER", True, 0

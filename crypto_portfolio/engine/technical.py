@@ -87,6 +87,35 @@ def expected_latest_completed_date(as_of: str | datetime) -> date:
     return timestamp.date() - timedelta(days=1)
 
 
+def daily_candle_freshness(
+    candles: Sequence[Candle] | Iterable[Candle],
+    *,
+    as_of: str | datetime,
+    maximum_lag_days: int,
+) -> dict[str, Any]:
+    """Report how far the completed daily tail lags the expected latest UTC candle.
+
+    ``lag_days`` counts completed daily candles only: with ``as_of`` on
+    2026-09-11 and a last completed candle of 2026-09-09 the lag is 1, not 2,
+    because the 2026-09-11 candle is legitimately still open.
+    """
+    if isinstance(maximum_lag_days, bool) or not isinstance(maximum_lag_days, int) or maximum_lag_days < 0:
+        raise ValueError("maximum_lag_days must be a non-negative integer")
+    values = completed_candles(candles, as_of=as_of)
+    if not values:
+        raise ValueError("at least one completed candle is required")
+    expected = expected_latest_completed_date(as_of)
+    actual = parse_timestamp(values[-1].timestamp).date()
+    lag = max(0, (expected - actual).days)
+    return {
+        "expected_latest_completed_date": expected.isoformat(),
+        "actual_latest_completed_date": actual.isoformat(),
+        "lag_days": lag,
+        "maximum_allowed_lag_days": maximum_lag_days,
+        "status": "CURRENT" if lag <= maximum_lag_days else "STALE",
+    }
+
+
 def daily_coverage(
     candles: Sequence[Candle] | Iterable[Candle],
     *,
@@ -790,9 +819,14 @@ def build_technical_snapshot(
         maximum_zone_span_atr=config["maximum_zone_span_atr"],
     )
     coverage = daily_coverage(candles)
-    expected_date = expected_latest_completed_date(as_of_timestamp)
-    latest_date = date.fromisoformat(coverage["latest_completed_date"])
-    observation_lag = max(0, (expected_date - latest_date).days)
+    freshness = daily_candle_freshness(
+        series.candles,
+        as_of=as_of_timestamp,
+        maximum_lag_days=config["maximum_daily_candle_lag_days"],
+    )
+    expected_date = date.fromisoformat(freshness["expected_latest_completed_date"])
+    latest_date = date.fromisoformat(freshness["actual_latest_completed_date"])
+    observation_lag = freshness["lag_days"]
     history_sufficient = (
         len(candles) >= config["minimum_history_days"]
         and coverage["calendar_span_days"] >= config["minimum_history_days"]
@@ -932,6 +966,9 @@ def build_technical_snapshot(
             "latest_completed_candle_date": latest_date.isoformat(),
             "expected_latest_completed_date": expected_date.isoformat(),
             "observation_lag_days": observation_lag,
+            "maximum_daily_candle_lag_days": freshness["maximum_allowed_lag_days"],
+            "daily_candle_status": freshness["status"],
+            "latest_candle_timestamp": candles[-1].timestamp,
             "as_of": as_of_value,
         },
         spot_observed_at=supplied_spot.observed_at,
@@ -980,6 +1017,7 @@ __all__ = [
     "canonical_ohlcv_hash",
     "detect_swings",
     "daily_coverage",
+    "daily_candle_freshness",
     "expected_latest_completed_date",
     "history_position",
     "lookback_return",

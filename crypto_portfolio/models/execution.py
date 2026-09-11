@@ -337,6 +337,7 @@ class ExecutionPlan:
                 "fetched_at", "ohlcv_hash", "calendar_span_days", "missing_day_count", "coverage_ratio",
                 "max_gap_days", "observation_lag_days", "latest_completed_candle_date",
                 "expected_latest_completed_date", "as_of", "venue", "market", "quote_currency",
+                "maximum_daily_candle_lag_days", "daily_candle_status", "latest_candle_timestamp",
             }
             unknown_metadata = set(metadata) - allowed_metadata
             if unknown_metadata:
@@ -365,7 +366,7 @@ class ExecutionPlan:
                 metadata[field] = normalize_timestamp(metadata[field], f"ohlcv_metadata.{field}")
             if metadata["fetched_at"] is not None:
                 metadata["fetched_at"] = normalize_timestamp(metadata["fetched_at"], "ohlcv_metadata.fetched_at")
-            for field in ("as_of",):
+            for field in ("as_of", "latest_candle_timestamp"):
                 if field in metadata:
                     metadata[field] = normalize_timestamp(metadata[field], f"ohlcv_metadata.{field}")
             for field in ("latest_completed_candle_date", "expected_latest_completed_date"):
@@ -383,12 +384,17 @@ class ExecutionPlan:
             count = metadata["candle_count"]
             if isinstance(count, bool) or not isinstance(count, int) or count < 1:
                 raise ValueError("ohlcv_metadata candle_count must be a positive integer")
-            for field in ("calendar_span_days", "missing_day_count", "max_gap_days", "observation_lag_days"):
+            for field in ("calendar_span_days", "missing_day_count", "max_gap_days", "observation_lag_days", "maximum_daily_candle_lag_days"):
                 if field in metadata:
                     value = metadata[field]
                     minimum = 1 if field == "calendar_span_days" else 0
                     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                         raise ValueError(f"ohlcv_metadata {field} is invalid")
+            if "daily_candle_status" in metadata:
+                status = str(metadata["daily_candle_status"]).strip().upper()
+                if status not in {"CURRENT", "STALE"}:
+                    raise ValueError("ohlcv_metadata daily_candle_status must be CURRENT or STALE")
+                metadata["daily_candle_status"] = status
             if "coverage_ratio" in metadata:
                 ratio = _number(metadata["coverage_ratio"], "ohlcv_metadata.coverage_ratio", minimum=0.0)
                 if ratio > 1:

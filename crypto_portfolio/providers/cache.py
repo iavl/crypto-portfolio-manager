@@ -563,6 +563,34 @@ def missing_series_range(
     return None
 
 
+def cached_series_is_complete_for_as_of(
+    existing: OHLCVSeries | None,
+    *,
+    as_of: str | datetime | None,
+    maximum_lag_days: int = 0,
+) -> bool:
+    """Whether a cached series tail is fresh enough for ``as_of``.
+
+    A freshly written cache entry can still hold a stale tail (fetched before
+    the latest daily candle closed), so fetched-at age alone must not decide
+    cache health for the newest daily candles.
+    """
+    if existing is None:
+        return False
+    if isinstance(maximum_lag_days, bool) or not isinstance(maximum_lag_days, int) or maximum_lag_days < 0:
+        raise ValueError("maximum_lag_days must be a non-negative integer")
+    completed = tuple(candle for candle in existing.candles if candle.completed)
+    if not completed:
+        return False
+    reference = as_of if as_of is not None else existing.fetched_at
+    if reference is None:
+        return False
+    from ..engine.technical import expected_latest_completed_date
+
+    latest = parse_timestamp(completed[-1].timestamp).date()
+    return latest >= expected_latest_completed_date(reference) - timedelta(days=maximum_lag_days)
+
+
 def provider_cache_stats(root: str | Path | None = None) -> dict[str, int]:
     return ProviderCache(root).stats()
 
@@ -573,6 +601,7 @@ __all__ = [
     "CacheExpired",
     "ProviderCache",
     "canonical_json",
+    "cached_series_is_complete_for_as_of",
     "content_hash",
     "merge_ohlcv_series",
     "missing_series_range",
