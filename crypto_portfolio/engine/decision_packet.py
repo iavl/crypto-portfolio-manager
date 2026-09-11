@@ -1,4 +1,4 @@
-"""Builders and conditional routing for compact decision review packets."""
+"""Builders and conditional high-impact review checks for decision packets."""
 
 from __future__ import annotations
 
@@ -11,20 +11,11 @@ from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
-from ..model_routing import ModelRouting, validate_model_routing
 from .confidence import DecisionScope, calculate_decision_confidence, calculate_regime_confidence
 from .rebalance import build_no_trade_attribution
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
-
-
-def _routing(value: ModelRouting | Mapping[str, Any] | None) -> ModelRouting:
-    if value is None:
-        from ..model_routing import load_model_routing
-
-        return load_model_routing()
-    return value if isinstance(value, ModelRouting) else validate_model_routing(value)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -532,18 +523,17 @@ def _target_change(packet: DecisionReviewPacket) -> float:
     )
 
 
-def sol_final_review_reasons(
+def high_impact_review_reasons(
     packet: DecisionReviewPacket | Mapping[str, Any],
     *,
     policy: Policy | None = None,
     material_reduce_pp: float | None = None,
     material_target_change_pp: float | None = None,
-    routing: ModelRouting | Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
     packet = packet if isinstance(packet, DecisionReviewPacket) else DecisionReviewPacket.from_mapping(packet)
     resolved = policy or resolve_policy()
     if material_reduce_pp is None or material_target_change_pp is None:
-        thresholds = _routing(routing).sol_thresholds
+        thresholds = resolved.high_impact_review
         material_reduce_pp = thresholds["material_reduce_pp"] if material_reduce_pp is None else material_reduce_pp
         material_target_change_pp = thresholds["material_target_change_pp"] if material_target_change_pp is None else material_target_change_pp
     for name, value in (("material_reduce_pp", material_reduce_pp), ("material_target_change_pp", material_target_change_pp)):
@@ -583,7 +573,7 @@ def sol_final_review_reasons(
     return tuple(dict.fromkeys(reasons))
 
 
-def should_run_sol_final_review(
+def should_run_high_impact_review(
     packet: DecisionReviewPacket | Mapping[str, Any] | None = None,
     *,
     decision_review_packet: DecisionReviewPacket | Mapping[str, Any] | None = None,
@@ -602,7 +592,6 @@ def should_run_sol_final_review(
     target_weight_change: float | None = None,
     policy: Policy | None = None,
     material_target_change_pp: float | None = None,
-    routing: ModelRouting | Mapping[str, Any] | None = None,
 ) -> bool:
     if packet is not None and decision_review_packet is not None:
         raise ValueError("provide only one of packet or decision_review_packet")
@@ -630,11 +619,10 @@ def should_run_sol_final_review(
         )
     elif not isinstance(packet, DecisionReviewPacket):
         packet = DecisionReviewPacket.from_mapping(packet)
-    reasons = list(sol_final_review_reasons(
+    reasons = list(high_impact_review_reasons(
         packet,
         policy=policy,
         material_target_change_pp=material_target_change_pp,
-        routing=routing,
     ))
     if thesis_broken:
         reasons.append("thesis_broken")
@@ -647,7 +635,7 @@ def should_run_sol_final_review(
     if risk_budget_breach:
         reasons.append("risk-budget breach")
     if material_target_change_pp is None:
-        material_target_change_pp = _routing(routing).sol_thresholds["material_target_change_pp"]
+        material_target_change_pp = (policy or resolve_policy()).high_impact_review["material_target_change_pp"]
     if target_change_pp > material_target_change_pp:
         reasons.append("material target-weight change")
     if reasons:
@@ -671,7 +659,7 @@ def validate_decision_review_packet(value: DecisionReviewPacket | Mapping[str, A
 
 __all__ = [
     "build_decision_review_packet",
-    "should_run_sol_final_review",
-    "sol_final_review_reasons",
+    "should_run_high_impact_review",
+    "high_impact_review_reasons",
     "validate_decision_review_packet",
 ]

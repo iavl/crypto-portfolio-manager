@@ -388,7 +388,6 @@ class MetricCollectionPlan:
     assets: tuple[str, ...] = ()
     discovery_required_assets: tuple[str, ...] = ()
     excluded_assets: tuple[str, ...] = ()
-    collector_model: str = "LUNA_MAX"
 
     def __post_init__(self) -> None:
         review_type = _review_type(self.review_type)
@@ -437,10 +436,6 @@ class MetricCollectionPlan:
         )
         if set(self.discovery_required_assets) & set(excluded_assets):
             raise ValueError("excluded assets must not be discovery assets")
-        if str(self.collector_model).strip().upper() != "LUNA_MAX":
-            raise ValueError("metric collection plans must use LUNA_MAX")
-        object.__setattr__(self, "collector_model", "LUNA_MAX")
-
     @property
     def critical_requests(self) -> tuple[MetricRequest, ...]:
         return tuple(item for item in self.requests if item.critical)
@@ -468,7 +463,6 @@ class MetricCollectionPlan:
             "review_type": self.review_type,
             "assets": list(self.assets),
             "requests": [item.as_dict() for item in self.requests],
-            "collector_model": self.collector_model,
             "critical_metric_keys": list(self.critical_metric_keys),
             "discovery_required_assets": list(self.discovery_required_assets),
             "excluded_assets": list(self.excluded_assets),
@@ -481,7 +475,7 @@ class MetricCollectionPlan:
         data = dict(value)
         allowed = {
             "review_type", "requests", "assets", "discovery_required_assets", "excluded_assets",
-            "collector_model", "critical_metric_keys",
+            "critical_metric_keys",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -495,7 +489,6 @@ class MetricCollectionPlan:
             assets=data["assets"],
             discovery_required_assets=data["discovery_required_assets"],
             excluded_assets=data["excluded_assets"],
-            collector_model=data["collector_model"],
         )
         if tuple(data["critical_metric_keys"]) != model.critical_metric_keys:
             raise ValueError("critical_metric_keys does not match the collection requests")
@@ -711,8 +704,6 @@ def build_metric_collection_plan(
 
 def build_metric_collection_request(plan: MetricCollectionPlan | Mapping[str, Any]) -> dict[str, Any]:
     """Return the validated compact payload handed to the collector."""
-    if isinstance(plan, Mapping) and plan.get("collector_model", "LUNA_MAX") != "LUNA_MAX":
-        raise ValueError("metric collection requests must use LUNA_MAX")
     model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
     return model.as_dict()
 

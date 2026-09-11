@@ -72,14 +72,12 @@ the LLM may perform bounded semantic judgment. LLMs must never recompute or
 override deterministic financial results already produced by Python.
 
 Deterministic financial calculations belong to Python. LLM must never silently
-override deterministic engine outputs. Luna-family usage supports exactly one
-target: `LUNA_MAX`. Model changes must not alter portfolio risk authority. Do
-not store private chain-of-thought.
-
-Luna-family usage has exactly one supported target: `LUNA_MAX`. Do not store
-chain-of-thought, private scratchpads, or hidden reasoning in runtime state.
-Model routing must not alter the portfolio allocation, risk, rebalance, or
-execution authority held by Python.
+override deterministic engine outputs. Model selection and reasoning settings
+belong entirely to the current Agent Skills host; this repository must inherit
+them and must not switch them. Do not introduce model-specific
+routing/configuration without an explicit future product requirement. Do not
+store private chain-of-thought, private scratchpads, or hidden reasoning in
+runtime state.
 
 LLM/Agent work may research evidence, interpret market structure, assess
 fundamentals/governance/security, assign bounded factor judgments, explain

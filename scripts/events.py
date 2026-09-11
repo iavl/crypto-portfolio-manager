@@ -19,7 +19,6 @@ from crypto_portfolio.events import (  # noqa: E402
     EventScanner,
     EventSourceScanRequest,
     build_exchange_document,
-    classifier_from_environment,
     parse_exchange_document,
     validate_exchange_responses,
 )
@@ -29,7 +28,7 @@ from crypto_portfolio.providers.base import FetchMode  # noqa: E402
 
 
 ASSET_DEFAULT = ("BTC", "ETH")
-CATEGORIES = ("security", "governance", "regulatory")
+CATEGORIES = ("security", "regulatory")
 
 
 def _now() -> str:
@@ -47,7 +46,7 @@ def _assets(values: Iterable[str] | None) -> tuple[str, ...]:
 def _requests(scanner: EventScanner, assets: tuple[str, ...], as_of: str, review_type: str) -> tuple[EventSourceScanRequest, ...]:
     result: list[EventSourceScanRequest] = []
     for asset in assets:
-        for category in ("security", "governance"):
+        for category in ("security",):
             result.extend(scanner.build_requests(asset, category, as_of, review_type=review_type))
     result.extend(scanner.build_requests("MARKET", "regulatory", as_of, review_type=review_type))
     return tuple(result)
@@ -77,13 +76,10 @@ def _fetch(args: argparse.Namespace, scanner: EventScanner, requests: tuple[Even
     mode = FetchMode.parse(args.fetch_mode)
     transport = _transport(mode)
     responses = tuple(transport.fetch(request) for request in requests)
-    classifier = classifier_from_environment()
     document = build_exchange_document(
         requests,
         responses,
         classification_mode="host",
-        classifier_backend=getattr(classifier, "backend", None),
-        classifier_model=getattr(classifier, "model", None),
     )
     _write_or_print(document, args.output)
     return 0
@@ -126,7 +122,7 @@ def _resolve(args: argparse.Namespace, scanner: EventScanner) -> int:
     by_id = {response.source_id: response for response in responses}
     results: dict[str, dict[str, Any]] = {}
     for asset in sorted(document_assets):
-        for category in ("security", "governance"):
+        for category in ("security",):
             group = scanner.build_requests(asset, category, next(item.as_of for item in requests if item.asset == asset), review_type="EVENT_REVIEW")
             results[f"{asset}:{category}"] = scanner.scan(
                 asset,
@@ -152,8 +148,7 @@ def _resolve(args: argparse.Namespace, scanner: EventScanner) -> int:
 def _smoke(args: argparse.Namespace, scanner: EventScanner, requests: tuple[EventSourceScanRequest, ...]) -> int:
     mode = FetchMode.parse(args.fetch_mode)
     transport = _transport(mode)
-    classifier = None if mode == FetchMode.CACHE_ONLY else classifier_from_environment()
-    resolver = EventResolver(transport=transport, classifier=classifier)
+    resolver = EventResolver(transport=transport)
     responses = tuple(resolver.resolve(request) for request in requests)
     by_id = {response.source_id: response for response in responses}
     results: dict[str, str] = {}
@@ -161,7 +156,7 @@ def _smoke(args: argparse.Namespace, scanner: EventScanner, requests: tuple[Even
 
     assets = _assets(args.asset)
     for asset in assets:
-        for category in ("security", "governance"):
+        for category in ("security",):
             group = tuple(item for item in requests if item.asset == asset and item.category == category)
             try:
                 scan = scanner.scan(asset, category, group[0].as_of, responses=tuple(by_id[item.source_id] for item in group), review_type="EVENT_REVIEW")

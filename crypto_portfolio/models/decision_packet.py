@@ -304,23 +304,19 @@ class AssetDecisionSummary:
         return result
 
 @dataclass(frozen=True)
-class SolReview:
+class HighImpactReview:
     status: str
     rationale: str
-    stage: str = "SOL"
 
     def __post_init__(self) -> None:
-        status = _text(self.status, "Sol review status").upper()
+        status = _text(self.status, "high-impact review status").upper()
         if status not in {"APPROVE", "CHALLENGE", "DOWNGRADE", "REQUIRE_REVIEW"}:
-            raise ValueError("Sol review status is unsupported")
+            raise ValueError("high-impact review status is unsupported")
         object.__setattr__(self, "status", status)
-        object.__setattr__(self, "rationale", _text(self.rationale, "Sol review rationale"))
-        if _text(self.stage, "Sol review stage").upper() != "SOL":
-            raise ValueError("Sol review stage must be SOL")
-        object.__setattr__(self, "stage", "SOL")
+        object.__setattr__(self, "rationale", _text(self.rationale, "high-impact review rationale"))
 
     def as_dict(self) -> dict[str, str]:
-        return {"status": self.status, "rationale": self.rationale, "stage": self.stage}
+        return {"status": self.status, "rationale": self.rationale}
 
 
 @dataclass(frozen=True)
@@ -498,4 +494,4 @@ class DecisionReviewPacket:
         return cls(**data)
 
 
-__all__ = ["AssetDecisionSummary", "DecisionReviewPacket", "NoTradeAttribution", "SolReview"]
+__all__ = ["AssetDecisionSummary", "DecisionReviewPacket", "NoTradeAttribution", "HighImpactReview"]

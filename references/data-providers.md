@@ -422,7 +422,7 @@ accepted for the current-supply cross-check.
 
 The event catalog can use bounded GitHub releases/advisories, RSS/Atom, and
 Aave Risk Discourse JSON. Transport code only returns metadata candidates.
-Python filters lookback and deduplicates; `LUNA_MAX` classifies bounded
+Python filters lookback and deduplicates; the Agent classifies bounded
 candidates for materiality. A complete reachable source with zero candidates is
 a valid empty response. Same-authority URLs share a `source_group`; independent
 security domains do not.

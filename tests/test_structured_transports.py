@@ -234,7 +234,7 @@ class StructuredTransportTests(unittest.TestCase):
     def test_candidate_response_cannot_be_treated_as_a_clean_scan(self):
         request = self.request("BTC", "security", "bitcoin-core-security-advisories")
         response = self.transport.fetch(request)
-        with self.assertRaisesRegex(ValueError, "LUNA_MAX"):
+        with self.assertRaisesRegex(ValueError, "host-agent"):
             self.scanner.build_result("BTC", "security", AS_OF, (response,))
 
 

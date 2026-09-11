@@ -28,8 +28,7 @@
       "minItems": 1
     },
     "classification_mode": {"type": "string", "minLength": 1},
-    "classifier_backend": {"type": ["string", "null"]},
-    "classifier_model": {"type": ["string", "null"]}
+    "classifier_backend": {"type": ["string", "null"]}
   },
   "$defs": {
     "request": {

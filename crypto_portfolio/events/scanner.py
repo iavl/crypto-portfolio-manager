@@ -523,7 +523,7 @@ class EventScanner:
             for response in coerced
             for item in response.items
         ):
-            raise ValueError("event source candidates require LUNA_MAX materiality classification")
+            raise ValueError("event source candidates require host-agent materiality classification")
         unknown = {item.source_id for item in coerced} - set(by_id)
         if unknown:
             raise ValueError("event scan response contains an unknown source ID")

@@ -1,6 +1,6 @@
 # 工作原理
 
-本文档说明 `crypto-portfolio-manager` 当前的架构、Python 与模型的边界、
+本文档说明 `crypto-portfolio-manager` 当前的架构、Python 与 Agent 的边界、
 数据流、历史记录和可复现性。
 策略概念和决策原则见[投资策略](../references/investment-strategy.md)。
 
@@ -27,31 +27,32 @@
 
 系统只提供建议和执行区间，不连接交易下单、提现、杠杆、保证金或自动交易。
 
-## 2. Python 与模型的边界
+## 2. Python 与 Agent 的边界
 
-如果结果可以从结构化数据确定性推导，Python 拥有该结果。模型只处理截图
+如果结果可以从结构化数据确定性推导，Python 拥有该结果。Agent 只处理截图
 字段提取、未解决来源检索、有界语义判断、重大事件解释和报告文字。
 
 | 责任 | 所有者 | 说明 |
 |---|---|---|
-| 截图字段提取 | `LUNA_MAX` | 读取可见 Binance 行，不计算金融结果。 |
+| 截图字段提取 | Agent | 读取可见 Binance 行，不计算金融结果。 |
 | metric 计划 | Python | 从 registry 选择适用 metric key。 |
 | provider 获取与规范化 | Python | 负责 route、cache、单位、时间、freshness、provenance。 |
 | Position P&L | Python | 计算成本基础、未实现盈亏、收益率和覆盖率。 |
 | 指标数学 | Python | MA、ATR、收益、波动率、回撤、Volume Profile。 |
-| 语义判断 | `LUNA_MAX` | 解释 fundamentals、event、冲突和不确定性。 |
-| 评分、regime、allocation、risk、rebalance | Python | 模型不能覆盖确定性输出。 |
-| 重大影响复核 | `SOL`，按 Python predicate | 只做高影响批评，不改金融数学。 |
-| 最终报告 | 配置的 report stage | 只能解释 finalized `ReportPacket`。 |
+| 语义判断 | Agent | 解释 fundamentals、event、冲突和不确定性。 |
+| 评分、regime、allocation、risk、rebalance | Python | Agent 不能覆盖确定性输出。 |
+| 高影响复核 | Agent，在 Python predicate 触发时 | 只做高影响批评，不改金融数学。 |
+| 最终报告 | Agent | 只能解释 finalized `ReportPacket`。 |
 
-数据包不传递原始网页、完整 OHLCV、完整历史或私有 reasoning。Evidence、
+这里的 Agent 指用户在宿主中选择的当前模型/会话。仓库不选择或切换模型，也不
+选择或切换推理设置。数据包不传递原始网页、完整 OHLCV、完整历史或私有 reasoning。Evidence、
 来源、时间和 hash 会保留在规范化记录和 finalized packet 中。
 
 ## 3. 策略与资产分类
 
 `config/policy.json` 是 canonical policy，包含 universe、benchmark、stablecoin
-floor、drawdown budget、scoring weights、regime limits、rebalance thresholds
-和 execution constants。
+floor、drawdown budget、scoring weights、regime limits、rebalance thresholds、
+high-impact review thresholds 和 execution constants。
 
 ```text
 canonical policy
@@ -420,5 +421,5 @@ cross-check。
 
 EventScanner 可注入 `StructuredEventTransport`，使用 bounded GitHub、RSS/Atom、
 Discourse JSON 和 allowlisted BNB Governor RPC。Transport 只发现并去重候选，
-`LUNA_MAX` 只判断候选 materiality；同 authority 的 URL 以 source group 完成
+Agent 只判断候选 materiality；同 authority 的 URL 以 source group 完成
 覆盖，独立安全域仍分别保留。

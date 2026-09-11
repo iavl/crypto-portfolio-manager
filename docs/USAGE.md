@@ -121,7 +121,7 @@ ln -s "$PWD/.agents/skills/crypto-portfolio-manager" \
 宿主运行，但以下内容由宿主决定：
 
 - `$crypto-portfolio-manager`、`/crypto-portfolio-manager` 和 ZCode 的 Import 是不同的触发方式；
-- `LUNA_MAX` 是当前模型路由中的特定目标，Claude Code 或 ZCode 不应假装具备该目标；
+- 模型和推理设置由各自宿主的用户选择；本 Skill 直接继承当前会话设置，不进行仓库级切换；
 - 实时 Web 证据、shell、文件系统和网络权限必须由宿主实际提供；
 - 直接调用 GLM/Claude API 而没有 Agent 宿主时，需要把 Skill 指令和工具编排自行注入，不能自动读取本地仓库。
 
@@ -271,7 +271,7 @@ python3 scripts/run_with_debug.py \
 - github
 - chain_liveness
 
-## 6. 模型与 Python 边界
+## 6. Agent 与 Python 边界
 
 系统采用 Python-first 流程：
 
@@ -284,17 +284,9 @@ python3 scripts/run_with_debug.py \
 → 中文报告
 ```
 
-模型不能发明 metric key、重算组合金额、修改 Python 目标权重或覆盖风险门。
-模型路由由 `config/model-routing.json` 控制；Python-owned stages 永远保持
-Python。
-
-查看模型配置：
-
-```bash
-python3 scripts/model_routing.py --validate
-python3 scripts/model_routing.py --list-profiles
-python3 scripts/model_routing.py --show-effective
-```
+Agent 不能发明 metric key、重算组合金额、修改 Python 目标权重或覆盖风险门。
+模型选择由当前宿主控制；本仓库不配置、切换或回退模型和推理设置。Python-owned
+stages 永远保持 Python。
 
 ## 7. 提供结构化 JSON
 

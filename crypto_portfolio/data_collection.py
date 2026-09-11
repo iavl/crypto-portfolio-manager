@@ -718,7 +718,6 @@ class CollectionReporter:
     observation_path: str | None = None
     event_path: str | None = None
     weights: Mapping[str, float] | None = None
-    routing: Mapping[str, str] | None = None
     review_type: str | None = None
     policy: Policy | None = None
 
@@ -753,10 +752,6 @@ class CollectionReporter:
             review_type=self.review_type,
             policy=self.policy,
         )
-        if self.routing is not None:
-            from .model_routing import routing_metadata
-
-            result["routing_metadata"] = routing_metadata(self.routing)
         return result
 
     def record_result(self, result: Any, previous: MetricObservation | None = None) -> None:

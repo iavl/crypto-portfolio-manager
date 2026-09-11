@@ -8,7 +8,7 @@ from .cash_flow import cash_flow_adjusted_performance, detect_external_cash_flow
 from .ledger import build_nav_history_result
 from .benchmark import build_aligned_benchmark_result
 from .volume_profile import build_multi_horizon_profiles, build_volume_profile
-from .decision_packet import build_decision_review_packet, should_run_sol_final_review, validate_decision_review_packet
+from .decision_packet import build_decision_review_packet, should_run_high_impact_review, validate_decision_review_packet
 from .factor_packet import build_asset_factor_packet, validate_asset_factor_packet
 from .metric_plan import build_metric_collection_plan, build_metric_collection_request, scoring_metric_enabled_for_asset
 from .metric_normalization import (
@@ -104,5 +104,5 @@ __all__ = [
     "normalize_metric_result",
     "normalize_collection_results",
     "persist_collection_results",
-    "should_run_sol_final_review",
+    "should_run_high_impact_review",
 ]

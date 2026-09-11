@@ -19,6 +19,10 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.classify("USD"), "cash")
         self.assertEqual(policy.events["lookback_days"]["FULL_REVIEW"]["security"], 90)
         self.assertEqual(policy.events["coverage"]["high_minimum"], 1.0)
+        self.assertEqual(
+            policy.high_impact_review,
+            {"material_reduce_pp": 5.0, "material_target_change_pp": 10.0},
+        )
         self.assertEqual(policy.scoring_profile_name("BTC"), "btc")
         self.assertEqual(policy.scoring_profile("BTC")["relative_strength_btc"], 0.0)
         self.assertEqual(policy.scoring_profile_name("AAVE"), "defi_protocol")
@@ -186,6 +190,14 @@ class PolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "policy.json"
             path.write_text(json.dumps(invalid_events), encoding="utf-8")
+            with self.assertRaises(PolicyError):
+                load_policy(path)
+
+        invalid_high_impact = json.loads(json.dumps(original))
+        invalid_high_impact["high_impact_review"]["material_target_change_pp"] = 0
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(invalid_high_impact), encoding="utf-8")
             with self.assertRaises(PolicyError):
                 load_policy(path)
 

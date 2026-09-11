@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from ..metrics_registry import metric_definition
 from .confidence import ConfidenceResult, DecisionConfidence
-from .decision_packet import NoTradeAttribution, SolReview
+from .decision_packet import HighImpactReview, NoTradeAttribution
 from .evidence import ManualAssetContext
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .time import normalize_timestamp
@@ -332,7 +332,7 @@ class ReportPacket:
     execution_zones: Mapping[str, Any] = field(default_factory=dict)
     historical_changes: Mapping[str, Any] = field(default_factory=dict)
     risk_flags: tuple[str, ...] = ()
-    sol_review: SolReview | Mapping[str, Any] | None = None
+    high_impact_review: HighImpactReview | Mapping[str, Any] | None = None
     critical_missing_data: tuple[str, ...] = ()
     data_quality: Mapping[str, Any] = field(default_factory=dict)
     positioning_summaries: Mapping[str, Any] = field(default_factory=dict)
@@ -452,10 +452,10 @@ class ReportPacket:
             if len(values) != len(set(values)):
                 raise ValueError(f"{field_name} must contain unique values")
             object.__setattr__(self, field_name, values)
-        review = self.sol_review
-        if review is not None and not isinstance(review, SolReview):
-            review = SolReview(**dict(review))
-        object.__setattr__(self, "sol_review", review)
+        review = self.high_impact_review
+        if review is not None and not isinstance(review, HighImpactReview):
+            review = HighImpactReview(**dict(review))
+        object.__setattr__(self, "high_impact_review", review)
         if self.regime_confidence is not None:
             value = self.regime_confidence if isinstance(self.regime_confidence, ConfidenceResult) else ConfidenceResult.from_mapping(self.regime_confidence)
             object.__setattr__(self, "regime_confidence", value)
@@ -505,7 +505,7 @@ class ReportPacket:
             "execution_zones": thaw_packet_value(self.execution_zones),
             "historical_changes": thaw_packet_value(self.historical_changes),
             "risk_flags": list(self.risk_flags),
-            "sol_review": self.sol_review.as_dict() if self.sol_review else None,
+            "high_impact_review": self.high_impact_review.as_dict() if self.high_impact_review else None,
             "critical_missing_data": list(self.critical_missing_data),
             "data_quality": thaw_packet_value(self.data_quality),
             "failed_data_fetches": thaw_packet_value(self.failed_data_fetches),

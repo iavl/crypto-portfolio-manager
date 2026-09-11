@@ -7,12 +7,10 @@ from jsonschema import Draft202012Validator, FormatChecker
 from crypto_portfolio.acquisition import AcquisitionManager
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
 from crypto_portfolio.events import (
-    ApiEventMaterialityClassifier,
     EventResolver,
     EventScanner,
     EventSourceScanResponse,
     build_exchange_document,
-    classifier_from_environment,
     parse_exchange_document,
     validate_exchange_responses,
 )
@@ -48,7 +46,6 @@ class CandidateTransport:
 class ClearClassifier:
     mode = "host"
     backend = "test"
-    model = None
 
     def classify(self, *, request, response):
         return EventSourceScanResponse(
@@ -66,18 +63,6 @@ class MutatingClassifier(ClearClassifier):
     def classify(self, *, request, response):
         item = {**response.items[0], "canonical_url": "https://example.test/mutated"}
         return EventSourceScanResponse(response.source_id, True, response.checked_at, (item,), None)
-
-
-class ApiClient:
-    def __init__(self):
-        self.calls = []
-
-    def post_json(self, url, *, json_body, headers, idempotent):
-        self.calls.append((url, json_body, headers, idempotent))
-        item = json.loads(json_body["messages"][1]["content"])["items"][0]
-        item["materiality"] = False
-        item["relevance"] = "IRRELEVANT"
-        return {"choices": [{"message": {"content": json.dumps({"items": [item]})}}]}
 
 
 class EventResolutionTests(unittest.TestCase):
@@ -134,26 +119,6 @@ class EventResolutionTests(unittest.TestCase):
         response = resolver.resolve(self.request)
         self.assertEqual(response.items[0]["materiality"], "CANDIDATE")
         self.assertEqual(resolver.diagnostics[0].status, "CONFLICT")
-
-    def test_openai_compatible_classifier_is_bounded_and_validated(self):
-        client = ApiClient()
-        response = ApiEventMaterialityClassifier(
-            endpoint="https://classifier.example/v1/chat/completions",
-            api_key="secret",
-            client=client,
-        ).classify(
-            request=self.request,
-            response=CandidateTransport().fetch(self.request),
-        )
-        self.assertFalse(response.items[0]["materiality"])
-        self.assertEqual(client.calls[0][2]["Authorization"], "Bearer secret")
-        self.assertTrue(client.calls[0][3])
-
-    def test_api_mode_without_key_stays_unavailable(self):
-        classifier = classifier_from_environment({"EVENT_CLASSIFIER_MODE": "api"})
-        self.assertEqual(classifier.backend, "openai")
-        response = EventResolver(transport=CandidateTransport(), classifier=classifier).resolve(self.request)
-        self.assertIn("EVENT_CLASSIFIER_UNAVAILABLE", response.error)
 
     def test_transport_wiring_and_shared_regulatory_scan(self):
         transport = CandidateTransport(empty=True)

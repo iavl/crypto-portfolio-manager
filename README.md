@@ -11,7 +11,7 @@
 
 术语不熟悉？请先查看[中文术语表](docs/GLOSSARY.zh-CN.md)。
 
-模型与推理配置使用安全默认值，并会根据运行时进行回退；请参阅[路由参考](references/model-routing.md)。
+模型选择由 Codex、ZCode、Claude Code 等宿主控制；Skill 使用用户当前会话的模型和推理设置，不进行仓库级模型切换。
 
 ## 概览
 
@@ -36,7 +36,7 @@ Skill：   .agents/skills/crypto-portfolio-manager/SKILL.md
 - 将稳定币和现金视为同一资金篮子，并允许 `NO_TRADE`。
 - 从 Binance 钱包截图导入结构化字段，并确定性地计算每个仓位的成本基础、未实现盈亏、收益率和数据覆盖率。
 - 基于带时间戳的现货数据和完整的 OHLCV，结合日历覆盖检查、确定性的 ATR 感知区间、已确认的摆动点、Volume Profile POC/价值区间/HVN 背景、分批方案以及 `WAIT` 处理，对获批的再平衡金额制定分阶段执行计划。
-- 可配置模型/推理配置使用安全默认值，并根据运行时进行回退；Luna 阶段仅允许使用 `LUNA_MAX`。
+- Python 负责确定性金融计算；Agent 负责有界语义研究、解释和报告文字。
 
 ## 安全边界 / 它不是什么
 
@@ -53,7 +53,7 @@ Skill：   .agents/skills/crypto-portfolio-manager/SKILL.md
 - Git，用于克隆和开发。
 - 运行 Agent 的环境需要具备网络/网页访问能力，以进行实时研究或按需刷新公共 provider 数据。
 
-正常使用 Skill 不需要安装 Python 包。仓库没有运行时 Python 依赖；`jsonschema` 和 `ruff` 仅是开发依赖。逻辑阶段路由配置在 `config/model-routing.json` 中。
+正常使用 Skill 不需要安装 Python 包。仓库没有运行时 Python 依赖；`jsonschema` 和 `ruff` 仅是开发依赖。
 
 ## Skill 安装与使用
 

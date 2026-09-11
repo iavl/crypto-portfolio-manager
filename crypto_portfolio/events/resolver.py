@@ -35,7 +35,7 @@ EVENT_RESOLUTION_ERROR_CODES = (
 )
 _ALLOWED_EXCHANGE_FIELDS = {
     "schema_version", "generated_at", "requests", "pending_requests", "responses", "pending_responses",
-    "classification_mode", "classifier_backend", "classifier_model",
+    "classification_mode", "classifier_backend",
 }
 
 
@@ -61,7 +61,6 @@ class EventResolutionDiagnostic:
     classified_count: int
     classification_mode: str
     classifier_backend: str | None = None
-    classifier_model: str | None = None
     coverage_ratio: float = 0.0
     confidence: str | None = None
     event_state: str | None = None
@@ -83,7 +82,6 @@ class EventResolutionDiagnostic:
             "classified_count": self.classified_count,
             "classification_mode": self.classification_mode,
             "classifier_backend": self.classifier_backend,
-            "classifier_model": self.classifier_model,
             "coverage_ratio": self.coverage_ratio,
             "confidence": self.confidence,
             "event_state": self.event_state,
@@ -146,7 +144,6 @@ class EventResolver:
             classified_count=len(response.items) - candidates,
             classification_mode=getattr(classifier, "mode", "host"),
             classifier_backend=getattr(classifier, "backend", None),
-            classifier_model=getattr(classifier, "model", None),
             coverage_ratio=1.0 if response.reachable and response.complete_for_source else 0.0,
             confidence="HIGH" if response.reachable and response.complete_for_source and not candidates else "LOW",
             status=status,
@@ -256,7 +253,6 @@ def build_exchange_document(
     generated_at: str | None = None,
     classification_mode: str = "host",
     classifier_backend: str | None = None,
-    classifier_model: str | None = None,
 ) -> dict[str, Any]:
     """Build the stable host-assisted pending/classified exchange document."""
     requests = tuple(requests)
@@ -271,7 +267,6 @@ def build_exchange_document(
         "pending_responses": [response.as_dict() for response in pending],
         "classification_mode": classification_mode,
         "classifier_backend": classifier_backend,
-        "classifier_model": classifier_model,
     }
 
 

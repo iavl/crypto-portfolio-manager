@@ -9,7 +9,7 @@ from .cash_flow import (
 )
 from .events import EventItem, EventScanResult, build_event_scan_result, event_scan_observation
 from ..facts.models import EventFacts, FactBase, FlowFacts, FundamentalFacts, OnchainFacts, RelativeStrengthFacts, TrendFacts, ValuationFacts
-from .decision_packet import AssetDecisionSummary, DecisionReviewPacket, NoTradeAttribution, SolReview
+from .decision_packet import AssetDecisionSummary, DecisionReviewPacket, NoTradeAttribution, HighImpactReview
 from .cycle import (
     BTCCycleContext,
     CycleRisk,
@@ -89,7 +89,7 @@ __all__ = [
     "ConfidenceDimension",
     "ConfidenceResult",
     "DecisionConfidence",
-    "SolReview",
+    "HighImpactReview",
     "TrendFacts",
     "ValuationFacts",
     "MetricObservation",

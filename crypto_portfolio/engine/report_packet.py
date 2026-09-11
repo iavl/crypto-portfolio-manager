@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any, Mapping
 import json
 
-from ..models.decision_packet import DecisionReviewPacket, SolReview
+from ..models.decision_packet import DecisionReviewPacket, HighImpactReview
 from ..models.market_overlays import MarketOverlays
 from ..models.report_packet import ReportPacket
 
@@ -59,7 +59,7 @@ def _failed_script_executions(value: Any) -> tuple[Mapping[str, Any], ...]:
 
 def build_report_packet(
     decision_packet: DecisionReviewPacket | Mapping[str, Any],
-    sol_review: SolReview | Mapping[str, Any] | None = None,
+    high_impact_review: HighImpactReview | Mapping[str, Any] | None = None,
     *,
     scores: Mapping[str, Any] | None = None,
     data_quality: Mapping[str, Any] | None = None,
@@ -149,7 +149,7 @@ def build_report_packet(
         execution_zones=zones,
         historical_changes=historical,
         risk_flags=packet.risk_flags,
-        sol_review=sol_review,
+        high_impact_review=high_impact_review,
         critical_missing_data=packet.critical_missing_data,
         data_quality=data_quality or {},
         failed_data_fetches=failed_data_fetches,

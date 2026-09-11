@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import math
-import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .evidence import AssetAssessment, Evidence, FactorScore, ManualAssetContext, contains_private_reasoning
+from .evidence import AssetAssessment, Evidence, FactorScore, ManualAssetContext
 from .confidence import ConfidenceResult, DecisionConfidence
 from .decision_packet import NoTradeAttribution
 from .execution import ExecutionPlan
@@ -61,7 +60,6 @@ class Decision:
     decision_id: str | None = None
     based_on_snapshot_id: str | None = None
     execution_plans: Mapping[str, ExecutionPlan | Mapping[str, Any]] | None = None
-    routing_metadata: Mapping[str, Any] | None = None
     market_overlays: Mapping[str, Any] | None = None
     regime_confidence: ConfidenceResult | Mapping[str, Any] | None = None
     decision_confidence: DecisionConfidence | Mapping[str, Any] | None = None
@@ -262,66 +260,6 @@ class Decision:
                 raise ValueError(
                     "each execution plan with a technical summary must have one matching execution_technical evidence record"
                 )
-        if self.routing_metadata is not None:
-            if not isinstance(self.routing_metadata, Mapping):
-                raise ValueError("routing_metadata must be an object or null")
-            metadata = dict(self.routing_metadata)
-            if contains_private_reasoning(metadata):
-                raise ValueError("routing_metadata must not contain private reasoning")
-            stages_used = metadata.get("stages_used")
-            if stages_used is not None:
-                if not isinstance(stages_used, Mapping):
-                    raise ValueError("routing_metadata.stages_used must be an object")
-                if any(
-                    not isinstance(stage, str)
-                    or not stage.strip()
-                    or not isinstance(model, str)
-                    or not model.strip()
-                    for stage, model in stages_used.items()
-                ):
-                    raise ValueError("routing_metadata.stages_used must map stages to non-empty strings")
-            stages = metadata.get("stages")
-            if stages is not None:
-                if not isinstance(stages, Mapping):
-                    raise ValueError("routing_metadata.stages must be an object")
-                route_fields = {
-                    "requested_preset",
-                    "requested_model",
-                    "requested_reasoning_effort",
-                    "effective_model",
-                    "effective_reasoning_effort",
-                    "runtime",
-                    "fallback_used",
-                    "fallback_reason",
-                }
-                for stage, route in stages.items():
-                    if not isinstance(route, Mapping):
-                        raise ValueError(f"routing_metadata.stages.{stage} must be an object")
-                    missing = route_fields - set(route)
-                    if missing:
-                        raise ValueError(
-                            f"routing_metadata.stages.{stage} is missing fields: {', '.join(sorted(missing))}"
-                        )
-                    if not isinstance(route["fallback_used"], bool):
-                        raise ValueError(
-                            f"routing_metadata.stages.{stage}.fallback_used must be boolean"
-                        )
-                    if route["fallback_used"] and not route["fallback_reason"]:
-                        raise ValueError(
-                            f"routing_metadata.stages.{stage}.fallback_reason is required"
-                        )
-                    if not route["fallback_used"] and route["fallback_reason"] is not None:
-                        raise ValueError(
-                            f"routing_metadata.stages.{stage}.fallback_reason must be null"
-                        )
-            if "sol_review_performed" in metadata and not isinstance(metadata["sol_review_performed"], bool):
-                raise ValueError("routing_metadata.sol_review_performed must be boolean")
-            try:
-                json.dumps(metadata, ensure_ascii=False, allow_nan=False)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("routing_metadata must be JSON serializable and finite") from exc
-            object.__setattr__(self, "routing_metadata", metadata)
-
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "Decision":
         if not isinstance(value, Mapping):
@@ -331,7 +269,7 @@ class Decision:
             "timestamp", "market_regime", "current_weights", "target_weights", "actions",
             "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "constraints_applied",
             "config", "policy_hash", "resolved_policy", "review_type", "decision_id",
-            "based_on_snapshot_id", "execution_plans", "routing_metadata", "market_overlays",
+            "based_on_snapshot_id", "execution_plans", "market_overlays",
             "regime_confidence", "decision_confidence", "nav_performance",
             "benchmark_performance", "event_scan_summary",
             "manual_asset_contexts",
@@ -371,7 +309,6 @@ class Decision:
             decision_id=data.get("decision_id"),
             based_on_snapshot_id=data.get("based_on_snapshot_id"),
             execution_plans=data.get("execution_plans"),
-            routing_metadata=data.get("routing_metadata"),
             market_overlays=data.get("market_overlays"),
             regime_confidence=data.get("regime_confidence"),
             decision_confidence=data.get("decision_confidence"),
@@ -415,8 +352,6 @@ class Decision:
             result["execution_plans"] = {
                 symbol: plan.as_dict() for symbol, plan in self.execution_plans.items()
             }
-        if self.routing_metadata is not None:
-            result["routing_metadata"] = dict(self.routing_metadata)
         if self.market_overlays is not None:
             result["market_overlays"] = thaw_packet_value(self.market_overlays)
         if self.regime_confidence is not None:

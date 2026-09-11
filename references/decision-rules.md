@@ -184,6 +184,12 @@ Do not reverse a medium-term recommendation based solely on one or two noisy dai
 
 A new recommendation that contradicts the prior two-week thesis should identify the new evidence that justifies the change.
 
+The deterministic engine requests a high-impact review for an `EXIT`, a core
+reduction at or above `config/policy.json`'s `high_impact_review.material_reduce_pp`,
+or a target-weight change above `high_impact_review.material_target_change_pp`.
+The current Agent performs that review and may challenge the recommendation, but
+cannot rewrite Python-owned scores, targets, limits, or amounts.
+
 ## Rule 12 — Positioning and cycle context
 
 Derivatives positioning, structured social sentiment, and BTC Cycle Context are

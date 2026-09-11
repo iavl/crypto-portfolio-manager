@@ -3,11 +3,10 @@
   "$id": "https://example.local/crypto-portfolio-manager/metric-collection-plan.schema.json",
   "title": "Deterministic metric collection plan",
   "type": "object",
-  "required": ["review_type", "assets", "requests", "critical_metric_keys", "discovery_required_assets", "excluded_assets", "collector_model"],
+  "required": ["review_type", "assets", "requests", "critical_metric_keys", "discovery_required_assets", "excluded_assets"],
   "properties": {
     "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
     "assets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "collector_model": {"const": "LUNA_MAX"},
     "critical_metric_keys": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "discovery_required_assets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "excluded_assets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},

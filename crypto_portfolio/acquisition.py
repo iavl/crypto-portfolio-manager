@@ -304,7 +304,6 @@ def _expand_derived_dependencies(plan: MetricCollectionPlan) -> MetricCollection
         assets=plan.assets,
         discovery_required_assets=plan.discovery_required_assets,
         excluded_assets=plan.excluded_assets,
-        collector_model=plan.collector_model,
     )
 
 
@@ -346,31 +345,30 @@ class AcquisitionManager:
         event_source_scan_responses: Mapping[Any, EventSourceScanResponse | Mapping[str, Any]] | Iterable[EventSourceScanResponse | Mapping[str, Any]] | None = None,
         event_source_fetcher: Callable[[EventSourceScanRequest], Any] | None = None,
     ) -> AcquisitionResult:
-        requested_model = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
-        excluded = list(requested_model.excluded_assets)
+        requested_plan = plan if isinstance(plan, MetricCollectionPlan) else MetricCollectionPlan.from_mapping(plan)
+        excluded = list(requested_plan.excluded_assets)
         kept_requests = []
-        for request in requested_model.requests:
+        for request in requested_plan.requests:
             if self.policy.is_excluded(request.asset):
                 if request.asset not in excluded:
                     excluded.append(request.asset)
                 continue
             kept_requests.append(request)
-        if len(kept_requests) != len(requested_model.requests) or tuple(excluded) != requested_model.excluded_assets:
-            requested_model = MetricCollectionPlan(
-                review_type=requested_model.review_type,
+        if len(kept_requests) != len(requested_plan.requests) or tuple(excluded) != requested_plan.excluded_assets:
+            requested_plan = MetricCollectionPlan(
+                review_type=requested_plan.review_type,
                 requests=tuple(kept_requests),
                 assets=tuple(
-                    asset for asset in requested_model.assets
+                    asset for asset in requested_plan.assets
                     if not self.policy.is_excluded(asset)
                 ),
                 discovery_required_assets=tuple(
-                    asset for asset in requested_model.discovery_required_assets
+                    asset for asset in requested_plan.discovery_required_assets
                     if not self.policy.is_excluded(asset)
                 ),
                 excluded_assets=tuple(excluded),
-                collector_model=requested_model.collector_model,
             )
-        model = _expand_derived_dependencies(requested_model)
+        model = _expand_derived_dependencies(requested_plan)
         selected_mode = resolve_fetch_mode(mode if mode is not None else self.fetch_mode)
         current = _now(now)
         cutoff = as_of if as_of is not None else current
@@ -651,7 +649,6 @@ class AcquisitionManager:
                 "classified_count": 0,
                 "classification_mode": "host",
                 "classifier_backend": None,
-                "classifier_model": None,
                 "coverage_ratio": 0.0,
                 "confidence": "LOW",
                 "event_state": "UNRESOLVED",
@@ -722,7 +719,7 @@ class AcquisitionManager:
                 (*chain, "official/current sources") if chain else ("official/current sources",),
             ))
 
-        for request in requested_model.requests:
+        for request in requested_plan.requests:
             identity = (request.asset, request.metric_key)
             raw = reusable.get(identity)
             if raw is not None:
@@ -911,7 +908,7 @@ class AcquisitionManager:
             if scan is not None:
                 event_sources_reachable += round(scan.coverage * len(requests))
         summary.update({
-            "metrics_requested": len(requested_model.requests),
+            "metrics_requested": len(requested_plan.requests),
             "fresh_observation_hits": fresh_hits,
             "provider_cache_hits": routed.provider_cache_hits,
             "api_requests": routed.api_requests,
@@ -937,7 +934,7 @@ class AcquisitionManager:
             "event_sources_required": event_sources_required,
         })
         acquisition = AcquisitionResult(
-            requested_model,
+            requested_plan,
             tuple(results),
             tuple(web_fallbacks),
             summary,

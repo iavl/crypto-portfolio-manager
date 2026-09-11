@@ -42,7 +42,6 @@ judgment and user-facing decisions:
 - `references/data-sources.md`
 - `references/data-providers.md`
 - `references/output-template.md`
-- `references/model-routing.md`
 
 Use `data-sources.md` for source quality, methodology, and evidence meaning;
 use `data-providers.md` for provider routing, authentication, endpoints,
@@ -58,7 +57,7 @@ Never collect or research an asset in `policy.universe.excluded`. Exclusion is
 an unmanaged-universe decision, not an automatic sell; an existing excluded
 holding remains visible in snapshot accounting with any supplied value.
 
-## Python-first model boundaries
+## Python-first Agent boundaries
 
 Before delegating work to an LLM, first determine whether the result can be
 derived deterministically from structured data. If yes, Python MUST produce it;
@@ -76,17 +75,11 @@ base-score weight. BTC-native realized-cap valuation, normalized ETF flows, and
 official macro/liquidity evidence are separate from security, liveness, and
 holder/cycle overlays.
 
-Every Luna-assigned stage uses `LUNA_MAX` only. The current balanced profile
-also routes bounded semantic interpretation and report prose through the
-configured `LUNA_MAX` preset. Sol is conditional and reserved for major
-event/thesis-risk analysis or a high-impact final critique. Logical
-routing is recorded in `config/model-routing.json`; runtime model IDs are not
-hard-coded here. Load the effective model/reasoning profile before any
-LLM-owned stage, honoring the default, explicit profile, and run override.
-Keep requested and effective routes distinct. If runtime capabilities do not
-permit per-stage switching, use the configured fallback and say so; never
-claim a host-level model switch that did not happen. Python-owned stages stay
-Python under every profile.
+Model selection and reasoning settings are owned entirely by the current Agent
+Skills host. Use the host-selected configuration for this session; do not
+switch LLM models, reasoning levels, or LLM fallbacks on behalf of this Skill.
+Python-owned deterministic stages remain Python-owned, and the Agent handles
+only bounded semantic or reporting work.
 
 ## Binance screenshot intake
 
@@ -129,7 +122,7 @@ display data, so the engine uses value ÷ quantity and records a note.
 7. Let Python build the validated metric collection plan, then run the
    `AcquisitionManager` in `AUTO` (or the explicit `CACHE_ONLY`/
    `REFRESH`) mode. It checks fresh normalized observations, provider cache,
-   and free structured APIs before producing unresolved work for `LUNA_MAX`.
+   and free structured APIs before producing unresolved work for the Agent.
    Show provider preflight before acquisition: configured state, adapter
    availability, credential requirement/presence, runtime readiness, and a
    precise configuration reason when a provider is not ready.
@@ -493,7 +486,7 @@ structured source exists, but remain non-scoring and methodology-bound.
 
 Events are structured-first. An injected `StructuredEventTransport` may use
 bounded GitHub, RSS/Atom, Discourse JSON, and allowlisted RPC transports;
-Python filters and deduplicates candidates, while `LUNA_MAX` only classifies
+Python filters and deduplicates candidates, while the Agent only classifies
 their materiality. A complete reachable source with zero candidates returns a
 valid empty scan; same-authority URLs share a source group, and Discourse may
 complete once an ordered `created_at` page crosses the requested lookback.

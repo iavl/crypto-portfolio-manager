@@ -3,7 +3,7 @@
 Collection is registry-driven. Python selects applicable metrics and freshness
 requirements; `AcquisitionManager` first reuses fresh observations and local
 cache, then routes grouped requests through free structured providers. Only
-unresolved requests reach `LUNA_MAX`/Web, which returns normalized observations
+unresolved requests reach the Agent/Web stage, which returns normalized observations
 with source and timestamps. Python validates units, timestamps, freshness,
 conflicts, and history. Downstream semantic stages consume the normalized
 records/Facts rather than repeatedly reading raw webpages.
@@ -438,7 +438,7 @@ never inferred as deposits, withdrawals, or zero flow.
 
 The fixed event catalog may use bounded GitHub REST, RSS/Atom, Discourse JSON,
 or allowlisted RPC log transports. Python performs lookback filtering and
-deduplication; `LUNA_MAX` only classifies the bounded candidate packet for
+deduplication; the Agent only classifies the bounded candidate packet for
 materiality. A reachable, complete source with zero candidates is a valid
 empty response for that declared scope. Sources from one authority use a
 shared source group, while independent security domains remain separate.

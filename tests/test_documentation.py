@@ -48,7 +48,6 @@ class DocumentationTests(unittest.TestCase):
             "schemas/metric-observation.schema.json",
             "schemas/collection-event.schema.json",
             "schemas/volume-profile.schema.json",
-            "config/model-routing.json",
             "config/data-providers.json",
             "references/data-providers.md",
             "schemas/data-providers.schema.json",
@@ -58,7 +57,6 @@ class DocumentationTests(unittest.TestCase):
             "schemas/event-source-scan-response.schema.json",
             "schemas/event-classification-exchange.schema.json",
             "schemas/provider-runtime-status.schema.json",
-            "references/model-routing.md",
             "schemas/metric-collection-plan.schema.json",
             "schemas/factor-packet.schema.json",
             "schemas/decision-review-packet.schema.json",
@@ -123,7 +121,7 @@ class DocumentationTests(unittest.TestCase):
             "CLASSIFICATION_PENDING",
             "INSUFFICIENT_SOURCE_COVERAGE",
             "pending_responses",
-            "EVENT_CLASSIFIER_API_KEY",
+            "host-assisted",
             "不会默认",
         ):
             with self.subTest(text=text):

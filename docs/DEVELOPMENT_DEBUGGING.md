@@ -134,11 +134,10 @@ FETCH_FAILED | CLASSIFICATION_FAILED | INSUFFICIENT_SOURCE_COVERAGE | CONFLICT
 ```
 
 `CACHE_ONLY` 只读 event transport cache，cache miss 保持不可达；它不会发 HTTP
-或调用 classifier API。可选 API classifier 使用环境变量：
-`EVENT_CLASSIFIER_MODE=api`、`EVENT_CLASSIFIER_API_KEY`、
-`EVENT_CLASSIFIER_API_URL`、`EVENT_CLASSIFIER_PROVIDER`、`EVENT_CLASSIFIER_MODEL`。
-缺少 key 或 API 失败会保持 pending，并不会产生 `CLEAR`。GitHub source 若无
-`GITHUB_TOKEN`，smoke 输出应明确是 unauthenticated mode。
+或调用外部分类器。需要语义分类时，由当前宿主中的 Agent 处理
+`pending_responses`，再通过 `--resolve` 交回结构化结果。缺少分类或分类失败会保持
+pending，并不会产生 `CLEAR`。GitHub source 若无 `GITHUB_TOKEN`，smoke 输出应明确
+是 unauthenticated mode。
 
 ## 决策树
 

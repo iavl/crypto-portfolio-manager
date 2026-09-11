@@ -7,7 +7,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from crypto_portfolio.engine.decision_packet import (
     build_decision_review_packet,
-    should_run_sol_final_review,
+    should_run_high_impact_review,
 )
 from crypto_portfolio.engine.factor_packet import build_asset_factor_packet
 from crypto_portfolio.engine.factors.flows import classify_flow_state
@@ -19,7 +19,6 @@ from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequ
 from crypto_portfolio.engine.report_packet import build_final_review_output, build_report_packet
 from crypto_portfolio.engine.regime_inputs import build_regime_inputs
 from crypto_portfolio.metrics_registry import METRIC_REGISTRY, MetricDefinition
-from crypto_portfolio.model_routing import RoutingError, load_model_routing, validate_stage_model
 from crypto_portfolio.models.market import TechnicalSnapshot
 from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
 from crypto_portfolio.state.metrics import read_metric_observations
@@ -236,7 +235,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
         self.assertEqual(inputs.btc_trend, "BULLISH")
         self.assertEqual(inputs.breadth_state, "HEALTHY")
 
-    def test_packets_are_compact_immutable_and_sol_is_conditional(self):
+    def test_packets_are_compact_immutable_and_high_impact_review_is_conditional(self):
         factor_packet = build_asset_factor_packet(
             "ETH",
             facts={"fundamentals": build_factor_facts([_observation(10)], symbol="ETH", factor="fundamentals")},
@@ -264,9 +263,9 @@ class PythonFirstArchitectureTests(unittest.TestCase):
                 "assets": [],
                 "execution_summary": {"raw_webpage": "do not pass"},
             })
-        self.assertFalse(should_run_sol_final_review(packet))
+        self.assertFalse(should_run_high_impact_review(packet))
         self.assertTrue(
-            should_run_sol_final_review(
+            should_run_high_impact_review(
                 review_type="SNAPSHOT_REVIEW",
                 market_regime="NORMAL",
                 actions=[{"symbol": "ETH", "action": "EXIT", "amount_usd": 100}],
@@ -286,11 +285,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
         self.assertEqual(output["report_packet"]["market_regime"], "NORMAL")
         self.assertIn("event_scans", output)
 
-    def test_routing_rejects_non_max_luna_and_schemas_validate(self):
-        routing = load_model_routing()
-        self.assertEqual(routing.model_for_stage("metric_collection"), "LUNA_MAX")
-        with self.assertRaises(RoutingError):
-            validate_stage_model("metric_collection", "LUNA_LOW")
+    def test_high_impact_review_keeps_deterministic_outputs_and_schemas_validate(self):
         factor_packet = build_asset_factor_packet(
             "ETH",
             facts={"fundamentals": build_factor_facts([_observation(10)], symbol="ETH", factor="fundamentals")},
@@ -300,13 +295,22 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"ETH": 1},
             target_weights={"ETH": 1},
+            previous_target_weights={"ETH": 0.8, "USD": 0.2},
             assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
             factor_packets={"ETH": factor_packet},
         )
-        report = build_report_packet(packet)
+        self.assertTrue(should_run_high_impact_review(packet))
+        report = build_report_packet(
+            packet,
+            high_impact_review={"status": "CHALLENGE", "rationale": "review the material target change"},
+        )
+        rendered = json.dumps(report.as_dict())
+        for token in ("L" + "UNA", "T" + "ERRA", "S" + "OL", "g" + "pt-", "reasoning" + "_effort", "routing" + " profile"):
+            self.assertNotIn(token, rendered)
+        self.assertEqual(report.as_dict()["scores"]["ETH"], 70.0)
+        self.assertEqual(report.as_dict()["target_weights"], {"ETH": 1.0})
         root = Path(__file__).parents[1]
         payloads = {
-            "model-routing.schema.json": routing.as_dict(),
             "factor-packet.schema.json": factor_packet.as_dict(),
             "decision-review-packet.schema.json": packet.as_dict(),
             "report-packet.schema.json": report.as_dict(),

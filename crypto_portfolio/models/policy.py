@@ -59,6 +59,7 @@ _TOP_LEVEL_FIELDS = {
     "btc_cycle",
     "execution_overlay",
     "events",
+    "high_impact_review",
     "event_risk_multipliers",
     "confidence",
     "freshness_policy",
@@ -82,6 +83,7 @@ _CHAIN_FINALIZED_FIELDS = {
 }
 _HORIZON_FIELDS = {"min", "max"}
 _REBALANCE_FIELDS = {"hold_below_pp", "watch_below_pp", "high_priority_above_pp"}
+_HIGH_IMPACT_REVIEW_FIELDS = {"material_reduce_pp", "material_target_change_pp"}
 _ALLOCATION_FIELDS = {
     "satellite_entry_score",
     "satellite_exit_score",
@@ -414,6 +416,18 @@ def _parse_event_risk_multipliers(value: Any) -> dict[str, float]:
     return result
 
 
+def _parse_high_impact_review(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        raise PolicyError("high_impact_review must be an object")
+    _unknown_fields(value, _HIGH_IMPACT_REVIEW_FIELDS, "high_impact_review")
+    if set(value) != _HIGH_IMPACT_REVIEW_FIELDS:
+        raise PolicyError("high_impact_review fields are incomplete")
+    return {
+        key: _number(value[key], f"high_impact_review.{key}", minimum=math.nextafter(0.0, 1.0))
+        for key in _HIGH_IMPACT_REVIEW_FIELDS
+    }
+
+
 def _parse_core_allocation(value: Any) -> dict[str, Any]:
     if value is None:
         raise PolicyError("core_allocation is required")
@@ -514,6 +528,7 @@ class Policy:
     source_quality: Mapping[str, Any] = dataclass_field(default_factory=dict)
     event_severity: Mapping[str, Any] = dataclass_field(default_factory=dict)
     nav_history: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    high_impact_review: Mapping[str, float] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -622,6 +637,8 @@ class Policy:
             result["event_severity"] = _copy_mapping(self.event_severity)
         if self.nav_history:
             result["nav_history"] = _copy_mapping(self.nav_history)
+        if self.high_impact_review:
+            result["high_impact_review"] = dict(self.high_impact_review)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -1765,6 +1782,7 @@ def _parse_policy(
     parsed_source_quality = _parse_source_quality(data.get("source_quality"))
     parsed_event_severity = _parse_event_severity(data.get("event_severity"))
     parsed_nav_history = _parse_nav_history(data.get("nav_history"))
+    parsed_high_impact_review = _parse_high_impact_review(data.get("high_impact_review"))
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -1878,6 +1896,7 @@ def _parse_policy(
         source_quality=parsed_source_quality,
         event_severity=parsed_event_severity,
         nav_history=parsed_nav_history,
+        high_impact_review=parsed_high_impact_review,
     )
     return policy
 
