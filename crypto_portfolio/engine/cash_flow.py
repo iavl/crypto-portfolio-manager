@@ -146,13 +146,129 @@ def detect_external_cash_flow(
     raise ValueError("unsupported cash-flow resolution state")
 
 
+def _snapshot_field(value: Any, field: str, default: Any = None) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(field, default)
+    return getattr(value, field, default)
+
+
+def _snapshot_id_of(value: Any) -> str | None:
+    raw = _snapshot_field(value, "snapshot_id")
+    return str(raw).strip() if raw is not None and str(raw).strip() else None
+
+
+def apply_cash_flow_resolutions(
+    snapshots: Sequence[PortfolioSnapshot | Mapping[str, Any]],
+    resolutions: Sequence[CashFlowResolution | Mapping[str, Any]] = (),
+) -> tuple[tuple[dict[str, Any], ...], dict[str, Any]]:
+    """Overlay explicit resolutions onto snapshots without mutating inputs.
+
+    Only snapshots whose status is ``UNRESOLVED`` may be overridden by a
+    resolution; a user-explicit status is never silently rewritten. Snapshots
+    without a matching resolution keep their persisted classification — this
+    function never guesses a legacy unresolved flow.
+    """
+    parsed: list[tuple[str, CashFlowResolution]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(resolutions):
+        resolution = item if isinstance(item, CashFlowResolution) else CashFlowResolution.from_mapping(dict(item))
+        if resolution.snapshot_id in seen:
+            raise ValueError(f"duplicate cash-flow resolution for snapshot {resolution.snapshot_id}")
+        seen.add(resolution.snapshot_id)
+        parsed.append((f"resolutions[{index}]", resolution))
+    known_ids = {_snapshot_id_of(value) for value in snapshots}
+    unknown = [
+        (label, resolution)
+        for label, resolution in parsed
+        if resolution.snapshot_id not in known_ids
+    ]
+    if unknown:
+        label, resolution = unknown[0]
+        raise ValueError(
+            f"{label} references unknown snapshot_id {resolution.snapshot_id}"
+        )
+    by_snapshot = {resolution.snapshot_id: resolution for _, resolution in parsed}
+    effective: list[dict[str, Any]] = []
+    lineage: list[dict[str, Any]] = []
+    for value in snapshots:
+        original_status = str(
+            _snapshot_field(value, "cash_flow_resolution_status", "ASSUMED_NONE")
+        ).strip().upper()
+        record = {
+            "timestamp": _snapshot_field(value, "timestamp"),
+            "total_value_usd": _total_value(value),
+            "external_cash_flow": _snapshot_field(value, "external_cash_flow"),
+            "external_cash_flow_type": _snapshot_field(value, "external_cash_flow_type"),
+            "cash_flow_resolution_status": original_status,
+            "snapshot_id": _snapshot_id_of(value),
+        }
+        snapshot_id = record["snapshot_id"]
+        resolution = by_snapshot.get(snapshot_id) if snapshot_id else None
+        if resolution is not None:
+            if original_status != "UNRESOLVED":
+                raise ValueError(
+                    f"snapshot {snapshot_id} is {original_status}; only UNRESOLVED snapshots accept a resolution"
+                )
+            record.update(
+                {
+                    "external_cash_flow": resolution.external_cash_flow,
+                    "external_cash_flow_type": resolution.external_cash_flow_type,
+                    "cash_flow_resolution_status": resolution.cash_flow_resolution_status,
+                    "cash_flow_classification_source": "USER_EXPLICIT",
+                }
+            )
+            lineage.append(
+                {
+                    "snapshot_id": snapshot_id,
+                    "original_status": original_status,
+                    "effective_status": resolution.cash_flow_resolution_status,
+                    "resolution_id": resolution.resolution_id,
+                    "rationale": resolution.rationale,
+                    "source": "USER_EXPLICIT",
+                }
+            )
+        else:
+            lineage.append(
+                {
+                    "snapshot_id": snapshot_id,
+                    "original_status": original_status,
+                    "effective_status": original_status,
+                    "resolution_id": None,
+                    "rationale": None,
+                    "source": "PERSISTED",
+                }
+            )
+        effective.append(record)
+    return tuple(effective), {"lineage": tuple(lineage)}
+
+
+def find_unresolved_cash_flow_snapshots(
+    snapshots: Sequence[PortfolioSnapshot | Mapping[str, Any]],
+    resolutions: Sequence[CashFlowResolution | Mapping[str, Any]] = (),
+) -> tuple[dict[str, Any], ...]:
+    """List snapshots that still block final NAV after the resolution overlay."""
+    effective, _ = apply_cash_flow_resolutions(snapshots, resolutions)
+    return tuple(
+        {
+            "snapshot_id": record["snapshot_id"],
+            "timestamp": record["timestamp"],
+            "original_status": record["cash_flow_resolution_status"],
+            "has_resolution": False,
+        }
+        for record in effective
+        if record["cash_flow_resolution_status"] == "UNRESOLVED"
+    )
+
+
 def cash_flow_adjusted_performance(
     snapshots: Sequence[PortfolioSnapshot | Mapping[str, Any]],
+    *,
+    resolutions: Sequence[CashFlowResolution | Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Return a NAV result only when every material change is classified."""
     if not snapshots:
         raise ValueError("at least one snapshot is required")
-    values = tuple(snapshots)
+    values, resolution_diagnostics = apply_cash_flow_resolutions(snapshots, resolutions)
     unresolved = [
         detect_external_cash_flow(previous, current)
         for previous, current in zip(values, values[1:])
@@ -160,30 +276,26 @@ def cash_flow_adjusted_performance(
     if any(item["requires_confirmation"] for item in unresolved) or any(
         _flow(value)[1] == "UNRESOLVED" for value in values
     ):
+        blocking = find_unresolved_cash_flow_snapshots(snapshots, resolutions)
         return {
             "status": "PROVISIONAL",
             "performance_finality": "PROVISIONAL",
             "return": None,
             "transitions": unresolved,
+            "unresolved_snapshots": blocking,
+            "resolution_lineage": resolution_diagnostics["lineage"],
             "reason": "external cash-flow classification is required before reporting NAV performance",
         }
     ledger = []
     for value in values:
-        if isinstance(value, PortfolioSnapshot):
-            timestamp = value.timestamp
-            total = value.total_value_usd
-            amount = value.external_cash_flow
-        else:
-            timestamp = value["timestamp"]
-            total = _total_value(value)
-            amount, _, _ = _flow(value)
+        amount, _, _ = _flow(value)
         ledger.append(
             LedgerSnapshot(
-                timestamp,
-                total,
+                value["timestamp"],
+                value["total_value_usd"],
                 amount,
-                value.cash_flow_resolution_status if isinstance(value, PortfolioSnapshot) else value.get("cash_flow_resolution_status"),
-                value.snapshot_id if isinstance(value, PortfolioSnapshot) else value.get("snapshot_id"),
+                value["cash_flow_resolution_status"],
+                value.get("snapshot_id"),
             )
         )
     states = build_nav_history(ledger)
@@ -192,6 +304,8 @@ def cash_flow_adjusted_performance(
         "performance_finality": "FINAL",
         "return": nav_return(states),
         "transitions": unresolved,
+        "unresolved_snapshots": (),
+        "resolution_lineage": resolution_diagnostics["lineage"],
         "states": [state.__dict__.copy() for state in states],
     }
 
@@ -218,4 +332,10 @@ def resolve_cash_flow_issue(
     )
 
 
-__all__ = ["cash_flow_adjusted_performance", "detect_external_cash_flow", "resolve_cash_flow_issue"]
+__all__ = [
+    "apply_cash_flow_resolutions",
+    "cash_flow_adjusted_performance",
+    "detect_external_cash_flow",
+    "find_unresolved_cash_flow_snapshots",
+    "resolve_cash_flow_issue",
+]

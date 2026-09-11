@@ -28,8 +28,30 @@ python3 scripts/providers.py --smoke ETH --metric market.spot_price
 
 `--status` 是离线 readiness 检查。`--probe`、`--doctor`、`--contract` 和
 `--smoke` 是显式联网操作。已实际测试的失败返回 `2`；`all` 操作中跳过的
-未配置 Provider 不会导致命令失败。`scripts/run_with_debug.py` 保持适合报告
+provider 不会导致命令失败。`scripts/run_with_debug.py` 保持适合报告
 流程的退出码 `0`，同时把子进程退出码 `2` 记录为 `FAILED`。
+
+## OHLCV freshness 与 cash-flow 检查
+
+最新完整日 K 用统一定义：`expected = as_of UTC 日期 - 1 天`，
+`lag_days = expected - actual`，阈值只用 policy 的
+`execution.maximum_daily_candle_lag_days`。技术快照的
+`ohlcv_metadata` 会输出 `expected_latest_completed_date`、
+`actual_latest_completed_date`（`latest_completed_candle_date`）、
+`observation_lag_days`、`maximum_daily_candle_lag_days`、
+`daily_candle_status`（`CURRENT`/`STALE`）、`latest_candle_timestamp` 与
+`ohlcv_hash`。OHLCV 缓存会检查尾部完整性：缓存内容缺少最新完整日 K 时会
+刷新，而不是因为 fetch 时间新鲜就继续沿用。
+
+未解决的历史现金流会阻断 NAV/benchmark/drawdown finality。只读检查命令：
+
+```bash
+python3 scripts/cash_flow_resolutions.py list-unresolved
+python3 scripts/cash_flow_resolutions.py validate
+```
+
+`list-unresolved` 输出仍处于 `UNRESOLVED` 的 snapshot id 和时间戳；显式
+resolution 命令见 `docs/USAGE.md` 第 10 节。
 
 ## growthepie L2 TVS 定向验证
 

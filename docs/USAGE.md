@@ -276,6 +276,28 @@ snapshot 不被重写。
 `BASELINE_RESET` 必须带有该 snapshot 的 `snapshot_id`，它只建立新的记账
 基线；此前的 performance segment 保留为 archived history，不会重写旧记录。
 
+历史 `UNRESOLVED` snapshot 必须由用户显式解决，不会被自动猜测。只读检查：
+
+```bash
+python3 scripts/cash_flow_resolutions.py list-unresolved
+python3 scripts/cash_flow_resolutions.py validate
+```
+
+显式追加 resolution（只写 `cash-flow-resolutions.jsonl`，不改写 snapshots）：
+
+```bash
+python3 scripts/cash_flow_resolutions.py resolve-none \
+  --snapshot-id <id> --rationale "User confirmed no external cash flow"
+python3 scripts/cash_flow_resolutions.py resolve-amount \
+  --snapshot-id <id> --type DEPOSIT --amount 1000 --rationale "User confirmed deposit"
+python3 scripts/cash_flow_resolutions.py baseline-reset \
+  --snapshot-id <id> --rationale "Start verified baseline here"
+```
+
+resolution overlay 在 NAV replay 时生效：所有历史 unresolved 都有有效
+resolution 后，NAV、benchmark 与 drawdown 才会变为 `FINAL / AVAILABLE`；
+只要还有一个 unresolved，NAV 保持 `PROVISIONAL` 并列出具体 snapshot id。
+
 截图中的 `$0.00` 成本若精度不足，按未知成本处理；稳定币和现金仍计入组合
 总值及 stable sleeve。
 
