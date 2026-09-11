@@ -93,6 +93,13 @@ def stable_observation_id(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def observation_values_equal(left: Any, right: Any) -> bool:
+    """Compare persisted observation values with a shared numeric tolerance."""
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)) and not isinstance(left, bool) and not isinstance(right, bool):
+        return math.isclose(float(left), float(right), rel_tol=1e-12, abs_tol=1e-12)
+    return left == right
+
+
 @dataclass(frozen=True)
 class MetricObservation:
     observation_id: str
@@ -285,8 +292,9 @@ class MetricObservation:
     def to_evidence(self):
         """Project the observation into an immutable Decision Evidence record."""
         from .evidence import Evidence
+        from .factor_packet import strip_forbidden_packet_fields
 
-        metadata = dict(self.metadata or {})
+        metadata = strip_forbidden_packet_fields(dict(self.metadata or {}))
         metadata.update({
             "observation_id": self.observation_id,
             "metric_key": self.metric_key,

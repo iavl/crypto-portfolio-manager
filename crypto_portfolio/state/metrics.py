@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ..metrics_registry import METRIC_REGISTRY, metric_definition
-from ..models.metrics_history import CollectionEvent, MetricObservation, observation_freshness_reference
+from ..models.metrics_history import (
+    CollectionEvent,
+    MetricObservation,
+    observation_freshness_reference,
+    observation_values_equal,
+)
 from ..models.time import normalize_timestamp, parse_timestamp
 from ._jsonl import append_record, read_records
 from .snapshots import runtime_data_dir
@@ -35,9 +40,32 @@ def _event(value: CollectionEvent | Mapping[str, Any]) -> CollectionEvent:
 
 
 def _same_value(left: Any, right: Any) -> bool:
-    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-        return math.isclose(float(left), float(right), rel_tol=1e-12, abs_tol=1e-12)
-    return left == right
+    return observation_values_equal(left, right)
+
+
+def _same_point_records(model: MetricObservation, existing: Iterable[MetricObservation]) -> list[MetricObservation]:
+    return [
+        item for item in existing
+        if (
+            item.asset == model.asset
+            and item.metric_key == model.metric_key
+            and item.observed_at == model.observed_at
+            and item.source == model.source
+            and item.period == model.period
+        )
+    ]
+
+
+def latest_same_point_observation(
+    observation: MetricObservation | Mapping[str, Any],
+    path: str | Path | None = None,
+) -> MetricObservation | None:
+    """Return the newest persisted observation at the same identity point, if any."""
+    model = _observation(observation)
+    same_point = _same_point_records(model, read_metric_observations(path))
+    if not same_point:
+        return None
+    return max(same_point, key=lambda item: parse_timestamp(item.fetched_at))
 
 
 def _same_identity(left: MetricObservation, right: MetricObservation) -> bool:
@@ -79,16 +107,7 @@ def append_metric_observation(
             if _same_identity(item, model):
                 return destination
             raise ValueError(f"duplicate observation_id {model.observation_id} has different content")
-    same_point = [
-        item for item in existing
-        if (
-            item.asset == model.asset
-            and item.metric_key == model.metric_key
-            and item.observed_at == model.observed_at
-            and item.source == model.source
-            and item.period == model.period
-        )
-    ]
+    same_point = _same_point_records(model, existing)
     is_revision = model.supersedes_observation_id is not None
     if any(_same_value(item.value, model.value) for item in same_point) and not is_revision:
         return destination

@@ -5,16 +5,25 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 from ..metrics_registry import MetricDefinition, metric_definition, validate_metric_value
 from .metric_plan import MetricCollectionPlan
-from ..models.metrics_history import CollectionEvent, MetricObservation, stable_observation_id
+from ..models.metrics_history import (
+    CollectionEvent,
+    MetricObservation,
+    observation_values_equal,
+    stable_observation_id,
+)
 from ..models.time import normalize_timestamp, parse_timestamp
-from ..state.metrics import append_collection_event, append_metric_observation
+from ..state.metrics import (
+    append_collection_event,
+    append_metric_observation,
+    latest_same_point_observation,
+)
 
 
 _STATUSES = {"SUCCESS", "FAILED", "STALE", "CONFLICT", "NOT_APPLICABLE", "SKIPPED"}
@@ -370,6 +379,23 @@ def normalize_metric_result(
     return NormalizedMetricResult(status, None, event)
 
 
+def _mark_same_point_revision(
+    observation: MetricObservation,
+    observation_path: str | Path | None,
+) -> MetricObservation:
+    """Declare an explicit revision when a provider changed a persisted point."""
+    if observation.supersedes_observation_id is not None:
+        return observation
+    prior = latest_same_point_observation(observation, observation_path)
+    if prior is None or observation_values_equal(prior.value, observation.value):
+        return observation
+    return replace(
+        observation,
+        supersedes_observation_id=prior.observation_id,
+        revision_reason="provider revised the previously persisted same-point value",
+    )
+
+
 def persist_metric_result(
     result: NormalizedMetricResult | Mapping[str, Any],
     *,
@@ -378,7 +404,10 @@ def persist_metric_result(
 ) -> NormalizedMetricResult:
     normalized = result if isinstance(result, NormalizedMetricResult) else normalize_metric_result(result)
     if normalized.observation is not None:
-        append_metric_observation(normalized.observation, observation_path)
+        append_metric_observation(
+            _mark_same_point_revision(normalized.observation, observation_path),
+            observation_path,
+        )
     append_collection_event(normalized.event, event_path)
     return normalized
 

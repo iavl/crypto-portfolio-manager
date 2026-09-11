@@ -22,6 +22,7 @@ from crypto_portfolio.metrics_registry import METRIC_REGISTRY, MetricDefinition
 from crypto_portfolio.model_routing import RoutingError, load_model_routing, validate_stage_model
 from crypto_portfolio.models.market import TechnicalSnapshot
 from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
+from crypto_portfolio.state.metrics import read_metric_observations
 from crypto_portfolio.models.execution import PriceZone
 
 
@@ -114,6 +115,47 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             persist_metric_result(result, observation_path=result_path, event_path=event_path)
             self.assertTrue(result_path.exists())
             self.assertTrue(event_path.exists())
+
+    def test_persist_marks_same_point_provider_revision_explicitly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result_path = Path(directory) / "observations.jsonl"
+            event_path = Path(directory) / "events.jsonl"
+            first = normalize_metric_result(
+                {
+                    "asset": "BNB",
+                    "metric_key": "onchain.blockspace_fees",
+                    "value": 3138593.24,
+                    "unit": "USD",
+                    "period": "1d",
+                    "observed_at": "2026-09-10T00:00:00Z",
+                    "fetched_at": "2026-09-10T06:00:00Z",
+                    "source": "defillama",
+                    "confidence": "HIGH",
+                }
+            )
+            persist_metric_result(first, observation_path=result_path, event_path=event_path)
+            revised = normalize_metric_result(
+                {
+                    "asset": "BNB",
+                    "metric_key": "onchain.blockspace_fees",
+                    "value": 3681268.92,
+                    "unit": "USD",
+                    "period": "1d",
+                    "observed_at": "2026-09-10T00:00:00Z",
+                    "fetched_at": "2026-09-11T08:00:00Z",
+                    "source": "defillama",
+                    "confidence": "HIGH",
+                }
+            )
+            persist_metric_result(revised, observation_path=result_path, event_path=event_path)
+            stored = read_metric_observations(result_path)
+            self.assertEqual(len(stored), 2)
+            self.assertEqual(stored[0].value, 3138593.24)
+            self.assertEqual(stored[1].supersedes_observation_id, stored[0].observation_id)
+            self.assertEqual(stored[1].revision_reason, "provider revised the previously persisted same-point value")
+            # A repeated identical point stays a single record.
+            persist_metric_result(revised, observation_path=result_path, event_path=event_path)
+            self.assertEqual(len(read_metric_observations(result_path)), 2)
         facts = build_factor_facts(
             [_observation(100, "2026-09-01T00:00:00Z"), _observation(110, "2026-09-02T00:00:00Z")],
             symbol="ETH",

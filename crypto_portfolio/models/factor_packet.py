@@ -40,14 +40,35 @@ _FORBIDDEN_KEYS = {
 }
 
 
+def _is_forbidden_key(key: str) -> bool:
+    normalized = key.strip().lower()
+    return (
+        normalized in _FORBIDDEN_KEYS
+        or normalized.startswith("raw_")
+        or normalized.endswith("_html")
+    )
+
+
+def strip_forbidden_packet_fields(value: Any) -> Any:
+    """Recursively drop raw/full-history fields, mirroring freeze_packet_value."""
+    if isinstance(value, Mapping):
+        return {
+            key: strip_forbidden_packet_fields(item)
+            for key, item in value.items()
+            if isinstance(key, str) and key.strip() and not _is_forbidden_key(key)
+        }
+    if isinstance(value, (list, tuple)):
+        return [strip_forbidden_packet_fields(item) for item in value]
+    return value
+
+
 def freeze_packet_value(value: Any, *, path: str = "packet") -> Any:
     if isinstance(value, Mapping):
         frozen = {}
         for key, item in value.items():
             if not isinstance(key, str) or not key.strip():
                 raise ValueError(f"{path} contains an invalid key")
-            normalized = key.strip().lower()
-            if normalized in _FORBIDDEN_KEYS or normalized.startswith("raw_") or normalized.endswith("_html"):
+            if _is_forbidden_key(key):
                 raise ValueError(f"{path} must not contain raw or full-history field {key}")
             frozen[key] = freeze_packet_value(item, path=f"{path}.{key}")
         return MappingProxyType(frozen)

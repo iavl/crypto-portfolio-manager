@@ -44,6 +44,7 @@ class HistoricalRecordTests(unittest.TestCase):
                 snapshot_path=root / "missing-snapshots.jsonl",
                 decision_path=root / "missing-decisions.jsonl",
                 metrics_path=observations,
+                cash_flow_resolution_path=root / "missing-resolutions.jsonl",
             )
             self.assertIn("ETH", context["metric_history_summary"])
             self.assertNotIn("fundamentals.semantic", context["metric_history_summary"].get("BTC", {}))

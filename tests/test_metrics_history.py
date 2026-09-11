@@ -145,6 +145,7 @@ class MetricHistoryTests(unittest.TestCase):
                 decision_path=Path(directory) / "missing-decisions.jsonl",
                 metrics_path=path,
                 metric_keys=("fundamentals.tvl",),
+                cash_flow_resolution_path=Path(directory) / "missing-resolutions.jsonl",
             )
             self.assertIn("ETH", context["metric_history_summary"])
             self.assertIn("fundamentals.tvl", context["metric_history_summary"]["ETH"])
@@ -252,6 +253,29 @@ class MetricHistoryTests(unittest.TestCase):
             collection_summary((success, regulatory), review_type="SNAPSHOT_REVIEW")["critical_failures"],
             0,
         )
+
+    def test_to_evidence_strips_raw_metadata_fields(self):
+        raw = observation(100, "2026-09-01T00:00:00Z")
+        carried = MetricObservation(
+            raw.observation_id,
+            raw.asset,
+            raw.metric_key,
+            raw.factor,
+            raw.value,
+            raw.unit,
+            raw.period,
+            raw.observed_at,
+            raw.fetched_at,
+            raw.source,
+            raw.freshness,
+            raw.confidence,
+            metadata={"raw_metrics": {"candles": [1, 2, 3]}, "note": "derived via 240x1D"},
+        )
+        evidence = carried.to_evidence()
+        self.assertNotIn("raw_metrics", evidence.metadata)
+        self.assertNotIn("candles", evidence.metadata)
+        self.assertEqual(evidence.metadata.get("note"), "derived via 240x1D")
+        self.assertEqual(evidence.metadata.get("metric_key"), "fundamentals.tvl")
 
     def test_history_records_validate_against_schemas(self):
         root = Path(__file__).parents[1] / "schemas"
