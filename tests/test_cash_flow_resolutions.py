@@ -165,13 +165,32 @@ class CashFlowResolutionOverlayTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             find_unresolved_cash_flow_snapshots(_snapshots(), (stray,))
 
-    def test_resolution_cannot_override_an_already_explicit_status(self):
+    def test_user_explicit_classification_cannot_be_reresolved(self):
         snapshots = (
-            dict(BASELINE, cash_flow_resolution_status="ASSUMED_NONE"),
+            dict(
+                BASELINE,
+                cash_flow_resolution_status="CONFIRMED_NONE",
+                cash_flow_classification_source="USER_EXPLICIT",
+            ),
             _snapshots()[1],
         )
         with self.assertRaises(ValueError):
             apply_cash_flow_resolutions(snapshots, (_resolution(),))
+
+    def test_derived_assumed_none_accepts_a_late_resolution(self):
+        # A snapshot recorded before the classification contract (no status of
+        # its own) derives to ASSUMED_NONE; the user may still resolve it later.
+        snapshots = (
+            dict(BASELINE, cash_flow_resolution_status="ASSUMED_NONE"),
+            _snapshots()[1],
+        )
+        effective, lineage = apply_cash_flow_resolutions(
+            snapshots,
+            (_resolution("CONFIRMED_AMOUNT", 500.0, "DEPOSIT"),),
+        )
+        self.assertEqual(effective[0]["cash_flow_resolution_status"], "CONFIRMED_AMOUNT")
+        self.assertEqual(lineage["lineage"][0]["original_status"], "ASSUMED_NONE")
+        self.assertEqual(lineage["lineage"][0]["effective_status"], "CONFIRMED_AMOUNT")
 
     def test_find_unresolved_reports_each_blocking_snapshot(self):
         snapshots = (

@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from ..engine.ledger import build_nav_history_result
-from ..engine.cash_flow import detect_external_cash_flow
+from ..engine.cash_flow import (
+    apply_cash_flow_resolutions,
+    detect_external_cash_flow,
+)
 from ..engine.position_pnl import calculate_portfolio_position_performance
 from ..models.performance import PositionPerformance
 from ..models.decision import Decision
-from ..models.portfolio import snapshot_from_mapping
+from ..models.portfolio import PortfolioSnapshot, Position
 from ..models.time import parse_timestamp
 from .decisions import read_decisions
 from .cash_flows import read_cash_flow_resolutions
@@ -34,43 +37,61 @@ def latest_decision(path: str | Path | None = None) -> dict[str, Any] | None:
     return _latest(read_decisions(path))
 
 
+def _snapshot_total(record: dict[str, Any]) -> float:
+    for field in ("total_value_usd", "total_value"):
+        value = record.get(field)
+        if value is not None:
+            return float(value)
+    return sum(
+        float(item["value_usd"])
+        for item in record.get("positions", ())
+        if isinstance(item, dict) and "value_usd" in item
+    )
+
+
+def _ledger_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Reduce one persisted snapshot to the fields a NAV replay needs.
+
+    History replay must not revalidate an old embedded policy blob; it only
+    consumes the ledger fields. A pre-contract record whose unresolved intent
+    lived in ``external_cash_flow_type`` is normalized to the current
+    ``cash_flow_resolution_status`` shape without guessing an amount.
+    """
+    status = record.get("cash_flow_resolution_status")
+    flow = record.get("external_cash_flow")
+    flow_type = record.get("external_cash_flow_type")
+    if status is None:
+        if str(flow_type or "").strip().upper() == "UNRESOLVED":
+            status, flow, flow_type = "UNRESOLVED", None, None
+        else:
+            status, flow, flow_type = "ASSUMED_NONE", 0.0, "NONE"
+    return {
+        "timestamp": record.get("timestamp"),
+        "total_value_usd": _snapshot_total(record),
+        "external_cash_flow": flow,
+        "external_cash_flow_type": flow_type,
+        "cash_flow_resolution_status": status,
+        "cash_flow_classification_source": record.get("cash_flow_classification_source"),
+        "snapshot_id": record.get("snapshot_id"),
+    }
+
+
 def _cash_flow_snapshots(
     path: str | Path | None = None,
     resolution_path: str | Path | None = None,
-) -> list[Any]:
-    resolutions = {item.snapshot_id: item for item in read_cash_flow_resolutions(resolution_path)}
-    snapshots = []
-    for record in read_snapshots(path):
-        snapshot, _, _ = snapshot_from_mapping(record)
-        resolution = resolutions.get(snapshot.snapshot_id)
-        legacy_unresolved = (
-            resolution is None
-            and str(record.get("cash_flow_resolution_status", "")).strip().upper() == "UNRESOLVED"
-            and "cash_flow_classification_source" not in record
-        )
-        if resolution is not None or legacy_unresolved:
-            updated = snapshot.as_dict()
-            if resolution is not None:
-                updated.update(
-                    {
-                        "cash_flow_resolution_status": resolution.cash_flow_resolution_status,
-                        "external_cash_flow": resolution.external_cash_flow,
-                        "external_cash_flow_type": resolution.external_cash_flow_type,
-                        "cash_flow_classification_source": "USER_EXPLICIT",
-                    }
-                )
-            else:
-                updated.update(
-                    {
-                        "cash_flow_resolution_status": "ASSUMED_NONE",
-                        "external_cash_flow": 0.0,
-                        "external_cash_flow_type": "NONE",
-                        "cash_flow_classification_source": "LEGACY",
-                    }
-                )
-            snapshot = snapshot_from_mapping(updated)[0]
-        snapshots.append(snapshot)
-    return snapshots
+) -> list[dict[str, Any]]:
+    """Effective ledger history: raw records overlaid with explicit resolutions.
+
+    A persisted UNRESOLVED snapshot stays UNRESOLVED until the user resolves
+    it; this overlay never guesses a legacy flow.
+    """
+    records = [_ledger_record(record) for record in read_snapshots(path)]
+    effective, _ = apply_cash_flow_resolutions(records, read_cash_flow_resolutions(resolution_path))
+    ordered = sorted(
+        enumerate(effective),
+        key=lambda item: (parse_timestamp(item[1]["timestamp"]), item[0]),
+    )
+    return [dict(item) for _, item in ordered]
 
 
 def portfolio_nav_history(
@@ -78,28 +99,10 @@ def portfolio_nav_history(
     *,
     resolution_path: str | Path | None = None,
 ):
-    snapshots = []
-    for index, snapshot in enumerate(_cash_flow_snapshots(path, resolution_path)):
-        snapshots.append((index, snapshot))
-    # Append order is not guaranteed to be chronological; NAV history requires
-    # strictly increasing timestamps, so sort by timestamp with append-order
-    # as a deterministic tie-break for equal timestamps.
-    snapshots.sort(
-        key=lambda item: (parse_timestamp(item[1].timestamp), item[0])
-    )
-    if not snapshots:
+    records = _cash_flow_snapshots(path, resolution_path)
+    if not records:
         return []
-    result = build_nav_history_result([
-        {
-            "timestamp": snapshot.timestamp,
-            "portfolio_value": snapshot.total_value_usd,
-            "external_cash_flow": snapshot.external_cash_flow,
-            "external_cash_flow_type": snapshot.external_cash_flow_type,
-            "cash_flow_resolution_status": snapshot.cash_flow_resolution_status,
-            "snapshot_id": snapshot.snapshot_id,
-        }
-        for _, snapshot in snapshots
-    ])
+    result = build_nav_history_result(records)
     return list(result.states) if result.performance_finality == "FINAL" else []
 
 
@@ -108,21 +111,7 @@ def portfolio_nav_history_result(
     *,
     resolution_path: str | Path | None = None,
 ):
-    records = []
-    for index, snapshot in enumerate(_cash_flow_snapshots(path, resolution_path)):
-        records.append((index, snapshot))
-    records.sort(key=lambda item: (parse_timestamp(item[1].timestamp), item[0]))
-    ledger = []
-    for index, (_, snapshot) in enumerate(records):
-        ledger.append({
-            "timestamp": snapshot.timestamp,
-            "portfolio_value": snapshot.total_value_usd,
-            "external_cash_flow": snapshot.external_cash_flow,
-            "external_cash_flow_type": snapshot.external_cash_flow_type,
-            "cash_flow_resolution_status": snapshot.cash_flow_resolution_status,
-            "snapshot_id": snapshot.snapshot_id,
-        })
-    return build_nav_history_result(ledger)
+    return build_nav_history_result(_cash_flow_snapshots(path, resolution_path))
 
 
 def external_cash_flow_review(
@@ -132,7 +121,7 @@ def external_cash_flow_review(
 ) -> dict[str, Any]:
     records = []
     for index, snapshot in enumerate(_cash_flow_snapshots(path, resolution_path)):
-        records.append((parse_timestamp(snapshot.timestamp), index, snapshot))
+        records.append((parse_timestamp(snapshot["timestamp"]), index, snapshot))
     records.sort(key=lambda item: (item[0], item[1]))
     transitions = [
         detect_external_cash_flow(previous[2], current[2])
@@ -141,7 +130,7 @@ def external_cash_flow_review(
     unresolved = next((item for item in transitions if item["requires_confirmation"]), None)
     if unresolved is None:
         first_unresolved = next(
-            (snapshot for _, _, snapshot in records if snapshot.cash_flow_resolution_status == "UNRESOLVED"),
+            (snapshot for _, _, snapshot in records if snapshot["cash_flow_resolution_status"] == "UNRESOLVED"),
             None,
         )
         if first_unresolved is not None:
@@ -149,7 +138,7 @@ def external_cash_flow_review(
                 "status": "UNRESOLVED",
                 "requires_confirmation": True,
                 "cash_flow_resolution_status": "UNRESOLVED",
-                "snapshot_id": first_unresolved.snapshot_id,
+                "snapshot_id": first_unresolved["snapshot_id"],
                 "reason": "cash_flow_resolution_status is UNRESOLVED",
             }
     if not records:
@@ -181,12 +170,54 @@ def previous_asset_assessment(
     return None
 
 
+def _history_snapshot(record: dict[str, Any]) -> PortfolioSnapshot:
+    """Rebuild a snapshot model for position P&L without revalidating history.
+
+    Position P&L needs quantities, values, and cost basis — not the embedded
+    policy blob old records carry. Classification defaults to ``other`` here;
+    resolved classification stays the current policy's job on fresh snapshots.
+    """
+    positions = tuple(
+        Position(
+            symbol=raw["symbol"],
+            quantity=raw.get("quantity"),
+            value_usd=raw.get("value_usd", 0.0),
+            cost_basis_usd=raw.get("cost_basis_usd"),
+            asset_type_hint=raw.get("asset_type_hint", raw.get("asset_type")),
+            current_price_usd=raw.get("current_price_usd"),
+            average_cost_price_usd=raw.get("average_cost_price_usd"),
+            exchange_unrealized_pnl_usd=raw.get("exchange_unrealized_pnl_usd"),
+        )
+        for raw in record.get("positions", ())
+        if isinstance(raw, dict) and raw.get("symbol")
+    )
+    status = record.get("cash_flow_resolution_status")
+    flow = record.get("external_cash_flow")
+    flow_type = record.get("external_cash_flow_type")
+    if status is None:
+        if str(flow_type or "").strip().upper() == "UNRESOLVED":
+            status, flow, flow_type = "UNRESOLVED", None, None
+        else:
+            status, flow, flow_type = "ASSUMED_NONE", 0.0, "NONE"
+    return PortfolioSnapshot(
+        timestamp=record.get("timestamp", ""),
+        base_currency=record.get("base_currency", "USD"),
+        positions=positions,
+        external_cash_flow=flow,
+        external_cash_flow_type=flow_type,
+        total_value=record.get("total_value"),
+        source=record.get("source"),
+        snapshot_id=record.get("snapshot_id"),
+        cash_flow_resolution_status=status,
+    )
+
+
 def _position_performance_records(
     path: str | Path | None = None,
 ) -> dict[str, list[tuple[str, PositionPerformance]]]:
     records = []
     for index, record in enumerate(read_snapshots(path)):
-        snapshot, _, _ = snapshot_from_mapping(record)
+        snapshot = _history_snapshot(record)
         records.append((snapshot.timestamp, index, calculate_portfolio_position_performance(snapshot)))
     records.sort(
         key=lambda item: (
@@ -269,7 +300,17 @@ def build_history_context(
     snapshot = latest_snapshot(snapshot_path)
     applied_snapshots = _cash_flow_snapshots(snapshot_path, cash_flow_resolution_path)
     if applied_snapshots:
-        snapshot = max(applied_snapshots, key=lambda item: parse_timestamp(item.timestamp)).as_dict()
+        effective_latest = max(applied_snapshots, key=lambda item: parse_timestamp(item["timestamp"]))
+        if snapshot is not None and snapshot.get("snapshot_id") == effective_latest.get("snapshot_id"):
+            # Keep the full persisted record (positions, provenance) but let
+            # the resolution overlay own the effective cash-flow classification.
+            snapshot = {
+                **snapshot,
+                "cash_flow_resolution_status": effective_latest["cash_flow_resolution_status"],
+                "external_cash_flow": effective_latest["external_cash_flow"],
+                "external_cash_flow_type": effective_latest["external_cash_flow_type"],
+                "cash_flow_classification_source": effective_latest.get("cash_flow_classification_source"),
+            }
     decision = latest_decision(decision_path)
     nav = portfolio_nav_history(snapshot_path, resolution_path=cash_flow_resolution_path)
     nav_result = portfolio_nav_history_result(snapshot_path, resolution_path=cash_flow_resolution_path)

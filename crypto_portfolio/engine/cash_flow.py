@@ -163,8 +163,9 @@ def apply_cash_flow_resolutions(
 ) -> tuple[tuple[dict[str, Any], ...], dict[str, Any]]:
     """Overlay explicit resolutions onto snapshots without mutating inputs.
 
-    Only snapshots whose status is ``UNRESOLVED`` may be overridden by a
-    resolution; a user-explicit status is never silently rewritten. Snapshots
+    A resolution may override a persisted ``UNRESOLVED`` status or a merely
+    derived ``ASSUMED_NONE`` (no user-explicit classification). A snapshot the
+    user already classified explicitly is never silently rewritten. Snapshots
     without a matching resolution keep their persisted classification — this
     function never guesses a legacy unresolved flow.
     """
@@ -205,9 +206,16 @@ def apply_cash_flow_resolutions(
         snapshot_id = record["snapshot_id"]
         resolution = by_snapshot.get(snapshot_id) if snapshot_id else None
         if resolution is not None:
-            if original_status != "UNRESOLVED":
+            classification_source = str(
+                _snapshot_field(value, "cash_flow_classification_source", "") or ""
+            ).strip().upper()
+            overridable = original_status == "UNRESOLVED" or (
+                original_status == "ASSUMED_NONE" and classification_source != "USER_EXPLICIT"
+            )
+            if not overridable:
                 raise ValueError(
-                    f"snapshot {snapshot_id} is {original_status}; only UNRESOLVED snapshots accept a resolution"
+                    f"snapshot {snapshot_id} already has an explicit user classification "
+                    f"({original_status}); it cannot be re-resolved"
                 )
             record.update(
                 {
