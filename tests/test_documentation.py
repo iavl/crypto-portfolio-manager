@@ -1,19 +1,17 @@
-import os
 import json
 import re
-import subprocess
 import tomllib
-import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SKILL_PATH = ROOT / ".agents" / "skills" / "crypto-portfolio-manager" / "SKILL.md"
 
 
 class DocumentationTests(unittest.TestCase):
     def test_skill_package_is_self_contained(self):
-        skill = ROOT / "SKILL.md"
+        skill = SKILL_PATH
         self.assertTrue(skill.is_file())
         self.assertIn("name: crypto-portfolio-manager", skill.read_text(encoding="utf-8"))
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -134,7 +132,7 @@ class DocumentationTests(unittest.TestCase):
     def test_no_obsolete_data_source_layer_references(self):
         obsolete = "data-source-" + "inventory.md"
         paths = (
-            ROOT / "SKILL.md",
+            SKILL_PATH,
             ROOT / "README.md",
             ROOT / "docs" / "USAGE.md",
             ROOT / "docs" / "HOW_IT_WORKS.md",
@@ -148,7 +146,7 @@ class DocumentationTests(unittest.TestCase):
         self.assertFalse((ROOT / "references" / obsolete).exists())
 
     def test_reports_document_decision_basis_and_ambiguous_terms(self):
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill = SKILL_PATH.read_text(encoding="utf-8")
         template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
         for text in (
             "证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action",
@@ -221,135 +219,20 @@ class DocumentationTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         guide = (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8")
 
-        for content in (readme,):
-            for text in (
-                "git clone https://github.com/iavl/crypto-portfolio-manager.git",
-                "cd crypto-portfolio-manager",
-                "./install.sh",
-                "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/",
-                "docs/USAGE.md#安装管理",
-            ):
-                with self.subTest(text=text):
-                    self.assertIn(text, content)
-            for text in (
-                "$skill-installer",
-                "## Verify Installation",
-                "## Updating",
-                "## Uninstalling",
-                "## 验证安装",
-                "## 更新",
-                "## 卸载",
-            ):
-                with self.subTest(text=text):
-                    self.assertNotIn(text, content)
-
         for text in (
-            "## 安装管理",
-            "test -d \"${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager\"",
-            "$crypto-portfolio-manager explain what portfolio reviews you support.",
-            "git -C /path/to/crypto-portfolio-manager pull --ff-only",
-            "rm -rf \"${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager\"",
-            "/path/to/crypto-portfolio-manager/install.sh",
-            "rm -rf ~/.local/share/crypto-portfolio-manager",
+            "git clone https://github.com/iavl/crypto-portfolio-manager.git",
+            "cd crypto-portfolio-manager",
+            "codex",
+            ".agents/skills/crypto-portfolio-manager/SKILL.md",
+            "不需要单独安装 Skill",
+            "旧版 copy-installed Skill 迁移",
         ):
             with self.subTest(text=text):
+                self.assertIn(text, readme)
                 self.assertIn(text, guide)
-
-    def test_install_script_copies_payload_and_refuses_existing_destination(self):
-        script = ROOT / "install.sh"
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertTrue(script.is_file())
-        self.assertTrue(os.access(script, os.X_OK))
-        self.assertIn("./install.sh", readme)
-        self.assertIn("拒绝覆盖", readme)
-
-        with tempfile.TemporaryDirectory() as directory:
-            temporary_root = Path(directory)
-            environment = os.environ.copy()
-            environment["CODEX_HOME"] = str(temporary_root / "codex")
-            environment["HOME"] = str(temporary_root / "home")
-
-            first = subprocess.run(
-                [str(script)],
-                cwd=temporary_root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(first.returncode, 0, first.stderr)
-
-            installed = Path(environment["CODEX_HOME"]) / "skills" / "crypto-portfolio-manager"
-            self.assertTrue(installed.is_dir())
-            self.assertFalse(installed.is_symlink())
-            for relative_path in (
-                "SKILL.md",
-                "README.md",
-                "docs/USAGE.md",
-                "docs/HOW_IT_WORKS.md",
-                "docs/GLOSSARY.zh-CN.md",
-                "config/policy.json",
-                "references/investment-strategy.md",
-                "references/risk-model.md",
-                "references/data-sources.md",
-                "references/data-providers.md",
-                "schemas/decision.schema.json",
-                "crypto_portfolio/__init__.py",
-                "scripts/portfolio_snapshot.py",
-            ):
-                with self.subTest(relative_path=relative_path):
-                    self.assertTrue((installed / relative_path).is_file())
-
-            for excluded_path in (
-                ".git",
-                "tests",
-                "data",
-                "USAGE.md",
-                "HOW_IT_WORKS.md",
-                "install.sh",
-                "pyproject.toml",
-                "AGENTS.md",
-                "plan.md",
-                "README.zh-CN.md",
-            ):
-                with self.subTest(excluded_path=excluded_path):
-                    self.assertFalse((installed / excluded_path).exists())
-            self.assertFalse(any(installed.rglob("__pycache__")))
-            obsolete = "data-source-" + "inventory.md"
-            self.assertFalse((installed / "references" / obsolete).exists())
-
-            marker = installed / "install-smoke-marker"
-            marker.write_text("preserve", encoding="utf-8")
-            second = subprocess.run(
-                [str(script)],
-                cwd=temporary_root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertNotEqual(second.returncode, 0)
-            self.assertIn("already exists", second.stderr)
-            self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
-
-            broken_home = temporary_root / "broken-codex"
-            broken_skills = broken_home / "skills"
-            broken_skills.mkdir(parents=True)
-            broken_destination = broken_skills / "crypto-portfolio-manager"
-            broken_destination.symlink_to(temporary_root / "missing-skill", target_is_directory=True)
-            broken_environment = environment.copy()
-            broken_environment["CODEX_HOME"] = str(broken_home)
-            broken = subprocess.run(
-                [str(script)],
-                cwd=temporary_root,
-                env=broken_environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertNotEqual(broken.returncode, 0)
-            self.assertIn("already exists", broken.stderr)
-            self.assertTrue(broken_destination.is_symlink())
+        for content in (readme, guide):
+            self.assertNotIn("./install.sh", content)
+            self.assertNotIn("安装到：", content)
 
     def test_glossary_covers_current_terms_and_boundaries(self):
         glossary = (ROOT / "docs" / "GLOSSARY.zh-CN.md").read_text(encoding="utf-8")
@@ -391,7 +274,7 @@ class DocumentationTests(unittest.TestCase):
                 self.assertIn(text, glossary)
 
     def test_evidence_collection_and_decision_chain_are_documented(self):
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill = SKILL_PATH.read_text(encoding="utf-8")
         template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
         self.assertIn("Data Collection Log", skill)
         self.assertIn("Never silently omit", skill)
@@ -492,7 +375,7 @@ class DocumentationTests(unittest.TestCase):
             ROOT / "docs",
             ROOT / "references",
             ROOT / "README.md",
-            ROOT / "SKILL.md",
+            SKILL_PATH,
             ROOT / "AGENTS.md",
         )
         forbidden = (

@@ -5,19 +5,35 @@
 本指南说明 `crypto-portfolio-manager` 的实际使用方式、输入格式、复盘
 流程、数据采集、历史记录和故障处理。
 
-安装、验证、更新和卸载请参阅下方的[安装管理](#安装管理)。组合策略请参阅
-[投资策略](../references/investment-strategy.md)；架构与内部实现请参阅
-[工作原理](HOW_IT_WORKS.md)。Skill 专属参考资料位于根目录的 `references/`
-与 `SKILL.md`。
+安装、发现、更新和旧版迁移请参阅下方的[Repository Skill 使用与发现](#repository-skill-使用与发现)。
+组合策略请参阅[投资策略](../references/investment-strategy.md)；架构与内部实现请参阅
+[工作原理](HOW_IT_WORKS.md)。仓库 Skill 位于
+`.agents/skills/crypto-portfolio-manager/SKILL.md`，参考资料仍位于根目录的
+`references/`。
 
-## 安装管理
+## Repository Skill 使用与发现
 
-验证安装：
+Repository Skill 与代码一起提交在：
+
+```text
+.agents/skills/crypto-portfolio-manager/SKILL.md
+```
+
+首次使用或从新检出开始时：
 
 ```bash
-test -d "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
-  && test -f "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager/SKILL.md" \
-  && echo "crypto-portfolio-manager installed"
+git clone https://github.com/iavl/crypto-portfolio-manager.git
+cd crypto-portfolio-manager
+codex
+```
+
+从仓库根目录或任一嵌套目录启动 Codex，Codex 都应发现该 Skill，并通过 Git
+`REPO_ROOT` 从当前 working tree 读取 `config/`、`references/`、`scripts/` 和
+`crypto_portfolio/`。可进行本地文件验证：
+
+```bash
+test -f .agents/skills/crypto-portfolio-manager/SKILL.md \
+  && echo "repository skill present"
 ```
 
 然后在 Codex 中调用：
@@ -26,26 +42,36 @@ test -d "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
 $crypto-portfolio-manager explain what portfolio reviews you support.
 ```
 
-更新安装：
+不需要单独安装 Skill，也不需要同步复制代码。未提交的本地代码变更会被 Skill 直接看到；更新
+仓库只需正常开发或：
 
 ```bash
-git -C /path/to/crypto-portfolio-manager pull --ff-only
-rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
-/path/to/crypto-portfolio-manager/install.sh
+git pull --ff-only
 ```
 
-运行前确认删除路径；这不会删除投资组合历史数据。
+### 旧版 copy-installed Skill 迁移
 
-卸载 Skill：
+旧版本可能留下与仓库 Skill 同名的用户级副本。先检查：
+
+```bash
+test -e "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
+  && echo "legacy Codex Skill exists"
+test -e "$HOME/.agents/skills/crypto-portfolio-manager" \
+  && echo "user-level Skill exists"
+```
+
+确认第一项确实是旧的 copy-installed Skill 后，用户可以手动删除：
 
 ```bash
 rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
 ```
 
-删除默认历史目录是独立且具有破坏性的操作：
+不要盲删 `$HOME/.agents/skills/crypto-portfolio-manager`，除非确认它是旧副本。
+删除仓库本身即可移除 Repository Skill，不存在单独的仓库 Skill 卸载步骤。
+无论哪种 Skill 清理方式，都不要删除独立的运行时历史目录：
 
-```bash
-rm -rf ~/.local/share/crypto-portfolio-manager
+```text
+~/.local/share/crypto-portfolio-manager/
 ```
 
 ## 1. Skill 能做什么
@@ -64,7 +90,7 @@ rm -rf ~/.local/share/crypto-portfolio-manager
 
 ## 2. 快速开始
 
-1. 安装并重新加载 Skill。
+1. 在仓库根目录或其子目录启动 Codex。
 2. 上传交易所钱包总览截图，或提供结构化 JSON 仓位。
 3. 调用 `$crypto-portfolio-manager`。
 4. 指定 `SNAPSHOT_REVIEW`、`FULL_REVIEW` 或 `EVENT_REVIEW`。

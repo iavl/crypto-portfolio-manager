@@ -43,7 +43,8 @@ security review.
 Keep responsibilities separated:
 
 ```text
-SKILL.md       agent workflow/orchestration
+.agents/skills/crypto-portfolio-manager/SKILL.md
+               repository-scoped agent workflow/orchestration
 references/    human-readable investment and decision policy
 config/        canonical machine-readable policy
 providers/     normalized market/factual data
@@ -52,6 +53,14 @@ engine/        deterministic calculations
 state/         history, cash flows, decisions, ledger
 cli/           thin optional interface
 ```
+
+The Git repository is the single source of truth. The Repository Skill contains
+orchestration instructions only and must use config, references, schemas,
+Python packages, scripts, tests, and other resources directly from the same
+repository working tree. Do not introduce a copied Skill payload or maintain
+duplicate runtime code under a Skill installation directory. Repository-
+relative paths are resolved from Git `REPO_ROOT`, not from the physical
+directory containing `SKILL.md`.
 
 Do not put deterministic mathematics in prompts or subjective interpretation
 in accounting functions. Keep the core reusable by the Skill, CLI, API, and

@@ -9,6 +9,24 @@ Use this Skill for a 3–6 month portfolio horizon. It supports research and
 proposed decisions; it never places trades, requests trading permissions, or
 introduces leverage, futures, perpetuals, or margin.
 
+## Repository boundary
+
+This is a repository-scoped Skill. Before accessing repository resources or
+running repository commands, resolve the Git repository root and call it
+`REPO_ROOT`:
+
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+```
+
+Paths such as `config/`, `references/`, `schemas/`, `crypto_portfolio/`,
+`scripts/`, and `tests/` are relative to `REPO_ROOT`, not to this
+`SKILL.md` directory. Run repository scripts from `REPO_ROOT` unless a command
+explicitly requires another working directory. Never use a copied installation
+under `~/.codex/skills` or another external Skill directory as the
+implementation source.
+
 ## Policy and references
 
 Load the canonical machine-readable policy from `config/policy.json` before

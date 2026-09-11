@@ -6,7 +6,7 @@
 
 ## 1. 系统总览
 
-`SKILL.md` 负责工作流编排；`AcquisitionManager` 和 `ProviderRouter` 负责
+`.agents/skills/crypto-portfolio-manager/SKILL.md` 负责工作流编排；`AcquisitionManager` 和 `ProviderRouter` 负责
 缓存优先的数据获取；规范化、记账、评分、regime、allocation、risk、rebalance
 和 execution 由 Python 完成。
 
