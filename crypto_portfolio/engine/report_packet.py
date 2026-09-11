@@ -214,6 +214,26 @@ def build_final_review_output(
     collection["required_scoring_failures"] = packet_value["required_scoring_failures"]
     collection["optional_data_unavailable"] = packet_value["optional_data_unavailable"]
     collection["provider_operational_failures"] = packet_value["provider_operational_failures"]
+    from .confidence import confidence_attribution
+
+    def _attribution(value: Any) -> dict[str, Any] | None:
+        return confidence_attribution(value) if isinstance(value, Mapping) and value else None
+
+    regime_confidence = packet.regime_confidence
+    decision_confidence = packet.decision_confidence
+    if not isinstance(regime_confidence, Mapping) and hasattr(regime_confidence, "as_dict"):
+        regime_confidence = regime_confidence.as_dict()
+    if not isinstance(decision_confidence, Mapping) and hasattr(decision_confidence, "as_dict"):
+        decision_confidence = decision_confidence.as_dict()
+    asset_attribution = {
+        str(item.get("symbol", index)).upper(): {
+            "confidence": item.get("confidence"),
+            "confidence_score": item.get("confidence_score"),
+            "drags": list(item.get("confidence_drags", ())),
+        }
+        for index, item in enumerate(packet_value["actions"])
+        if item.get("confidence") or item.get("confidence_score") is not None
+    }
     result = {
         "portfolio": {
             "current_weights": packet_value["current_weights"],
@@ -249,7 +269,10 @@ def build_final_review_output(
         },
         "confidence": {
             "regime": packet_value["regime_confidence"],
+            "regime_attribution": _attribution(regime_confidence),
             "decision": packet_value["decision_confidence"],
+            "decision_attribution": _attribution(decision_confidence),
+            "asset_attribution": asset_attribution,
             "caps": packet_value["confidence_caps"],
         },
         "performance": {

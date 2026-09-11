@@ -549,6 +549,112 @@ def apply_confidence_caps(raw_score: Any, caps: Iterable[ConfidenceCap | Mapping
     return min([raw, *(cap.ceiling for cap in parsed)])
 
 
+def _attribution_source(result: ConfidenceResult | Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any], tuple[Mapping[str, Any], ...]]:
+    """Return (dimensions, components, caps) as plain mappings for attribution."""
+    if isinstance(result, ConfidenceResult):
+        dimensions = {name: dimension.as_dict() for name, dimension in result.dimensions.items()}
+        caps = tuple(cap.as_dict() for cap in result.caps)
+        components = (
+            {name: dict(value) for name, value in result.components.items()}
+            if isinstance(result, DecisionConfidence)
+            else {}
+        )
+        return dimensions, components, caps
+    if not isinstance(result, Mapping):
+        raise ValueError("confidence result must be a ConfidenceResult or mapping")
+    dimensions = {
+        name: (item.as_dict() if hasattr(item, "as_dict") else dict(item))
+        for name, item in (result.get("dimensions") or {}).items()
+    }
+    caps = tuple(
+        (item.as_dict() if hasattr(item, "as_dict") else dict(item))
+        for item in result.get("caps") or ()
+    )
+    components = {
+        name: dict(value)
+        for name, value in (result.get("components") or {}).items()
+    }
+    return dimensions, components, caps
+
+
+def confidence_attribution(result: ConfidenceResult | Mapping[str, Any]) -> dict[str, Any]:
+    """Expose per-dimension score/weight/contribution for audit and reports.
+
+    Contribution arithmetic stays in deterministic Python so downstream
+    reports never recompute score * weight themselves. When a cap applies,
+    the raw score, cap ceilings, and final score are all preserved.
+    """
+    dimensions, components, caps = _attribution_source(result)
+    entries = components or dimensions
+    attribution: dict[str, Any] = {}
+    for name in sorted(entries):
+        item = entries[name]
+        score = _bounded(item.get("score"), f"attribution {name}.score")
+        weight = _bounded(item.get("weight"), f"attribution {name}.weight")
+        entry: dict[str, Any] = {
+            "score": score,
+            "weight": weight,
+            "contribution": score * weight,
+        }
+        for field in ("explanation", "reason", "reason_codes"):
+            if item.get(field):
+                entry[field] = item[field]
+        attribution[name] = entry
+    raw_value = result.raw_score if isinstance(result, ConfidenceResult) else result.get("raw_score")
+    final_value = result.score if isinstance(result, ConfidenceResult) else result.get("score")
+    band = result.band if isinstance(result, ConfidenceResult) else result.get("band")
+    if raw_value is None or final_value is None:
+        raw_value = sum(entry["contribution"] for entry in attribution.values())
+        final_value = raw_value
+    raw_score = _bounded(raw_value, "attribution raw_score")
+    final_score = _bounded(final_value, "attribution final_score")
+    output = {
+        "raw_score": raw_score,
+        "final_score": final_score,
+        "band": band,
+        "components": attribution,
+        "caps": [
+            {"code": cap.get("code"), "ceiling": cap.get("ceiling"), "reason": cap.get("reason", "")}
+            for cap in caps
+        ],
+    }
+    penalties = result.get("soft_penalties") if isinstance(result, Mapping) else (
+        result.soft_penalties if isinstance(result, DecisionConfidence) else ()
+    )
+    if penalties:
+        output["soft_penalties"] = [dict(item) for item in penalties]
+    return output
+
+
+def top_confidence_drags(
+    result: ConfidenceResult | Mapping[str, Any],
+    *,
+    limit: int = 3,
+) -> tuple[Mapping[str, Any], ...]:
+    """Rank the dimensions losing the most weighted confidence.
+
+    Impact is the weighted headroom ``weight * (1 - score)``; a perfect
+    dimension contributes zero drag. Read-only diagnostics — this never
+    changes scores or thresholds.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("limit must be a positive integer")
+    dimensions, _, _ = _attribution_source(result)
+    drags = []
+    for name in sorted(dimensions):
+        item = dimensions[name]
+        score = _bounded(item.get("score"), f"drag {name}.score")
+        weight = _bounded(item.get("weight"), f"drag {name}.weight")
+        drags.append({
+            "dimension": name,
+            "impact": weight * (1.0 - score),
+            "score": score,
+            "weight": weight,
+        })
+    drags.sort(key=lambda item: (-item["impact"], item["dimension"]))
+    return tuple(drags[:limit])
+
+
 def calculate_regime_confidence(
     domain_confidence: Mapping[str, Any],
     *,
@@ -730,6 +836,7 @@ __all__ = [
     "apply_confidence_caps",
     "calculate_data_confidence",
     "calculate_decision_confidence",
+    "confidence_attribution",
     "confidence_deployment_factor",
     "calculate_freshness",
     "calculate_regime_confidence",
@@ -739,4 +846,5 @@ __all__ = [
     "aggregate_asset_evidence_confidence",
     "signal_consistency_score",
     "source_quality_score",
+    "top_confidence_drags",
 ]
