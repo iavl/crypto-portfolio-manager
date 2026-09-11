@@ -229,17 +229,11 @@ class Decision:
             item.id: item for item in self.evidence if isinstance(item, Evidence)
         }
         for symbol, assessment in self.factor_scores.items():
-            for factor, score in assessment.factor_scores.items():
-                if not isinstance(score, FactorScore):
-                    continue
-                for evidence_id in score.evidence_ids:
-                    evidence = evidence_by_id.get(evidence_id)
-                    if evidence is None:
-                        raise ValueError(f"factor {factor} references missing evidence {evidence_id}")
-                    if evidence.asset != symbol:
-                        raise ValueError(f"factor {factor} references evidence for wrong asset {evidence_id}")
-                    if evidence.factor != factor:
-                        raise ValueError(f"factor {factor} references evidence for wrong factor {evidence_id}")
+            validate_factor_evidence_binding(
+                assessment.factor_scores,
+                evidence_by_id,
+                symbol=symbol,
+            )
             if assessment.event_risk is not None:
                 for evidence_id in assessment.event_risk.evidence_ids:
                     evidence = evidence_by_id.get(evidence_id)
@@ -440,6 +434,34 @@ class Decision:
         return result
 
 
+def validate_factor_evidence_binding(
+    factor_scores: Mapping[str, Any],
+    evidence_by_id: Mapping[str, Evidence],
+    *,
+    symbol: str,
+) -> None:
+    """Reject any factor whose evidence references cross factor or asset lines.
+
+    ``factor_scores`` maps factor name to a value carrying ``evidence_ids``
+    (``FactorScore`` or a mapping). ``evidence_by_id`` maps evidence id to its
+    persisted ``Evidence``. A reference that is missing, belongs to another
+    asset, or belongs to another factor is a lineage error, never a warning.
+    """
+    for factor, score in factor_scores.items():
+        if not isinstance(score, FactorScore):
+            continue
+        if str(getattr(score, "factor", factor)).strip().lower() != str(factor).strip().lower():
+            raise ValueError(f"factor score key {factor} does not match its factor {score.factor}")
+        for evidence_id in score.evidence_ids:
+            evidence = evidence_by_id.get(evidence_id)
+            if evidence is None:
+                raise ValueError(f"factor {factor} references missing evidence {evidence_id}")
+            if evidence.asset != symbol:
+                raise ValueError(f"factor {factor} references evidence for wrong asset {evidence_id}")
+            if evidence.factor != factor:
+                raise ValueError(f"factor {factor} references evidence for wrong factor {evidence_id}")
+
+
 @dataclass(frozen=True)
 class DecisionStatusEvent:
     decision_id: str
@@ -472,4 +494,4 @@ class DecisionStatusEvent:
         return result
 
 
-__all__ = ["Decision", "DecisionStatusEvent"]
+__all__ = ["Decision", "DecisionStatusEvent", "validate_factor_evidence_binding"]
