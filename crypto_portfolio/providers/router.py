@@ -24,7 +24,7 @@ from .base import (
     ProviderNotApplicable,
 )
 from .cache import CacheCorruption, CacheExpired, ProviderCache, cached_series_is_complete_for_as_of, merge_ohlcv_series, missing_series_range, request_hash
-from .config import load_provider_config, provider_api_key, provider_enabled
+from .config import load_provider_config, provider_api_key, provider_enabled, provider_settings
 from .circuit_breaker import CircuitBreaker
 from .http import HttpClient, classify_transport_error, is_retryable_error_code, redact_log, redact_secrets
 from .routes import BASIS_METHODOLOGY, build_provider_requests, current_delivery_basis, provider_chain
@@ -242,7 +242,7 @@ class ProviderRouter:
                 client=client,
                 api_key=provider_api_key("sosovalue", self.config),
             )
-        if provider_enabled("rated", self.config):
+        if provider_enabled("rated", self.config) and provider_settings("rated", self.config).get("subscription_active", True):
             providers["rated"] = RatedProvider(
                 client=client,
                 api_key=provider_api_key("rated", self.config),

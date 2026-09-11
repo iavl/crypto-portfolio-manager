@@ -25,9 +25,14 @@ _OPTIONAL_METRICS = {
     "btc_valuation.mvrv_zscore": "OPTIONAL_SOURCE_UNAVAILABLE",
     "eth.monetary.issuance_365d_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
     "eth.monetary.net_supply_growth_365d": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.active_effective_stake_eth": "OPTIONAL_PROVIDER_UNAVAILABLE",
-    "eth.staking.active_effective_stake_change_30d": "DERIVED_INPUT_UNAVAILABLE",
-    "flows.eth_active_stake_change_to_supply_30d": "DERIVED_INPUT_UNAVAILABLE",
+}
+# Rated-gated staking facts and their derived dependents: skipped as premium
+# (never failed, never in sufficiency denominators) so operational summaries
+# separate a known paywalled source from a genuine provider failure.
+_PREMIUM_METRICS = {
+    "eth.staking.active_effective_stake_eth",
+    "eth.staking.active_effective_stake_change_30d",
+    "flows.eth_active_stake_change_to_supply_30d",
 }
 _SUPPORTING_METRICS = {
     "market.ma20",
@@ -108,6 +113,8 @@ def metric_availability(asset: str, metric_key: str) -> MetricAvailabilityPolicy
     asset = str(asset).strip().upper()
     definition = metric_definition(metric_key)
     key = definition.key
+    if key in _PREMIUM_METRICS:
+        return MetricAvailabilityPolicy(key, "PREMIUM_ONLY")
     if key in _OPTIONAL_METRICS:
         return MetricAvailabilityPolicy(key, "OPTIONAL", _OPTIONAL_METRICS[key])
     if key == "fundamentals.developer_activity":

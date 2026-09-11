@@ -185,6 +185,19 @@ and monetary supply context, proof-of-stake security and staking flows, Ethereum
 L2 settlement rent, blob/data-availability demand, DeFi/stablecoin economics,
 realized valuation where supported, and ETH ETF flow/AUM ratios.
 
+Within ETH valuation, `eth_valuation.mvrv` is the only primary scoring signal:
+MVRV already encodes price relative to realized price, so
+`eth_valuation.realized_price`, `eth_valuation.realized_cap_usd`, and
+`eth_valuation.price_to_realized_price` are execution-context only. They never
+enter the scoring-coverage denominator, their unavailability is reported as an
+optional skip, and a realized-price provider failure cannot lower ETH valuation
+coverage or asset confidence. BTC keeps its separate valuation model unchanged.
+Rated-gated ETH staking values (`eth.staking.active_effective_stake_eth` and its
+30D change/normalized-flow dependents) are premium-only: when the Rated
+subscription is inactive (config `rated.subscription_active: false`), they are
+planned as `SKIPPED_PREMIUM` without network requests instead of surfacing as
+provider failures.
+
 L2 activity is not ETH value capture unless Ethereum settlement or DA use is
 shown. Rising staking share is not automatically bullish, and deflation is not
 automatically bullish; cause, persistence, liquidity, and security context
@@ -216,6 +229,16 @@ must be resolved upstream; input order must not select the scoring source.
 Flow observations retain their weakest source confidence. Relative-strength
 OHLCV freshness is evaluated against persisted fetch timestamps, never the
 current wall clock; absent fetch timestamps give UNKNOWN freshness.
+
+Daily-candle freshness uses one definition everywhere:
+`lag_days = expected_latest_completed_date - actual_latest_completed_date`,
+where the expected latest completed UTC daily candle is `as_of.date() - 1 day`
+(the current UTC day is always still open and never enters indicators). A
+series ending on 2026-09-09 at `as_of = 2026-09-11T02:27Z` has `lag_days = 1`,
+not two days. The configured `execution.maximum_daily_candle_lag_days` is the
+only freshness threshold. The OHLCV cache is checked for tail completeness:
+a freshly fetched but tail-stale series is refreshed instead of being served
+because its fetch age looks small.
 
 ## Event-risk gate and overlays
 
@@ -286,6 +309,15 @@ renormalized; no fixed redundancy value is injected.
 Scores are bounded in `[0, 1]` and reported with `LOW`/`MEDIUM`/`HIGH` bands.
 Missing, stale, conflict, fallback, and evidence IDs remain explicit. A
 hard-critical cap cannot be diluted by ordinary metrics.
+
+Every confidence result ships a deterministic attribution: each dimension or
+component reports `score`, `weight`, and `contribution = score * weight`, plus
+`raw_score`, cap ceilings, soft penalties, and the final score. A capped result
+always shows raw and final side by side (for example `raw 0.85, cap 0.79,
+final 0.79`), so a report can state exactly which domain or component moved
+the number. Optional or premium data being unavailable is not a decision
+blocker and never lowers `score`; it only appears in the separated
+optional/premium collection sections.
 
 ### Action-scoped Decision Confidence
 

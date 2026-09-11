@@ -75,6 +75,8 @@ def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
             value = settings["maximum_bytes_billed"]
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"provider {raw_name} maximum_bytes_billed must be a positive integer")
+        if "subscription_active" in settings and not isinstance(settings["subscription_active"], bool):
+            raise ValueError(f"provider {raw_name} subscription_active must be boolean")
         if any(str(key).strip().lower().replace("-", "_") in _SECRET_FIELDS for key in settings):
             raise ValueError(f"provider {raw_name} config must not contain secret values")
         normalized_providers[raw_name.strip().lower()] = settings
