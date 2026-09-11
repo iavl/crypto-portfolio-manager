@@ -222,13 +222,29 @@ class DocumentationTests(unittest.TestCase):
         for text in (
             "git clone https://github.com/iavl/crypto-portfolio-manager.git",
             "cd crypto-portfolio-manager",
-            "codex",
-            ".agents/skills/crypto-portfolio-manager/SKILL.md",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, readme)
+                self.assertIn(text, guide)
+        for text in (
+            "Codex",
+            "Claude Code",
+            "ZCode",
+            "docs/USAGE.md#多宿主-skill-使用与安装",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, readme)
+        for text in (
+            "### Codex：仓库级自动发现",
+            "### Claude Code：用户级 symlink",
+            "### ZCode：Import 或用户级 symlink",
+            ".claude/skills",
+            ".zcode/skills",
+            "Settings → Skills → Import",
             "不需要单独安装 Skill",
             "旧版 copy-installed Skill 迁移",
         ):
             with self.subTest(text=text):
-                self.assertIn(text, readme)
                 self.assertIn(text, guide)
         for content in (readme, guide):
             self.assertNotIn("./install.sh", content)

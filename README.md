@@ -1,7 +1,7 @@
 
 # crypto-portfolio-manager
 
-`crypto-portfolio-manager` 是一个 Codex Skill，用于在约 3–6 个月的主动配置周期内，以保守均衡、仅现货的方式研究加密货币投资组合。它将当前市场证据与确定性的记账、风险、配置、基准和再平衡计算结合起来。
+`crypto-portfolio-manager` 是一个 Agent Skill，用于在约 3–6 个月的主动配置周期内，以保守均衡、仅现货的方式研究加密货币投资组合。它将当前市场证据与确定性的记账、风险、配置、基准和再平衡计算结合起来，可由支持 Agent Skills 的 Codex、Claude Code 和 ZCode 使用。
 
 详细的复盘流程、输入示例、历史数据行为和故障排查请参阅[使用指南](docs/USAGE.md)。
 
@@ -48,52 +48,35 @@ Skill：   .agents/skills/crypto-portfolio-manager/SKILL.md
 
 ## 环境要求
 
-- 支持 Agent Skills 的 Codex。
+- 支持 Agent Skills 的 Codex、Claude Code 或 ZCode 宿主。
 - Python 3.11 或更高版本，用于包含的脚本和开发检查。
 - Git，用于克隆和开发。
-- 运行 Codex 的环境需要具备网络/网页访问能力，以进行实时研究或按需刷新公共 provider 数据。
+- 运行 Agent 的环境需要具备网络/网页访问能力，以进行实时研究或按需刷新公共 provider 数据。
 
 正常使用 Skill 不需要安装 Python 包。仓库没有运行时 Python 依赖；`jsonschema` 和 `ruff` 仅是开发依赖。逻辑阶段路由配置在 `config/model-routing.json` 中。
 
-## Repository Skill 使用
+## Skill 安装与使用
 
 ```bash
 git clone https://github.com/iavl/crypto-portfolio-manager.git
 cd crypto-portfolio-manager
-codex
 ```
 
-Codex 会从以下提交到仓库的路径发现 Skill：
+仓库唯一 source of truth 是：
 
 ```text
 .agents/skills/crypto-portfolio-manager/SKILL.md
 ```
 
-从仓库根目录或其子目录启动 Codex 都会使用 Git working tree 中的当前实现。
-不需要单独安装 Skill，也不需要同步复制代码；更新代码只需正常 Git 开发或
-`git pull --ff-only`。验证、旧版本迁移和运行时数据边界请参阅[使用指南](docs/USAGE.md#repository-skill-使用与发现)。
+Codex 从仓库根目录或其子目录启动即可自动发现该 Skill；Claude Code 和 ZCode
+需要各自的 Skill 目录或 Import 操作。所有宿主都应使用 symlink 指向上述目录，
+避免产生过期副本。完整命令、旧版迁移和运行时数据边界请参阅[多宿主安装指南](docs/USAGE.md#多宿主-skill-使用与安装)。
 
-### 旧版 copy-installed Skill 迁移
-
-旧版本可能在用户目录留下同名的 copy-installed Skill。迁移到仓库 Skill 前，
-只读检查以下位置：
+仓库 Skill 不需要单独的 Python 安装；如果需要运行开发检查，再执行：
 
 ```bash
-test -e "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager" \
-  && echo "legacy Codex Skill exists"
-test -e "$HOME/.agents/skills/crypto-portfolio-manager" \
-  && echo "user-level Skill exists"
+python3 -m pip install -e ".[dev]"
 ```
-
-确认第一项确实是旧的复制目录后，用户可以手动删除它：
-
-```bash
-rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
-```
-
-不要把上述路径与 `~/.local/share/crypto-portfolio-manager/` 混淆；后者保存
-投资组合历史，不能作为 Skill 清理的一部分删除。`$HOME/.agents/skills/` 下的
-同名目录只有在确认是旧副本时才可由用户决定处理。
 
 ## 使用
 

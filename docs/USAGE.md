@@ -5,19 +5,21 @@
 本指南说明 `crypto-portfolio-manager` 的实际使用方式、输入格式、复盘
 流程、数据采集、历史记录和故障处理。
 
-安装、发现、更新和旧版迁移请参阅下方的[Repository Skill 使用与发现](#repository-skill-使用与发现)。
+安装、发现、更新和旧版迁移请参阅下方的[多宿主 Skill 使用与安装](#多宿主-skill-使用与安装)。
 组合策略请参阅[投资策略](../references/investment-strategy.md)；架构与内部实现请参阅
 [工作原理](HOW_IT_WORKS.md)。仓库 Skill 位于
 `.agents/skills/crypto-portfolio-manager/SKILL.md`，参考资料仍位于根目录的
 `references/`。
 
-## Repository Skill 使用与发现
+## 多宿主 Skill 使用与安装
 
-Repository Skill 与代码一起提交在：
+仓库唯一 source of truth 是：
 
 ```text
 .agents/skills/crypto-portfolio-manager/SKILL.md
 ```
+
+### Codex：仓库级自动发现
 
 首次使用或从新检出开始时：
 
@@ -29,25 +31,84 @@ codex
 
 从仓库根目录或任一嵌套目录启动 Codex，Codex 都应发现该 Skill，并通过 Git
 `REPO_ROOT` 从当前 working tree 读取 `config/`、`references/`、`scripts/` 和
-`crypto_portfolio/`。可进行本地文件验证：
+`crypto_portfolio/`。调用方式：
 
 ```bash
 test -f .agents/skills/crypto-portfolio-manager/SKILL.md \
   && echo "repository skill present"
 ```
 
-然后在 Codex 中调用：
-
 ```text
 $crypto-portfolio-manager explain what portfolio reviews you support.
 ```
 
-不需要单独安装 Skill，也不需要同步复制代码。未提交的本地代码变更会被 Skill 直接看到；更新
-仓库只需正常开发或：
+不需要单独安装 Skill，也不需要同步复制代码。更新仓库只需正常开发或：
 
 ```bash
 git pull --ff-only
 ```
+
+### Claude Code：用户级 symlink
+
+Claude Code 使用 Agent Skills 标准，但自动发现路径是
+`.claude/skills/<skill-name>/SKILL.md` 或
+`~/.claude/skills/<skill-name>/SKILL.md`。建议从仓库 Skill 目录创建 symlink，
+不要复制文件：
+
+```bash
+cd /path/to/crypto-portfolio-manager
+mkdir -p "$HOME/.claude/skills"
+ln -s "$PWD/.agents/skills/crypto-portfolio-manager" \
+  "$HOME/.claude/skills/crypto-portfolio-manager"
+claude .
+```
+
+如果目标路径已经存在，先确认它是旧 symlink 或旧副本；不要覆盖未知目录。
+在 Claude Code 中使用：
+
+```text
+/crypto-portfolio-manager
+```
+
+也可以将同一个 symlink 放在项目级 `.claude/skills/` 中，让团队通过 Git
+共享，但这会向仓库增加宿主适配文件；默认不需要这样做。
+
+参考：[Claude Code Skills](https://code.claude.com/docs/en/skills)。
+
+### ZCode：Import 或用户级 symlink
+
+推荐使用 ZCode 的图形界面：
+
+1. 打开 `Settings → Skills → Import`。
+2. 选择 `crypto-portfolio-manager`。
+3. 选择 `Symlink`，再选择 `Project` 或 `Global`。
+4. Refresh 并启用该 Skill。
+
+ZCode 也支持手动用户级目录：
+
+```bash
+cd /path/to/crypto-portfolio-manager
+mkdir -p "$HOME/.zcode/skills"
+ln -s "$PWD/.agents/skills/crypto-portfolio-manager" \
+  "$HOME/.zcode/skills/crypto-portfolio-manager"
+```
+
+在 ZCode 中可使用 `$crypto-portfolio-manager`，也可从 `/` 菜单的 `Skills`
+分组选择。ZCode 的 `Copy` 模式会产生独立副本，后续不会随仓库更新；本仓库推荐
+`Symlink`。参考：[ZCode Skill](https://zcode.z.ai/en/docs/skill)。
+
+### 跨宿主兼容边界
+
+这份 `SKILL.md` 使用通用 Agent Skills 文件格式，Python 核心和仓库脚本可由不同
+宿主运行，但以下内容由宿主决定：
+
+- `$crypto-portfolio-manager`、`/crypto-portfolio-manager` 和 ZCode 的 Import 是不同的触发方式；
+- `LUNA_MAX` 是当前模型路由中的特定目标，Claude Code 或 ZCode 不应假装具备该目标；
+- 实时 Web 证据、shell、文件系统和网络权限必须由宿主实际提供；
+- 直接调用 GLM/Claude API 而没有 Agent 宿主时，需要把 Skill 指令和工具编排自行注入，不能自动读取本地仓库。
+
+运行任何宿主前，确认当前目录位于该 Git clone 内；Skill 会通过
+`git rev-parse --show-toplevel` 解析 `REPO_ROOT`。
 
 ### 旧版 copy-installed Skill 迁移
 
@@ -90,9 +151,9 @@ rm -rf "${CODEX_HOME:-$HOME/.codex}/skills/crypto-portfolio-manager"
 
 ## 2. 快速开始
 
-1. 在仓库根目录或其子目录启动 Codex。
+1. 按上文选择 Codex、Claude Code 或 ZCode，并确认 Skill 已被发现且启用。
 2. 上传交易所钱包总览截图，或提供结构化 JSON 仓位。
-3. 调用 `$crypto-portfolio-manager`。
+3. 使用对应宿主的调用方式：Codex/ZCode 使用 `$crypto-portfolio-manager`，Claude Code 使用 `/crypto-portfolio-manager`。
 4. 指定 `SNAPSHOT_REVIEW`、`FULL_REVIEW` 或 `EVENT_REVIEW`。
 
 标准 Binance 截图需要显示 USD 货币、资产、数量、价格/成本和浮动盈亏。
