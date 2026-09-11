@@ -21,7 +21,6 @@ from crypto_portfolio.engine.cash_flow import (
     apply_cash_flow_resolutions,
     find_unresolved_cash_flow_snapshots,
 )
-from crypto_portfolio.models.portfolio import snapshot_from_mapping
 from crypto_portfolio.state.cash_flows import (
     append_cash_flow_resolution,
     read_cash_flow_resolutions,
@@ -29,12 +28,10 @@ from crypto_portfolio.state.cash_flows import (
 from crypto_portfolio.state.snapshots import read_snapshots
 
 
-def _load_snapshots(path: str | Path | None):
-    parsed = []
-    for record in read_snapshots(path):
-        snapshot, _, _ = snapshot_from_mapping(record)
-        parsed.append(snapshot)
-    return parsed
+def _load_records(path: str | Path | None):
+    # Raw persisted records: the engine overlay extracts the ledger fields it
+    # needs, so history replay never revalidates an old embedded policy blob.
+    return read_snapshots(path)
 
 
 def _print_json(value) -> None:
@@ -42,16 +39,16 @@ def _print_json(value) -> None:
 
 
 def cmd_list_unresolved(args) -> int:
-    snapshots = _load_snapshots(args.snapshots)
-    blocking = find_unresolved_cash_flow_snapshots(snapshots, read_cash_flow_resolutions(args.resolutions))
+    records = _load_records(args.snapshots)
+    blocking = find_unresolved_cash_flow_snapshots(records, read_cash_flow_resolutions(args.resolutions))
     _print_json({"unresolved_count": len(blocking), "unresolved": blocking})
     return 1 if blocking else 0
 
 
 def cmd_validate(args) -> int:
-    snapshots = _load_snapshots(args.snapshots)
+    records = _load_records(args.snapshots)
     resolutions = read_cash_flow_resolutions(args.resolutions)
-    _, diagnostics = apply_cash_flow_resolutions(snapshots, resolutions)
+    _, diagnostics = apply_cash_flow_resolutions(records, resolutions)
     _print_json({"valid": True, "lineage": diagnostics["lineage"]})
     return 0
 

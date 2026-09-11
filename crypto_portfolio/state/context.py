@@ -37,56 +37,18 @@ def latest_decision(path: str | Path | None = None) -> dict[str, Any] | None:
     return _latest(read_decisions(path))
 
 
-def _snapshot_total(record: dict[str, Any]) -> float:
-    for field in ("total_value_usd", "total_value"):
-        value = record.get(field)
-        if value is not None:
-            return float(value)
-    return sum(
-        float(item["value_usd"])
-        for item in record.get("positions", ())
-        if isinstance(item, dict) and "value_usd" in item
-    )
-
-
-def _ledger_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Reduce one persisted snapshot to the fields a NAV replay needs.
-
-    History replay must not revalidate an old embedded policy blob; it only
-    consumes the ledger fields. A pre-contract record whose unresolved intent
-    lived in ``external_cash_flow_type`` is normalized to the current
-    ``cash_flow_resolution_status`` shape without guessing an amount.
-    """
-    status = record.get("cash_flow_resolution_status")
-    flow = record.get("external_cash_flow")
-    flow_type = record.get("external_cash_flow_type")
-    if status is None:
-        if str(flow_type or "").strip().upper() == "UNRESOLVED":
-            status, flow, flow_type = "UNRESOLVED", None, None
-        else:
-            status, flow, flow_type = "ASSUMED_NONE", 0.0, "NONE"
-    return {
-        "timestamp": record.get("timestamp"),
-        "total_value_usd": _snapshot_total(record),
-        "external_cash_flow": flow,
-        "external_cash_flow_type": flow_type,
-        "cash_flow_resolution_status": status,
-        "cash_flow_classification_source": record.get("cash_flow_classification_source"),
-        "snapshot_id": record.get("snapshot_id"),
-    }
-
-
 def _cash_flow_snapshots(
     path: str | Path | None = None,
     resolution_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Effective ledger history: raw records overlaid with explicit resolutions.
 
-    A persisted UNRESOLVED snapshot stays UNRESOLVED until the user resolves
-    it; this overlay never guesses a legacy flow.
+    Raw persisted records go straight into the engine overlay, which extracts
+    the ledger fields (no old embedded policy revalidation) and normalizes
+    pre-contract flow shapes. A persisted UNRESOLVED snapshot stays UNRESOLVED
+    until the user resolves it; this overlay never guesses a legacy flow.
     """
-    records = [_ledger_record(record) for record in read_snapshots(path)]
-    effective, _ = apply_cash_flow_resolutions(records, read_cash_flow_resolutions(resolution_path))
+    effective, _ = apply_cash_flow_resolutions(read_snapshots(path), read_cash_flow_resolutions(resolution_path))
     ordered = sorted(
         enumerate(effective),
         key=lambda item: (parse_timestamp(item[1]["timestamp"]), item[0]),

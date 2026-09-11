@@ -192,6 +192,36 @@ class CashFlowResolutionOverlayTests(unittest.TestCase):
         self.assertEqual(lineage["lineage"][0]["original_status"], "ASSUMED_NONE")
         self.assertEqual(lineage["lineage"][0]["effective_status"], "CONFIRMED_AMOUNT")
 
+    def test_raw_pre_contract_record_replays_without_full_model_parse(self):
+        # Real 2026-09-09 runtime shape: no status key, the unresolved intent in
+        # external_cash_flow_type, and a stale embedded policy blob that the
+        # current policy model would reject. History replay must consume the
+        # ledger fields only and still allow an explicit resolution.
+        legacy = {
+            "snapshot_id": "snap-legacy",
+            "timestamp": "2026-09-09T12:52:27Z",
+            "base_currency": "USD",
+            "positions": [{"symbol": "BTC", "quantity": 0.1, "value_usd": 10000.0}],
+            "external_cash_flow": 0.0,
+            "external_cash_flow_type": "UNRESOLVED",
+            "resolved_policy": {"positioning": {"deleveraging": {"enabled": True}}},
+        }
+        blocking = find_unresolved_cash_flow_snapshots((legacy,))
+        self.assertEqual(
+            blocking,
+            ({"snapshot_id": "snap-legacy", "timestamp": "2026-09-09T12:52:27Z",
+              "original_status": "UNRESOLVED", "has_resolution": False},),
+        )
+        resolution = dict(_resolution(), snapshot_id="snap-legacy")
+        effective, lineage = apply_cash_flow_resolutions((legacy,), (resolution,))
+        self.assertEqual(effective[0]["cash_flow_resolution_status"], "CONFIRMED_NONE")
+        self.assertEqual(lineage["lineage"][0]["source"], "USER_EXPLICIT")
+        result = cash_flow_adjusted_performance(
+            (legacy,),
+            resolutions=(resolution,),
+        )
+        self.assertEqual(result["performance_finality"], "FINAL")
+
     def test_find_unresolved_reports_each_blocking_snapshot(self):
         snapshots = (
             dict(BASELINE),

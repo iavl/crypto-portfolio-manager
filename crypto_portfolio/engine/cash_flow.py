@@ -157,6 +157,24 @@ def _snapshot_id_of(value: Any) -> str | None:
     return str(raw).strip() if raw is not None and str(raw).strip() else None
 
 
+def _persisted_flow_state(value: Any) -> tuple[str, Any, Any]:
+    """Normalize a snapshot's persisted flow fields to the current contract.
+
+    Pre-contract records carried no ``cash_flow_resolution_status`` and put
+    the unresolved intent in ``external_cash_flow_type``; those normalize to
+    ``UNRESOLVED`` with a null flow. Any other record without a status key
+    defaults to ``ASSUMED_NONE / 0 / NONE``. Explicit statuses pass through.
+    """
+    status = _snapshot_field(value, "cash_flow_resolution_status")
+    flow = _snapshot_field(value, "external_cash_flow")
+    flow_type = _snapshot_field(value, "external_cash_flow_type")
+    if status is None:
+        if str(flow_type or "").strip().upper() == "UNRESOLVED":
+            return "UNRESOLVED", None, None
+        return "ASSUMED_NONE", 0.0, "NONE"
+    return str(status).strip().upper(), flow, flow_type
+
+
 def apply_cash_flow_resolutions(
     snapshots: Sequence[PortfolioSnapshot | Mapping[str, Any]],
     resolutions: Sequence[CashFlowResolution | Mapping[str, Any]] = (),
@@ -192,23 +210,22 @@ def apply_cash_flow_resolutions(
     effective: list[dict[str, Any]] = []
     lineage: list[dict[str, Any]] = []
     for value in snapshots:
-        original_status = str(
-            _snapshot_field(value, "cash_flow_resolution_status", "ASSUMED_NONE")
-        ).strip().upper()
+        original_status, persisted_flow, persisted_flow_type = _persisted_flow_state(value)
+        classification_source = str(
+            _snapshot_field(value, "cash_flow_classification_source", "") or ""
+        ).strip().upper() or None
         record = {
             "timestamp": _snapshot_field(value, "timestamp"),
             "total_value_usd": _total_value(value),
-            "external_cash_flow": _snapshot_field(value, "external_cash_flow"),
-            "external_cash_flow_type": _snapshot_field(value, "external_cash_flow_type"),
+            "external_cash_flow": persisted_flow,
+            "external_cash_flow_type": persisted_flow_type,
             "cash_flow_resolution_status": original_status,
+            "cash_flow_classification_source": classification_source,
             "snapshot_id": _snapshot_id_of(value),
         }
         snapshot_id = record["snapshot_id"]
         resolution = by_snapshot.get(snapshot_id) if snapshot_id else None
         if resolution is not None:
-            classification_source = str(
-                _snapshot_field(value, "cash_flow_classification_source", "") or ""
-            ).strip().upper()
             overridable = original_status == "UNRESOLVED" or (
                 original_status == "ASSUMED_NONE" and classification_source != "USER_EXPLICIT"
             )
