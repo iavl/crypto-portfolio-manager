@@ -412,9 +412,11 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "eth.blobs.blob_transactions_30d": _definition("eth.blobs.blob_transactions_30d", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth.blobs.utilization_30d": _definition("eth.blobs.utilization_30d", "onchain", "number", "fraction", "HIGHER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
     "eth_valuation.mvrv": _definition("eth_valuation.mvrv", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
-    "eth_valuation.realized_price": _definition("eth_valuation.realized_price", "valuation", "number", "USD", "LOWER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
+    # MVRV already encodes price/realized-price, so realized-price values stay
+    # context-only: their failure must never penalize ETH valuation scoring.
+    "eth_valuation.realized_price": _definition("eth_valuation.realized_price", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_valuation"),
     "eth_valuation.realized_cap_usd": _definition("eth_valuation.realized_cap_usd", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_valuation"),
-    "eth_valuation.price_to_realized_price": _definition("eth_valuation.price_to_realized_price", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="2d", asset_scope=_ETH_ASSETS),
+    "eth_valuation.price_to_realized_price": _definition("eth_valuation.price_to_realized_price", "valuation", "number", "ratio", "CONTEXTUAL", freshness="2d", asset_scope=_ETH_ASSETS, decision_role="EXECUTION_CONTEXT", context_group="eth_valuation"),
     "tokenomics.next_unlock_pct": _definition("tokenomics.next_unlock_pct", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_UNLOCK_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
     "tokenomics.annualized_emissions": _definition("tokenomics.annualized_emissions", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_TOKENOMICS_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),
     "tokenomics.supply_growth": _definition("tokenomics.supply_growth", "event_risk", "number", "fraction", "LOWER_IS_BETTER", freshness="30d", asset_scope=_TOKENOMICS_ASSETS, decision_role="EVENT_RISK", context_group="event_risk"),

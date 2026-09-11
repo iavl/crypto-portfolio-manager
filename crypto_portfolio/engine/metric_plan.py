@@ -92,7 +92,6 @@ _ETH_METRICS = (
     "eth_valuation.mvrv",
     "eth_valuation.realized_price",
     "eth_valuation.realized_cap_usd",
-    "eth_valuation.price_to_realized_price",
     "flows.eth_active_stake_change_to_supply_30d",
 )
 _BTC_SCORING_METRICS = (
