@@ -143,6 +143,112 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertEqual(provider_chain("onchain.transfer_volume", "BNB"), ())
         self.assertEqual(dataset_for_metric("onchain.transfer_volume"), "onchain")
 
+    def test_solana_onchain_metrics_are_routed_and_accepted_by_coinmetrics(self):
+        from crypto_portfolio.providers.coinmetrics import COINMETRICS_ASSETS
+
+        # The registry scopes active addresses and transfer volume to
+        # BTC/ETH/SOL; routing SOL to a provider without an asset mapping
+        # would permanently fail the onchain factor for SOL.
+        self.assertEqual(provider_chain("onchain.active_addresses", "SOL"), ("coinmetrics_community",))
+        self.assertEqual(provider_chain("onchain.transfer_volume", "SOL"), ("coinmetrics_community",))
+        self.assertEqual(COINMETRICS_ASSETS["SOL"], "solana")
+
+    def test_missing_dataset_ttl_falls_back_to_dataset_default_not_generic(self):
+        from crypto_portfolio.providers.routes import DEFAULT_TTL_SECONDS, cache_ttl_seconds
+
+        configured = {"default": 3600, "spot": 600}
+        self.assertEqual(cache_ttl_seconds("chain_liveness", configured), DEFAULT_TTL_SECONDS["chain_liveness"])
+        self.assertEqual(cache_ttl_seconds("chain_liveness", {"chain_liveness": 60}), 60)
+        self.assertEqual(cache_ttl_seconds("stablecoin", configured), DEFAULT_TTL_SECONDS["stablecoin"])
+        self.assertEqual(cache_ttl_seconds("unknown_dataset", configured), 3600)
+        self.assertEqual(cache_ttl_seconds("chain_liveness"), DEFAULT_TTL_SECONDS["chain_liveness"])
+
+    def test_shipped_provider_config_pins_the_liveness_ttl(self):
+        config = json.loads(
+            (Path(__file__).parent.parent / "config" / "data-providers.json").read_text(encoding="utf-8")
+        )
+        ttl = config["cache_ttl_seconds"]
+        # The halt-detection gate is the one dataset whose intended window
+        # (300s) must never silently widen to the generic default.
+        self.assertEqual(ttl["chain_liveness"], 300)
+        self.assertEqual(ttl["github"], 86400)
+        self.assertEqual(ttl["ethereum_monetary"], 21600)
+
+    def test_response_cache_identity_buckets_fetch_timestamps(self):
+        from crypto_portfolio.providers.base import ProviderRequest
+        from crypto_portfolio.providers.cache import ProviderCache, request_hash
+
+        def etf_request(as_of: str) -> ProviderRequest:
+            return ProviderRequest(
+                "sosovalue", "etf", "MARKET",
+                {
+                    "as_of": as_of,
+                    "end": as_of,
+                    "start": "2026-09-08T00:00:00Z",
+                    "history_mode": "BOUNDED",
+                },
+                ("flows.etf_net_1d",),
+                True,
+                86400,
+            )
+
+        early = etf_request("2026-09-09T00:03:45.123456Z")
+        later = etf_request("2026-09-09T20:59:59.987654Z")
+        next_day = etf_request("2026-09-10T00:00:01Z")
+        # Sub-TTL fetch-time jitter must not fork the cache identity.
+        self.assertEqual(request_hash(early), request_hash(later))
+        self.assertNotEqual(request_hash(early), request_hash(next_day))
+        mapping_form = {
+            "provider": "sosovalue",
+            "dataset": "etf",
+            "asset": "MARKET",
+            "parameters": dict(early.parameters),
+            "metric_keys": ("flows.etf_net_1d",),
+            "freshness_seconds": 86400,
+        }
+        self.assertEqual(request_hash(early), request_hash(mapping_form))
+
+        payload = {"observations": [{"observed_at": "2026-09-09T00:00:00Z", "value": 1.0}]}
+        with TemporaryDirectory() as directory:
+            cache = ProviderCache(Path(directory) / "cache")
+            cache.save_response(early, payload, fetched_at="2026-09-09T00:03:45Z")
+            loaded = cache.load_response(later, now="2026-09-09T01:00:00Z", as_of="2026-09-09T01:00:00Z")
+            self.assertEqual(loaded, payload)
+
+    def test_expired_response_entries_are_pruned_on_save(self):
+        from crypto_portfolio.providers.base import ProviderRequest
+        from crypto_portfolio.providers.cache import ProviderCache
+
+        def request(asset: str) -> ProviderRequest:
+            return ProviderRequest(
+                "binance", "funding", asset,
+                {"as_of": "2026-09-09T00:00:00Z", "history_mode": "CURRENT"},
+                ("derivatives.funding_rate",),
+                True,
+                3600,
+            )
+
+        with TemporaryDirectory() as directory:
+            cache = ProviderCache(Path(directory) / "cache")
+            cache._PRUNE_INTERVAL_SAVES = 1
+            cache.save_response(
+                request("BTC"),
+                {"observations": [{"observed_at": "2026-09-09T00:00:00Z", "value": 1.0}]},
+                fetched_at="2026-09-09T00:00:00Z",
+                expires_at="2020-01-01T00:00:00Z",
+            )
+            cache.save_response(
+                request("ETH"),
+                {"observations": [{"observed_at": "2026-09-09T00:00:00Z", "value": 2.0}]},
+                fetched_at="2026-09-09T00:00:00Z",
+                expires_at="2099-01-01T00:00:00Z",
+            )
+            # The second save pruned the already-expired BTC entry; the live
+            # ETH entry survives and remains loadable.
+            self.assertEqual(cache.stats()["response_entries"], 1)
+            self.assertIsNotNone(cache.load_response(request("ETH")))
+            self.assertIsNone(cache.load_response(request("BTC"), allow_expired=False))
+
     def test_eth_transfer_volume_does_not_fallback_to_coinmetrics(self):
         class BlockchairClient:
             def __init__(self, response=None, error=None):

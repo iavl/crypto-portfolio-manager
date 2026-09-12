@@ -132,7 +132,10 @@ def benchmark_return_with_cash_flows(
         pre_flow_value = sum(components.values())
         value = pre_flow_value + flow
         if value <= 0 or not math.isfinite(value):
-            raise ValueError("benchmark value must remain > 0")
+            raise ValueError(
+                f"benchmark value must remain > 0 after cash flow {flow} in period {index}; "
+                "the benchmark must be scaled with the portfolio's initial value"
+            )
         for symbol, weight in normalized_weights.items():
             components[symbol] += flow * weight
         snapshots.append(
@@ -157,6 +160,7 @@ def benchmark_return_from_prices(
     benchmark: str | None = None,
     cash_flows: Sequence[float] | None = None,
     timestamps: Sequence[str] | None = None,
+    initial_value: float = 1.0,
     policy: Policy | None = None,
 ) -> float:
     if not prices_by_asset:
@@ -185,6 +189,7 @@ def benchmark_return_from_prices(
         periods,
         flows,
         selected_weights,
+        initial_value=initial_value,
         timestamps=timestamps,
         policy=policy,
     )
@@ -221,10 +226,15 @@ def build_aligned_benchmark_result(
     flows = list(cash_flows) if cash_flows is not None else [state.external_cash_flow for state in result.states[1:]]
     if len(flows) != len(btc_prices) - 1:
         raise ValueError("benchmark cash flows must match price return periods")
+    # Real-dollar flows only make sense against a benchmark sized like the
+    # portfolio: with the default unit start value every flow would dwarf the
+    # benchmark and silently rebalance the 70/30 sleeve back to its anchor.
+    initial_value = result.states[0].portfolio_value
     btc_return = benchmark_return_from_prices(
         {"BTC": btc_prices},
         cash_flows=flows,
         timestamps=timestamps,
+        initial_value=initial_value,
         benchmark="primary",
         policy=policy,
     )
@@ -236,6 +246,7 @@ def build_aligned_benchmark_result(
             {"BTC": btc_prices, "ETH": eth_prices},
             cash_flows=flows,
             timestamps=timestamps,
+            initial_value=initial_value,
             benchmark="secondary",
             policy=policy,
         )

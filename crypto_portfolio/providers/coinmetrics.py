@@ -25,6 +25,7 @@ COMMUNITY_BASE_URL = "https://community-api.coinmetrics.io"
 COINMETRICS_ASSETS = {
     "BTC": "btc",
     "ETH": "eth",
+    "SOL": "solana",
     "BNB": "bnb",
     "AAVE": "aave",
 }
@@ -53,7 +54,10 @@ COINMETRICS_BTC_VALUATION_METRICS = {
 }
 COINMETRICS_BTC_VALUATION_INPUTS = {
     "btc_valuation.mvrv": ("CapMVRVCur", "CapMrktCurUSD", "CapRealUSD"),
-    "btc_valuation.mvrv_zscore": ("CapMVRVZ", "CapMrktCurUSD", "CapRealUSD"),
+    # MVRV-Z is the z-score of the MVRV ratio itself; there is no faithful
+    # derivation from market-cap/realized-cap primitives, so CapMVRVZ is the
+    # only accepted input and the metric fails closed without it.
+    "btc_valuation.mvrv_zscore": ("CapMVRVZ",),
     "btc_valuation.realized_price": ("PriceRealizedUSD", "CapRealUSD", "SplyCur", "CapMVRVCur", "CapMrktCurUSD"),
     "btc_valuation.realized_cap_usd": ("CapRealUSD", "CapMVRVCur", "CapMrktCurUSD"),
 }
@@ -343,27 +347,10 @@ def _parse_btc_valuation(
             direct = row.get("CapMVRVZ")
             if "CapMVRVZ" in inputs and direct is not None:
                 value = float(direct)
-            elif {"CapMrktCurUSD", "CapRealUSD"} <= set(inputs):
-                market = row.get("CapMrktCurUSD")
-                realized = row.get("CapRealUSD")
-                history: list[float] = []
-                for history_row in rows:
-                    candidate = history_row.get("CapMrktCurUSD")
-                    try:
-                        candidate_value = float(candidate)
-                    except (TypeError, ValueError):
-                        continue
-                    if math.isfinite(candidate_value) and candidate_value > 0:
-                        history.append(candidate_value)
-                if market is not None and realized is not None and len(history) >= 2:
-                    mean = sum(history) / len(history)
-                    standard_deviation = math.sqrt(sum((item - mean) ** 2 for item in history) / len(history))
-                    if standard_deviation > 0:
-                        value = (float(market) - float(realized)) / standard_deviation
-                        mode = "DERIVED"
-                        methodology = "(CapMrktCurUSD - CapRealUSD) / population_std(CapMrktCurUSD)"
-            if value is None:
-                raise ProviderInsufficientHistory("Coin Metrics MVRV Z-score requires aligned market-cap history and realized cap")
+            else:
+                raise ProviderUnsupportedMetric(
+                    "Coin Metrics cannot supply btc_valuation.mvrv_zscore without the CapMVRVZ series"
+                )
         elif key == "btc_valuation.realized_price":
             if "PriceRealizedUSD" in inputs and row.get("PriceRealizedUSD") is not None:
                 value = float(row["PriceRealizedUSD"])
@@ -408,20 +395,6 @@ def _parse_btc_valuation(
                 "coinmetrics_metrics": list(inputs),
                 "source_mode": mode,
                 **({"methodology": methodology} if methodology else {}),
-                **(
-                    {
-                        "history_start": min(
-                            _timestamp(item.get("time", item.get("timestamp")), "Coin Metrics observation time")
-                            for item in rows
-                            if item.get("CapMrktCurUSD") is not None
-                        ),
-                        "history_end": observed,
-                        "rows_used": len(rows),
-                        "std_semantics": "population",
-                    }
-                    if key == "btc_valuation.mvrv_zscore" and mode == "DERIVED"
-                    else {}
-                ),
             },
         })
     return tuple(result)
@@ -702,11 +675,6 @@ class CoinMetricsProvider:
                         if candidates[0] in fields
                         else tuple(item for item in candidates[1:] if item in fields)
                     )
-                    if key == "btc_valuation.mvrv_zscore" and set(inputs) not in (
-                        {"CapMVRVZ"},
-                        {"CapMrktCurUSD", "CapRealUSD"},
-                    ):
-                        raise ProviderUnsupportedMetric(f"cached payload has no exact inputs for {key}")
                     if not inputs:
                         raise ProviderUnsupportedMetric(f"cached payload has no inputs for {key}")
                     values.extend(_parse_btc_valuation(
@@ -769,10 +737,6 @@ class CoinMetricsProvider:
                 candidates = COINMETRICS_BTC_VALUATION_INPUTS[key]
                 if key == "btc_valuation.mvrv" and candidates[0].lower() in available:
                     selected_inputs = (candidates[0],)
-                elif key == "btc_valuation.mvrv_zscore" and candidates[0].lower() in available:
-                    selected_inputs = (candidates[0],)
-                elif key == "btc_valuation.mvrv_zscore" and all(item.lower() in available for item in candidates[1:]):
-                    selected_inputs = candidates[1:]
                 elif key == "btc_valuation.realized_price" and candidates[0].lower() in available:
                     selected_inputs = (candidates[0],)
                 elif key == "btc_valuation.mvrv" and all(item.lower() in available for item in candidates[1:]):

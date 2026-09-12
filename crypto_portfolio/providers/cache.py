@@ -19,6 +19,7 @@ from .base import ProviderDataError, ProviderRequest
 
 _SAFE_COMPONENT = re.compile(r"^[a-z0-9_.-]+$")
 _SECRET_NAMES = {"api_key", "apikey", "api_secret", "authorization", "cookie", "password", "secret", "token"}
+_CACHE_BUCKET_KEYS = ("as_of", "end", "start")
 
 
 def _is_secret_name(value: Any) -> bool:
@@ -61,6 +62,18 @@ def _public_parameters(value: Any) -> Any:
     return value
 
 
+def _bucketed_cache_timestamp(value: Any, seconds: int) -> Any:
+    """Floor one timestamp parameter to a TTL bucket for cache identity."""
+    if not isinstance(value, str) or not value.strip():
+        return value
+    try:
+        parsed = parse_timestamp(value, "cache identity timestamp")
+    except ValueError:
+        return value
+    epoch = int(parsed.timestamp()) // seconds * seconds
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 def request_identity(request: ProviderRequest | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(request, ProviderRequest):
         provider = request.provider
@@ -68,19 +81,34 @@ def request_identity(request: ProviderRequest | Mapping[str, Any]) -> dict[str, 
         asset = request.asset
         parameters = request.parameters
         metric_keys = request.metric_keys
+        bucket_seconds = request.freshness_seconds
     elif isinstance(request, Mapping):
         provider = str(request.get("provider", "")).strip().lower()
         dataset = str(request.get("dataset", "")).strip().lower()
         asset = str(request.get("asset", "")).strip().upper()
         parameters = request.get("parameters", {})
         metric_keys = tuple(request.get("metric_keys", ()))
+        raw_bucket = request.get("freshness_seconds")
+        bucket_seconds = (
+            raw_bucket
+            if isinstance(raw_bucket, int) and not isinstance(raw_bucket, bool) and raw_bucket > 0
+            else None
+        )
     else:
         raise ValueError("request must be a ProviderRequest or mapping")
+    public = _public_parameters(dict(parameters))
+    if bucket_seconds:
+        # Live requests embed fetch-time timestamps with sub-second precision;
+        # identity must bucket them to the entry TTL or every run hashes to a
+        # fresh key and the response cache never reuses an unexpired entry.
+        for key in _CACHE_BUCKET_KEYS:
+            if key in public:
+                public[key] = _bucketed_cache_timestamp(public[key], bucket_seconds)
     return {
         "provider": provider,
         "dataset": dataset,
         "asset": asset,
-        "parameters": _public_parameters(parameters),
+        "parameters": public,
         "metric_keys": list(dict.fromkeys(str(key).strip().lower() for key in metric_keys)),
     }
 
@@ -123,6 +151,8 @@ def _range_end(value: Mapping[str, Any] | None) -> str | None:
 class ProviderCache:
     """Content-safe cache under the configured local runtime directory."""
 
+    _PRUNE_INTERVAL_SAVES = 25
+
     def __init__(
         self,
         root: str | Path | None = None,
@@ -136,6 +166,7 @@ class ProviderCache:
             )
             market_data_directory = data_root / "market-data" / "sha256"
         self.market_data_directory = Path(market_data_directory).expanduser()
+        self._saves_since_prune = 0
 
     request_identity = staticmethod(request_identity)
     request_hash = staticmethod(request_hash)
@@ -192,6 +223,16 @@ class ProviderCache:
         destination = self.response_path(request)
         destination.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(destination, encoded)
+        # Bucketed keys still leave one entry per TTL window behind; expired
+        # mutable entries are reclaimed opportunistically so the response
+        # cache stays bounded without a manual maintenance step.
+        self._saves_since_prune += 1
+        if self._saves_since_prune >= self._PRUNE_INTERVAL_SAVES:
+            self._saves_since_prune = 0
+            try:
+                self.prune_expired()
+            except OSError:
+                pass
         return destination
 
     def _read_response_record(self, request: ProviderRequest | Mapping[str, Any]) -> dict[str, Any] | None:

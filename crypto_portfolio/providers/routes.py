@@ -39,6 +39,9 @@ DEFAULT_TTL_SECONDS = {
     "macro": 86400,
     "github": 86400,
     "chain_liveness": 300,
+    "stablecoin": 86400,
+    "market_global": 21600,
+    "market_breadth": 21600,
     "ethereum_monetary": 21600,
     "ethereum_staking": 21600,
     "ethereum_l2": 21600,
@@ -217,7 +220,15 @@ def dataset_for_metric(metric_key: str) -> str:
 
 def cache_ttl_seconds(dataset: str, configured: dict[str, Any] | None = None) -> int:
     values = configured or DEFAULT_TTL_SECONDS
-    value = values.get(dataset, values.get("default", DEFAULT_TTL_SECONDS["default"]))
+    if dataset in values:
+        value = values[dataset]
+    elif values is not DEFAULT_TTL_SECONDS and dataset in DEFAULT_TTL_SECONDS and dataset != "default":
+        # A configured table that omits a dataset-specific TTL must not
+        # silently widen that dataset's window to the generic default (the
+        # chain-liveness halt gate must stay at its intended 300s bound).
+        value = DEFAULT_TTL_SECONDS[dataset]
+    else:
+        value = values.get("default", DEFAULT_TTL_SECONDS["default"])
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("cache TTL must be a positive integer")
     return value

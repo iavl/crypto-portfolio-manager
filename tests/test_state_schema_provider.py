@@ -76,6 +76,48 @@ class StateSchemaProviderTests(unittest.TestCase):
                 "CONFIRMED",
             )
 
+    def test_status_events_are_monotonic_and_bound_to_real_decisions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            decision_path = Path(directory) / "decisions.jsonl"
+            event_path = Path(directory) / "status-events.jsonl"
+            first = Decision(
+                "2026-09-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0}, decision_id="decision-1",
+            )
+            second = Decision(
+                "2026-09-01T00:00:00Z", "NORMAL", {"ETH": 1.0}, {"ETH": 1.0}, decision_id="decision-2",
+            )
+            append_decision(first, decision_path)
+            append_decision(second, decision_path)
+
+            with self.assertRaisesRegex(ValueError, "unknown decision_id"):
+                append_status_event(
+                    DecisionStatusEvent("missing-decision", "2026-09-02T00:00:00Z", "CONFIRMED"), event_path,
+                )
+            # A fresh decision already starts PENDING; re-asserting it is not a change.
+            with self.assertRaisesRegex(ValueError, "already PENDING"):
+                append_status_event(
+                    DecisionStatusEvent("decision-2", "2026-09-02T00:00:00Z", "PENDING"), event_path,
+                )
+            append_status_event(
+                DecisionStatusEvent("decision-2", "2026-09-02T00:00:00Z", "NOT_EXECUTED"), event_path,
+            )
+            with self.assertRaisesRegex(ValueError, "terminally"):
+                append_status_event(
+                    DecisionStatusEvent("decision-2", "2026-09-03T00:00:00Z", "CONFIRMED"), event_path,
+                )
+            append_status_event(
+                DecisionStatusEvent("decision-1", "2026-09-02T00:00:00Z", "CONFIRMED"), event_path,
+            )
+            with self.assertRaisesRegex(ValueError, "already CONFIRMED"):
+                append_status_event(
+                    DecisionStatusEvent("decision-1", "2026-09-03T00:00:00Z", "CONFIRMED"), event_path,
+                )
+            with self.assertRaisesRegex(ValueError, "must not precede"):
+                append_status_event(
+                    DecisionStatusEvent("decision-1", "2026-09-01T12:00:00Z", "NOT_EXECUTED"), event_path,
+                )
+            self.assertEqual(len(read_status_events(event_path)), 2)
+
     def test_duplicate_record_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot_path = Path(directory) / "portfolio.jsonl"

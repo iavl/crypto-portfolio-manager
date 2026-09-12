@@ -1,12 +1,17 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
 from tempfile import TemporaryDirectory
 
 from crypto_portfolio.events import EventScanner, EventSourceScanResponse
 from crypto_portfolio.events.transports import (
+    MAX_CANDIDATES,
+    EventCandidate,
     EventTransportCache,
+    EventTransportSpec,
     StructuredEventTransport,
+    _dedup,
     infer_transport_kind,
 )
 
@@ -236,6 +241,69 @@ class StructuredTransportTests(unittest.TestCase):
         response = self.transport.fetch(request)
         with self.assertRaisesRegex(ValueError, "host-agent"):
             self.scanner.build_result("BTC", "security", AS_OF, (response,))
+
+    def test_dedup_keeps_the_newest_candidates_when_over_the_cap(self):
+        spec = EventTransportSpec(
+            "overflow-source", "RSS_ATOM", "https://example.test/feed.xml",
+            "BTC", "security", "overflow-group", "2026-08-10T00:00:00Z", AS_OF,
+        )
+        base = datetime(2026, 8, 11, tzinfo=timezone.utc)
+        candidates = [
+            EventCandidate(
+                f"item-{index}",
+                f"Item {index}",
+                (base + timedelta(hours=index)).isoformat().replace("+00:00", "Z"),
+                f"https://example.test/item-{index}",
+            )
+            for index in range(MAX_CANDIDATES + 50)
+        ]
+        kept = _dedup(candidates, spec)
+        self.assertEqual(len(kept), MAX_CANDIDATES)
+        # Overflow must drop the oldest items; dropping the newest would hide
+        # exactly the events the current scan is responsible for.
+        self.assertEqual(kept[0].external_id, f"item-{50}")
+        self.assertEqual(kept[-1].external_id, f"item-{MAX_CANDIDATES + 49}")
+
+    def test_shallow_rss_feed_window_is_reported_incomplete(self):
+        # A feed whose oldest retained item is newer than the lookback start
+        # cannot prove window coverage; it must not count as complete.
+        result = self.transport.fetch_result(self.request("BTC", "security", "bitcoin-core-releases"))
+        self.assertTrue(result.reachable)
+        self.assertFalse(result.complete_for_source)
+        self.assertEqual(len(result.candidates), 1)
+
+    def test_empty_rss_feed_is_complete(self):
+        class EmptyFeed(Client):
+            def get_text(self, url, **kwargs):
+                self.calls.append(("TEXT", url))
+                return "<rss><channel></channel></rss>"
+
+        result = StructuredEventTransport(client=EmptyFeed()).fetch_result(
+            self.request("BTC", "security", "bitcoin-core-releases")
+        )
+        self.assertTrue(result.reachable)
+        self.assertTrue(result.complete_for_source)
+        self.assertEqual(result.candidates, ())
+
+    def test_incomplete_but_reachable_source_still_contributes_candidates(self):
+        class Endless(Client):
+            def get_json(self, url, *, params=None, headers=None):
+                if "governance.aave.com/c/risk/" in url:
+                    self.calls.append(("GET", url, params, headers))
+                    return {
+                        "topic_list": {
+                            "topics": [{"id": 201, "title": "Still paging", "created_at": AS_OF, "url": "/t/still-paging/201"}],
+                            "more_topics_url": "/c/risk/7?page=next",
+                        }
+                    }
+                return super().get_json(url, params=params, headers=headers)
+
+        result = StructuredEventTransport(client=Endless(), max_discourse_pages=2).fetch_result(
+            self.request("AAVE", "security", "aave-security")
+        )
+        self.assertTrue(result.reachable)
+        self.assertFalse(result.complete_for_source)
+        self.assertIn("discourse:201", [candidate.external_id for candidate in result.candidates])
 
 
 if __name__ == "__main__":

@@ -285,7 +285,10 @@ def _dedup(candidates: Iterable[EventCandidate], spec: EventTransportSpec) -> tu
     for candidate in candidates:
         if _in_lookback(candidate, spec):
             result.setdefault(candidate.external_id, candidate)
-    return tuple(sorted(result.values(), key=lambda item: (item.published_at, item.external_id)))[:MAX_CANDIDATES]
+    # Newest-first bound: when a source overflows the candidate cap, the
+    # oldest items are the ones already seen by earlier reviews; dropping the
+    # newest would hide exactly the events this scan is responsible for.
+    return tuple(sorted(result.values(), key=lambda item: (item.published_at, item.external_id))[-MAX_CANDIDATES:])
 
 
 def _github_candidates(payloads: Iterable[Any], spec: EventTransportSpec) -> tuple[EventCandidate, ...]:
@@ -350,7 +353,13 @@ def _xml_link(element: ET.Element) -> str | None:
     return None
 
 
-def _rss_candidates(text: str, spec: EventTransportSpec) -> tuple[EventCandidate, ...]:
+def _rss_feed(text: str, spec: EventTransportSpec) -> tuple[tuple[EventCandidate, ...], str | None, bool]:
+    """Return in-window candidates, the oldest dated feed item, and item presence.
+
+    Feeds truncate their history to a recent window, so completeness for a
+    lookback can only be proven when the oldest retained item predates the
+    window start (mirroring the Discourse pagination coverage rule).
+    """
     if len(text.encode("utf-8")) > 5_000_000 or "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
         raise ProviderResponseError("RSS/Atom document exceeds the safe XML contract")
     try:
@@ -358,13 +367,18 @@ def _rss_candidates(text: str, spec: EventTransportSpec) -> tuple[EventCandidate
     except ET.ParseError as exc:
         raise ProviderResponseError("RSS/Atom document is malformed") from exc
     candidates = []
+    dated: list[str] = []
+    has_items = False
     for element in root.iter():
         if _local_name(element.tag) not in {"item", "entry"}:
             continue
+        has_items = True
         title = _xml_text(element, {"title"})
         published = _xml_text(element, {"pubdate", "published", "updated", "date"})
         canonical_url = _xml_link(element)
         timestamp = _date_from(published)
+        if timestamp is not None:
+            dated.append(timestamp)
         if not title or not canonical_url or timestamp is None:
             continue
         candidates.append(EventCandidate(
@@ -374,7 +388,8 @@ def _rss_candidates(text: str, spec: EventTransportSpec) -> tuple[EventCandidate
             canonical_url,
             _bounded(_xml_text(element, {"description", "summary", "content"})),
         ))
-    return _dedup(candidates, spec)
+    oldest = min(dated, key=parse_timestamp) if dated else None
+    return _dedup(candidates, spec), oldest, has_items
 
 
 def _discourse_page(
@@ -535,7 +550,12 @@ class StructuredEventTransport:
             else:
                 value = self.client.get_json(spec.endpoint)
                 text = value.decode("utf-8") if isinstance(value, bytes) else str(value)
-            return EventTransportResult(spec.source_id, spec.kind, spec.endpoint, True, True, checked_at, _rss_candidates(text, spec))
+            candidates, oldest_item, has_items = _rss_feed(text, spec)
+            complete = not has_items or (
+                oldest_item is not None
+                and parse_timestamp(oldest_item) <= parse_timestamp(spec.lookback_start)
+            )
+            return EventTransportResult(spec.source_id, spec.kind, spec.endpoint, True, complete, checked_at, candidates)
         if spec.kind == "DISCOURSE_JSON":
             endpoint = spec.endpoint if spec.endpoint.endswith(".json") else spec.endpoint.rstrip("/") + ".json"
             endpoint = _discourse_window_endpoint(endpoint)
@@ -654,8 +674,10 @@ class StructuredEventTransport:
             results.append(result)
         reachable = [item for item in results if item.reachable]
         complete = [item for item in reachable if item.complete_for_source]
+        # Reachable-but-incomplete sources still contribute the items they did
+        # fetch; completeness only decides coverage, never candidate visibility.
         candidates: dict[str, EventCandidate] = {}
-        for item in complete:
+        for item in reachable:
             for candidate in item.candidates:
                 candidates.setdefault(candidate.external_id, candidate)
         errors = "; ".join(item.error for item in results if item.error) or None
@@ -668,7 +690,7 @@ class StructuredEventTransport:
             bool(reachable),
             bool(complete),
             max((item.checked_at for item in results), default=request.as_of),
-            tuple(sorted(candidates.values(), key=lambda item: (item.published_at, item.external_id)))[:MAX_CANDIDATES],
+            tuple(sorted(candidates.values(), key=lambda item: (item.published_at, item.external_id))[-MAX_CANDIDATES:]),
             errors if not complete else None,
         )
 

@@ -81,11 +81,62 @@ def default_status_event_path() -> Path:
     return runtime_data_dir() / "decisions" / "status-events.jsonl"
 
 
+_TERMINAL_DECISION_STATUSES = {"CONFIRMED", "NOT_EXECUTED"}
+_ALLOWED_STATUS_TRANSITIONS = {"PENDING": ("CONFIRMED", "NOT_EXECUTED")}
+
+
+def _decision_record_status(record: Mapping[str, Any]) -> str:
+    status = str(record.get("status", "PENDING")).strip().upper()
+    if status not in _STATUSES:
+        raise ValueError(f"persisted decision status {status!r} is unsupported")
+    return status
+
+
 def append_status_event(
-    event: DecisionStatusEvent | Mapping[str, Any], path: str | Path | None = None
+    event: DecisionStatusEvent | Mapping[str, Any],
+    path: str | Path | None = None,
+    *,
+    decision_path: str | Path | None = None,
 ) -> Path:
     model = event if isinstance(event, DecisionStatusEvent) else DecisionStatusEvent(**event)
     destination = Path(path or default_status_event_path())
+    resolved_decision_path = (
+        Path(decision_path) if decision_path is not None
+        else destination.parent / "decisions.jsonl"
+    )
+    decisions = read_records(resolved_decision_path)
+    decision = next(
+        (item for item in decisions if item.get("decision_id") == model.decision_id), None
+    )
+    if decision is None:
+        raise ValueError(f"status event references unknown decision_id {model.decision_id}")
+    events = sorted(
+        (
+            item if isinstance(item, DecisionStatusEvent) else DecisionStatusEvent(**item)
+            for item in read_records(destination)
+            if item.get("decision_id") == model.decision_id
+        ),
+        key=lambda item: parse_timestamp(item.timestamp),
+    )
+    if events:
+        current_status = events[-1].status
+        latest_timestamp = parse_timestamp(events[-1].timestamp)
+    else:
+        current_status = _decision_record_status(decision)
+        latest_timestamp = parse_timestamp(decision.get("timestamp", model.timestamp))
+    if parse_timestamp(model.timestamp) < latest_timestamp:
+        raise ValueError("status event timestamps must not precede the latest recorded event")
+    if model.status == current_status:
+        raise ValueError(f"decision {model.decision_id} is already {current_status}")
+    if current_status in _TERMINAL_DECISION_STATUSES:
+        raise ValueError(
+            f"decision {model.decision_id} is terminally {current_status}; "
+            "status events cannot rewrite a final outcome"
+        )
+    if model.status not in _ALLOWED_STATUS_TRANSITIONS.get(current_status, ()):
+        raise ValueError(
+            f"unsupported decision status transition {current_status} -> {model.status}"
+        )
     return append_record(destination, model.as_dict())
 
 

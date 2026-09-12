@@ -30,6 +30,28 @@ class PortfolioSnapshotTests(unittest.TestCase):
         self.assertEqual(detect_external_cash_flow(previous, confirmed)["status"], "CONFIRMED")
         self.assertAlmostEqual(cash_flow_adjusted_performance((previous, confirmed))["return"], 0.0)
 
+    def test_confirmed_none_material_market_move_is_not_labeled_withdrawal(self):
+        previous = {
+            "timestamp": "2026-09-01T00:00:00Z",
+            "external_cash_flow": 0,
+            "external_cash_flow_type": "NONE",
+            "cash_flow_resolution_status": "CONFIRMED_NONE",
+            "positions": [{"symbol": "BTC", "value_usd": 10000}],
+        }
+        current = {
+            "timestamp": "2026-09-02T00:00:00Z",
+            "external_cash_flow": 0,
+            "external_cash_flow_type": "NONE",
+            "cash_flow_resolution_status": "CONFIRMED_NONE",
+            "positions": [{"symbol": "BTC", "value_usd": 13000}],
+        }
+        flagged = detect_external_cash_flow(previous, current)
+        self.assertEqual(flagged["status"], "CONFIRMED")
+        self.assertEqual(flagged["external_cash_flow"], 0.0)
+        # A confirmed-zero flow with a material market delta is market
+        # performance, not a phantom zero-dollar withdrawal.
+        self.assertEqual(flagged["external_cash_flow_type"], "NONE")
+
     def test_cash_flow_status_matrix_is_strict(self):
         base = {
             "timestamp": "2026-09-01T00:00:00Z",

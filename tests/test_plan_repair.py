@@ -86,13 +86,12 @@ class PlanRepairTests(unittest.TestCase):
                 self.calls += 1
                 if "catalog" in url:
                     return {"data": [
-                        {"metric": "CapMrktCurUSD", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
-                        {"metric": "CapRealUSD", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+                        {"metric": "CapMVRVZ", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
                     ]}
                 start = _kwargs.get("params", {}).get("start_time")
                 days = (4, 5, 6, 7, 8, 9) if start else (1, 2, 3)
                 return {"data": [
-                    {"time": f"2026-09-0{index}T00:00:00Z", "CapMrktCurUSD": 100 + index, "CapRealUSD": 50 + index}
+                    {"time": f"2026-09-0{index}T00:00:00Z", "CapMVRVZ": 2.0 + index / 10}
                     for index in days
                 ]}
 
@@ -116,6 +115,34 @@ class PlanRepairTests(unittest.TestCase):
         self.assertEqual(len(first.observations), 1)
         self.assertEqual(client.calls, 3)
         self.assertEqual(second.provider_cache_hits, 0)
+
+    def test_mvrv_zscore_fails_closed_without_capmvrvz_series(self):
+        # (CapMrktCurUSD - CapRealUSD) / std(market cap) is not the MVRV-Z
+        # statistic; without CapMVRVZ the metric must be unsupported rather
+        # than derived on an incomparable scale.
+        class Client:
+            def get_json(self, url, **_kwargs):
+                if "catalog" in url:
+                    return {"data": [
+                        {"metric": "CapMrktCurUSD", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+                        {"metric": "CapRealUSD", "frequencies": [{"frequency": "1d", "assets": ["btc"]}]},
+                    ]}
+                return {"data": [
+                    {"time": f"2026-09-0{index}T00:00:00Z", "CapMrktCurUSD": 100 + index, "CapRealUSD": 50 + index}
+                    for index in (1, 2, 3)
+                ]}
+
+        request = build_provider_requests(
+            (MetricRequest("BTC", "btc_valuation.mvrv_zscore"),),
+            as_of=NOW,
+            now=NOW,
+        )[0]
+        response = CoinMetricsProvider(client=Client()).collect(request)
+        self.assertEqual(response.observations, ())
+        self.assertEqual(
+            response.diagnostics["btc_valuation.mvrv_zscore"]["error_code"],
+            "PROVIDER_UNSUPPORTED",
+        )
 
     def test_cached_direct_mvrv_z_is_replayed_without_forcing_derivation(self):
         provider = CoinMetricsProvider()

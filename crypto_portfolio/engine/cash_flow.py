@@ -140,7 +140,9 @@ def detect_external_cash_flow(
             "requires_confirmation": False,
             "delta_usd": delta,
             "external_cash_flow": amount,
-            "external_cash_flow_type": "DEPOSIT" if amount > 0 else "WITHDRAWAL",
+            # CONFIRMED_NONE reaches this branch with amount 0 when the market
+            # moved materially; a zero amount must not be labeled a withdrawal.
+            "external_cash_flow_type": "DEPOSIT" if amount > 0 else "WITHDRAWAL" if amount < 0 else "NONE",
             "cash_flow_resolution_status": status,
         }
     raise ValueError("unsupported cash-flow resolution state")

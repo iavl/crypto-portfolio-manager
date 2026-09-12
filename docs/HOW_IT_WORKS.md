@@ -109,8 +109,10 @@ provider-cache/
 ```
 
 snapshot 和 decision 是 append-only。状态变更写入独立 status event，不覆盖
-旧 rationale。MetricObservation 保留成功的规范化观测；CollectionEvent 保留
-所有采集结果，包括失败和 skipped。
+旧 rationale。决策状态只允许从 `PENDING` 单向迁移到 `CONFIRMED` 或
+`NOT_EXECUTED`（两者均为终态）；追加未知 `decision_id`、重复状态或回退
+迁移的 status event 会被拒绝。MetricObservation 保留成功的规范化观测；
+CollectionEvent 保留所有采集结果，包括失败和 skipped。
 
 仓库只支持当前内部运行时契约。破坏性变更后的不兼容生成状态必须手动重新生成，
 不会自动迁移或静默删除用户状态。
