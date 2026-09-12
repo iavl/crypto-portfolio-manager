@@ -201,10 +201,36 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         assessment = {"weighted_score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         self.assertEqual(satellite_eligibility(assessment), "INELIGIBLE")
         self.assertEqual(satellite_eligibility(assessment, current_weight=0.05), "HOLD_ONLY")
-        below_exit = {**assessment, "weighted_score": 61}
-        self.assertEqual(satellite_eligibility(below_exit, current_weight=0.05), "INELIGIBLE")
+        soft_band = {**assessment, "weighted_score": 61}
+        self.assertEqual(satellite_eligibility(soft_band, current_weight=0.05), "SOFT_EXIT")
+        self.assertEqual(satellite_eligibility(soft_band), "INELIGIBLE")
         result = build_target_allocation(assessments={"SOL": assessment}, current_weights={"SOL": 0.05, "USDT": 0.1, "BTC": 0.85})
         self.assertAlmostEqual(result.target_weights.get("SOL", 0), 0.05)
+
+    def test_satellite_soft_exit_band_reduces_instead_of_cliff_exiting(self):
+        common = {"confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
+        # Inside [satellite_soft_exit_score, satellite_exit_score) a held
+        # satellite keeps the configured fraction of its exposure instead of
+        # facing the full-exit cliff one point below the exit floor.
+        soft = build_target_allocation(
+            assessments={"SOL": {**common, "weighted_score": 59}},
+            current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
+        )
+        self.assertAlmostEqual(soft.target_weights["SOL"], 0.05)
+        below_band = build_target_allocation(
+            assessments={"SOL": {**common, "weighted_score": 50}},
+            current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
+        )
+        self.assertAlmostEqual(below_band.target_weights.get("SOL", 0), 0.0)
+        broken_relative = build_target_allocation(
+            assessments={"SOL": {**common, "weighted_score": 59, "relative_strength_vs_btc": "MATERIALLY_WEAK"}},
+            current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
+        )
+        # Materially weak BTC-relative evidence overrides the soft band.
+        self.assertAlmostEqual(broken_relative.target_weights.get("SOL", 0), 0.0)
+        self.assertTrue(
+            any("SOFT_EXIT" in reason for reason in soft.allocation_reasons)
+        )
 
     def test_missing_relative_strength_is_hold_only(self):
         new_risk = build_target_allocation(

@@ -145,6 +145,10 @@
       "strong_abs": 0.01
     }
   },
+  "regime_transitions": {
+    "enabled": true,
+    "max_notches_per_review": 1
+  },
   "event_risk_multipliers": {
     "NORMAL": 1.0,
     "ELEVATED": 0.75,
@@ -175,6 +179,8 @@
   "allocation": {
     "satellite_entry_score": 67,
     "satellite_exit_score": 62,
+    "satellite_soft_exit_score": 57,
+    "satellite_soft_exit_fraction": 0.5,
     "satellite_full_score": 85,
     "risk_multipliers": {
       "normal": 1.0,

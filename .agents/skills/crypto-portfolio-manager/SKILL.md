@@ -172,7 +172,11 @@ display data, so the engine uses value ÷ quantity and records a note.
     Build `PositioningFacts` and `BTCCycleContext` separately; their metrics
     are context overlays and never replace the profile-specific base scoring
     factors.
-11. Run the regime engine.
+11. Run the regime engine, passing the most recent prior decision's effective
+    regime as `previous` (from the loaded decision history; omit it only when
+    no prior decision exists). The result then moves at most
+    `regime_transitions.max_notches_per_review` notches per review; severe
+    systemic events and the mandatory drawdown floors stay immediate.
 12. Run the allocation engine.
 13. Run the risk gate and stop on `ERROR` violations.
 14. Recalculate post-new-cash economic weights.

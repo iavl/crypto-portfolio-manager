@@ -162,6 +162,39 @@ class ScoringAndRegimeTests(unittest.TestCase):
         ]
         self.assertEqual(regimes, sorted(regimes, key=order.get))
 
+    def test_vote_based_regime_transitions_move_one_notch_per_review(self):
+        votes = RegimeInputs("BEARISH", "ELEVATED", "NORMAL", "OUTFLOW", "WEAK", False)
+        # Without prior context the computed regime applies unchanged.
+        self.assertEqual(determine_regime(votes).regime, "CAPITAL_PRESERVATION")
+        # A vote-based jump straight to CAPITAL_PRESERVATION must pass through
+        # one defensive review first, in both directions.
+        capped = determine_regime(votes, previous="NORMAL")
+        self.assertEqual(capped.regime, "DEFENSIVE")
+        self.assertTrue(any("awaits confirmation" in reason for reason in capped.reasons))
+        self.assertEqual(determine_regime(votes, previous="DEFENSIVE").regime, "CAPITAL_PRESERVATION")
+        all_clear = RegimeInputs("HEALTHY", "LOW", "NORMAL", "NEUTRAL", "HEALTHY", False)
+        self.assertEqual(determine_regime(all_clear, previous="CAPITAL_PRESERVATION").regime, "DEFENSIVE")
+        self.assertEqual(determine_regime(all_clear, previous={"market_regime": "DEFENSIVE"}).regime, "NORMAL")
+
+    def test_mandatory_floors_and_severe_events_ignore_the_transition_cap(self):
+        floor_case = RegimeInputs("HEALTHY", "LOW", -0.13, "NEUTRAL", "HEALTHY", False)
+        self.assertEqual(determine_regime(floor_case, previous="NORMAL").regime, "CAPITAL_PRESERVATION")
+        severe_case = RegimeInputs("HEALTHY", "LOW", "NORMAL", "NEUTRAL", "HEALTHY", "SEVERE")
+        self.assertEqual(determine_regime(severe_case, previous="NORMAL").regime, "CAPITAL_PRESERVATION")
+        plain = RegimeInputs("HEALTHY", "LOW", "NORMAL", "NEUTRAL", "HEALTHY", False)
+        with self.assertRaises(ValueError):
+            determine_regime(plain, previous="BOGUS")
+
+    def test_regime_transition_cap_can_be_disabled_by_policy(self):
+        from crypto_portfolio.models.policy import Policy
+
+        policy = resolve_policy()
+        disabled = Policy(
+            **{**policy.__dict__, "regime_transitions": {"enabled": False, "max_notches_per_review": 1}},
+        )
+        votes = RegimeInputs("BEARISH", "ELEVATED", "NORMAL", "OUTFLOW", "WEAK", False)
+        self.assertEqual(determine_regime(votes, policy=disabled, previous="NORMAL").regime, "CAPITAL_PRESERVATION")
+
 
 if __name__ == "__main__":
     unittest.main()

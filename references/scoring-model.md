@@ -264,8 +264,12 @@ Positioning and BTC cycle overlays can cap immediate staged dollars or produce
 Satellite entry uses `satellite_entry_score=67`, existing holdings remain
 `HOLD_ONLY` through `satellite_exit_score=62`, and full score strength is
 reached at `satellite_full_score=85`. A new/non-held satellite below 67 receives
-no new risk. A held satellite from 62 through 66 is held without adding risk;
-below 62 it becomes an ineligible/reduction candidate. Score strength is
+no new risk. A held satellite from 62 through 66 is held without adding risk.
+From `satellite_soft_exit_score=57` through 61 a held satellite is `SOFT_EXIT`:
+its strategic target becomes `satellite_soft_exit_fraction=0.5` of current
+exposure, so a noisy score de-risks gradually instead of cliff-exiting one
+point below the exit floor. Below 57 it becomes an ineligible/full-exit
+candidate. Score strength is
 monotonic from 67 to 85. Strategic satellite sizing uses score strength and
 structural risk; confidence, event risk, decision confidence, positioning, and
 execution overlays are deployment allowances.

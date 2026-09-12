@@ -228,7 +228,7 @@ def satellite_eligibility(
     *,
     current_weight: float = 0.0,
 ) -> str:
-    """Return ELIGIBLE, HOLD_ONLY, or INELIGIBLE for a satellite assessment."""
+    """Return ELIGIBLE, HOLD_ONLY, SOFT_EXIT, or INELIGIBLE for a satellite assessment."""
     resolved = policy or resolve_policy()
     if isinstance(assessment, AssetAssessment) and assessment.weighted_score is None:
         assessment, _ = score_assessment(assessment, policy=resolved)
@@ -240,6 +240,7 @@ def satellite_eligibility(
         raise ValueError("current_weight must be finite and >= 0")
     entry_score = resolved.allocation["satellite_entry_score"]
     exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
+    soft_exit_score = resolved.allocation.get("satellite_soft_exit_score", exit_score)
     if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
         _field(assessment, "thesis_broken", False), "thesis_broken"
     ):
@@ -247,7 +248,13 @@ def satellite_eligibility(
     if score < entry_score:
         if _relative_eligibility(relative) == "INELIGIBLE":
             return "INELIGIBLE"
-        return "HOLD_ONLY" if current_weight > 0 and score >= exit_score else "INELIGIBLE"
+        if current_weight > 0 and score >= exit_score:
+            return "HOLD_ONLY"
+        # A held satellite inside the soft-exit band de-risks gradually instead
+        # of facing the full-exit cliff one score point below the exit floor.
+        if current_weight > 0 and score >= soft_exit_score:
+            return "SOFT_EXIT"
+        return "INELIGIBLE"
     if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
         return "HOLD_ONLY"
     event_risk = _field(assessment, "event_risk", None)
@@ -372,6 +379,8 @@ def build_target_allocation(
     ]
 
     strategic_satellite_raw: dict[str, float] = {}
+    # Preserve-existing bucket: HOLD_ONLY keeps the full current weight while
+    # SOFT_EXIT keeps the configured fraction of it.
     satellite_hold: dict[str, float] = {}
     deployment_allowances: dict[str, dict[str, Any]] = {}
     core_assessments: dict[str, Any] = {}
@@ -431,6 +440,16 @@ def build_target_allocation(
                     else "BTC-relative or critical evidence is incomplete"
                 )
                 reasons.append(f"{symbol} is HOLD_ONLY because {reason}")
+            elif relative_status == "SOFT_EXIT":
+                # Soft-exit targets ride the same preserve-existing bucket as
+                # HOLD_ONLY, at the configured fraction of current exposure.
+                fraction = float(resolved.allocation.get("satellite_soft_exit_fraction", 0.5))
+                if current_weights.get(symbol, 0.0) > 0:
+                    satellite_hold[symbol] = current_weights[symbol] * fraction
+                reasons.append(
+                    f"{symbol} is SOFT_EXIT because the score is inside the soft-exit band; "
+                    f"the strategic target reduces existing exposure to {fraction:.0%}"
+                )
             elif relative_status == "ELIGIBLE":
                 entry_score = resolved.allocation["satellite_entry_score"]
                 score_strength = min(
@@ -471,7 +490,7 @@ def build_target_allocation(
                 if decision_confidence_factor < 1.0:
                     reasons.append(f"{symbol} new deployment is capped by portfolio decision confidence at {decision_confidence_factor:.0%}")
             else:
-                reasons.append(f"{symbol} receives 0% satellite target because eligibility failed")
+                reasons.append(f"{symbol} receives 0% satellite target because eligibility failed or the soft-exit band was exhausted")
         elif asset_type == "core":
             core_assessments[symbol] = assessment
 

@@ -143,6 +143,66 @@ def _drawdown_floor(value: str | float, policy: Policy) -> str:
 
 _DOMAIN_NAMES = tuple(REGIME_DOMAIN_WEIGHTS)
 
+_REGIME_LEVELS = {"NORMAL": 0, "DEFENSIVE": 1, "CAPITAL_PRESERVATION": 2}
+_LEVEL_NAMES = ("NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION")
+
+
+def _previous_regime_name(previous: Any) -> str | None:
+    if previous is None:
+        return None
+    if isinstance(previous, RegimeResult):
+        name: Any = previous.regime
+    elif isinstance(previous, Mapping):
+        name = previous.get("regime", previous.get("market_regime"))
+    else:
+        name = previous
+    if name is None:
+        return None
+    name = str(name).strip().upper()
+    if name in _UNKNOWN:
+        return None
+    if name not in _REGIME_LEVELS:
+        raise ValueError("previous regime is unsupported")
+    return name
+
+
+def _cap_regime_transition(
+    regime: str,
+    floor_regime: str,
+    previous: Any,
+    resolved: Policy,
+    reasons: list[str],
+) -> str:
+    """Bound regime transitions per review; mandatory floors stay immediate.
+
+    A vote-based jump straight to CAPITAL_PRESERVATION (or straight back to
+    NORMAL) must pass through one defensive review first, so a single noisy
+    observation cannot rotate the stable sleeve by 35 points in either
+    direction. Severe systemic events return before this cap applies, and the
+    drawdown floor is re-asserted afterwards so `-0.6D`/`-0.8D` stay mandatory.
+    """
+    previous_name = _previous_regime_name(previous)
+    if previous_name is None:
+        return regime
+    transitions = resolved.regime_transitions if isinstance(resolved.regime_transitions, Mapping) else {}
+    if not transitions.get("enabled", True):
+        return regime
+    max_notches = transitions.get("max_notches_per_review", 1)
+    if isinstance(max_notches, bool) or not isinstance(max_notches, int) or not 1 <= max_notches <= 2:
+        raise ValueError("regime_transitions.max_notches_per_review must be 1 or 2")
+    previous_level = _REGIME_LEVELS[previous_name]
+    computed_level = _REGIME_LEVELS[regime]
+    lower = max(0, previous_level - max_notches)
+    upper = min(len(_LEVEL_NAMES) - 1, previous_level + max_notches)
+    capped = min(max(computed_level, lower), upper)
+    capped = max(capped, _REGIME_LEVELS[floor_regime])
+    if capped != computed_level:
+        reasons.append(
+            f"transition from {previous_name} is capped at {max_notches} notch(es) per review; "
+            f"the computed {regime} awaits confirmation"
+        )
+    return _LEVEL_NAMES[capped]
+
 
 def _domain_score(value: Any, *, state: Any = None) -> tuple[float, tuple[str, ...], tuple[str, ...]]:
     if isinstance(value, ConfidenceResult):
@@ -234,8 +294,19 @@ def _regime_confidence(
 
 
 def determine_regime(
-    inputs: RegimeInputs | dict[str, Any], *, policy: Policy | None = None
+    inputs: RegimeInputs | dict[str, Any],
+    *,
+    policy: Policy | None = None,
+    previous: RegimeResult | Mapping[str, Any] | str | None = None,
 ) -> RegimeResult:
+    """Deterministic market-regime classification from structured inputs.
+
+    ``previous`` is the prior review's effective regime (a RegimeResult, a
+    mapping with ``regime``/``market_regime``, or the regime name). When the
+    transition policy is enabled, the result moves at most
+    ``max_notches_per_review`` notches away from it; severe systemic events and
+    the mandatory drawdown floors are never delayed by the cap.
+    """
     resolved = policy or resolve_policy()
     if isinstance(inputs, Mapping):
         inputs = RegimeInputs(**inputs)
@@ -322,10 +393,9 @@ def determine_regime(
     else:
         regime = "NORMAL"
     floors = {"NORMAL": 0, "DEFENSIVE": 1, "CAPITAL_PRESERVATION": 2}
-    regime = max(
-        (regime, _drawdown_floor(inputs.portfolio_drawdown_band, resolved)),
-        key=lambda name: floors[name],
-    )
+    floor_regime = _drawdown_floor(inputs.portfolio_drawdown_band, resolved)
+    regime = max((regime, floor_regime), key=lambda name: floors[name])
+    regime = _cap_regime_transition(regime, floor_regime, previous, resolved, reasons)
     confidence_result = _regime_confidence(inputs, resolved)
     confidence = confidence_result.band
     if not reasons:
@@ -344,9 +414,12 @@ def determine_regime(
 
 
 def regime_engine(
-    inputs: RegimeInputs | dict[str, Any], *, policy: Policy | None = None
+    inputs: RegimeInputs | dict[str, Any],
+    *,
+    policy: Policy | None = None,
+    previous: RegimeResult | Mapping[str, Any] | str | None = None,
 ) -> RegimeResult:
-    return determine_regime(inputs, policy=policy)
+    return determine_regime(inputs, policy=policy, previous=previous)
 
 
 __all__ = ["RegimeInputs", "RegimeResult", "determine_regime", "regime_engine"]

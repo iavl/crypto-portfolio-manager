@@ -120,6 +120,16 @@ Do not flip regimes because of one noisy indicator. Prefer confirmation across i
 
 A single extreme event can override this confirmation rule when it directly threatens asset safety or market functioning.
 
+On top of the multi-dimension vote, `determine_regime` accepts the prior
+review's effective regime and bounds the result to
+`regime_transitions.max_notches_per_review` notches (default 1) away from it:
+a vote-based jump straight to (or straight back from) `CAPITAL_PRESERVATION`
+must pass through one defensive review first, so one noisy observation cannot
+rotate the stable sleeve by 35 points in either direction. Severe systemic
+events and the mandatory drawdown floors (`-0.60D`/`-0.80D`) are never delayed
+by this bound, and the result is never less defensive than the drawdown floor
+requires.
+
 ## Drawdown guardrails
 
 When reliable historical portfolio values exist, calculate peak-to-current drawdown. Let `D` be the positive configured `max_portfolio_drawdown` fraction. Apply these response bands:

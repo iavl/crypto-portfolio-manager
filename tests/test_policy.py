@@ -206,6 +206,32 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             policy_from_mapping(incomplete)
 
+    def test_satellite_soft_exit_and_regime_transition_policy_is_strict(self):
+        original = load_policy().as_dict()
+        for mutate in (
+            lambda data: data["allocation"].update({"satellite_soft_exit_score": 62}),
+            lambda data: data["allocation"].update({"satellite_soft_exit_score": 68}),
+            lambda data: data["allocation"].update({"satellite_soft_exit_fraction": 0}),
+            lambda data: data["allocation"].update({"satellite_soft_exit_fraction": 1}),
+            lambda data: data["allocation"].pop("satellite_soft_exit_fraction"),
+            lambda data: data["regime_transitions"].update({"enabled": "yes"}),
+            lambda data: data["regime_transitions"].update({"max_notches_per_review": 0}),
+            lambda data: data["regime_transitions"].update({"max_notches_per_review": 3}),
+            lambda data: data.pop("regime_transitions"),
+        ):
+            invalid = json.loads(json.dumps(original))
+            mutate(invalid)
+            with self.subTest(invalid=invalid):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "policy.json"
+                    path.write_text(json.dumps(invalid), encoding="utf-8")
+                    with self.assertRaises(PolicyError):
+                        load_policy(path)
+        policy = load_policy()
+        self.assertEqual(policy.allocation["satellite_soft_exit_score"], 57)
+        self.assertEqual(policy.allocation["satellite_soft_exit_fraction"], 0.5)
+        self.assertEqual(dict(policy.regime_transitions), {"enabled": True, "max_notches_per_review": 1})
+
     def test_scoring_profiles_and_event_multipliers_are_strict(self):
         original = load_policy().as_dict()
         for mutate in (

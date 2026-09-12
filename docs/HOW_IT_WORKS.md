@@ -295,7 +295,10 @@ settlement、DeFi/stablecoin 和 developer/ecosystem 证据；这些只是语义
 Python 结合 BTC trend、volatility、portfolio drawdown、flows、breadth 和
 systemic event risk，输出 `NORMAL`、`DEFENSIVE` 或 `CAPITAL_PRESERVATION`。
 单一 noisy indicator 不应切换 regime；drawdown floor 和严重事件可以形成
-硬性下限。
+硬性下限。传入上一次决策的 regime 时，结果每次评审最多移动
+`regime_transitions.max_notches_per_review` 档（默认 1）：投票驱动的
+两档跳变（含从 `CAPITAL_PRESERVATION` 直接回到 `NORMAL`）必须先经过一次
+中间档评审；严重事件与 `-0.6D`/`-0.8D` 回撤地板不受该限制。
 
 ### Allocation、risk 与 rebalance
 

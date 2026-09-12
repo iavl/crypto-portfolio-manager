@@ -190,7 +190,10 @@ or low-confidence satellites receive no new risk.
 Risk regimes are `NORMAL`, `DEFENSIVE`, and `CAPITAL_PRESERVATION`. Do not
 switch on one noisy indicator; use trend, volatility/drawdown, liquidity/flows,
 breadth/relative strength, and material events. Severe events may override
-confirmation. Drawdown floors from `references/risk-model.md` are mandatory:
+confirmation. Regime transitions are additionally bounded by
+`regime_transitions.max_notches_per_review` notches per review when the prior
+review's regime is supplied; severe events and the drawdown floors are never
+delayed by that bound. Drawdown floors from `references/risk-model.md` are mandatory:
 with `D` as the positive risk budget, `<= -0.60D` is at least defensive,
 `<= -0.80D` is capital preservation, and `< -D` is a breach. Worsening
 drawdown/regime must never produce a less defensive result.

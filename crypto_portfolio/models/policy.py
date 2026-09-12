@@ -66,7 +66,9 @@ _TOP_LEVEL_FIELDS = {
     "source_quality",
     "event_severity",
     "nav_history",
+    "regime_transitions",
 }
+_REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
 _CHAIN_LIVENESS_FIELDS = {"degraded_deployment_factor", "BTC", "ETH", "BNB", "SOL"}
@@ -87,6 +89,8 @@ _HIGH_IMPACT_REVIEW_FIELDS = {"material_reduce_pp", "material_target_change_pp"}
 _ALLOCATION_FIELDS = {
     "satellite_entry_score",
     "satellite_exit_score",
+    "satellite_soft_exit_score",
+    "satellite_soft_exit_fraction",
     "satellite_full_score",
     "risk_multipliers",
 }
@@ -428,6 +432,25 @@ def _parse_high_impact_review(value: Any) -> dict[str, float]:
     }
 
 
+def _parse_regime_transitions(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PolicyError("regime_transitions must be an object")
+    _unknown_fields(value, _REGIME_TRANSITION_FIELDS, "regime_transitions")
+    if set(value) != _REGIME_TRANSITION_FIELDS:
+        raise PolicyError("regime_transitions fields are incomplete")
+    enabled = value["enabled"]
+    if not isinstance(enabled, bool):
+        raise PolicyError("regime_transitions.enabled must be boolean")
+    max_notches = value["max_notches_per_review"]
+    if (
+        isinstance(max_notches, bool)
+        or not isinstance(max_notches, int)
+        or not 1 <= max_notches <= 2
+    ):
+        raise PolicyError("regime_transitions.max_notches_per_review must be 1 or 2")
+    return {"enabled": enabled, "max_notches_per_review": max_notches}
+
+
 def _parse_core_allocation(value: Any) -> dict[str, Any]:
     if value is None:
         raise PolicyError("core_allocation is required")
@@ -529,6 +552,7 @@ class Policy:
     event_severity: Mapping[str, Any] = dataclass_field(default_factory=dict)
     nav_history: Mapping[str, Any] = dataclass_field(default_factory=dict)
     high_impact_review: Mapping[str, float] = dataclass_field(default_factory=dict)
+    regime_transitions: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -639,6 +663,8 @@ class Policy:
             result["nav_history"] = _copy_mapping(self.nav_history)
         if self.high_impact_review:
             result["high_impact_review"] = dict(self.high_impact_review)
+        if self.regime_transitions:
+            result["regime_transitions"] = dict(self.regime_transitions)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -1783,6 +1809,7 @@ def _parse_policy(
     parsed_event_severity = _parse_event_severity(data.get("event_severity"))
     parsed_nav_history = _parse_nav_history(data.get("nav_history"))
     parsed_high_impact_review = _parse_high_impact_review(data.get("high_impact_review"))
+    parsed_regime_transitions = _parse_regime_transitions(data.get("regime_transitions"))
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -1809,7 +1836,12 @@ def _parse_policy(
         raise PolicyError("allocation must be an object")
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
     common_allocation_fields = {"satellite_full_score", "risk_multipliers"}
-    score_fields = {"satellite_entry_score", "satellite_exit_score"}
+    score_fields = {
+        "satellite_entry_score",
+        "satellite_exit_score",
+        "satellite_soft_exit_score",
+        "satellite_soft_exit_fraction",
+    }
     expected_allocation_fields = common_allocation_fields | score_fields
     if set(allocation) != expected_allocation_fields:
         raise PolicyError("allocation fields are incomplete")
@@ -1840,13 +1872,31 @@ def _parse_policy(
         minimum=0,
         maximum=100,
     )
+    parsed_allocation["satellite_soft_exit_score"] = _number(
+        allocation["satellite_soft_exit_score"],
+        "allocation.satellite_soft_exit_score",
+        minimum=0,
+        maximum=100,
+    )
+    parsed_allocation["satellite_soft_exit_fraction"] = _fraction(
+        allocation["satellite_soft_exit_fraction"],
+        "allocation.satellite_soft_exit_fraction",
+        exclusive_minimum=True,
+    )
+    if not 0.0 < parsed_allocation["satellite_soft_exit_fraction"] < 1.0:
+        # Fraction 1 would collapse the band into HOLD_ONLY and fraction 0
+        # into the full-exit cliff the band exists to soften.
+        raise PolicyError(
+            "allocation.satellite_soft_exit_fraction must be strictly between 0 and 1"
+        )
     if not (
-        parsed_allocation["satellite_exit_score"]
+        parsed_allocation["satellite_soft_exit_score"]
+        < parsed_allocation["satellite_exit_score"]
         < parsed_allocation["satellite_entry_score"]
         < parsed_allocation["satellite_full_score"]
     ):
         raise PolicyError(
-            "allocation satellite scores must satisfy exit < entry < full"
+            "allocation satellite scores must satisfy soft_exit < exit < entry < full"
         )
 
     parsed_event_risk_multipliers = _parse_event_risk_multipliers(
@@ -1897,6 +1947,7 @@ def _parse_policy(
         event_severity=parsed_event_severity,
         nav_history=parsed_nav_history,
         high_impact_review=parsed_high_impact_review,
+        regime_transitions=parsed_regime_transitions,
     )
     return policy
 
