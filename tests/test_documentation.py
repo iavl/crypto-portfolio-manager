@@ -122,7 +122,7 @@ class DocumentationTests(unittest.TestCase):
             "INSUFFICIENT_SOURCE_COVERAGE",
             "pending_responses",
             "host-assisted",
-            "不会默认",
+            "来源不可达不能解释成",
         ):
             with self.subTest(text=text):
                 self.assertTrue(text in guide or text in usage)
@@ -234,14 +234,15 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIn(text, readme)
         for text in (
-            "### Codex：仓库级自动发现",
-            "### Claude Code：用户级 symlink",
-            "### ZCode：Import 或用户级 symlink",
+            "### Codex",
+            "直接从当前 Git working tree 读取实现",
+            "### Claude Code",
+            "用户级 symlink",
+            "### ZCode",
             ".claude/skills",
             ".zcode/skills",
             "Settings → Skills → Import",
-            "不需要单独安装 Skill",
-            "旧版 copy-installed Skill 迁移",
+            "安装脚本使用 symlink",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, guide)
