@@ -72,6 +72,30 @@ class BlockchairProviderTests(unittest.TestCase):
         self.assertNotIn("transactions", observation["metadata"])
         self.assertIsNone(response.payload)
 
+    def test_collect_accepts_block_time_after_request_as_of(self):
+        # Acquisition stamps as_of once at collection start; the newest indexed
+        # block lands between that stamp and the fetch (a 2026-09-11T23:17Z
+        # review lost this race and marked the metric STALE). The gauge anchor
+        # is fetched_at, so this must be accepted, not rejected.
+        data = payload()
+        data["data"]["best_block_time"] = "2026-09-09 12:00:02"
+        client = Client(data)
+        provider = BlockchairProvider(
+            client=client,
+            clock=lambda: datetime(2026, 9, 9, 12, 0, 5, tzinfo=timezone.utc),
+        )
+
+        response = provider.collect(REQUEST)
+
+        self.assertEqual(response.observations[0]["observed_at"], "2026-09-09T12:00:02Z")
+        self.assertEqual(response.observations[0]["fetched_at"], "2026-09-09T12:00:05Z")
+
+    def test_best_block_time_after_fetch_still_fails_closed(self):
+        data = payload()
+        data["data"]["best_block_time"] = "2026-09-09 12:00:01"
+        with self.assertRaises(ProviderDataError):
+            parse_stats_payload(data, fetched_at=FETCHED_AT)
+
     def test_calculates_before_float_conversion(self):
         raw_volume = "1234567890123456789012345"
         raw_price = "0.123456789012345678"

@@ -256,7 +256,12 @@ Both inputs come from the same response. The output is
 medium confidence. `best_block_time` supplies the observation timestamp when
 valid; a missing timestamp uses the current fetch timestamp rather than
 inventing a historical timestamp. The endpoint is a current rolling snapshot,
-so it is not used to fabricate historical `as_of` values. BTC/BNB transfer
+so it is not used to fabricate historical `as_of` values. The observation
+anchor is the fetch timestamp: `best_block_time` is validated against
+`fetched_at`, not against the collection-start `as_of` stamp, because the
+newest indexed block advances every ~12 seconds and is inherently later than
+any collection-start clock. Anchoring a historical `as_of` remains enforced by
+metric normalization at the persistence boundary. BTC/BNB transfer
 volume remains on the catalog-checked Coin Metrics route where supported.
 
 ## FRED

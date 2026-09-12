@@ -98,7 +98,6 @@ def parse_stats_payload(
     payload: Any,
     *,
     fetched_at: str,
-    as_of: str | None = None,
 ) -> Mapping[str, Any]:
     """Normalize one current Blockchair Ethereum stats response."""
     if not isinstance(payload, Mapping):
@@ -127,10 +126,14 @@ def parse_stats_payload(
         raise ProviderDataError("Blockchair normalized transfer volume is not finite")
 
     observed_at = _observed_at(data.get("best_block_time"), fetched)
+    # /ethereum/stats is a rolling current gauge: best_block_time advances
+    # every ~12s and is inherently later than the collection-start clock stamp
+    # the acquisition layer passes as as_of, so as_of must not reject here.
+    # The anti-lookahead anchor for this endpoint is fetched_at; anchoring a
+    # historical as_of stays enforced by metric normalization at the
+    # persistence boundary.
     if parse_timestamp(observed_at) > parse_timestamp(fetched):
         raise ProviderDataError("Blockchair best_block_time is after fetched_at")
-    if as_of is not None and parse_timestamp(observed_at) > parse_timestamp(as_of):
-        raise ProviderDataError("Blockchair observation is after as_of")
 
     metadata: dict[str, Any] = {
         "source_dataset": "ethereum/stats",
@@ -217,7 +220,6 @@ class BlockchairProvider:
             observations=(parse_stats_payload(
                 payload,
                 fetched_at=_now(self.clock),
-                as_of=request.parameters.get("as_of"),
             ),),
             network_requests=1,
         )
