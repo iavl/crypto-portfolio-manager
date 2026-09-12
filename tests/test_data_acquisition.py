@@ -1130,7 +1130,7 @@ class DataAcquisitionTests(unittest.TestCase):
 
     def test_old_coinglass_etf_history_is_replayable_but_not_live_cache(self):
         old = normalize_metric_result({
-            "asset": "BTC", "metric_key": "flows.etf_net_1d", "value": 10, "unit": "USD",
+            "asset": "ETH", "metric_key": "flows.etf_net_1d", "value": 10, "unit": "USD",
             "observed_at": "2026-09-04T20:00:00Z", "fetched_at": "2026-09-04T21:00:00Z",
             "source": "coinglass", "confidence": "HIGH",
         }).observation
@@ -1151,7 +1151,7 @@ class DataAcquisitionTests(unittest.TestCase):
                 observation_path=Path(directory) / "observations.jsonl",
                 persist=False,
             ).run(
-                MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("BTC", "flows.etf_net_1d"),)),
+                MetricCollectionPlan("SNAPSHOT_REVIEW", (MetricRequest("ETH", "flows.etf_net_1d"),)),
                 mode=FetchMode.AUTO,
                 as_of="2026-09-05T00:00:00Z",
                 now="2026-09-05T00:00:00Z",
@@ -1173,7 +1173,7 @@ class DataAcquisitionTests(unittest.TestCase):
             result = AcquisitionManager(router, persist=False).run(
                 MetricCollectionPlan(
                     "SNAPSHOT_REVIEW",
-                    (MetricRequest("BTC", "flows.etf_net_1d"),),
+                    (MetricRequest("ETH", "flows.etf_net_1d"),),
                 ),
                 mode=FetchMode.REFRESH,
                 as_of=None,

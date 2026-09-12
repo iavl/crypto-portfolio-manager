@@ -70,6 +70,83 @@ class MetricHistoryTests(unittest.TestCase):
         self.assertEqual(facts.coverage, 0.0)
         self.assertTrue(any(item.startswith("MISSING_REQUIRED:") for item in facts.data_quality_flags))
 
+    def test_market_scope_metrics_never_force_asset_factor_unknown(self):
+        """Regression: market-scope metrics stored under asset MARKET must not
+        enter per-asset factor coverage denominators. Before the asset_scope
+        fix, a satellite with every collected observation fresh still reported
+        relative_strength_btc coverage 0.60 / valuation 0.83 with freshness
+        UNKNOWN because market.breadth, market.btc_dominance, and
+        market.total_crypto_market_cap can never be stored under the asset."""
+        from crypto_portfolio.engine.metric_history import build_facts_for_asset
+        from crypto_portfolio.metrics_registry import metric_definition
+
+        def scoped_observation(asset, key, value, observed_at="2026-09-12T00:00:00Z"):
+            definition = metric_definition(key)
+            return MetricObservation(
+                stable_observation_id(asset, key, observed_at, "test", value),
+                asset, key, definition.factor, value, definition.unit, None,
+                observed_at, observed_at, "test", "CURRENT", "HIGH",
+            )
+
+        values = [
+            scoped_observation("AAVE", "relative.return_vs_btc_30d", 0.21),
+            scoped_observation("AAVE", "relative.return_vs_btc_90d", 0.66),
+            scoped_observation("AAVE", "relative.return_vs_btc_180d", 0.04),
+            scoped_observation("AAVE", "market.drawdown", -0.28),
+            scoped_observation("AAVE", "valuation.fdv", 2.0e9),
+            scoped_observation("AAVE", "valuation.fdv_market_cap_ratio", 1.04),
+            scoped_observation("AAVE", "valuation.fee_revenue_multiple", 7.25),
+            scoped_observation("AAVE", "valuation.market_cap", 1.96e9),
+            scoped_observation("MARKET", "market.breadth", 0.61),
+            scoped_observation("MARKET", "market.btc_dominance", 0.58),
+            scoped_observation("MARKET", "market.total_crypto_market_cap", 3.1e12),
+        ]
+        facts = build_facts_for_asset(values, "AAVE")
+        relative = facts["relative_strength_btc"]
+        self.assertEqual(relative.coverage, 1.0)
+        self.assertEqual(relative.freshness, "CURRENT")
+        valuation = facts["valuation"]
+        self.assertEqual(valuation.coverage, 1.0)
+        self.assertEqual(valuation.freshness, "CURRENT")
+        # Market-scope context stays in the MARKET scope, not in asset facts.
+        self.assertNotIn("market.breadth", relative.current)
+        self.assertNotIn("market.total_crypto_market_cap", valuation.current)
+
+    def test_market_scope_metric_classification(self):
+        from crypto_portfolio.metric_availability import contributes_to_scoring_coverage
+
+        for key in ("market.breadth", "market.btc_dominance", "market.total_crypto_market_cap", "market.stablecoin_supply"):
+            self.assertFalse(contributes_to_scoring_coverage("AAVE", key), key)
+            self.assertFalse(contributes_to_scoring_coverage("BTC", key), key)
+            self.assertTrue(contributes_to_scoring_coverage("MARKET", key), key)
+        # ETH ETF flows stay dual-scoped: collected under ETH and MARKET.
+        for key in ("flows.etf_net_1d", "flows.etf_net_7d", "flows.etf_net_30d"):
+            self.assertTrue(contributes_to_scoring_coverage("ETH", key), key)
+            self.assertTrue(contributes_to_scoring_coverage("MARKET", key), key)
+            self.assertFalse(contributes_to_scoring_coverage("BTC", key), key)
+
+    def test_missing_required_asset_metric_still_forces_unknown(self):
+        from crypto_portfolio.engine.metric_history import build_facts_for_asset
+        from crypto_portfolio.metrics_registry import metric_definition
+
+        def scoped_observation(asset, key, value, observed_at="2026-09-12T00:00:00Z"):
+            definition = metric_definition(key)
+            return MetricObservation(
+                stable_observation_id(asset, key, observed_at, "test", value),
+                asset, key, definition.factor, value, definition.unit, None,
+                observed_at, observed_at, "test", "CURRENT", "HIGH",
+            )
+
+        values = [
+            scoped_observation("AAVE", "relative.return_vs_btc_30d", 0.21),
+            scoped_observation("AAVE", "relative.return_vs_btc_90d", 0.66),
+            scoped_observation("MARKET", "market.breadth", 0.61),
+        ]
+        relative = build_facts_for_asset(values, "AAVE")["relative_strength_btc"]
+        self.assertAlmostEqual(relative.coverage, 2.0 / 3.0)
+        self.assertEqual(relative.freshness, "UNKNOWN")
+        self.assertTrue(any(item == "MISSING_REQUIRED:relative.return_vs_btc_180d" for item in relative.data_quality_flags))
+
     def test_model_validation_and_stable_identity(self):
         first_id = stable_observation_id("eth", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100)
         self.assertEqual(first_id, stable_observation_id("ETH", "fundamentals.tvl", "2026-09-01T00:00:00Z", "test", 100.0))
