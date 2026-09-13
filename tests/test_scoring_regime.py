@@ -31,7 +31,6 @@ class ScoringAndRegimeTests(unittest.TestCase):
         result = score_factors(
             {"trend": 80, "valuation": 60},
             {"trend": 0.5, "valuation": 0.4, "onchain": 0.1},
-            confidence="HIGH",
         )
         self.assertAlmostEqual(result.score, 80 * 0.5 + 60 * 0.4 + 50 * 0.1)
         self.assertEqual(result.missing_factors, ("onchain",))
@@ -51,7 +50,7 @@ class ScoringAndRegimeTests(unittest.TestCase):
                 self.assertAlmostEqual(result.coverage, reliability)
 
     def test_missing_all_factors_is_neutral_but_not_investable(self):
-        result = score_factors({}, {"trend": 1.0}, confidence="HIGH")
+        result = score_factors({}, {"trend": 1.0})
         self.assertEqual(result.score, 50.0)
         self.assertEqual(result.coverage, 0.0)
         self.assertEqual(result.confidence, "LOW")
@@ -72,15 +71,15 @@ class ScoringAndRegimeTests(unittest.TestCase):
 
     def test_confidence_tracks_coverage_and_critical_completeness(self):
         low_coverage = score_factors(
-            {"trend": 80}, {"trend": 0.2, "valuation": 0.8}, confidence="HIGH"
+            {"trend": 80}, {"trend": 0.2, "valuation": 0.8}
         )
         medium_coverage = score_factors(
-            {"trend": 80}, {"trend": 0.7, "valuation": 0.3}, confidence="HIGH"
+            {"trend": 80}, {"trend": 0.7, "valuation": 0.3}
         )
         self.assertEqual(low_coverage.confidence, "LOW")
         self.assertEqual(medium_coverage.confidence, "MEDIUM")
         self.assertEqual(
-            score_factors({"trend": 80}, {"trend": 1.0}, confidence="HIGH", critical_data_complete=False).confidence,
+            score_factors({"trend": 80}, {"trend": 1.0}, critical_data_complete=False).confidence,
             "LOW",
         )
         assessment, _ = score_assessment(

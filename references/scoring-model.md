@@ -145,8 +145,10 @@ coverage   = sum(profile_weight[f] * reliability[f])
 The profile weights are fixed resolved weights, not renormalized weights.
 Explicit custom weights must also sum to 1; invalid sums are rejected.
 Coverage can permit at most `HIGH` at 90%, `MEDIUM` at 70%, and investability
-at 60%. Critical incompleteness forces `LOW`; a user-supplied confidence cannot
-raise a coverage cap.
+at 60%. Critical incompleteness forces `LOW`. The assessment band is derived,
+never labeled: the coverage gate and the numeric data-confidence band
+(0.80/0.60 thresholds) both apply and the more defensive one wins, so no
+caller-supplied label can contradict the evidence the score was built from.
 
 ## Relative strength versus BTC
 

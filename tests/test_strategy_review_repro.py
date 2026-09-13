@@ -171,15 +171,38 @@ class F7RegimeNotchTests(unittest.TestCase):
 
 
 class A2ConfidenceLabelTests(unittest.TestCase):
-    def test_supplied_low_label_overrides_numeric_high(self):
-        result = score_factors(ALL_FACTORS, confidence="LOW", symbol="SOL")
-        self.assertEqual(result.confidence, "LOW")
-        self.assertEqual(result.data_confidence_band, "HIGH")
-        self.assertEqual(result.data_confidence_score, 1.0)
-
-    def test_no_label_matches_numeric_band(self):
+    def test_band_is_derived_not_labeled(self):
+        # A LOW caller label cannot pin the band while the numeric evidence
+        # is complete: the band comes from coverage gates plus the numeric
+        # data-confidence score, and only the more defensive one wins.
         result = score_factors(ALL_FACTORS, symbol="SOL")
         self.assertEqual(result.confidence, "HIGH")
+        self.assertEqual(result.data_confidence_band, "HIGH")
+
+    def test_supplied_low_label_cannot_override_numeric_high(self):
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        from crypto_portfolio.engine.scoring import score_assessment
+
+        assessment, result = score_assessment(
+            AssetAssessment("SOL", dict(ALL_FACTORS), confidence="LOW")
+        )
+        self.assertEqual(assessment.confidence, "HIGH")  # input label cannot pin LOW
+        self.assertEqual(result.confidence, "HIGH")
+        self.assertEqual(result.data_confidence_band, "HIGH")
+
+    def test_low_numeric_evidence_lowers_band_without_label(self):
+        factors = dict(ALL_FACTORS)
+        factors["trend"] = {"score": 80, "freshness": "UNKNOWN"}
+        weights = {
+            "trend": 0.3, "valuation": 0.15, "fundamentals": 0.2,
+            "onchain": 0.1, "capital_flows": 0.1, "relative_strength_btc": 0.15,
+        }
+        result = score_factors(factors, weights, symbol="SOL")
+        # Trend reliability collapses to 0: coverage 0.7 (gate MEDIUM) and a
+        # freshness dimension of 0 drag the numeric score to ~0.42 (band LOW).
+        self.assertAlmostEqual(result.data_confidence_score, 0.42, places=2)
+        self.assertEqual(result.confidence, "LOW")
 
 
 class A3ScopeMismatchTests(unittest.TestCase):
