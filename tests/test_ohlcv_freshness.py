@@ -245,3 +245,45 @@ class CacheTailFreshnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelativeStrengthFreshnessAnchorTests(unittest.TestCase):
+    """A1: factor freshness must follow the evaluation anchor, not the cache."""
+
+    @staticmethod
+    def _pair(days: tuple[str, ...], fetched_at: str) -> tuple[OHLCVSeries, OHLCVSeries]:
+        common = dict(source="binance", venue="BINANCE", market="spot", quote_currency="USDT", fetched_at=fetched_at)
+        return (
+            OHLCVSeries("SOL", "1D", tuple(_candle(day) for day in days), **common),
+            OHLCVSeries("BTC", "1D", tuple(_candle(day) for day in days), **common),
+        )
+
+    def test_same_day_evaluation_uses_previous_completed_day(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset, btc = self._pair(("2026-09-08", "2026-09-09"), "2026-09-10T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL", as_of="2026-09-10T23:10:00Z")
+        self.assertEqual(result.facts.freshness, "CURRENT")
+
+    def test_cached_series_is_stale_for_later_evaluation(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        # Fetched and complete on 2026-09-10, but scored two days later: the
+        # policy allows one lagging candle, not two.
+        asset, btc = self._pair(("2026-09-08", "2026-09-09"), "2026-09-10T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL", as_of="2026-09-13T12:00:00Z")
+        self.assertEqual(result.facts.freshness, "STALE")
+
+    def test_new_fetch_wrapping_old_tail_is_stale_without_as_of(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset, btc = self._pair(("2026-09-08", "2026-09-09"), "2026-09-12T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL")
+        self.assertEqual(result.facts.freshness, "STALE")
+
+    def test_policy_lag_tolerance_applies_to_evaluation_anchor(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset, btc = self._pair(("2026-09-08", "2026-09-10"), "2026-09-11T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL", as_of="2026-09-12T12:00:00Z")
+        self.assertEqual(result.facts.freshness, "CURRENT")
