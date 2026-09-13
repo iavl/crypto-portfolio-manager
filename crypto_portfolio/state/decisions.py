@@ -51,7 +51,9 @@ def _validated_decision(
     # permissively while new appends must not carry a scope contradiction.
     from ..engine.confidence import validate_decision_confidence_scope
 
-    validate_decision_confidence_scope(model.actions, model.decision_confidence)
+    validate_decision_confidence_scope(
+        model.actions, model.decision_confidence, stable_symbols=resolved.stable_symbols
+    )
     record = model.as_dict()
     record["policy_hash"] = expected_hash
     record["resolved_policy"] = resolved.as_dict()

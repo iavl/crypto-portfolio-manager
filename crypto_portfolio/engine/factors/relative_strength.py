@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 from ...facts.models import RelativeStrengthFacts
 from ...models.market import OHLCVSeries
 from ...models.policy import Policy, resolve_policy
-from ...models.time import normalize_timestamp
+from ...models.time import normalize_timestamp, parse_timestamp
 from ..metrics import simple_return
 from ..technical import completed_candles, expected_latest_completed_date
 
@@ -226,6 +226,40 @@ def _horizon_score(value: float | None, neutral: float, saturation: float) -> fl
 
 
 
+def _as_of_moment(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(normalize_timestamp(value, "as_of").replace("Z", "+00:00"))
+
+
+def _truncate_to_as_of(series: OHLCVSeries, as_of: str | datetime) -> OHLCVSeries:
+    """Drop candles the evaluation time has not completed yet.
+
+    Mirrors ``completed_candles(candles, as_of)`` so every downstream
+    calculation — alignment, returns, volatility, drawdown, trends — sees
+    only history that existed at ``as_of``; without this a later-fetched
+    series would leak future prices into a historical evaluation.
+    """
+    day_start = _as_of_moment(as_of).astimezone(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    kept = tuple(
+        candle
+        for candle in series.candles
+        if candle.completed and parse_timestamp(candle.timestamp) < day_start
+    )
+    return OHLCVSeries(
+        series.symbol,
+        series.timeframe,
+        kept,
+        series.source,
+        series.fetched_at,
+        series.venue,
+        series.market,
+        series.quote_currency,
+    )
+
+
 def calculate_relative_strength(
     asset_prices: Sequence[float] | OHLCVSeries | Mapping[str, Any] | None = None,
     btc_prices: Sequence[float] | OHLCVSeries | Mapping[str, Any] | None = None,
@@ -239,11 +273,14 @@ def calculate_relative_strength(
 ) -> RelativeStrengthFactorResult:
     """Calculate raw and volatility-adjusted excess returns.
 
-    ``as_of`` is the evaluation time the caller scores for.  Daily-candle
-    freshness is judged against it (with the policy's
-    ``maximum_daily_candle_lag_days`` tolerance), so a cached series cannot
-    stay CURRENT merely because its own ``fetched_at`` is old.  Without
-    ``as_of`` the fetch time remains the anchor, as before.
+    ``as_of`` is the evaluation time the caller scores for.  Candles after
+    that moment are removed before any calculation, so a later-fetched
+    series cannot leak future prices into a historical evaluation.
+    Daily-candle freshness is judged against ``as_of`` (with the policy's
+    ``maximum_daily_candle_lag_days`` tolerance); without ``as_of`` each
+    series is judged against its own fetch time, and a series without one
+    makes the factor freshness UNKNOWN rather than inheriting the other
+    series' anchor.
     """
     if asset_prices is not None and asset_history is not None:
         raise ValueError("provide only one of asset_prices or asset_history")
@@ -281,6 +318,11 @@ def calculate_relative_strength(
         raise ValueError("both asset and BTC price histories are required")
     asset = _values(asset_prices, "asset_prices")
     btc = _values(btc_prices, "btc_prices")
+    if as_of is not None:
+        if isinstance(asset, OHLCVSeries):
+            asset = _truncate_to_as_of(asset, as_of)
+        if isinstance(btc, OHLCVSeries):
+            btc = _truncate_to_as_of(btc, as_of)
     if isinstance(asset, OHLCVSeries) and isinstance(btc, OHLCVSeries):
         asset_dates = [item.timestamp for item in completed_candles(asset)]
         btc_dates = [item.timestamp for item in completed_candles(btc)]
@@ -361,35 +403,26 @@ def calculate_relative_strength(
         if isinstance(series, OHLCVSeries):
             ids.append(series.ohlcv_hash)
     freshness = "CURRENT"
-    anchor = as_of
     series_inputs = tuple(series for series in (asset, btc) if isinstance(series, OHLCVSeries))
-    if anchor is None:
-        anchor = next((series.fetched_at for series in series_inputs if series.fetched_at), None)
-    if series_inputs and anchor is None:
-        # Daily series without a fetch time cannot prove their tail age;
-        # plain caller-supplied price sequences carry no such claim.
-        freshness = "UNKNOWN"
-    elif anchor is not None:
-        if isinstance(anchor, datetime):
-            anchor_moment = anchor if anchor.tzinfo else anchor.replace(tzinfo=timezone.utc)
-        else:
-            anchor_moment = datetime.fromisoformat(
-                normalize_timestamp(anchor, "as_of").replace("Z", "+00:00")
-            )
-        configured_lag = (resolved.execution or {}).get("maximum_daily_candle_lag_days", 0)
-        if isinstance(configured_lag, bool) or not isinstance(configured_lag, int) or configured_lag < 0:
-            raise ValueError("execution.maximum_daily_candle_lag_days must be a non-negative integer")
-        oldest_allowed = expected_latest_completed_date(anchor_moment) - timedelta(days=configured_lag)
-        for series in (asset, btc):
-            if not isinstance(series, OHLCVSeries):
-                continue
-            candles = completed_candles(series)
-            if not candles:
-                freshness = "UNKNOWN"
-                break
-            tail = datetime.fromisoformat(candles[-1].timestamp.replace("Z", "+00:00")).date()
-            if tail < oldest_allowed:
-                freshness = "STALE"
+    configured_lag = (resolved.execution or {}).get("maximum_daily_candle_lag_days", 0)
+    if isinstance(configured_lag, bool) or not isinstance(configured_lag, int) or configured_lag < 0:
+        raise ValueError("execution.maximum_daily_candle_lag_days must be a non-negative integer")
+    for series in series_inputs:
+        candles = completed_candles(series)
+        anchor = _as_of_moment(as_of) if as_of is not None else (
+            _as_of_moment(series.fetched_at) if series.fetched_at else None
+        )
+        # Each series is judged against its own anchor: with as_of that is
+        # the shared evaluation time, otherwise the series' own fetch time.
+        # A series with no anchor cannot prove its tail age and forces
+        # UNKNOWN instead of borrowing the other series' timestamp.
+        if not candles or anchor is None:
+            freshness = "UNKNOWN"
+            continue
+        oldest_allowed = expected_latest_completed_date(anchor) - timedelta(days=configured_lag)
+        tail = datetime.fromisoformat(candles[-1].timestamp.replace("Z", "+00:00")).date()
+        if tail < oldest_allowed:
+            freshness = "STALE"
     facts = RelativeStrengthFacts(
         symbol=normalized_symbol,
         current={

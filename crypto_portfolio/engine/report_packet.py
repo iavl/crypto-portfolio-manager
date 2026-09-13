@@ -176,14 +176,20 @@ def build_report_packet(
         event_scan_summary=packet.event_scan_summary,
         manual_asset_contexts=packet.manual_asset_contexts,
         no_trade_attribution=packet.no_trade_attribution,
+        post_action_projection=packet.post_action_projection,
     )
 
 
 def validate_report_packet(value: ReportPacket | Mapping[str, Any]) -> bool:
     packet = value if isinstance(value, ReportPacket) else ReportPacket.from_mapping(value)
+    from ..models.policy import resolve_policy
     from .confidence import validate_decision_confidence_scope
 
-    validate_decision_confidence_scope(packet.actions, packet.decision_confidence)
+    validate_decision_confidence_scope(
+        packet.actions,
+        packet.decision_confidence,
+        stable_symbols=resolve_policy().stable_symbols,
+    )
     return True
 
 
@@ -264,6 +270,7 @@ def build_final_review_output(
             "actions": packet_value["actions"],
             "approved_amounts": packet_value["approved_amounts"],
             "no_trade_attribution": packet_value["no_trade_attribution"],
+            "post_action_projection": packet_value["post_action_projection"],
         },
         "overlays": {
             "positioning": packet_value["positioning_summaries"],

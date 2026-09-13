@@ -458,6 +458,7 @@ def recommend_rebalance(
     if post_cash_total <= 0:
         raise ValueError("portfolio_value plus new_cash_available must be > 0")
     stable_symbols = tuple(resolved.stable_symbols)
+    stable_symbols_set = frozenset(stable_symbols)
     if not stable_symbols:
         raise ValueError("policy must define at least one stable symbol")
     stable_target = _stable_target_weights(current, target, stable_symbols)
@@ -610,12 +611,38 @@ def recommend_rebalance(
     # behind: hard-constraint compliance is judged on this projection, not on
     # the strategic target. Shortfalls the actions cannot repair stay visible
     # instead of being swallowed by the turnover thresholds.
-    projected_dollars: dict[str, float] = dict(effective_current)
+    projected_dollars: dict[str, float] = {}
     for action in actions:
-        if action.action == "INCREASE":
-            projected_dollars[action.symbol] = projected_dollars.get(action.symbol, 0.0) + action.amount_usd
-        elif action.action in {"REDUCE", "EXIT"}:
-            projected_dollars[action.symbol] = projected_dollars.get(action.symbol, 0.0) - action.amount_usd
+        if action.symbol in stable_symbols_set:
+            # Stable legs are settlement plumbing: sells exist to fund buys,
+            # and any buy a cap shrank leaves its dollars undeployed. The
+            # stable sleeve absorbs the remainder so dollars are conserved
+            # instead of silently destroyed by capped increases.
+            continue
+        delta = action.amount_usd if action.action == "INCREASE" else -action.amount_usd
+        if action.action in {"INCREASE", "REDUCE", "EXIT"}:
+            projected_dollars[action.symbol] = (
+                effective_current.get(action.symbol, 0.0) + delta
+            )
+        else:
+            projected_dollars[action.symbol] = effective_current.get(action.symbol, 0.0)
+    for symbol, dollars in effective_current.items():
+        projected_dollars.setdefault(symbol, dollars)
+    risky_total = sum(
+        dollars for symbol, dollars in projected_dollars.items() if symbol not in stable_symbols_set
+    )
+    stable_total = max(0.0, post_cash_total - risky_total)
+    current_stable = {
+        symbol: dollars
+        for symbol, dollars in effective_current.items()
+        if symbol in stable_symbols_set and dollars > 0
+    }
+    current_stable_total = sum(current_stable.values())
+    if current_stable_total > 0:
+        for symbol, dollars in current_stable.items():
+            projected_dollars[symbol] = stable_total * dollars / current_stable_total
+    else:
+        projected_dollars[stable_symbol] = projected_dollars.get(stable_symbol, 0.0) + stable_total
     projected_weights = {
         symbol: dollars / post_cash_total for symbol, dollars in projected_dollars.items()
     }

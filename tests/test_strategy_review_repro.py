@@ -185,6 +185,8 @@ class F4DoubleDeploymentCapTests(unittest.TestCase):
         snapshot = build_technical_snapshot(
             series, SpotPrice("ETH", 282, "2026-01-01T08:00:00Z", "synthetic", "2026-01-01T08:00:00Z")
         )
+        from dataclasses import replace
+
         high = build_entry_plan("ETH", 2000, snapshot, "NORMAL", "HIGH")
         medium = build_entry_plan("ETH", 2000, snapshot, "NORMAL", "MEDIUM")
         # The approved amount is final: MEDIUM portfolio confidence must not
@@ -194,6 +196,10 @@ class F4DoubleDeploymentCapTests(unittest.TestCase):
         self.assertAlmostEqual(
             confidence_deployment_factor(0.7), 0.7
         )  # the upstream cap that approved dollars already consumed
+        # The snapshot's own MEDIUM data confidence is an independent basis
+        # measured after approval, so it still scales staging to 70%.
+        medium_tech = build_entry_plan("ETH", 2000, replace(snapshot, data_confidence="MEDIUM"), "NORMAL", "HIGH")
+        self.assertAlmostEqual(medium_tech.planned_amount_usd, high.planned_amount_usd * 0.7, places=6)
 
 
 class F5RelativeStrengthUnitTests(unittest.TestCase):
@@ -251,6 +257,20 @@ class F6PostActionConstraintTests(unittest.TestCase):
         self.assertEqual(
             result.no_trade_attribution.primary_reason, "STABLECOIN_FLOOR_CONSTRAINT"
         )
+
+    def test_capped_buys_leave_undeployed_dollars_in_the_stable_sleeve(self):
+        result = recommend_rebalance(
+            {"BTC": 0.40, "ETH": 0.20, "USDT": 0.40},
+            {"BTC": 0.50, "ETH": 0.25, "USDT": 0.25},
+            10000.0,
+            deployment_caps={"BTC": 0.7, "ETH": 0.7},
+        )
+        weights = result.post_action_projection["projected_weights"]
+        # Buy caps shrink the increases but the stable REDUCE was sized to
+        # fund the uncapped buys: the undeployed dollars must stay in the
+        # stable sleeve instead of disappearing from the projection.
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=9)
+        self.assertGreater(weights["USDT"], 0.25)
 
     def test_projection_reflects_approved_dollars_and_conserves_total(self):
         result = recommend_rebalance(
@@ -489,3 +509,120 @@ class A3ScopeMismatchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRound2Regressions(unittest.TestCase):
+    """Regressions for the PR #2 Codex review findings."""
+
+    def test_projection_reaches_review_and_report_packets(self):
+        from crypto_portfolio.engine.report_packet import build_report_packet
+
+        result = recommend_rebalance(
+            {"BTC": 0.50, "ETH": 0.36, "USDT": 0.14},
+            {"BTC": 0.50, "ETH": 0.35, "USDT": 0.15},
+            10000.0,
+        )
+        packet = build_decision_review_packet(
+            review_type="SNAPSHOT_REVIEW",
+            market_regime="NORMAL",
+            current_weights={"BTC": 0.50, "ETH": 0.36, "USDT": 0.14},
+            target_weights={"BTC": 0.50, "ETH": 0.35, "USDT": 0.15},
+            post_action_projection=dict(result.post_action_projection),
+        )
+        self.assertIsNotNone(packet.post_action_projection)
+        report = build_report_packet(packet)
+        self.assertIsNotNone(report.post_action_projection)
+        self.assertIn(
+            "STABLECOIN_FLOOR_UNRESOLVED",
+            "".join(report.post_action_projection["unresolved_constraints"]),
+        )
+        output = __import__("crypto_portfolio.engine.report_packet", fromlist=["build_final_review_output"]).build_final_review_output(report)
+        self.assertIn("post_action_projection", output["rebalance"])
+
+    def test_stable_funding_leg_does_not_flip_the_confidence_action(self):
+        # A routine de-risk: SOL REDUCE funds a USDT INCREASE. The confidence
+        # scope must follow the risky leg (REDUCE), not the settlement leg.
+        decision_confidence = calculate_decision_confidence(
+            {
+                "portfolio_data": 0.9,
+                "regime_confidence": 0.9,
+                "asset_evidence": {"assets": {"SOL": 0.9}, "weights": {"SOL": 0.1}},
+                "portfolio_accounting": 1.0,
+                "signal_agreement": 1.0,
+            },
+            scope=DecisionScope("REDUCE", ("SOL",), {"SOL": 0.1}),
+        )
+        packet = build_decision_review_packet(
+            review_type="SNAPSHOT_REVIEW",
+            market_regime="NORMAL",
+            current_weights={"BTC": 0.5, "SOL": 0.1, "USDT": 0.4},
+            target_weights={"BTC": 0.5, "SOL": 0.05, "USDT": 0.45},
+            assessments={"SOL": {"weighted_score": 60, "confidence": "MEDIUM"}},
+            actions=[
+                {"symbol": "SOL", "action": "REDUCE", "amount_usd": 500.0, "current_weight": 0.1, "target_weight": 0.05},
+                {"symbol": "USDT", "action": "INCREASE", "amount_usd": 500.0, "current_weight": 0.4, "target_weight": 0.45},
+            ],
+            decision_confidence=decision_confidence,
+        )
+        self.assertEqual(packet.decision_confidence.scope["action"], "REDUCE")
+
+    def test_missing_scoring_factor_preserves_held_satellite(self):
+        # Only the trend factor is missing: the shrunk neutral score (47)
+        # must not exit a held position even though the coarse
+        # critical_data_complete flag is still True.
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        from crypto_portfolio.engine.scoring import score_assessment
+
+        factors = {"trend": None, "valuation": 60, "fundamentals": 60, "onchain": 60,
+                   "capital_flows": 60, "relative_strength_btc": 60}
+        scored, _ = score_assessment(
+            AssetAssessment("SOL", factors, critical_data_complete=True,
+                            relative_strength_vs_btc="OUTPERFORM")
+        )
+        # 0.3*50 + 0.7*60 = 57: inside the soft-exit band, but the missing
+        # factor makes this incomplete evidence, not evidenced weakness.
+        self.assertLess(scored.weighted_score, 67)
+        self.assertEqual(satellite_eligibility(scored, current_weight=0.1), "HOLD_ONLY")
+
+    def test_risk_tier_source_is_representation_independent(self):
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        common = {"weighted_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
+        mapping_result = build_target_allocation(
+            assessments={"SOL": {**common, "risk_tier": "normal"}})
+        typed_result = build_target_allocation(
+            assessments={"SOL": AssetAssessment(
+                "SOL",
+                {"trend": 85, "valuation": 85, "fundamentals": 85, "onchain": 85,
+                 "capital_flows": 85, "relative_strength_btc": 85},
+                confidence="HIGH", relative_strength_vs_btc="OUTPERFORM")})
+        self.assertEqual(
+            mapping_result.deployment_allowances["SOL"]["risk_tier_source"],
+            typed_result.deployment_allowances["SOL"]["risk_tier_source"],
+        )
+        self.assertEqual(
+            typed_result.deployment_allowances["SOL"]["risk_tier_source"], "POLICY_DEFAULT"
+        )
+
+    def test_model_rejects_unknown_relative_strength_states(self):
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        with self.assertRaisesRegex(ValueError, "recognized state"):
+            AssetAssessment("SOL", {"trend": 80}, relative_strength_vs_btc="FOO")
+
+
+class ReviewRound2RiskTests(unittest.TestCase):
+    def test_impossible_drawdowns_are_rejected(self):
+        from crypto_portfolio.engine.risk import (
+            projected_peak_drawdown,
+            remaining_drawdown_capacity,
+        )
+
+        with self.assertRaisesRegex(ValueError, "in \\[-1, 0\\]"):
+            projected_peak_drawdown(-1.5, -0.2)
+        with self.assertRaisesRegex(ValueError, "in \\[-1, 0\\]"):
+            remaining_drawdown_capacity(-1.5, 0.15)
+        # -1 exactly is the legitimate total-loss boundary.
+        self.assertIsNone(remaining_drawdown_capacity(-1.0, 0.15))
+        self.assertEqual(projected_peak_drawdown(-1.0, 0.0)["projected_drawdown"], -1.0)

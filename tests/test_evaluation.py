@@ -50,6 +50,26 @@ class SimulatePeriodsTests(unittest.TestCase):
         self.assertEqual(result["trough_period_index"], 2)
         self.assertEqual(result["recovery_period_index"], 4)
 
+    def test_turnover_is_measured_against_drifted_holdings(self):
+        # The review scenario: a 50/50 BTC/stable target held through a BTC
+        # doubling. The drifted portfolio is ~67/33, so restoring the target
+        # trades even though the target weights never changed.
+        periods = [
+            _period(0, {"BTC": 0.5, "USDT": 0.5}, {"BTC": 1.0, "USDT": 0.0}),
+            _period(1, {"BTC": 0.5, "USDT": 0.5}, {"BTC": 0.0, "USDT": 0.0}),
+        ]
+        result = simulate_periods(periods, fee_bps=50)
+        self.assertAlmostEqual(result["period_detail"][1]["turnover"], 1.0 / 3.0, places=9)
+        self.assertAlmostEqual(result["period_detail"][1]["cost"], (1.0 / 3.0) * 0.005)
+
+    def test_symbols_are_normalized_and_case_collisions_rejected(self):
+        period = _period(0, {"BTC": 1.0}, {"btc": 0.20})
+        self.assertAlmostEqual(simulate_periods([period])["total_return"], 0.20)
+        with self.assertRaisesRegex(ValueError, "duplicate symbol"):
+            _period(0, {"BTC": 0.5, "btc": 0.5}, {"BTC": 0.0})
+        with self.assertRaisesRegex(ValueError, "missing realized return"):
+            _period(0, {"BTC": 1.0}, {"ETH": 0.0})
+
     def test_zero_turnover_and_cash_weight_visibility(self):
         periods = [
             _period(0, {"BTC": 0.6, "USDT": 0.4}, {"BTC": 0.0, "USDT": 0.0}),
@@ -79,6 +99,22 @@ class BuyAndHoldBenchmarkTests(unittest.TestCase):
         self.assertAlmostEqual(path["final_nav"], 2.0)
         self.assertAlmostEqual(path["max_drawdown"], 0.0)
 
+    def test_negative_benchmark_weights_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "finite fraction >= 0"):
+            buy_and_hold_path([{"BTC": 0.0, "ETH": 0.0}], weights={"BTC": 2, "ETH": -1})
+
+    def test_external_flows_allocate_at_the_configured_ratio(self):
+        # A +0.5 flow at the start of period 2 is split 70/30, not by drifted
+        # weights; the sleeves then compound on the flowed base.
+        path = buy_and_hold_path(
+            [{"BTC": 0.0, "ETH": 0.0}, {"BTC": 0.0, "ETH": 0.0}],
+            weights={"BTC": 0.7, "ETH": 0.3},
+            external_flows=[0.0, 0.5],
+        )
+        self.assertAlmostEqual(path["final_nav"], 1.5)
+        with self.assertRaisesRegex(ValueError, "align with asset_returns"):
+            buy_and_hold_path([{"BTC": 0.0}], weights={"BTC": 1.0}, external_flows=[0.0, 0.0])
+
     def test_missing_benchmark_return_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "missing return for BTC"):
             buy_and_hold_path([{"ETH": 0.0}], weights={"BTC": 0.7, "ETH": 0.3})
@@ -95,6 +131,15 @@ class SequentialSplitTests(unittest.TestCase):
         self.assertLess(max(splits["train"]), min(splits["validation"]))
         self.assertLess(max(splits["validation"]), min(splits["holdout"]))
         self.assertEqual(len(splits["holdout"]), 2)
+
+    def test_label_horizon_purges_boundary_samples(self):
+        dates = [date(2026, 1, 1) + timedelta(days=30 * index) for index in range(12)]
+        splits = sequential_splits(dates, train_fraction=0.5, validation_fraction=0.25, label_horizon_days=90)
+        # No training or validation sample's 90-day forward window crosses
+        # into the following block.
+        self.assertLessEqual(max(splits["train"]) + timedelta(days=90), min(splits["validation"]))
+        self.assertLessEqual(max(splits["validation"]) + timedelta(days=90), min(splits["holdout"]))
+        self.assertLess(len(splits["train"]), 6)
 
     def test_no_lookahead_overlap_between_blocks(self):
         dates = [date(2026, 1, 1) + timedelta(days=30 * index) for index in range(12)]

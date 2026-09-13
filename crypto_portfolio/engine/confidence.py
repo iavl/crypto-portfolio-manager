@@ -180,14 +180,20 @@ def _action_field(action: Any, name: str, default: Any = None) -> Any:
     return getattr(action, name, default)
 
 
-def action_derived_scope(actions: Iterable[Any]) -> DecisionScope | None:
+def action_derived_scope(
+    actions: Iterable[Any], *, stable_symbols: Iterable[str] = ()
+) -> DecisionScope | None:
     """Derive the decision scope implied by proposed executable actions.
 
-    INCREASE wins over REDUCE/EXIT when both are proposed (a purchase also
+    Stable/cash settlement legs are excluded: a routine de-risking rebalance
+    pairs a risky REDUCE with a stable INCREASE, and the confidence action
+    must follow the risk decision, not the funding leg. INCREASE wins over
+    REDUCE/EXIT among risky legs when both are proposed (a purchase also
     depends on the sells funding it), and a pure HOLD/WAIT/NO_TRADE set has
     no executable scope. The exposure weights intentionally stay empty: the
     authoritative weights live on the packet-level scope builder.
     """
+    stables = frozenset(str(symbol).strip().upper() for symbol in stable_symbols)
     increases: list[str] = []
     reductions: list[str] = []
     records = tuple(actions or ())
@@ -195,6 +201,8 @@ def action_derived_scope(actions: Iterable[Any]) -> DecisionScope | None:
     for action in records:
         name = str(_action_field(action, "action", "")).strip().upper()
         symbol = str(_action_field(action, "symbol", "")).strip().upper()
+        if symbol in stables:
+            continue
         raw_amount = _action_field(action, "amount_usd", _action_field(action, "approved_amount_usd", 0.0))
         try:
             amount = float(raw_amount)
@@ -217,15 +225,18 @@ def action_derived_scope(actions: Iterable[Any]) -> DecisionScope | None:
 def validate_decision_confidence_scope(
     actions: Iterable[Any],
     decision_confidence: DecisionConfidence | Mapping[str, Any] | None,
+    *,
+    stable_symbols: Iterable[str] = (),
 ) -> None:
     """Reject an executable decision whose confidence scope contradicts its actions.
 
     A missing scope makes no claim and stays valid; a supplied scope must
-    carry the derived action and must not drop any executable asset, so a
-    NO_TRADE-scoped confidence can never authorize a REDUCE and a narrowed
-    scope cannot exclude portfolio-level constraints.
+    carry the derived action and must not drop any executable risky asset, so
+    a NO_TRADE-scoped confidence can never authorize a REDUCE and a narrowed
+    scope cannot exclude portfolio-level constraints. Stable settlement legs
+    are ignored on both sides, matching the packet-level scope builder.
     """
-    derived = action_derived_scope(actions)
+    derived = action_derived_scope(actions, stable_symbols=stable_symbols)
     if derived is None:
         return
     if isinstance(decision_confidence, DecisionConfidence):

@@ -556,8 +556,8 @@ def projected_peak_drawdown(
     if isinstance(current_drawdown, bool) or not isinstance(current_drawdown, (int, float)):
         raise ValueError("current_drawdown must be a number")
     drawdown = float(current_drawdown)
-    if not math.isfinite(drawdown) or drawdown > 0:
-        raise ValueError("current_drawdown must be finite and <= 0")
+    if not math.isfinite(drawdown) or drawdown > 0 or drawdown < -1.0:
+        raise ValueError("current_drawdown must be finite and in [-1, 0]")
     scenario = _scenario_return(scenario_return, "portfolio")
     change = (1.0 + drawdown) * (1.0 + scenario) - 1.0
     return {
@@ -580,8 +580,8 @@ def remaining_drawdown_capacity(
     if isinstance(current_drawdown, bool) or not isinstance(current_drawdown, (int, float)):
         raise ValueError("current_drawdown must be a number")
     drawdown = float(current_drawdown)
-    if not math.isfinite(drawdown) or drawdown > 0:
-        raise ValueError("current_drawdown must be finite and <= 0")
+    if not math.isfinite(drawdown) or drawdown > 0 or drawdown < -1.0:
+        raise ValueError("current_drawdown must be finite and in [-1, 0]")
     if isinstance(risk_budget, bool) or not isinstance(risk_budget, (int, float)):
         raise ValueError("risk_budget must be a positive fraction")
     budget = float(risk_budget)

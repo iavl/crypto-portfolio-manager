@@ -367,10 +367,8 @@ def build_entry_plan(
         (quality for _, quality, _ in selected),
     )
     # LOW portfolio confidence is a gate, not a sizing input: the approved
-    # amount already consumed every confidence-based deployment cap exactly
-    # once upstream, so re-multiplying it here would double-apply them. The
-    # structural tranche coverage below is an independently based technical
-    # restriction, not a portfolio confidence factor.
+    # amount already consumed every portfolio-level confidence cap exactly
+    # once upstream, so re-multiplying it here would double-apply them.
     if portfolio_level == "LOW":
         return _wait_plan(
             normalized_symbol,
@@ -381,9 +379,25 @@ def build_entry_plan(
             btc_cycle=btc_cycle,
             effective_factor=0.0,
         )
+    # The snapshot's own data confidence is an independently based technical
+    # restriction: it is measured after rebalance approval, so it was never
+    # folded into the approved dollars and must still scale the staging.
+    technical_confidence_factor = float(
+        config["confidence_deployment_factor"][technical_snapshot.data_confidence]
+    )
+    if technical_confidence_factor <= 0:
+        return _wait_plan(
+            normalized_symbol,
+            approved,
+            technical_snapshot,
+            "technical data confidence is LOW; approved amount reserved",
+            positioning=positioning,
+            btc_cycle=btc_cycle,
+            effective_factor=0.0,
+        )
     # Structural tranche coverage only: the share of the approved amount the
     # selected zones deploy now; the remainder stays reserved, not blocked.
-    base_deployment_fraction = min(1.0, deployed_fraction)
+    base_deployment_fraction = min(1.0, deployed_fraction) * technical_confidence_factor
     deployment_factor = effective_deployment_factor(
         base_deployment_fraction,
         positioning=positioning,

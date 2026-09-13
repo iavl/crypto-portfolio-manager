@@ -395,6 +395,7 @@ class AssetAssessment:
     asset_type: str = "other"
     relative_strength_vs_btc: float | str | None = None
     risk_tier: str = "normal"
+    risk_tier_source: str | None = None
     thesis_broken: bool = False
     critical_data_complete: bool = True
     event_risk: EventRiskAssessment | Mapping[str, Any] | None = None
@@ -501,7 +502,10 @@ class AssetAssessment:
         if self.asset_type not in _ASSET_TYPES:
             raise ValueError(f"asset_type must be one of {sorted(_ASSET_TYPES)}")
         if isinstance(self.relative_strength_vs_btc, str):
-            object.__setattr__(self, "relative_strength_vs_btc", self.relative_strength_vs_btc.upper())
+            state = self.relative_strength_vs_btc.strip().upper()
+            if state not in {"OUTPERFORM", "NEUTRAL", "UNDERPERFORM", "MATERIALLY_WEAK", "UNKNOWN"}:
+                raise ValueError("relative_strength_vs_btc string must be a recognized state")
+            object.__setattr__(self, "relative_strength_vs_btc", state)
         elif self.relative_strength_vs_btc is not None:
             value = float(self.relative_strength_vs_btc)
             if not math.isfinite(value):
@@ -529,6 +533,13 @@ class AssetAssessment:
                 raise ValueError("score_coverage must be finite and in [0, 1] or null")
             object.__setattr__(self, "score_coverage", coverage)
         object.__setattr__(self, "risk_tier", _text(self.risk_tier, "risk_tier").lower())
+        if self.risk_tier_source is not None:
+            source = _text(self.risk_tier_source, "risk_tier_source").upper()
+            if source not in {"POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"}:
+                raise ValueError(
+                    "risk_tier_source must be POLICY_DEFAULT, MANUAL_ASSESSMENT, or DETERMINISTIC_ESTIMATE"
+                )
+            object.__setattr__(self, "risk_tier_source", source)
 
     @classmethod
     def from_mapping(
@@ -541,7 +552,7 @@ class AssetAssessment:
         data = dict(value)
         allowed = {
             "symbol", "factor_scores", "weighted_score", "confidence", "asset_type",
-            "relative_strength_vs_btc", "risk_tier", "thesis_broken", "critical_data_complete",
+            "relative_strength_vs_btc", "risk_tier", "risk_tier_source", "thesis_broken", "critical_data_complete",
             "event_risk", "scoring_profile_name", "score_coverage", "confidence_score",
             "confidence_explanation", "data_confidence",
         }
@@ -565,6 +576,7 @@ class AssetAssessment:
             "thesis_broken": self.thesis_broken,
             "critical_data_complete": self.critical_data_complete,
             "risk_tier": self.risk_tier,
+            "risk_tier_source": self.risk_tier_source,
             "event_risk": self.event_risk.as_dict() if self.event_risk is not None else None,
             "scoring_profile_name": self.scoring_profile_name,
             "score_coverage": self.score_coverage,

@@ -320,6 +320,7 @@ def build_decision_review_packet(
     event_scan_summary: Mapping[str, Any] | None = None,
     manual_asset_contexts: Any = None,
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None,
+    post_action_projection: Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
@@ -477,7 +478,9 @@ def build_decision_review_packet(
     # An externally supplied confidence must not contradict the actions it
     # authorizes; the internally derived scope is consistent by construction.
     validate_decision_confidence_scope(
-        (item.as_dict() for item in assets), decision_confidence_value
+        (item.as_dict() for item in assets),
+        decision_confidence_value,
+        stable_symbols=resolve_policy().stable_symbols,
     )
     if attribution is None:
         attribution = build_no_trade_attribution(
@@ -520,6 +523,10 @@ def build_decision_review_packet(
         event_scan_summary=event_scan_summary if event_scan_summary is not None else source.get("event_scan_summary"),
         manual_asset_contexts=(manual_asset_contexts if manual_asset_contexts is not None else source.get("manual_asset_contexts", ())),
         no_trade_attribution=attribution,
+        post_action_projection=(
+            post_action_projection if post_action_projection is not None
+            else source.get("post_action_projection")
+        ),
     )
 
 
@@ -665,7 +672,9 @@ def should_run_high_impact_review(
 def validate_decision_review_packet(value: DecisionReviewPacket | Mapping[str, Any]) -> bool:
     packet = value if isinstance(value, DecisionReviewPacket) else DecisionReviewPacket.from_mapping(value)
     validate_decision_confidence_scope(
-        (item.as_dict() for item in packet.assets), packet.decision_confidence
+        (item.as_dict() for item in packet.assets),
+        packet.decision_confidence,
+        stable_symbols=resolve_policy().stable_symbols,
     )
     return True
 

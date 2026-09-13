@@ -231,6 +231,35 @@ def _event_risk_multiplier(state: str, policy: Policy) -> float:
         raise ValueError(f"unknown event risk state {state}") from exc
 
 
+def _missing_factor_evidence(assessment: Any) -> bool:
+    """True when the assessment itself reports a MISSING scoring factor.
+
+    A scored assessment whose profile marks a positive-weight factor MISSING
+    has incomplete evidence even when the caller left the coarse
+    ``critical_data_complete`` flag at its default; the shrunk neutral score
+    must not be mistaken for fully evidenced weakness. Raw assessments that
+    carry no factor detail stay trusted on their flag.
+    """
+    if assessment is None:
+        return False
+    factors = _field(assessment, "factor_scores", None)
+    if not isinstance(factors, Mapping):
+        return False
+    for value in factors.values():
+        if value is None:
+            return True
+        availability = None
+        if isinstance(value, Mapping):
+            if str(value.get("state", "")).strip().upper() == "UNKNOWN":
+                return True
+            availability = value.get("availability")
+        elif hasattr(value, "availability"):
+            availability = value.availability
+        if str(availability or "").strip().upper() == "MISSING":
+            return True
+    return False
+
+
 def satellite_eligibility(
     assessment: AssetAssessment | Mapping[str, Any] | None,
     policy: Policy | None = None,
@@ -264,6 +293,7 @@ def satellite_eligibility(
     evidence_incomplete = (
         relative_status == "HOLD_ONLY"
         or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+        or _missing_factor_evidence(assessment)
     )
     if score < entry_score:
         if evidence_incomplete:
@@ -427,6 +457,10 @@ def build_target_allocation(
         event_risk = _event_risk_state(assessment) if assessment is not None else "NORMAL"
         event_multiplier = _event_risk_multiplier(event_risk, resolved)
         if asset_type == "satellite":
+            # Distinguish where the tier came from, independent of whether
+            # the assessment arrived typed or as a mapping: an explicit
+            # source wins; otherwise a non-default tier implies a human
+            # assessment and the default "normal" tier is the policy's own.
             supplied_tier = _field(assessment, "risk_tier", None) if assessment is not None else None
             risk_tier = str(supplied_tier).lower() if supplied_tier is not None else "normal"
             risk_multipliers = resolved.allocation["risk_multipliers"]
@@ -440,12 +474,11 @@ def build_target_allocation(
                 float(parsed_overlays.effective_deployment_caps.get(symbol, 1.0))
                 if parsed_overlays is not None else 1.0
             )
-            # Distinguish where the tier came from: the policy default for an
-            # unspecified tier, an explicit human assessment, or a future
-            # deterministic estimate. Never label a default as manual.
             risk_tier_source = _field(assessment, "risk_tier_source", None) if assessment is not None else None
             if risk_tier_source is None:
-                risk_tier_source = "POLICY_DEFAULT" if supplied_tier is None else "MANUAL_ASSESSMENT"
+                risk_tier_source = (
+                    "MANUAL_ASSESSMENT" if risk_tier not in {"", "normal"} else "POLICY_DEFAULT"
+                )
             risk_tier_source = str(risk_tier_source).strip().upper()
             if risk_tier_source not in {"POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"}:
                 raise ValueError(
@@ -468,6 +501,7 @@ def build_target_allocation(
                 evidence_incomplete = (
                     _relative_eligibility(_field(assessment, "relative_strength_vs_btc", None)) != "ELIGIBLE"
                     or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+                    or _missing_factor_evidence(assessment)
                 )
                 reason = (
                     "BTC-relative or critical evidence is incomplete; missing data preserves the position without adding risk"
