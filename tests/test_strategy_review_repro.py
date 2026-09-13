@@ -134,8 +134,8 @@ class F3CoreTemporaryCapTests(unittest.TestCase):
 
 
 class F4DoubleDeploymentCapTests(unittest.TestCase):
-    def _result(self, **kwargs):
-        allocation = build_target_allocation(
+    def _allocation(self):
+        return build_target_allocation(
             regime="NORMAL",
             assessments={
                 **CORE,
@@ -144,18 +144,56 @@ class F4DoubleDeploymentCapTests(unittest.TestCase):
             current_weights=CURRENT,
             decision_confidence={"score": 0.7},
         )
-        return recommend_rebalance(
-            CURRENT, dict(allocation.target_weights), 10000.0,
-            decision_confidence={"score": 0.7}, **kwargs,
-        )
 
-    def test_same_cap_applied_twice_currently(self):
-        once = self._result()
-        twice = self._result(deployment_caps={"SOL": 0.7})
-        amount_once = next(a.amount_usd for a in once.actions if a.symbol == "SOL")
-        amount_twice = next(a.amount_usd for a in twice.actions if a.symbol == "SOL")
-        self.assertAlmostEqual(amount_once, 910.0)
-        self.assertAlmostEqual(amount_twice, 637.0)
+    def test_cap_is_consumed_exactly_once(self):
+        allocation = self._allocation()
+        factor = allocation.deployment_factors["SOL"]
+        self.assertAlmostEqual(factor, 0.7)
+        result = recommend_rebalance(
+            CURRENT, dict(allocation.target_weights), 10000.0,
+            deployment_caps={"SOL": factor},
+        )
+        amount = next(a.amount_usd for a in result.actions if a.symbol == "SOL")
+        self.assertAlmostEqual(amount, 910.0)
+        # Re-expressing the same decision confidence alongside the folded
+        # per-symbol cap is rejected instead of silently multiplying again.
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            recommend_rebalance(
+                CURRENT, dict(allocation.target_weights), 10000.0,
+                decision_confidence={"score": 0.7}, deployment_caps={"SOL": 0.7},
+            )
+
+    def test_entry_does_not_reapply_confidence_to_approved_amount(self):
+        from crypto_portfolio.engine.confidence import confidence_deployment_factor
+        from crypto_portfolio.engine.entry import build_entry_plan
+        from crypto_portfolio.engine.technical import build_technical_snapshot
+        from crypto_portfolio.models.market import Candle, OHLCVSeries, SpotPrice
+        from datetime import date, timedelta
+
+        candles = []
+        start = date(2025, 1, 1)
+        for index in range(365):
+            close = 100 + index * 0.5
+            if index == 330:
+                close -= 20
+            candles.append(Candle(
+                (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
+                close - 0.5, close + 2, close - 2, close,
+                200 if index == 364 else 100,
+            ))
+        series = OHLCVSeries("ETH", "1D", tuple(candles), source="synthetic", fetched_at="2026-01-01T00:00:00Z")
+        snapshot = build_technical_snapshot(
+            series, SpotPrice("ETH", 282, "2026-01-01T08:00:00Z", "synthetic", "2026-01-01T08:00:00Z")
+        )
+        high = build_entry_plan("ETH", 2000, snapshot, "NORMAL", "HIGH")
+        medium = build_entry_plan("ETH", 2000, snapshot, "NORMAL", "MEDIUM")
+        # The approved amount is final: MEDIUM portfolio confidence must not
+        # shrink the staged dollars a second time (factor 0.7 would).
+        self.assertAlmostEqual(medium.planned_amount_usd, high.planned_amount_usd)
+        self.assertGreater(medium.planned_amount_usd, 0)
+        self.assertAlmostEqual(
+            confidence_deployment_factor(0.7), 0.7
+        )  # the upstream cap that approved dollars already consumed
 
 
 class F5RelativeStrengthUnitTests(unittest.TestCase):

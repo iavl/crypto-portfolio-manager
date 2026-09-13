@@ -76,6 +76,7 @@ class ScoreResult:
     effective_factor_scores: Mapping[str, float] = None
     factor_reliability: Mapping[str, float] = None
     factor_availability: Mapping[str, str] = None
+    factor_contributions: Mapping[str, float] = None
     not_applicable_factors: tuple[str, ...] = ()
     factor_data_confidence: ConfidenceResult | None = None
     data_confidence_score: float | None = None
@@ -93,6 +94,7 @@ class ScoreResult:
             "effective_factor_scores": dict(self.effective_factor_scores or {}),
             "factor_reliability": dict(self.factor_reliability or {}),
             "factor_availability": dict(self.factor_availability or {}),
+            "factor_contributions": dict(self.factor_contributions or {}),
             "missing_factors": list(self.missing_factors),
             "not_applicable_factors": list(self.not_applicable_factors),
             "confidence": self.confidence,
@@ -508,6 +510,12 @@ def _score_factors(
         effective_factor_scores=effective_scores,
         factor_reliability=reliabilities,
         factor_availability=availability,
+        # Per-factor contribution to the base score (weight x effective
+        # score) so attribution consumers never recompute it themselves.
+        factor_contributions={
+            factor: resolved_weights[factor] * effective_scores.get(factor, 0.0)
+            for factor in resolved_weights
+        },
         missing_factors=tuple(missing),
         not_applicable_factors=tuple(not_applicable),
         # The band is derived, never labeled: coverage gates and the numeric

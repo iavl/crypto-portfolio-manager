@@ -426,8 +426,9 @@ def build_target_allocation(
         confidence = _confidence(_field(assessment, "confidence", "MEDIUM")) if assessment is not None else "MEDIUM"
         event_risk = _event_risk_state(assessment) if assessment is not None else "NORMAL"
         event_multiplier = _event_risk_multiplier(event_risk, resolved)
-        risk_tier = str(_field(assessment, "risk_tier", "normal")).lower() if assessment is not None else "normal"
         if asset_type == "satellite":
+            supplied_tier = _field(assessment, "risk_tier", None) if assessment is not None else None
+            risk_tier = str(supplied_tier).lower() if supplied_tier is not None else "normal"
             risk_multipliers = resolved.allocation["risk_multipliers"]
             risk_multiplier = risk_multipliers.get(
                 risk_tier, risk_multipliers.get(risk_tier.replace("-", "_"), 1.0)
@@ -439,9 +440,17 @@ def build_target_allocation(
                 float(parsed_overlays.effective_deployment_caps.get(symbol, 1.0))
                 if parsed_overlays is not None else 1.0
             )
-            risk_tier_source = _field(assessment, "risk_tier_source", "MANUAL_ASSESSMENT")
-            if not isinstance(risk_tier_source, str) or not risk_tier_source.strip():
-                raise ValueError("risk_tier_source must be a non-empty string")
+            # Distinguish where the tier came from: the policy default for an
+            # unspecified tier, an explicit human assessment, or a future
+            # deterministic estimate. Never label a default as manual.
+            risk_tier_source = _field(assessment, "risk_tier_source", None) if assessment is not None else None
+            if risk_tier_source is None:
+                risk_tier_source = "POLICY_DEFAULT" if supplied_tier is None else "MANUAL_ASSESSMENT"
+            risk_tier_source = str(risk_tier_source).strip().upper()
+            if risk_tier_source not in {"POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"}:
+                raise ValueError(
+                    "risk_tier_source must be POLICY_DEFAULT, MANUAL_ASSESSMENT, or DETERMINISTIC_ESTIMATE"
+                )
             deployment_factor = min(
                 asset_confidence_factor,
                 event_multiplier,
@@ -497,7 +506,7 @@ def build_target_allocation(
                     "score_strength": score_strength,
                     "current_weight": normalized_current_weights.get(symbol, 0.0),
                     "risk_tier": risk_tier,
-                    "risk_tier_source": risk_tier_source.strip(),
+                    "risk_tier_source": risk_tier_source,
                     "risk_multiplier": risk_multiplier,
                     "asset_confidence": confidence,
                     "confidence_deployment_factor": asset_confidence_factor,
@@ -534,6 +543,13 @@ def build_target_allocation(
     for symbol, details in deployment_allowances.items():
         strategic_weight = satellite_weights.get(symbol, 0.0)
         details["strategic_target_weight"] = strategic_weight
+        # Capacity competition context: the envelope this satellite competed
+        # in, how much preserve-existing buckets already consumed, and the
+        # pre-cap strategic weight it requested.
+        details["satellite_envelope"] = satellite_cap
+        details["held_satellite_weight"] = sum(held_satellite_weights.values())
+        details["eligible_satellite_budget"] = eligible_satellite_budget
+        details["requested_strategic_weight"] = strategic_satellite_raw.get(symbol, 0.0)
         details["max_immediate_increase_weight"] = strategic_weight * details["deployment_factor"]
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight

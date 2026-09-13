@@ -416,6 +416,16 @@ def recommend_rebalance(
         raise ValueError("portfolio_value must be finite and >= 0")
     if not math.isfinite(new_cash_available) or new_cash_available < 0:
         raise ValueError("new_cash_available must be finite and >= 0")
+    if decision_confidence is not None and deployment_caps:
+        # Both parameters can express the same deployment cap on the same
+        # dollar basis: per-symbol allowances from allocation already fold
+        # the decision-confidence factor in (min of all applicable caps), so
+        # supplying both would consume it twice. Express each constraint
+        # once, composed by the caller when sources differ.
+        raise ValueError(
+            "decision_confidence and deployment_caps are mutually exclusive; "
+            "compose different cap sources into one per-symbol factor instead"
+        )
     normalized_deployment_caps: dict[str, float] = {}
     for raw_symbol, raw_factor in (deployment_caps or {}).items():
         symbol = str(raw_symbol).strip().upper()
