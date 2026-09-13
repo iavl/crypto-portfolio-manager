@@ -348,6 +348,7 @@ class DecisionReviewPacket:
     event_scan_summary: Mapping[str, Any] | None = None
     manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
+    post_action_projection: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -446,6 +447,12 @@ class DecisionReviewPacket:
                 else NoTradeAttribution.from_mapping(self.no_trade_attribution)
             )
             object.__setattr__(self, "no_trade_attribution", value)
+        if self.post_action_projection is not None:
+            if not isinstance(self.post_action_projection, Mapping):
+                raise ValueError("post_action_projection must be an object or null")
+            object.__setattr__(
+                self, "post_action_projection", freeze_packet_value(self.post_action_projection, path="post_action_projection")
+            )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -479,6 +486,9 @@ class DecisionReviewPacket:
             "event_scan_summary": thaw_packet_value(self.event_scan_summary) if self.event_scan_summary is not None else None,
             "manual_asset_contexts": [item.as_dict() for item in self.manual_asset_contexts],
             "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
+            "post_action_projection": (
+                thaw_packet_value(self.post_action_projection) if self.post_action_projection else None
+            ),
         }
 
     @classmethod

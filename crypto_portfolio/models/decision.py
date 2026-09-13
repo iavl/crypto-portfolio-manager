@@ -68,6 +68,7 @@ class Decision:
     event_scan_summary: Mapping[str, Any] | None = None
     manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
+    post_action_projection: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -150,6 +151,14 @@ class Decision:
                 else NoTradeAttribution.from_mapping(self.no_trade_attribution)
             )
             object.__setattr__(self, "no_trade_attribution", value)
+        if self.post_action_projection is not None:
+            if not isinstance(self.post_action_projection, Mapping):
+                raise ValueError("post_action_projection must be an object or null")
+            object.__setattr__(
+                self,
+                "post_action_projection",
+                freeze_packet_value(self.post_action_projection, path="post_action_projection"),
+            )
         if self.config is not None:
             if not isinstance(self.config, Mapping):
                 raise ValueError("config must be an object or null")
@@ -274,6 +283,7 @@ class Decision:
             "benchmark_performance", "event_scan_summary",
             "manual_asset_contexts",
             "no_trade_attribution",
+            "post_action_projection",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -317,6 +327,7 @@ class Decision:
             event_scan_summary=data.get("event_scan_summary"),
             manual_asset_contexts=tuple(data.get("manual_asset_contexts", ())),
             no_trade_attribution=data.get("no_trade_attribution"),
+            post_action_projection=data.get("post_action_projection"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -366,6 +377,8 @@ class Decision:
             result["manual_asset_contexts"] = [item.as_dict() for item in self.manual_asset_contexts]
         if self.no_trade_attribution is not None:
             result["no_trade_attribution"] = self.no_trade_attribution.as_dict()
+        if self.post_action_projection is not None:
+            result["post_action_projection"] = thaw_packet_value(self.post_action_projection)
         return result
 
 

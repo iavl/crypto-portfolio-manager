@@ -1,7 +1,7 @@
 """Regression coverage for the 2026-09-11 missing-latest-daily-candle incident."""
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -245,3 +245,114 @@ class CacheTailFreshnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelativeStrengthFreshnessAnchorTests(unittest.TestCase):
+    """A1: factor freshness must follow the evaluation anchor, not the cache."""
+
+    @staticmethod
+    def _pair(days: tuple[str, ...], fetched_at: str) -> tuple[OHLCVSeries, OHLCVSeries]:
+        common = dict(source="binance", venue="BINANCE", market="spot", quote_currency="USDT", fetched_at=fetched_at)
+        return (
+            OHLCVSeries("SOL", "1D", tuple(_candle(day) for day in days), **common),
+            OHLCVSeries("BTC", "1D", tuple(_candle(day) for day in days), **common),
+        )
+
+    def test_same_day_evaluation_uses_previous_completed_day(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset, btc = self._pair(("2026-09-08", "2026-09-09"), "2026-09-10T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL", as_of="2026-09-10T23:10:00Z")
+        self.assertEqual(result.facts.freshness, "CURRENT")
+
+    def test_cached_series_is_stale_for_later_evaluation(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        # Fetched and complete on 2026-09-10, but scored two days later: the
+        # policy allows one lagging candle, not two.
+        asset, btc = self._pair(("2026-09-08", "2026-09-09"), "2026-09-10T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL", as_of="2026-09-13T12:00:00Z")
+        self.assertEqual(result.facts.freshness, "STALE")
+
+    def test_new_fetch_wrapping_old_tail_is_stale_without_as_of(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset, btc = self._pair(("2026-09-08", "2026-09-09"), "2026-09-12T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL")
+        self.assertEqual(result.facts.freshness, "STALE")
+
+    def test_policy_lag_tolerance_applies_to_evaluation_anchor(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset, btc = self._pair(("2026-09-08", "2026-09-10"), "2026-09-11T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL", as_of="2026-09-12T12:00:00Z")
+        self.assertEqual(result.facts.freshness, "CURRENT")
+
+
+class RelativeStrengthAnchorRegressionTests(unittest.TestCase):
+    """Per-series fetch anchors and as_of cutoffs (PR #2 review)."""
+
+    @staticmethod
+    def _series(symbol: str, days: tuple[str, ...], fetched_at: str | None) -> OHLCVSeries:
+        return OHLCVSeries(
+            symbol, "1D", tuple(_candle(day) for day in days),
+            source="binance", venue="BINANCE", market="spot",
+            quote_currency="USDT", fetched_at=fetched_at,
+        )
+
+    def test_each_series_is_judged_against_its_own_fetch_anchor(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        # BTC was fetched later (Jan 20) but its tail is Jan 9: judged against
+        # its own fetch it is stale, even though the asset series (fetched
+        # Jan 10) is current.
+        asset = self._series("SOL", ("2026-01-08", "2026-01-09"), "2026-01-10T01:00:00Z")
+        btc = self._series("BTC", ("2026-01-08", "2026-01-09"), "2026-01-20T01:00:00Z")
+        result = calculate_relative_strength(asset, btc, symbol="SOL")
+        self.assertEqual(result.facts.freshness, "STALE")
+
+    def test_series_without_fetch_time_is_unknown_not_inherited(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        asset = self._series("SOL", ("2026-01-08", "2026-01-09"), "2026-01-10T01:00:00Z")
+        btc = self._series("BTC", ("2026-01-08", "2026-01-09"), None)
+        result = calculate_relative_strength(asset, btc, symbol="SOL")
+        self.assertEqual(result.facts.freshness, "UNKNOWN")
+
+    def test_as_of_truncates_future_candles_from_every_calculation(self):
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        days = [
+            (datetime.fromisoformat("2025-06-01T00:00:00+00:00") + timedelta(days=index)).date()
+            for index in range(220)
+        ]
+        # SOL trends up vs flat BTC so different windows give different
+        # excess returns; a future leak would change the early evaluation.
+        def series(symbol: str, visible: list) -> OHLCVSeries:
+            candles = tuple(
+                Candle(
+                    day.isoformat() + "T00:00:00Z",
+                    100.0 * (1.0 + 0.004 * index if symbol == "SOL" else 1.0) - 1,
+                    100.0 * (1.0 + 0.004 * index if symbol == "SOL" else 1.0) + 1,
+                    99.0,
+                    100.0 * (1.0 + 0.004 * index if symbol == "SOL" else 1.0),
+                    100.0,
+                )
+                for index, day in enumerate(days)
+                if day in visible
+            )
+            return OHLCVSeries(symbol, "1D", candles, source="binance", venue="BINANCE",
+                               market="spot", quote_currency="USDT", fetched_at="2026-01-20T00:00:00Z")
+
+        full = list(days)
+        early = "2025-10-01T12:00:00Z"
+        cutoff = datetime.fromisoformat(early.replace("Z", "+00:00")).date()
+        visible = [day for day in days if day < cutoff]
+        early_result = calculate_relative_strength(series("SOL", full), series("BTC", full), symbol="SOL", as_of=early)
+        truncated_result = calculate_relative_strength(series("SOL", visible), series("BTC", visible), symbol="SOL")
+        self.assertEqual(
+            (early_result.relative_30d, early_result.relative_90d, early_result.relative_180d, early_result.score),
+            (truncated_result.relative_30d, truncated_result.relative_90d, truncated_result.relative_180d, truncated_result.score),
+        )
+        late_result = calculate_relative_strength(series("SOL", full), series("BTC", full), symbol="SOL", as_of="2026-01-20T00:00:00Z")
+        self.assertNotEqual(early_result.relative_90d, late_result.relative_90d)

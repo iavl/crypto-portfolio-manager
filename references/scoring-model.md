@@ -145,8 +145,10 @@ coverage   = sum(profile_weight[f] * reliability[f])
 The profile weights are fixed resolved weights, not renormalized weights.
 Explicit custom weights must also sum to 1; invalid sums are rejected.
 Coverage can permit at most `HIGH` at 90%, `MEDIUM` at 70%, and investability
-at 60%. Critical incompleteness forces `LOW`; a user-supplied confidence cannot
-raise a coverage cap.
+at 60%. Critical incompleteness forces `LOW`. The assessment band is derived,
+never labeled: the coverage gate and the numeric data-confidence band
+(0.80/0.60 thresholds) both apply and the more defensive one wins, so no
+caller-supplied label can contradict the evidence the score was built from.
 
 ## Relative strength versus BTC
 
@@ -169,6 +171,17 @@ clamped to 0–100 outside it.
 
 For non-BTC satellites, missing BTC-relative evidence is `HOLD_ONLY`, while a
 materially negative comparison is ineligible for new risk.
+
+`relative_strength_vs_btc` carries one unit everywhere: a numeric value is the
+canonical 0–100 factor score (below 50 is the confirmed weak case, at or above
+50 is outperform/neutral), a string is the state, and excess returns stay on
+the horizon-scoped fraction facts. No magnitude-based unit guess is applied,
+values outside `[0, 100]` are rejected, and core/satellite consumers read the
+field identically. Missing factors shrink the weighted score toward neutral
+but can never by themselves produce a satellite exit: without independent
+negative evidence (broken thesis, severe event, materially weak BTC-relative
+case, or hard portfolio risk) an incomplete held satellite stays `HOLD_ONLY`
+at its full current weight.
 
 For BTC macro/liquidity interpretation, 90D rate/real-yield/USD changes, the
 13W Fed balance-sheet change, and 6M M2 change are the primary current-horizon
@@ -341,3 +354,48 @@ proposal scanning is not an input; important governance, tokenomics, legal, or
 protocol context may be supplied through `ManualAssetContext` with
 `source=MANUAL_USER_INPUT`. Unknown security or chain liveness for a
 risk-increasing target remains a fail-closed action gate.
+
+## Semantic factor anchors (phase-7 research, not policy)
+
+Semantic factors (fundamentals, valuation for non-priced models) give 0-100
+judgments. To keep them reviewable, each protocol-asset judgment must answer a
+fixed evidence checklist and be calibrated against explicit anchors before it
+can support a material decision. For AAVE (defi_protocol profile) the
+checklist is:
+
+1. **Protocol revenue capture**: fees, protocol net revenue, and the share
+   actually accrued to the token (buyback/split), stated separately; usage
+   without capture is not token-bullish evidence.
+2. **Supply and dilution**: current supply, emission/safety-module schedule,
+   and the horizon-matched dilution rate.
+3. **Growth persistence**: is utilization/fee growth durable or one-off
+   (incentive season, rate spike)? State the driver.
+4. **Competition and bad debt**: share of the lending market, documented
+   bad-debt/liquidation history, and collateral quality trend.
+5. **Valuation denominator and period**: price/fees ratio must name its
+   denominator (fees vs net revenue) and averaging window.
+
+Proposed score anchors awaiting user confirmation (they are research
+calibration, not config, until approved):
+
+| Anchor | Score | Meaning |
+|---|---|---|
+| Materially weak | 20 | shrinking capture, heavy dilution, or bad-debt stress |
+| Weak | 35 | one deteriorating driver, others flat |
+| Neutral | 50 | mixed or insufficiently differentiated |
+| Strong | 65 | growing capture, contained dilution, stable share |
+| Materially strong | 80 | multiple durable drivers with independent evidence |
+
+Repeat-judgment protocol: fix the frozen facts, run a set number of
+independent judgments on the host's currently selected model, and record the
+score dispersion plus whether any repeat crossed a decision boundary
+(`satellite_entry_score`, soft-exit band). Reproducible stability across
+repeats is required before a semantic anchor may justify a material action.
+The repository neither routes models nor persists private reasoning.
+
+Sensitivity studies stay counterfactual and clearly labeled: varying
+`risk_multipliers.high_beta` (0.5 default) or the relative-strength
+risk-adjustment band changes only the diagnostic output of
+`build_target_allocation` allowances and `stress_diagnostic`/`evaluation`
+harnesses; none of those variants is a recommendation, and changing the
+default requires the phase-8C decision plus out-of-sample evidence.

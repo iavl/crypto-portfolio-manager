@@ -51,7 +51,7 @@ class RegressionFixtureTests(unittest.TestCase):
         result = normalize_snapshot(fixture("stablecoin_below_floor.json"))
         self.assertTrue(any("below configured minimum" in warning for warning in result["warnings"]))
         missing = fixture("missing_factor_data.json")
-        score = score_factors(missing["factor_scores"], confidence=missing["confidence"])
+        score = score_factors(missing["factor_scores"])
         self.assertEqual(score.missing_factors, ("fundamentals", "onchain", "capital_flows", "relative_strength_btc"))
         self.assertEqual(score.confidence, "LOW")
 

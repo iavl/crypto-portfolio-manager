@@ -76,6 +76,7 @@ class ScoreResult:
     effective_factor_scores: Mapping[str, float] = None
     factor_reliability: Mapping[str, float] = None
     factor_availability: Mapping[str, str] = None
+    factor_contributions: Mapping[str, float] = None
     not_applicable_factors: tuple[str, ...] = ()
     factor_data_confidence: ConfidenceResult | None = None
     data_confidence_score: float | None = None
@@ -93,6 +94,7 @@ class ScoreResult:
             "effective_factor_scores": dict(self.effective_factor_scores or {}),
             "factor_reliability": dict(self.factor_reliability or {}),
             "factor_availability": dict(self.factor_availability or {}),
+            "factor_contributions": dict(self.factor_contributions or {}),
             "missing_factors": list(self.missing_factors),
             "not_applicable_factors": list(self.not_applicable_factors),
             "confidence": self.confidence,
@@ -322,17 +324,6 @@ def _extract(value: Any, factor: str) -> tuple[float | None, str, float]:
     return score, availability, reliability
 
 
-def _confidence(value: str | None) -> str:
-    if value is None:
-        return "HIGH"
-    if not isinstance(value, str):
-        raise ValueError("confidence must be HIGH, MEDIUM, or LOW")
-    value = value.upper()
-    if value not in _CONFIDENCE_ORDER:
-        raise ValueError("confidence must be HIGH, MEDIUM, or LOW")
-    return value
-
-
 def _factor_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("factor_scores must be an object")
@@ -370,19 +361,21 @@ def _weight_mapping(value: Mapping[str, float]) -> dict[str, float]:
     return result
 
 
-def _confidence_for_coverage(
-    confidence: str | None, coverage: float, critical_data_complete: bool, policy: Policy
-) -> str:
-    result = _confidence(confidence)
-    index = _CONFIDENCE_ORDER.index(result)
+def _coverage_gate_band(coverage: float, critical_data_complete: bool, policy: Policy) -> str:
+    """Hard coverage gates from the canonical scoring policy.
+
+    These thresholds (0.9/0.7/0.6) gate investability, which is a distinct
+    concept from the data-confidence band thresholds; both are applied and
+    the more defensive band wins.
+    """
     thresholds = policy.scoring
     if not critical_data_complete or coverage < thresholds["minimum_investable_coverage"]:
-        index = 0
-    elif coverage < thresholds["medium_confidence_min_coverage"]:
-        index = min(index, 0)
-    elif coverage < thresholds["high_confidence_min_coverage"]:
-        index = min(index, 1)
-    return _CONFIDENCE_ORDER[index]
+        return "LOW"
+    if coverage < thresholds["medium_confidence_min_coverage"]:
+        return "LOW"
+    if coverage < thresholds["high_confidence_min_coverage"]:
+        return "MEDIUM"
+    return "HIGH"
 
 
 
@@ -391,7 +384,6 @@ def _score_factors(
     factor_scores: Mapping[str, Any],
     weights: Mapping[str, float],
     *,
-    confidence: str | None,
     critical_data_complete: bool,
     policy: Policy,
     profile_name: str,
@@ -518,9 +510,21 @@ def _score_factors(
         effective_factor_scores=effective_scores,
         factor_reliability=reliabilities,
         factor_availability=availability,
+        # Per-factor contribution to the base score (weight x effective
+        # score) so attribution consumers never recompute it themselves.
+        factor_contributions={
+            factor: resolved_weights[factor] * effective_scores.get(factor, 0.0)
+            for factor in resolved_weights
+        },
         missing_factors=tuple(missing),
         not_applicable_factors=tuple(not_applicable),
-        confidence=_confidence_for_coverage(confidence, coverage, critical_data_complete, policy),
+        # The band is derived, never labeled: coverage gates and the numeric
+        # data-confidence score both apply and the more defensive band wins,
+        # so no caller label can contradict the evidence it was built from.
+        confidence=min(
+            (_coverage_gate_band(coverage, critical_data_complete, policy), factor_data_confidence.band),
+            key=_CONFIDENCE_ORDER.index,
+        ),
         confidence_adjustment=coverage,
         coverage=coverage,
         critical_data_complete=critical_data_complete,
@@ -536,7 +540,6 @@ def score_factors(
     factor_scores: Mapping[str, Any],
     weights: Mapping[str, float] | None = None,
     *,
-    confidence: str | None = None,
     critical_data_complete: bool = True,
     policy: Policy | None = None,
     acquisition: Any | None = None,
@@ -559,7 +562,6 @@ def score_factors(
     return _score_factors(
         factors,
         raw_weights,
-        confidence=confidence,
         critical_data_complete=critical_data_complete,
         policy=resolved_policy,
         profile_name=profile_name,
@@ -573,7 +575,6 @@ def score_assessment(
     result = score_factors(
         assessment.factor_scores,
         policy=policy,
-        confidence=assessment.confidence,
         critical_data_complete=assessment.critical_data_complete,
         acquisition=acquisition,
         symbol=assessment.symbol,
@@ -608,7 +609,6 @@ def weighted_score(
     factor_scores: Mapping[str, Any],
     weights: Mapping[str, float] | None = None,
     *,
-    confidence: str | None = None,
     critical_data_complete: bool = True,
     policy: Policy | None = None,
     acquisition: Any | None = None,
@@ -617,7 +617,6 @@ def weighted_score(
     return score_factors(
         factor_scores,
         weights,
-        confidence=confidence,
         critical_data_complete=critical_data_complete,
         policy=policy,
         acquisition=acquisition,

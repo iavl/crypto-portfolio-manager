@@ -107,7 +107,16 @@ rebalance action.
 
 Avoid arbitrary “-5%, -10%, -15%” ladders without structural justification.
 The engine may deploy less than the approved amount or return `WAIT` when
-history, structure, volatility, or freshness is inadequate.
+history, structure, volatility, or freshness is inadequate. The approved
+amount is final approved dollars: portfolio-level confidence caps were
+consumed exactly once upstream (allocation folds asset confidence, event
+risk, decision confidence, and overlay caps into one per-symbol deployment
+factor; rebalance accepts either that folded per-symbol cap or a
+portfolio-level decision confidence, never both), and the entry planner
+never re-multipplies them. Two independently based restrictions still apply
+at entry: the technical snapshot's own data-confidence factor (measured
+after approval, so it was never in the approved dollars; LOW is a hard WAIT
+gate, MEDIUM scales staging) and the structural tranche coverage.
 `ATR14` is the simple mean of 14 fully defined true ranges (15 candles
 including the preceding close); it is not silently substituted with Wilder
 smoothing.

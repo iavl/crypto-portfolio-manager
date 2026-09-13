@@ -63,10 +63,15 @@
           "weighted_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
           "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
-          "relative_strength_vs_btc": {"type": ["number", "string", "null"]},
+          "relative_strength_vs_btc": {"oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["OUTPERFORM", "NEUTRAL", "UNDERPERFORM", "MATERIALLY_WEAK", "UNKNOWN"]},
+            {"type": "number", "minimum": 0, "maximum": 100}
+          ]},
           "thesis_broken": {"type": "boolean"},
           "critical_data_complete": {"type": "boolean"},
         "risk_tier": {"type": "string", "minLength": 1},
+        "risk_tier_source": {"oneOf": [{"type": "null"}, {"type": "string", "enum": ["POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"]}]},
         "event_risk": {"oneOf": [{"$ref": "#/$defs/eventRisk"}, {"type": "null"}]},
         "scoring_profile_name": {"type": ["string", "null"]},
         "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
@@ -89,6 +94,7 @@
     ,"event_scan_summary": {"type": ["object", "null"]}
     ,"manual_asset_contexts": {"type": "array", "items": {"$ref": "#/$defs/manualAssetContext"}}
     ,"no_trade_attribution": {"oneOf": [{"$ref": "#/$defs/noTradeAttribution"}, {"type": "null"}]}
+    ,"post_action_projection": {"type": ["object", "null"]}
   },
   "additionalProperties": false,
   "$defs": {

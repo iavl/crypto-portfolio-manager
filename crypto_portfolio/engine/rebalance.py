@@ -167,7 +167,16 @@ def build_no_trade_attribution(
         relative = _value_field(assessment, "relative_strength_vs_btc")
         if symbol == "ETH" or resolved.classify(symbol) == "satellite":
             btc_relative_gate = "PASS"
-            relative_state = str(relative or "UNKNOWN").strip().upper()
+            if relative is None:
+                relative_state = "UNKNOWN"
+            elif isinstance(relative, str):
+                relative_state = relative.strip().upper()
+            else:
+                # Canonical 0-100 score unit; below 50 is the confirmed weak case.
+                try:
+                    relative_state = "UNDERPERFORM" if float(relative) < 50 else "OUTPERFORM"
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("relative_strength_vs_btc must be numeric or a supported state") from exc
             if relative_state in {"", "UNKNOWN", "UNDERPERFORM", "MATERIALLY_WEAK"}:
                 btc_relative_gate = "BLOCKED"
                 reasons.add("BTC_RELATIVE_WEAK")
@@ -302,6 +311,7 @@ class RebalanceResult:
     post_cash_total: float = 0.0
     reconciliation: Mapping[str, float | bool] | None = None
     no_trade_attribution: NoTradeAttribution | None = None
+    post_action_projection: Mapping[str, Any] | None = None
 
     @property
     def no_trade(self) -> bool:
@@ -324,6 +334,7 @@ class RebalanceResult:
             "post_cash_total": self.post_cash_total,
             "reconciliation": dict(self.reconciliation or {}),
             "no_trade_attribution": self.no_trade_attribution.as_dict() if self.no_trade_attribution else None,
+            "post_action_projection": dict(self.post_action_projection or {}) or None,
         }
 
 
@@ -407,6 +418,16 @@ def recommend_rebalance(
         raise ValueError("portfolio_value must be finite and >= 0")
     if not math.isfinite(new_cash_available) or new_cash_available < 0:
         raise ValueError("new_cash_available must be finite and >= 0")
+    if decision_confidence is not None and deployment_caps:
+        # Both parameters can express the same deployment cap on the same
+        # dollar basis: per-symbol allowances from allocation already fold
+        # the decision-confidence factor in (min of all applicable caps), so
+        # supplying both would consume it twice. Express each constraint
+        # once, composed by the caller when sources differ.
+        raise ValueError(
+            "decision_confidence and deployment_caps are mutually exclusive; "
+            "compose different cap sources into one per-symbol factor instead"
+        )
     normalized_deployment_caps: dict[str, float] = {}
     for raw_symbol, raw_factor in (deployment_caps or {}).items():
         symbol = str(raw_symbol).strip().upper()
@@ -437,6 +458,7 @@ def recommend_rebalance(
     if post_cash_total <= 0:
         raise ValueError("portfolio_value plus new_cash_available must be > 0")
     stable_symbols = tuple(resolved.stable_symbols)
+    stable_symbols_set = frozenset(stable_symbols)
     if not stable_symbols:
         raise ValueError("policy must define at least one stable symbol")
     stable_target = _stable_target_weights(current, target, stable_symbols)
@@ -585,6 +607,77 @@ def recommend_rebalance(
     ]
     active = {"INCREASE", "REDUCE", "EXIT"}
     decision = "REBALANCE" if any(action.action in active for action in actions) else "NO_TRADE"
+    # Project the portfolio that the recommended actions would actually leave
+    # behind: hard-constraint compliance is judged on this projection, not on
+    # the strategic target. Shortfalls the actions cannot repair stay visible
+    # instead of being swallowed by the turnover thresholds.
+    projected_dollars: dict[str, float] = {}
+    for action in actions:
+        if action.symbol in stable_symbols_set:
+            # Stable legs are settlement plumbing: sells exist to fund buys,
+            # and any buy a cap shrank leaves its dollars undeployed. The
+            # stable sleeve absorbs the remainder so dollars are conserved
+            # instead of silently destroyed by capped increases.
+            continue
+        delta = action.amount_usd if action.action == "INCREASE" else -action.amount_usd
+        if action.action in {"INCREASE", "REDUCE", "EXIT"}:
+            projected_dollars[action.symbol] = (
+                effective_current.get(action.symbol, 0.0) + delta
+            )
+        else:
+            projected_dollars[action.symbol] = effective_current.get(action.symbol, 0.0)
+    for symbol, dollars in effective_current.items():
+        projected_dollars.setdefault(symbol, dollars)
+    risky_total = sum(
+        dollars for symbol, dollars in projected_dollars.items() if symbol not in stable_symbols_set
+    )
+    stable_total = max(0.0, post_cash_total - risky_total)
+    current_stable = {
+        symbol: dollars
+        for symbol, dollars in effective_current.items()
+        if symbol in stable_symbols_set and dollars > 0
+    }
+    current_stable_total = sum(current_stable.values())
+    if current_stable_total > 0:
+        for symbol, dollars in current_stable.items():
+            projected_dollars[symbol] = stable_total * dollars / current_stable_total
+    else:
+        projected_dollars[stable_symbol] = projected_dollars.get(stable_symbol, 0.0) + stable_total
+    projected_weights = {
+        symbol: dollars / post_cash_total for symbol, dollars in projected_dollars.items()
+    }
+    projected_stable = sum(projected_weights.get(symbol, 0.0) for symbol in stable_symbols)
+    unresolved: list[str] = []
+    if projected_stable + 1e-9 < required_stable:
+        unresolved.append(
+            f"STABLECOIN_FLOOR_UNRESOLVED: projected stable sleeve {projected_stable:.2%} "
+            f"is below required {required_stable:.2%}"
+        )
+    limits = resolved.regime(regime_name)
+    for symbol, weight in projected_weights.items():
+        if symbol in resolved.stable_symbols or weight <= 0:
+            continue
+        if weight > limits.single_asset_max + 1e-9:
+            unresolved.append(
+                f"SINGLE_ASSET_CAP_UNRESOLVED: projected {symbol} {weight:.2%} "
+                f"exceeds {limits.single_asset_max:.2%}"
+            )
+    projected_satellite = sum(
+        projected_weights.get(symbol, 0.0) for symbol in resolved.satellite_symbols
+    )
+    if projected_satellite > limits.satellite_max + 1e-9:
+        unresolved.append(
+            f"SATELLITE_CAP_UNRESOLVED: projected satellite sleeve {projected_satellite:.2%} "
+            f"exceeds {limits.satellite_max:.2%}"
+        )
+    projection: dict[str, Any] = {
+        "basis": "recommended actions applied to current dollars plus new cash",
+        "post_action_total_usd": post_cash_total,
+        "projected_weights": {symbol: max(0.0, weight) for symbol, weight in sorted(projected_weights.items())},
+        "projected_stable_weight": projected_stable,
+        "required_stable_weight": required_stable,
+        "unresolved_constraints": tuple(unresolved),
+    }
     return RebalanceResult(
         tuple(actions),
         decision,
@@ -597,7 +690,9 @@ def recommend_rebalance(
             policy=resolved,
             regime=regime_name,
             decision_confidence=decision_confidence,
+            risk_flags=unresolved,
         ),
+        projection,
     )
 
 

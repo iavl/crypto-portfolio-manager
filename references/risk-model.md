@@ -184,6 +184,17 @@ At minimum consider:
 
 Do not present a stress test as a probability forecast. Its purpose is to expose hidden concentration and beta.
 
+Python owns the arithmetic through `engine.risk.stress_diagnostic`: scenario
+inputs are explicit decimal-fraction returns for every asset carrying weight
+(stables included), a missing input is an error rather than a zero fill, and
+spot losses cannot be below -100%. The output carries the weighted scenario
+return, per-asset contributions, the peak-relative projected drawdown
+`(1+d)(1+s)-1` clamped at zero with the untruncated change preserved, and the
+remaining budget capacity `max(0, 1-(1-D)/(1+d))`; a total loss (`d=-1`) is
+explicitly unrecoverable. Which scenarios bind on allocation remains a
+pending policy decision — until then the diagnostic reports `DIAGNOSTIC_ONLY`
+and never blocks or rescales targets by itself.
+
 ## Risk hierarchy
 
 When reducing risk, generally prefer:

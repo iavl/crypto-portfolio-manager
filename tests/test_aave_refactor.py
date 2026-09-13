@@ -125,7 +125,15 @@ class AaveRefactorTests(unittest.TestCase):
         })
         self.assertEqual(high.target_weights["AAVE"], medium.target_weights["AAVE"])
         self.assertEqual(high.target_weights["AAVE"], elevated.target_weights["AAVE"])
-        self.assertEqual(high.deployment_allowances["AAVE"]["risk_tier_source"], "MANUAL_ASSESSMENT")
+        # The tier was not supplied by an assessment, so it is the policy
+        # default, never mislabeled as a manual estimate.
+        self.assertEqual(high.deployment_allowances["AAVE"]["risk_tier_source"], "POLICY_DEFAULT")
+        manual = build_target_allocation(assessments={
+            "AAVE": {**common, "confidence": "HIGH", "risk_tier": "high_beta",
+                     "risk_tier_source": "MANUAL_ASSESSMENT"}
+        })
+        self.assertEqual(manual.deployment_allowances["AAVE"]["risk_tier_source"], "MANUAL_ASSESSMENT")
+        self.assertEqual(manual.deployment_allowances["AAVE"]["risk_multiplier"], 0.5)
         self.assertLess(medium.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
         self.assertLess(elevated.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
 

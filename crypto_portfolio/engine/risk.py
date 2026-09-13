@@ -507,11 +507,142 @@ def run_risk_gate(
     return RiskCheckResult(tuple(violations), deployment_caps, tuple(dict.fromkeys(blocked_symbols)))
 
 
+def _scenario_return(value: Any, symbol: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"scenario return for {symbol} must be a decimal fraction")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"scenario return for {symbol} must be finite")
+    if result < -1.0:
+        raise ValueError(f"scenario return for {symbol} cannot be below -100%")
+    return result
+
+
+def scenario_portfolio_return(
+    weights: Mapping[str, float],
+    scenario_returns: Mapping[str, float],
+) -> float:
+    """Weighted portfolio return under one explicit loss/gain scenario.
+
+    Every asset carrying weight must have a scenario input, stables included:
+    a missing input is a fail-closed error, never a zero fill or a
+    renormalization over the remaining weights. Inputs are decimal fractions;
+    spot assets may lose at most 100%.
+    """
+    parsed_weights = _weights(weights)
+    if not math.isclose(sum(parsed_weights.values()), 1.0, abs_tol=1e-9):
+        raise ValueError("scenario weights must sum to 1")
+    returns = {
+        str(symbol).strip().upper(): _scenario_return(value, str(symbol))
+        for symbol, value in scenario_returns.items()
+    }
+    missing = sorted(symbol for symbol, weight in parsed_weights.items() if weight > 0 and symbol not in returns)
+    if missing:
+        raise ValueError("scenario return is missing for exposed asset(s): " + ", ".join(missing))
+    return sum(weight * returns[symbol] for symbol, weight in parsed_weights.items())
+
+
+def projected_peak_drawdown(
+    current_drawdown: float,
+    scenario_return: float,
+) -> dict[str, float]:
+    """Combine an existing drawdown with one scenario return, peak-relative.
+
+    ``projected_drawdown`` is the NAV change versus the old peak, clamped at
+    zero (a gain cannot create a positive "drawdown"); the untruncated value
+    is preserved as ``change_vs_previous_peak`` so recovery upside stays
+    explainable.
+    """
+    if isinstance(current_drawdown, bool) or not isinstance(current_drawdown, (int, float)):
+        raise ValueError("current_drawdown must be a number")
+    drawdown = float(current_drawdown)
+    if not math.isfinite(drawdown) or drawdown > 0 or drawdown < -1.0:
+        raise ValueError("current_drawdown must be finite and in [-1, 0]")
+    scenario = _scenario_return(scenario_return, "portfolio")
+    change = (1.0 + drawdown) * (1.0 + scenario) - 1.0
+    return {
+        "projected_drawdown": min(0.0, change),
+        "change_vs_previous_peak": change,
+    }
+
+
+def remaining_drawdown_capacity(
+    current_drawdown: float,
+    risk_budget: float,
+) -> float | None:
+    """Further loss fraction the portfolio can still take within the budget.
+
+    Solves (1+d)(1+s)-1 >= -D for the largest tolerable additional loss
+    ``1-(1-D)/(1+d)``; a total loss (d = -1) has no recoverable capacity and
+    returns None. A budget breach is the caller's separate determination:
+    this value never turns a negative into new budget.
+    """
+    if isinstance(current_drawdown, bool) or not isinstance(current_drawdown, (int, float)):
+        raise ValueError("current_drawdown must be a number")
+    drawdown = float(current_drawdown)
+    if not math.isfinite(drawdown) or drawdown > 0 or drawdown < -1.0:
+        raise ValueError("current_drawdown must be finite and in [-1, 0]")
+    if isinstance(risk_budget, bool) or not isinstance(risk_budget, (int, float)):
+        raise ValueError("risk_budget must be a positive fraction")
+    budget = float(risk_budget)
+    if not math.isfinite(budget) or budget <= 0 or budget > 1:
+        raise ValueError("risk_budget must be finite and in (0, 1]")
+    if drawdown <= -1.0:
+        return None
+    return max(0.0, 1.0 - (1.0 - budget) / (1.0 + drawdown))
+
+
+def stress_diagnostic(
+    weights: Mapping[str, float],
+    scenario_returns: Mapping[str, float],
+    *,
+    current_drawdown: float = 0.0,
+    risk_budget: float | None = None,
+) -> dict[str, Any]:
+    """Research/policy diagnostic for one explicit scenario, not a constraint.
+
+    Combines the scenario portfolio return, per-asset loss contributions, the
+    peak-relative projected drawdown, and the remaining budget capacity. The
+    scenario set stays caller-owned; this function never invents defaults or
+    turns a diagnostic into a hard cap.
+    """
+    parsed_weights = _weights(weights)
+    returns = {
+        str(symbol).strip().upper(): _scenario_return(value, str(symbol))
+        for symbol, value in scenario_returns.items()
+    }
+    portfolio_return = scenario_portfolio_return(parsed_weights, returns)
+    contributions = {
+        symbol: weight * returns.get(symbol, 0.0)
+        for symbol, weight in sorted(parsed_weights.items())
+        if weight > 0
+    }
+    projection = projected_peak_drawdown(current_drawdown, portfolio_return)
+    result: dict[str, Any] = {
+        "scenario_return": portfolio_return,
+        "asset_contributions": contributions,
+        **projection,
+        "status": "DIAGNOSTIC_ONLY",
+    }
+    if risk_budget is not None:
+        capacity = remaining_drawdown_capacity(current_drawdown, risk_budget)
+        result["risk_budget"] = risk_budget
+        result["remaining_capacity"] = capacity
+        result["budget_breach"] = projection["projected_drawdown"] < -risk_budget
+        if capacity is None:
+            result["capacity_note"] = "current drawdown is a total loss; no recoverable capacity"
+    return result
+
+
 __all__ = [
     "RiskCheckResult",
     "RiskViolation",
     "apply_chain_liveness_deployment_cap",
     "chain_liveness_deployment_factor",
     "event_risk_deployment_factor",
+    "projected_peak_drawdown",
+    "remaining_drawdown_capacity",
     "run_risk_gate",
+    "scenario_portfolio_return",
+    "stress_diagnostic",
 ]

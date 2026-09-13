@@ -89,6 +89,14 @@ def _confidence(value: Any) -> str:
 
 
 def _relative_eligibility(value: Any) -> str:
+    """Classify the BTC-relative comparison on the canonical 0-100 score unit.
+
+    Numeric values are factor scores: below 50 is the confirmed
+    UNDERPERFORM case (no new risk), at or above 50 is OUTPERFORM/NEUTRAL.
+    Excess returns are never read here; they are horizon-scoped fraction
+    facts on the relative-strength result. ``None``/UNKNOWN means the
+    comparison is missing and maps to HOLD_ONLY.
+    """
     if value is None:
         return "HOLD_ONLY"
     if isinstance(value, str):
@@ -100,13 +108,14 @@ def _relative_eligibility(value: Any) -> str:
         if state in {"OUTPERFORM", "NEUTRAL"}:
             return "ELIGIBLE"
         raise ValueError("relative_strength_vs_btc is unsupported")
-    try:
-        value = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("relative_strength_vs_btc must be numeric or a supported state") from exc
-    if not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("relative_strength_vs_btc must be numeric or a supported state")
+    score = float(value)
+    if not math.isfinite(score):
         raise ValueError("relative_strength_vs_btc must be finite")
-    return "ELIGIBLE" if value >= 0 else "INELIGIBLE"
+    if not 0 <= score <= 100:
+        raise ValueError("relative_strength_vs_btc score must be in [0, 100]")
+    return "ELIGIBLE" if score >= 50 else "INELIGIBLE"
 
 
 def _core_quality_multiplier(score: float) -> float:
@@ -222,6 +231,35 @@ def _event_risk_multiplier(state: str, policy: Policy) -> float:
         raise ValueError(f"unknown event risk state {state}") from exc
 
 
+def _missing_factor_evidence(assessment: Any) -> bool:
+    """True when the assessment itself reports a MISSING scoring factor.
+
+    A scored assessment whose profile marks a positive-weight factor MISSING
+    has incomplete evidence even when the caller left the coarse
+    ``critical_data_complete`` flag at its default; the shrunk neutral score
+    must not be mistaken for fully evidenced weakness. Raw assessments that
+    carry no factor detail stay trusted on their flag.
+    """
+    if assessment is None:
+        return False
+    factors = _field(assessment, "factor_scores", None)
+    if not isinstance(factors, Mapping):
+        return False
+    for value in factors.values():
+        if value is None:
+            return True
+        availability = None
+        if isinstance(value, Mapping):
+            if str(value.get("state", "")).strip().upper() == "UNKNOWN":
+                return True
+            availability = value.get("availability")
+        elif hasattr(value, "availability"):
+            availability = value.availability
+        if str(availability or "").strip().upper() == "MISSING":
+            return True
+    return False
+
+
 def satellite_eligibility(
     assessment: AssetAssessment | Mapping[str, Any] | None,
     policy: Policy | None = None,
@@ -241,13 +279,27 @@ def satellite_eligibility(
     entry_score = resolved.allocation["satellite_entry_score"]
     exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
     soft_exit_score = resolved.allocation.get("satellite_soft_exit_score", exit_score)
+    # Confirmed hard risk first: a broken thesis or severe event is never
+    # masked by data availability in either direction.
     if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
         _field(assessment, "thesis_broken", False), "thesis_broken"
     ):
         return "INELIGIBLE"
+    relative_status = _relative_eligibility(relative)
+    # A confirmed materially-negative BTC-relative case is ineligible at any
+    # score; missing evidence is the opposite signal and handled below.
+    if relative_status == "INELIGIBLE":
+        return "INELIGIBLE"
+    evidence_incomplete = (
+        relative_status == "HOLD_ONLY"
+        or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+        or _missing_factor_evidence(assessment)
+    )
     if score < entry_score:
-        if _relative_eligibility(relative) == "INELIGIBLE":
-            return "INELIGIBLE"
+        if evidence_incomplete:
+            # Missing factors shrink the score toward neutral; the neutral
+            # score alone must not manufacture an exit for a held position.
+            return "HOLD_ONLY" if current_weight > 0 else "INELIGIBLE"
         if current_weight > 0 and score >= exit_score:
             return "HOLD_ONLY"
         # A held satellite inside the soft-exit band de-risks gradually instead
@@ -255,7 +307,7 @@ def satellite_eligibility(
         if current_weight > 0 and score >= soft_exit_score:
             return "SOFT_EXIT"
         return "INELIGIBLE"
-    if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
+    if evidence_incomplete:
         return "HOLD_ONLY"
     event_risk = _field(assessment, "event_risk", None)
     unresolved = (
@@ -267,7 +319,7 @@ def satellite_eligibility(
     )
     if unresolved:
         return "HOLD_ONLY"
-    return _relative_eligibility(relative)
+    return relative_status
 
 
 def _bounded_allocate(
@@ -404,8 +456,13 @@ def build_target_allocation(
         confidence = _confidence(_field(assessment, "confidence", "MEDIUM")) if assessment is not None else "MEDIUM"
         event_risk = _event_risk_state(assessment) if assessment is not None else "NORMAL"
         event_multiplier = _event_risk_multiplier(event_risk, resolved)
-        risk_tier = str(_field(assessment, "risk_tier", "normal")).lower() if assessment is not None else "normal"
         if asset_type == "satellite":
+            # Distinguish where the tier came from, independent of whether
+            # the assessment arrived typed or as a mapping: an explicit
+            # source wins; otherwise a non-default tier implies a human
+            # assessment and the default "normal" tier is the policy's own.
+            supplied_tier = _field(assessment, "risk_tier", None) if assessment is not None else None
+            risk_tier = str(supplied_tier).lower() if supplied_tier is not None else "normal"
             risk_multipliers = resolved.allocation["risk_multipliers"]
             risk_multiplier = risk_multipliers.get(
                 risk_tier, risk_multipliers.get(risk_tier.replace("-", "_"), 1.0)
@@ -417,9 +474,16 @@ def build_target_allocation(
                 float(parsed_overlays.effective_deployment_caps.get(symbol, 1.0))
                 if parsed_overlays is not None else 1.0
             )
-            risk_tier_source = _field(assessment, "risk_tier_source", "MANUAL_ASSESSMENT")
-            if not isinstance(risk_tier_source, str) or not risk_tier_source.strip():
-                raise ValueError("risk_tier_source must be a non-empty string")
+            risk_tier_source = _field(assessment, "risk_tier_source", None) if assessment is not None else None
+            if risk_tier_source is None:
+                risk_tier_source = (
+                    "MANUAL_ASSESSMENT" if risk_tier not in {"", "normal"} else "POLICY_DEFAULT"
+                )
+            risk_tier_source = str(risk_tier_source).strip().upper()
+            if risk_tier_source not in {"POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"}:
+                raise ValueError(
+                    "risk_tier_source must be POLICY_DEFAULT, MANUAL_ASSESSMENT, or DETERMINISTIC_ESTIMATE"
+                )
             deployment_factor = min(
                 asset_confidence_factor,
                 event_multiplier,
@@ -434,10 +498,15 @@ def build_target_allocation(
             if relative_status == "HOLD_ONLY":
                 if current_weights.get(symbol, 0.0) > 0:
                     satellite_hold[symbol] = current_weights[symbol]
+                evidence_incomplete = (
+                    _relative_eligibility(_field(assessment, "relative_strength_vs_btc", None)) != "ELIGIBLE"
+                    or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+                    or _missing_factor_evidence(assessment)
+                )
                 reason = (
-                    "score is inside the entry/exit hysteresis band"
-                    if score < resolved.allocation["satellite_entry_score"]
-                    else "BTC-relative or critical evidence is incomplete"
+                    "BTC-relative or critical evidence is incomplete; missing data preserves the position without adding risk"
+                    if evidence_incomplete
+                    else "score is inside the entry/exit hysteresis band"
                 )
                 reasons.append(f"{symbol} is HOLD_ONLY because {reason}")
             elif relative_status == "SOFT_EXIT":
@@ -471,7 +540,7 @@ def build_target_allocation(
                     "score_strength": score_strength,
                     "current_weight": normalized_current_weights.get(symbol, 0.0),
                     "risk_tier": risk_tier,
-                    "risk_tier_source": risk_tier_source.strip(),
+                    "risk_tier_source": risk_tier_source,
                     "risk_multiplier": risk_multiplier,
                     "asset_confidence": confidence,
                     "confidence_deployment_factor": asset_confidence_factor,
@@ -508,6 +577,13 @@ def build_target_allocation(
     for symbol, details in deployment_allowances.items():
         strategic_weight = satellite_weights.get(symbol, 0.0)
         details["strategic_target_weight"] = strategic_weight
+        # Capacity competition context: the envelope this satellite competed
+        # in, how much preserve-existing buckets already consumed, and the
+        # pre-cap strategic weight it requested.
+        details["satellite_envelope"] = satellite_cap
+        details["held_satellite_weight"] = sum(held_satellite_weights.values())
+        details["eligible_satellite_budget"] = eligible_satellite_budget
+        details["requested_strategic_weight"] = strategic_satellite_raw.get(symbol, 0.0)
         details["max_immediate_increase_weight"] = strategic_weight * details["deployment_factor"]
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight
