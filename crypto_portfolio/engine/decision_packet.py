@@ -11,7 +11,12 @@ from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, resolve_policy
-from .confidence import DecisionScope, calculate_decision_confidence, calculate_regime_confidence
+from .confidence import (
+    DecisionScope,
+    calculate_decision_confidence,
+    calculate_regime_confidence,
+    validate_decision_confidence_scope,
+)
 from .rebalance import build_no_trade_attribution
 
 
@@ -469,6 +474,11 @@ def build_decision_review_packet(
             policy=resolved_policy,
         )
     attribution = no_trade_attribution
+    # An externally supplied confidence must not contradict the actions it
+    # authorizes; the internally derived scope is consistent by construction.
+    validate_decision_confidence_scope(
+        (item.as_dict() for item in assets), decision_confidence_value
+    )
     if attribution is None:
         attribution = build_no_trade_attribution(
             current,
@@ -653,7 +663,10 @@ def should_run_high_impact_review(
 
 
 def validate_decision_review_packet(value: DecisionReviewPacket | Mapping[str, Any]) -> bool:
-    DecisionReviewPacket.from_mapping(value) if not isinstance(value, DecisionReviewPacket) else value
+    packet = value if isinstance(value, DecisionReviewPacket) else DecisionReviewPacket.from_mapping(value)
+    validate_decision_confidence_scope(
+        (item.as_dict() for item in packet.assets), packet.decision_confidence
+    )
     return True
 
 

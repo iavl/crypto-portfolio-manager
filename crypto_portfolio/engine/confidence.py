@@ -174,6 +174,84 @@ def confidence_deployment_factor(score: Any, policy: Any | None = None) -> float
     return _bounded(configured[band], f"confidence deployment factor {band}")
 
 
+def _action_field(action: Any, name: str, default: Any = None) -> Any:
+    if isinstance(action, Mapping):
+        return action.get(name, default)
+    return getattr(action, name, default)
+
+
+def action_derived_scope(actions: Iterable[Any]) -> DecisionScope | None:
+    """Derive the decision scope implied by proposed executable actions.
+
+    INCREASE wins over REDUCE/EXIT when both are proposed (a purchase also
+    depends on the sells funding it), and a pure HOLD/WAIT/NO_TRADE set has
+    no executable scope. The exposure weights intentionally stay empty: the
+    authoritative weights live on the packet-level scope builder.
+    """
+    increases: list[str] = []
+    reductions: list[str] = []
+    records = tuple(actions or ())
+    has_reduce = False
+    for action in records:
+        name = str(_action_field(action, "action", "")).strip().upper()
+        symbol = str(_action_field(action, "symbol", "")).strip().upper()
+        raw_amount = _action_field(action, "amount_usd", _action_field(action, "approved_amount_usd", 0.0))
+        try:
+            amount = float(raw_amount)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if not symbol or name not in {"INCREASE", "REDUCE", "EXIT"} or amount <= 0:
+            continue
+        if name == "INCREASE":
+            increases.append(symbol)
+        else:
+            reductions.append(symbol)
+            has_reduce = has_reduce or name == "REDUCE"
+    if increases:
+        return DecisionScope("INCREASE", tuple(dict.fromkeys(increases)))
+    if reductions:
+        return DecisionScope("REDUCE" if has_reduce else "EXIT", tuple(dict.fromkeys(reductions)))
+    return None
+
+
+def validate_decision_confidence_scope(
+    actions: Iterable[Any],
+    decision_confidence: DecisionConfidence | Mapping[str, Any] | None,
+) -> None:
+    """Reject an executable decision whose confidence scope contradicts its actions.
+
+    A missing scope makes no claim and stays valid; a supplied scope must
+    carry the derived action and must not drop any executable asset, so a
+    NO_TRADE-scoped confidence can never authorize a REDUCE and a narrowed
+    scope cannot exclude portfolio-level constraints.
+    """
+    derived = action_derived_scope(actions)
+    if derived is None:
+        return
+    if isinstance(decision_confidence, DecisionConfidence):
+        scope = decision_confidence.scope
+    elif isinstance(decision_confidence, Mapping):
+        scope = decision_confidence.get("scope")
+    else:
+        return
+    if scope is None:
+        return
+    if not isinstance(scope, Mapping):
+        raise ValueError("decision confidence scope must be an object")
+    scope_action = str(scope.get("action", "")).strip().upper()
+    if scope_action != derived.action:
+        raise ValueError(
+            f"decision confidence scope action {scope_action or '<empty>'} contradicts "
+            f"the proposed {derived.action} action(s)"
+        )
+    scoped_assets = {str(item).strip().upper() for item in scope.get("relevant_assets", ())}
+    missing = [asset for asset in derived.relevant_assets if asset not in scoped_assets]
+    if missing:
+        raise ValueError(
+            "decision confidence scope omits executable asset(s): " + ", ".join(sorted(missing))
+        )
+
+
 def _as_record(value: Any) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value
@@ -833,6 +911,7 @@ __all__ = [
     "DECISION_COMPONENT_WEIGHTS",
     "DecisionScope",
     "REGIME_DOMAIN_WEIGHTS",
+    "action_derived_scope",
     "apply_confidence_caps",
     "calculate_data_confidence",
     "calculate_decision_confidence",
@@ -847,4 +926,5 @@ __all__ = [
     "signal_consistency_score",
     "source_quality_score",
     "top_confidence_drags",
+    "validate_decision_confidence_scope",
 ]

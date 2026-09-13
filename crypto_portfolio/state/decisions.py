@@ -47,6 +47,11 @@ def _validated_decision(
         raise ValueError("decision policy_hash does not match resolved policy")
     if any(not isinstance(item, Evidence) for item in model.evidence):
         raise ValueError("persisted decision evidence must contain complete Evidence objects")
+    # Write gate only: history is append-only, so legacy records are parsed
+    # permissively while new appends must not carry a scope contradiction.
+    from ..engine.confidence import validate_decision_confidence_scope
+
+    validate_decision_confidence_scope(model.actions, model.decision_confidence)
     record = model.as_dict()
     record["policy_hash"] = expected_hash
     record["resolved_policy"] = resolved.as_dict()

@@ -16,7 +16,9 @@ pre-fix defect and are flipped when the corresponding phase lands:
 - F7 regime notch per review       -> PENDING_POLICY_DECISION (8D)
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from crypto_portfolio.engine.allocation import build_target_allocation, satellite_eligibility
 from crypto_portfolio.engine.confidence import DecisionScope, calculate_decision_confidence
@@ -230,11 +232,89 @@ class A3ScopeMismatchTests(unittest.TestCase):
             decision_confidence=decision_confidence,
         )
 
-    def test_reduce_action_with_no_trade_scope_currently_accepted(self):
-        packet = self._packet()
-        aave = next(item for item in packet.assets if item.symbol == "AAVE")
-        self.assertEqual(aave.action, "REDUCE")
-        self.assertEqual(packet.decision_confidence.scope["action"], "NO_TRADE")
+    def test_reduce_action_with_no_trade_scope_is_rejected(self):
+        from crypto_portfolio.models.decision import Decision
+        from crypto_portfolio.state.decisions import append_decision
+
+        with self.assertRaisesRegex(ValueError, "contradicts"):
+            self._packet()
+
+        no_trade_scoped = calculate_decision_confidence(
+            {
+                "portfolio_data": 0.9,
+                "regime_confidence": 0.9,
+                "asset_evidence": {"assets": {"BTC": 0.9}, "weights": {"BTC": 0.5}},
+                "portfolio_accounting": 1.0,
+                "signal_agreement": 1.0,
+            },
+            scope=DecisionScope("NO_TRADE", ("BTC",), {"BTC": 0.5}),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "contradicts"):
+                append_decision(
+                    Decision(
+                        "2026-09-13T00:00:00Z",
+                        "NORMAL",
+                        {"BTC": 0.5, "ETH": 0.2, "AAVE": 0.1, "USDT": 0.2},
+                        {"BTC": 0.5, "ETH": 0.2, "AAVE": 0.0, "USDT": 0.3},
+                        actions=[{
+                            "symbol": "AAVE", "action": "REDUCE", "amount_usd": 1000.0,
+                            "current_weight": 0.1, "target_weight": 0.0, "priority": "NORMAL",
+                        }],
+                        decision_confidence=no_trade_scoped,
+                    ),
+                    Path(directory) / "decisions.jsonl",
+                )
+
+    def test_matching_scope_is_accepted(self):
+        decision_confidence = calculate_decision_confidence(
+            {
+                "portfolio_data": 0.9,
+                "regime_confidence": 0.9,
+                "asset_evidence": {"assets": {"AAVE": 0.9}, "weights": {"AAVE": 0.1}},
+                "portfolio_accounting": 1.0,
+                "signal_agreement": 1.0,
+            },
+            scope=DecisionScope("REDUCE", ("AAVE",), {"AAVE": 0.1}),
+        )
+        packet = build_decision_review_packet(
+            review_type="SNAPSHOT_REVIEW",
+            market_regime="NORMAL",
+            current_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.1, "USDT": 0.2},
+            target_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.0, "USDT": 0.3},
+            assessments={"AAVE": {"weighted_score": 60, "confidence": "MEDIUM"}},
+            actions=[{
+                "symbol": "AAVE", "action": "REDUCE", "amount_usd": 1000.0,
+                "current_weight": 0.1, "target_weight": 0.0,
+            }],
+            decision_confidence=decision_confidence,
+        )
+        self.assertEqual(packet.decision_confidence.scope["action"], "REDUCE")
+
+    def test_scope_omitting_executable_asset_is_rejected(self):
+        decision_confidence = calculate_decision_confidence(
+            {
+                "portfolio_data": 0.9,
+                "regime_confidence": 0.9,
+                "asset_evidence": {"assets": {"BTC": 0.9}, "weights": {"BTC": 0.5}},
+                "portfolio_accounting": 1.0,
+                "signal_agreement": 1.0,
+            },
+            scope=DecisionScope("REDUCE", ("BTC",), {"BTC": 0.5}),
+        )
+        with self.assertRaisesRegex(ValueError, "omits executable asset"):
+            build_decision_review_packet(
+                review_type="SNAPSHOT_REVIEW",
+                market_regime="NORMAL",
+                current_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.1, "USDT": 0.2},
+                target_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.0, "USDT": 0.3},
+                assessments={"AAVE": {"weighted_score": 60, "confidence": "MEDIUM"}},
+                actions=[{
+                    "symbol": "AAVE", "action": "REDUCE", "amount_usd": 1000.0,
+                    "current_weight": 0.1, "target_weight": 0.0,
+                }],
+                decision_confidence=decision_confidence,
+            )
 
 
 if __name__ == "__main__":

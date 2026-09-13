@@ -180,7 +180,10 @@ def build_report_packet(
 
 
 def validate_report_packet(value: ReportPacket | Mapping[str, Any]) -> bool:
-    ReportPacket.from_mapping(value) if not isinstance(value, ReportPacket) else value
+    packet = value if isinstance(value, ReportPacket) else ReportPacket.from_mapping(value)
+    from .confidence import validate_decision_confidence_scope
+
+    validate_decision_confidence_scope(packet.actions, packet.decision_confidence)
     return True
 
 
