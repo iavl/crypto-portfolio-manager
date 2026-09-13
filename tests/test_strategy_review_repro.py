@@ -232,14 +232,96 @@ class F5RelativeStrengthUnitTests(unittest.TestCase):
 
 
 class F6PostActionConstraintTests(unittest.TestCase):
-    def test_stable_shortfall_swallowed_by_hold_band(self):
+    def test_stable_shortfall_stays_visible_under_hold_band(self):
         result = recommend_rebalance(
             {"BTC": 0.50, "ETH": 0.36, "USDT": 0.14},
             {"BTC": 0.50, "ETH": 0.35, "USDT": 0.15},
             10000.0,
         )
+        # Turnover thresholds keep the NO_TRADE outcome (sub-threshold repair
+        # trades are a pending 8E policy decision), but the post-action
+        # projection must expose the unrepaired shortfall instead of
+        # reporting the compliant strategic target.
         self.assertEqual(result.decision, "NO_TRADE")
         self.assertTrue(all(action.action == "HOLD" for action in result.actions))
+        projection = result.post_action_projection
+        self.assertAlmostEqual(projection["projected_stable_weight"], 0.14)
+        self.assertEqual(len(projection["unresolved_constraints"]), 1)
+        self.assertIn("STABLECOIN_FLOOR_UNRESOLVED", projection["unresolved_constraints"][0])
+        self.assertEqual(
+            result.no_trade_attribution.primary_reason, "STABLECOIN_FLOOR_CONSTRAINT"
+        )
+
+    def test_projection_reflects_approved_dollars_and_conserves_total(self):
+        result = recommend_rebalance(
+            {"BTC": 0.40, "ETH": 0.20, "USDT": 0.40},
+            {"BTC": 0.50, "ETH": 0.25, "USDT": 0.25},
+            10000.0,
+        )
+        projection = result.post_action_projection
+        buys = sum(
+            action.amount_usd for action in result.actions
+            if action.action == "INCREASE" and action.symbol != "USDT"
+        )
+        sells = sum(
+            action.amount_usd for action in result.actions
+            if action.action in {"REDUCE", "EXIT"} and action.symbol != "USDT"
+        )
+        self.assertGreater(buys, 0.0)
+        weights = projection["projected_weights"]
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=9)
+        self.assertAlmostEqual(
+            weights.get("USDT", 0.0),
+            (4000.0 - buys + sells) / 10000.0,
+            places=6,
+        )
+        self.assertEqual(projection["unresolved_constraints"], ())
+
+
+class S1StressDiagnosticTests(unittest.TestCase):
+    WEIGHTS = {"BTC": 0.42, "ETH": 0.18, "SOL": 0.25, "USDT": 0.15}
+
+    def test_scenario_return_is_weighted_and_fail_closed(self):
+        from crypto_portfolio.engine.risk import scenario_portfolio_return
+
+        scenario = {"BTC": -0.30, "ETH": -0.45, "SOL": -0.60, "USDT": 0.0}
+        self.assertAlmostEqual(scenario_portfolio_return(self.WEIGHTS, scenario), -0.357)
+        with self.assertRaisesRegex(ValueError, "missing for exposed asset"):
+            scenario_portfolio_return(self.WEIGHTS, {"BTC": -0.30, "ETH": -0.45, "SOL": -0.60})
+        with self.assertRaisesRegex(ValueError, "cannot be below -100%"):
+            scenario_portfolio_return(self.WEIGHTS, {**scenario, "USDT": -1.5})
+
+    def test_projected_drawdown_and_remaining_capacity(self):
+        from crypto_portfolio.engine.risk import (
+            projected_peak_drawdown,
+            remaining_drawdown_capacity,
+        )
+
+        projection = projected_peak_drawdown(-0.10, -0.357)
+        self.assertAlmostEqual(projection["projected_drawdown"], 0.9 * 0.643 - 1.0, places=9)
+        projection_gain = projected_peak_drawdown(-0.10, 0.20)
+        self.assertEqual(projection_gain["projected_drawdown"], 0.0)
+        self.assertGreater(projection_gain["change_vs_previous_peak"], 0.0)
+        # Review formula: d=-10%, D=15% leaves ~5.56% of further loss space.
+        self.assertAlmostEqual(remaining_drawdown_capacity(-0.10, 0.15), 0.055555, places=5)
+        self.assertEqual(remaining_drawdown_capacity(-0.16, 0.15), 0.0)
+        self.assertIsNone(remaining_drawdown_capacity(-1.0, 0.15))
+
+    def test_stress_diagnostic_combines_contribution_and_budget(self):
+        from crypto_portfolio.engine.risk import stress_diagnostic
+
+        diagnostic = stress_diagnostic(
+            self.WEIGHTS,
+            {"BTC": -0.30, "ETH": -0.45, "SOL": -0.60, "USDT": 0.0},
+            current_drawdown=-0.10,
+            risk_budget=0.15,
+        )
+        self.assertEqual(diagnostic["status"], "DIAGNOSTIC_ONLY")
+        self.assertAlmostEqual(
+            sum(diagnostic["asset_contributions"].values()), diagnostic["scenario_return"]
+        )
+        self.assertTrue(diagnostic["budget_breach"])
+        self.assertAlmostEqual(diagnostic["remaining_capacity"], 0.055555, places=5)
 
 
 class F7RegimeNotchTests(unittest.TestCase):

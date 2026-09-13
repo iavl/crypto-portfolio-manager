@@ -32,6 +32,15 @@ decision effect; never replace missing evidence with a neutral assumption.
 For daily OHLCV-derived metrics, also show the completed-candle close boundary
 as `freshness_reference_at` and verify it equals `metadata.completed_through`.
 
+Report compliance from the frozen post-action projection, not the strategic
+target: if the recommended actions leave the stable sleeve below its floor or
+a concentration cap unmet, carry the `*_UNRESOLVED` constraint verbatim and
+say the risk gap remains open. Reproducing the same direction three times on
+the same evidence within one day is "repeat calculation agreement", not three
+independent confirmations; never label it as such. Every number in the report
+comes from the validated packets — scores, dates, confidence, scope, targets,
+and actions are read, never recomputed by hand.
+
 ### Debug 报告
 
 Render the finalized failure categories separately when present:
