@@ -506,6 +506,8 @@ class AssetAssessment:
             value = float(self.relative_strength_vs_btc)
             if not math.isfinite(value):
                 raise ValueError("relative_strength_vs_btc must be finite")
+            if not 0 <= value <= 100:
+                raise ValueError("relative_strength_vs_btc score must be in [0, 100]")
             object.__setattr__(self, "relative_strength_vs_btc", value)
         if not isinstance(self.thesis_broken, bool):
             raise ValueError("thesis_broken must be boolean")

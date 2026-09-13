@@ -63,7 +63,11 @@
           "weighted_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
           "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
-          "relative_strength_vs_btc": {"type": ["number", "string", "null"]},
+          "relative_strength_vs_btc": {"oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["OUTPERFORM", "NEUTRAL", "UNDERPERFORM", "MATERIALLY_WEAK", "UNKNOWN"]},
+            {"type": "number", "minimum": 0, "maximum": 100}
+          ]},
           "thesis_broken": {"type": "boolean"},
           "critical_data_complete": {"type": "boolean"},
         "risk_tier": {"type": "string", "minLength": 1},

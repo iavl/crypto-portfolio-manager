@@ -89,6 +89,14 @@ def _confidence(value: Any) -> str:
 
 
 def _relative_eligibility(value: Any) -> str:
+    """Classify the BTC-relative comparison on the canonical 0-100 score unit.
+
+    Numeric values are factor scores: below 50 is the confirmed
+    UNDERPERFORM case (no new risk), at or above 50 is OUTPERFORM/NEUTRAL.
+    Excess returns are never read here; they are horizon-scoped fraction
+    facts on the relative-strength result. ``None``/UNKNOWN means the
+    comparison is missing and maps to HOLD_ONLY.
+    """
     if value is None:
         return "HOLD_ONLY"
     if isinstance(value, str):
@@ -100,13 +108,14 @@ def _relative_eligibility(value: Any) -> str:
         if state in {"OUTPERFORM", "NEUTRAL"}:
             return "ELIGIBLE"
         raise ValueError("relative_strength_vs_btc is unsupported")
-    try:
-        value = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("relative_strength_vs_btc must be numeric or a supported state") from exc
-    if not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("relative_strength_vs_btc must be numeric or a supported state")
+    score = float(value)
+    if not math.isfinite(score):
         raise ValueError("relative_strength_vs_btc must be finite")
-    return "ELIGIBLE" if value >= 0 else "INELIGIBLE"
+    if not 0 <= score <= 100:
+        raise ValueError("relative_strength_vs_btc score must be in [0, 100]")
+    return "ELIGIBLE" if score >= 50 else "INELIGIBLE"
 
 
 def _core_quality_multiplier(score: float) -> float:
@@ -241,13 +250,26 @@ def satellite_eligibility(
     entry_score = resolved.allocation["satellite_entry_score"]
     exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
     soft_exit_score = resolved.allocation.get("satellite_soft_exit_score", exit_score)
+    # Confirmed hard risk first: a broken thesis or severe event is never
+    # masked by data availability in either direction.
     if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
         _field(assessment, "thesis_broken", False), "thesis_broken"
     ):
         return "INELIGIBLE"
+    relative_status = _relative_eligibility(relative)
+    # A confirmed materially-negative BTC-relative case is ineligible at any
+    # score; missing evidence is the opposite signal and handled below.
+    if relative_status == "INELIGIBLE":
+        return "INELIGIBLE"
+    evidence_incomplete = (
+        relative_status == "HOLD_ONLY"
+        or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+    )
     if score < entry_score:
-        if _relative_eligibility(relative) == "INELIGIBLE":
-            return "INELIGIBLE"
+        if evidence_incomplete:
+            # Missing factors shrink the score toward neutral; the neutral
+            # score alone must not manufacture an exit for a held position.
+            return "HOLD_ONLY" if current_weight > 0 else "INELIGIBLE"
         if current_weight > 0 and score >= exit_score:
             return "HOLD_ONLY"
         # A held satellite inside the soft-exit band de-risks gradually instead
@@ -255,7 +277,7 @@ def satellite_eligibility(
         if current_weight > 0 and score >= soft_exit_score:
             return "SOFT_EXIT"
         return "INELIGIBLE"
-    if not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete"):
+    if evidence_incomplete:
         return "HOLD_ONLY"
     event_risk = _field(assessment, "event_risk", None)
     unresolved = (
@@ -267,7 +289,7 @@ def satellite_eligibility(
     )
     if unresolved:
         return "HOLD_ONLY"
-    return _relative_eligibility(relative)
+    return relative_status
 
 
 def _bounded_allocate(
@@ -434,10 +456,14 @@ def build_target_allocation(
             if relative_status == "HOLD_ONLY":
                 if current_weights.get(symbol, 0.0) > 0:
                     satellite_hold[symbol] = current_weights[symbol]
+                evidence_incomplete = (
+                    _relative_eligibility(_field(assessment, "relative_strength_vs_btc", None)) != "ELIGIBLE"
+                    or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+                )
                 reason = (
-                    "score is inside the entry/exit hysteresis band"
-                    if score < resolved.allocation["satellite_entry_score"]
-                    else "BTC-relative or critical evidence is incomplete"
+                    "BTC-relative or critical evidence is incomplete; missing data preserves the position without adding risk"
+                    if evidence_incomplete
+                    else "score is inside the entry/exit hysteresis band"
                 )
                 reasons.append(f"{symbol} is HOLD_ONLY because {reason}")
             elif relative_status == "SOFT_EXIT":

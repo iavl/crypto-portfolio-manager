@@ -172,6 +172,17 @@ clamped to 0–100 outside it.
 For non-BTC satellites, missing BTC-relative evidence is `HOLD_ONLY`, while a
 materially negative comparison is ineligible for new risk.
 
+`relative_strength_vs_btc` carries one unit everywhere: a numeric value is the
+canonical 0–100 factor score (below 50 is the confirmed weak case, at or above
+50 is outperform/neutral), a string is the state, and excess returns stay on
+the horizon-scoped fraction facts. No magnitude-based unit guess is applied,
+values outside `[0, 100]` are rejected, and core/satellite consumers read the
+field identically. Missing factors shrink the weighted score toward neutral
+but can never by themselves produce a satellite exit: without independent
+negative evidence (broken thesis, severe event, materially weak BTC-relative
+case, or hard portfolio risk) an incomplete held satellite stays `HOLD_ONLY`
+at its full current weight.
+
 For BTC macro/liquidity interpretation, 90D rate/real-yield/USD changes, the
 13W Fed balance-sheet change, and 6M M2 change are the primary current-horizon
 evidence. The 12M M2 change remains long-structure context unless a future

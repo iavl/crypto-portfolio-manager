@@ -66,14 +66,15 @@ class F1SatelliteEntryCliffTests(unittest.TestCase):
 
 
 class F2MissingDataExitTests(unittest.TestCase):
-    def test_missing_factors_currently_ineligible(self):
+    def test_missing_factors_preserve_held_position(self):
         assessment = {
             "weighted_score": 50,
             "confidence": "LOW",
             "critical_data_complete": False,
             "relative_strength_vs_btc": None,
         }
-        self.assertEqual(satellite_eligibility(assessment, current_weight=0.1), "INELIGIBLE")
+        self.assertEqual(satellite_eligibility(assessment, current_weight=0.1), "HOLD_ONLY")
+        self.assertEqual(satellite_eligibility(assessment, current_weight=0.0), "INELIGIBLE")
 
     def test_confirmed_negative_evidence_still_ineligible(self):
         assessment = {
@@ -83,6 +84,36 @@ class F2MissingDataExitTests(unittest.TestCase):
             "relative_strength_vs_btc": "UNDERPERFORM",
         }
         self.assertEqual(satellite_eligibility(assessment, current_weight=0.1), "INELIGIBLE")
+
+    def test_missing_evidence_does_not_shield_confirmed_weakness(self):
+        # Weak BTC-relative evidence decides even when the other factors are
+        # missing: bad news is never masked by data unavailability.
+        assessment = {
+            "weighted_score": 50,
+            "confidence": "LOW",
+            "critical_data_complete": False,
+            "relative_strength_vs_btc": "MATERIALLY_WEAK",
+        }
+        self.assertEqual(satellite_eligibility(assessment, current_weight=0.1), "INELIGIBLE")
+
+    def test_new_cash_cannot_implicitly_increase_hold_only_satellite(self):
+        allocation = build_target_allocation(
+            regime="NORMAL",
+            assessments={
+                **CORE,
+                "SOL": {
+                    "weighted_score": 50, "confidence": "LOW",
+                    "critical_data_complete": False, "relative_strength_vs_btc": None,
+                },
+            },
+            current_weights=CURRENT,
+        )
+        result = recommend_rebalance(
+            CURRENT, dict(allocation.target_weights), 10000.0, new_cash_available=1000.0
+        )
+        sol = next(action for action in result.actions if action.symbol == "SOL")
+        self.assertIn(sol.action, {"HOLD", "WAIT"})
+        self.assertEqual(sol.amount_usd, 0.0)
 
 
 class F3CoreTemporaryCapTests(unittest.TestCase):
@@ -128,18 +159,37 @@ class F4DoubleDeploymentCapTests(unittest.TestCase):
 
 
 class F5RelativeStrengthUnitTests(unittest.TestCase):
-    def test_guess_scaling_currently_applied(self):
-        self.assertEqual(relative_strength_score({"relative_strength_vs_btc": 0.5}), 50.0)
-        self.assertEqual(relative_strength_score({"relative_strength_vs_btc": 1}), 100.0)
+    def test_scores_are_read_on_the_single_0_100_unit(self):
+        # No magnitude guessing: 0.5 is score 0.5 (maximal underperformance),
+        # 1 is score 1, and 1.01 is score 1.01.
+        self.assertEqual(relative_strength_score({"relative_strength_vs_btc": 0.5}), 0.5)
+        self.assertEqual(relative_strength_score({"relative_strength_vs_btc": 1}), 1.0)
         self.assertEqual(relative_strength_score({"relative_strength_vs_btc": 1.01}), 1.01)
+        self.assertEqual(relative_strength_score({"relative_strength_vs_btc": 70}), 70.0)
 
-    def test_satellite_numeric_sign_interpretation(self):
-        # Numeric values are currently read as excess-return signs.
+    def test_out_of_range_scores_are_rejected(self):
+        for invalid in (-0.2, 100.5, float("inf")):
+            with self.subTest(value=invalid):
+                with self.assertRaisesRegex(ValueError, "must be finite|in \\[0, 100\\]"):
+                    relative_strength_score({"relative_strength_vs_btc": invalid})
+
+    def test_satellite_numeric_score_interpretation(self):
+        common = {"weighted_score": 85, "confidence": "HIGH", "critical_data_complete": True}
+        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 30}), "INELIGIBLE")
+        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 0.5}), "INELIGIBLE")
+        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 50}), "ELIGIBLE")
+        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 70}), "ELIGIBLE")
+        with self.assertRaisesRegex(ValueError, "in \\[0, 100\\]"):
+            satellite_eligibility({**common, "relative_strength_vs_btc": -0.2})
+
+    def test_assessment_model_rejects_out_of_range_scores(self):
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        with self.assertRaisesRegex(ValueError, "in \\[0, 100\\]"):
+            AssetAssessment("SOL", {"trend": 80}, relative_strength_vs_btc=120)
         self.assertEqual(
-            satellite_eligibility(
-                {"weighted_score": 85, "confidence": "HIGH", "critical_data_complete": True, "relative_strength_vs_btc": -0.2}
-            ),
-            "INELIGIBLE",
+            AssetAssessment("SOL", {"trend": 80}, relative_strength_vs_btc=70).relative_strength_vs_btc,
+            70.0,
         )
 
 

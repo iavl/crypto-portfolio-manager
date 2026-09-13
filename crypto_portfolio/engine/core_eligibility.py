@@ -62,7 +62,12 @@ def _event_state(assessment: Any) -> str:
 
 
 def relative_strength_score(assessment: Any) -> float | None:
-    """Normalize the explicit ETH/BTC opportunity score to 0..100."""
+    """Read the explicit ETH/BTC opportunity score on its single 0-100 unit.
+
+    Numeric values are canonical 0-100 factor scores; excess returns live on
+    the horizon-scoped fraction facts instead, so no magnitude-based unit
+    guess is applied. Unknown maps to None.
+    """
     raw = _field(assessment, "relative_strength_vs_btc")
     if raw is None and isinstance(assessment, AssetAssessment):
         factor = assessment.factor_scores.get("relative_strength_btc")
@@ -90,8 +95,6 @@ def relative_strength_score(assessment: Any) -> float | None:
     result = float(raw)
     if not math.isfinite(result):
         raise ValueError("relative_strength_vs_btc must be finite")
-    if 0 <= result <= 1:
-        result *= 100
     if not 0 <= result <= 100:
         raise ValueError("relative_strength_vs_btc score must be in [0, 100]")
     return result
@@ -146,8 +149,6 @@ def eth_core_eligibility(
     relative = relative_strength_score(assessment) if relative_score is None else relative_score
     if relative is not None:
         relative = float(relative)
-        if 0 <= relative <= 1:
-            relative *= 100
         if not math.isfinite(relative) or not 0 <= relative <= 100:
             raise ValueError("relative_score must be finite and in [0, 100]")
     if relative is None:
