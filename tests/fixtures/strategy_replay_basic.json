@@ -1,0 +1,388 @@
+{
+  "reviews": [
+    {
+      "as_of": "2026-01-05T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 72,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 78,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 56
+        },
+        "AAVE": {
+          "weighted_score": 71,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 51
+        },
+        "SOL": {
+          "weighted_score": 74,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 53
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "BULLISH",
+        "volatility_state": "NORMAL",
+        "flow_state": "POSITIVE",
+        "breadth_state": "HEALTHY",
+        "portfolio_drawdown_band": 0.0
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": 0.021,
+        "ETH": 0.03,
+        "AAVE": 0.036,
+        "SOL": 0.04,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-01-19T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 74,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 80,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 56
+        },
+        "AAVE": {
+          "weighted_score": 73,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 51
+        },
+        "SOL": {
+          "weighted_score": 76,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 53
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "BULLISH",
+        "volatility_state": "NORMAL",
+        "flow_state": "NEUTRAL",
+        "breadth_state": "HEALTHY",
+        "portfolio_drawdown_band": 0.0
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": 0.015,
+        "ETH": 0.022,
+        "AAVE": 0.028,
+        "SOL": 0.031,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-02-02T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 70,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 76,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 56
+        },
+        "AAVE": {
+          "weighted_score": 69,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 51
+        },
+        "SOL": {
+          "weighted_score": 72,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 53
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "NEUTRAL",
+        "volatility_state": "ELEVATED",
+        "flow_state": "NEGATIVE",
+        "breadth_state": "NEUTRAL",
+        "portfolio_drawdown_band": -0.02
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": -0.04,
+        "ETH": -0.061,
+        "AAVE": -0.082,
+        "SOL": -0.095,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-02-16T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 66,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 71,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 55
+        },
+        "AAVE": {
+          "weighted_score": 63,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 49
+        },
+        "SOL": {
+          "weighted_score": 66,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 51
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "BEARISH",
+        "volatility_state": "HIGH",
+        "flow_state": "NEGATIVE",
+        "breadth_state": "WEAK",
+        "portfolio_drawdown_band": -0.05
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": -0.052,
+        "ETH": -0.07,
+        "AAVE": -0.104,
+        "SOL": -0.12,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-03-02T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 65,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 69,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 54
+        },
+        "AAVE": {
+          "weighted_score": 60,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 47
+        },
+        "SOL": {
+          "weighted_score": 62,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 48
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "BEARISH",
+        "volatility_state": "ELEVATED",
+        "flow_state": "NEUTRAL",
+        "breadth_state": "WEAK",
+        "portfolio_drawdown_band": -0.04
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": 0.018,
+        "ETH": 0.024,
+        "AAVE": 0.031,
+        "SOL": 0.038,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-03-16T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 69,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 74,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 55
+        },
+        "AAVE": {
+          "weighted_score": 66,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 49
+        },
+        "SOL": {
+          "weighted_score": 69,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 51
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "NEUTRAL",
+        "volatility_state": "NORMAL",
+        "flow_state": "NEUTRAL",
+        "breadth_state": "NEUTRAL",
+        "portfolio_drawdown_band": -0.02
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": 0.026,
+        "ETH": 0.035,
+        "AAVE": 0.044,
+        "SOL": 0.05,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-03-30T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 72,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 78,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 56
+        },
+        "AAVE": {
+          "weighted_score": 70,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 50
+        },
+        "SOL": {
+          "weighted_score": 73,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 52
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "BULLISH",
+        "volatility_state": "NORMAL",
+        "flow_state": "POSITIVE",
+        "breadth_state": "HEALTHY",
+        "portfolio_drawdown_band": 0.0
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": 0.023,
+        "ETH": 0.029,
+        "AAVE": 0.033,
+        "SOL": 0.037,
+        "USDT": 0.0
+      }
+    },
+    {
+      "as_of": "2026-04-13T12:00:00Z",
+      "current_weights": {
+        "BTC": 0.45,
+        "ETH": 0.25,
+        "AAVE": 0.1,
+        "SOL": 0.05,
+        "USDT": 0.15
+      },
+      "portfolio_value": 10000.0,
+      "assessments": {
+        "BTC": {
+          "weighted_score": 74,
+          "confidence": "HIGH"
+        },
+        "ETH": {
+          "weighted_score": 81,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 57
+        },
+        "AAVE": {
+          "weighted_score": 74,
+          "confidence": "HIGH",
+          "risk_tier": "high_beta",
+          "relative_strength_vs_btc": 52
+        },
+        "SOL": {
+          "weighted_score": 77,
+          "confidence": "HIGH",
+          "relative_strength_vs_btc": 54
+        }
+      },
+      "regime_inputs": {
+        "btc_trend": "BULLISH",
+        "volatility_state": "NORMAL",
+        "flow_state": "POSITIVE",
+        "breadth_state": "HEALTHY",
+        "portfolio_drawdown_band": 0.0
+      },
+      "new_cash": 0.0,
+      "next_returns": {
+        "BTC": 0.019,
+        "ETH": 0.027,
+        "AAVE": 0.03,
+        "SOL": 0.034,
+        "USDT": 0.0
+      }
+    }
+  ]
+}
