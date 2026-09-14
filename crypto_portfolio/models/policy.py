@@ -92,7 +92,7 @@ _ALLOCATION_FIELDS = {
     "satellite_soft_exit_score",
     "satellite_full_score",
     "satellite_target_curve",
-    "risk_multipliers",
+    "risk_tier_caps",
 }
 _SATELLITE_CURVE_FIELDS = {
     "soft_exit_fraction",
@@ -1841,7 +1841,7 @@ def _parse_policy(
     if not isinstance(allocation, dict):
         raise PolicyError("allocation must be an object")
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
-    common_allocation_fields = {"satellite_full_score", "risk_multipliers", "satellite_target_curve"}
+    common_allocation_fields = {"satellite_full_score", "risk_tier_caps", "satellite_target_curve"}
     score_fields = {
         "satellite_entry_score",
         "satellite_exit_score",
@@ -1850,20 +1850,20 @@ def _parse_policy(
     expected_allocation_fields = common_allocation_fields | score_fields
     if set(allocation) != expected_allocation_fields:
         raise PolicyError("allocation fields are incomplete")
-    risk_multipliers = allocation["risk_multipliers"]
-    if not isinstance(risk_multipliers, dict):
-        raise PolicyError("allocation.risk_multipliers must be an object")
-    if set(risk_multipliers) != {"normal", "high_beta", "high"}:
-        raise PolicyError("allocation.risk_multipliers must contain normal, high_beta, and high")
-    parsed_risk_multipliers = {
-        key: _fraction(value, f"allocation.risk_multipliers.{key}")
-        for key, value in risk_multipliers.items()
+    risk_tier_caps = allocation["risk_tier_caps"]
+    if not isinstance(risk_tier_caps, dict):
+        raise PolicyError("allocation.risk_tier_caps must be an object")
+    if set(risk_tier_caps) != {"normal", "high_beta", "high"}:
+        raise PolicyError("allocation.risk_tier_caps must contain normal, high_beta, and high")
+    parsed_risk_tier_caps = {
+        key: _fraction(value, f"allocation.risk_tier_caps.{key}")
+        for key, value in risk_tier_caps.items()
     }
     parsed_allocation = {
         "satellite_full_score": _number(
             allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100
         ),
-        "risk_multipliers": parsed_risk_multipliers,
+        "risk_tier_caps": parsed_risk_tier_caps,
     }
     parsed_allocation["satellite_entry_score"] = _number(
         allocation["satellite_entry_score"],

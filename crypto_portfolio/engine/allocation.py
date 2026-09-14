@@ -551,9 +551,9 @@ def build_target_allocation(
             # assessment and the default "normal" tier is the policy's own.
             supplied_tier = _field(assessment, "risk_tier", None) if assessment is not None else None
             risk_tier = str(supplied_tier).lower() if supplied_tier is not None else "normal"
-            risk_multipliers = resolved.allocation["risk_multipliers"]
-            risk_multiplier = risk_multipliers.get(
-                risk_tier, risk_multipliers.get(risk_tier.replace("-", "_"), 1.0)
+            risk_tier_caps = resolved.allocation["risk_tier_caps"]
+            risk_tier_cap_fraction = risk_tier_caps.get(
+                risk_tier, risk_tier_caps.get(risk_tier.replace("-", "_"), 1.0)
             )
             asset_confidence_factor = float(
                 resolved.execution["confidence_deployment_factor"].get(confidence, 1.0)
@@ -586,7 +586,13 @@ def build_target_allocation(
                 full_score=resolved.allocation["satellite_full_score"],
                 curve=resolved.allocation["satellite_target_curve"],
             )
-            requested_strategic_weight = satellite_cap * curve_fraction * risk_multiplier
+            # Risk tier caps maximum exposure as a fraction of the active
+            # satellite envelope; it never scales mid-score targets, which
+            # already price risk in through the score and regime envelope.
+            raw_score_target_weight = satellite_cap * curve_fraction
+            risk_tier_cap_weight = satellite_cap * float(risk_tier_cap_fraction)
+            risk_cap_applied = raw_score_target_weight > risk_tier_cap_weight + 1e-12
+            requested_strategic_weight = min(raw_score_target_weight, risk_tier_cap_weight)
             deployment_factor = (
                 min(
                     asset_confidence_factor,
@@ -606,7 +612,10 @@ def build_target_allocation(
                 "eligibility_state": state,
                 "risk_tier": risk_tier,
                 "risk_tier_source": risk_tier_source,
-                "risk_multiplier": risk_multiplier,
+                "risk_tier_cap_fraction": float(risk_tier_cap_fraction),
+                "raw_score_target_weight": raw_score_target_weight,
+                "risk_tier_cap_weight": risk_tier_cap_weight,
+                "risk_cap_applied": risk_cap_applied,
                 "asset_confidence": confidence,
                 "confidence_deployment_factor": asset_confidence_factor,
                 "event_risk": event_risk,
@@ -637,6 +646,11 @@ def build_target_allocation(
                     )
             elif state == "ELIGIBLE_INCREASE":
                 strategic_satellite_raw[symbol] = requested_strategic_weight
+                if risk_cap_applied:
+                    reasons.append(
+                        f"{symbol} risk tier {risk_tier} caps the strategic target at "
+                        f"{risk_tier_cap_weight:.2%} instead of the {raw_score_target_weight:.2%} score target"
+                    )
                 if event_multiplier < 1.0:
                     reasons.append(
                         f"{symbol} event-risk state {event_risk} limits immediate deployment to {event_multiplier:.0%}"

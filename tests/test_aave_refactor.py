@@ -133,7 +133,8 @@ class AaveRefactorTests(unittest.TestCase):
                      "risk_tier_source": "MANUAL_ASSESSMENT"}
         })
         self.assertEqual(manual.deployment_allowances["AAVE"]["risk_tier_source"], "MANUAL_ASSESSMENT")
-        self.assertEqual(manual.deployment_allowances["AAVE"]["risk_multiplier"], 0.5)
+        self.assertEqual(manual.deployment_allowances["AAVE"]["risk_tier_cap_fraction"], 0.5)
+        self.assertTrue(manual.deployment_allowances["AAVE"]["risk_cap_applied"])
         self.assertLess(medium.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
         self.assertLess(elevated.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
 

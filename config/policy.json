@@ -187,7 +187,7 @@
       "entry_fraction": 0.4,
       "full_fraction": 1.0
     },
-    "risk_multipliers": {
+    "risk_tier_caps": {
       "normal": 1.0,
       "high_beta": 0.5,
       "high": 0.5

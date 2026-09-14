@@ -170,5 +170,74 @@ class SatelliteCurvePolicyTests(unittest.TestCase):
         self.assertLessEqual(curve["entry_fraction"], curve["full_fraction"])
 
 
+class RiskTierCapTests(unittest.TestCase):
+    """Risk tier caps maximum exposure; it never scales mid-score targets."""
+
+    def _aave(self, score: float = 73.88):
+        # The 2026-09-14 review asset: high_beta tier, held ~12.9%.
+        return build_target_allocation(
+            regime="NORMAL",
+            assessments={
+                "BTC": {"weighted_score": 65.52, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "AAVE": {
+                    "weighted_score": score, "confidence": "HIGH",
+                    "risk_tier": "high_beta", "relative_strength_vs_btc": "OUTPERFORM",
+                },
+            },
+            current_weights={"BTC": 0.44, "ETH": 0.24, "AAVE": 0.129, "USDT": 0.191},
+        )
+
+    def test_high_beta_target_comes_from_the_cap_not_a_half_scaled_curve(self):
+        result = self._aave()
+        allowance = result.deployment_allowances["AAVE"]
+        # Raw score target 0.6293 of the 25% envelope; high_beta cap 0.5 of
+        # the envelope binds: 4.78% (score-strength x 0.5) is gone.
+        self.assertAlmostEqual(allowance["raw_score_target_weight"], 0.157333, places=5)
+        self.assertAlmostEqual(allowance["risk_tier_cap_weight"], 0.125)
+        self.assertTrue(allowance["risk_cap_applied"])
+        self.assertAlmostEqual(allowance["requested_strategic_weight"], 0.125)
+        self.assertAlmostEqual(result.target_weights["AAVE"], 0.125)
+
+    def test_cap_does_not_halve_below_cap_score_targets(self):
+        result = self._aave(score=68)
+        allowance = result.deployment_allowances["AAVE"]
+        # Curve at 68 is 0.4333 of the envelope = 10.83%, below the 12.5%
+        # high-beta cap: the target must NOT be scaled to ~5.4%.
+        self.assertAlmostEqual(allowance["raw_score_target_weight"], 0.108333, places=5)
+        self.assertFalse(allowance["risk_cap_applied"])
+        self.assertAlmostEqual(allowance["requested_strategic_weight"], 0.108333, places=5)
+        self.assertAlmostEqual(result.target_weights["AAVE"], 0.108333, places=5)
+
+    def test_high_beta_strategic_target_stays_monotonic_and_under_the_cap(self):
+        previous = -1.0
+        for score in SCORE_GRID:
+            with self.subTest(score=score):
+                result = self._aave(score=score)
+                target = result.target_weights.get("AAVE", 0.0)
+                self.assertLessEqual(target, 0.125 + 1e-9)
+                self.assertGreaterEqual(target + 1e-12, previous)
+                previous = target
+
+    def test_normal_tier_keeps_the_full_envelope_available(self):
+        result = self._aave()
+        result_normal = build_target_allocation(
+            regime="NORMAL",
+            assessments={
+                "BTC": {"weighted_score": 65.52, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "AAVE": {
+                    "weighted_score": 73.88, "confidence": "HIGH",
+                    "risk_tier": "normal", "relative_strength_vs_btc": "OUTPERFORM",
+                },
+            },
+            current_weights={"BTC": 0.44, "ETH": 0.24, "AAVE": 0.129, "USDT": 0.191},
+        )
+        allowance = result_normal.deployment_allowances["AAVE"]
+        self.assertFalse(allowance["risk_cap_applied"])
+        self.assertAlmostEqual(result_normal.target_weights["AAVE"], 0.157333, places=5)
+        self.assertGreater(result_normal.target_weights["AAVE"], result.target_weights["AAVE"])
+
+
 if __name__ == "__main__":
     unittest.main()
