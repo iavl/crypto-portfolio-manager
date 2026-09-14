@@ -211,9 +211,11 @@ class PolicyTests(unittest.TestCase):
         for mutate in (
             lambda data: data["allocation"].update({"satellite_soft_exit_score": 62}),
             lambda data: data["allocation"].update({"satellite_soft_exit_score": 68}),
-            lambda data: data["allocation"].update({"satellite_soft_exit_fraction": 0}),
-            lambda data: data["allocation"].update({"satellite_soft_exit_fraction": 1}),
-            lambda data: data["allocation"].pop("satellite_soft_exit_fraction"),
+            lambda data: data["allocation"]["satellite_target_curve"].update({"entry_fraction": 0.1}),
+            lambda data: data["allocation"]["satellite_target_curve"].update({"full_fraction": 0.9}),
+            lambda data: data["allocation"]["satellite_target_curve"].update({"exit_fraction": -0.1}),
+            lambda data: data["allocation"]["satellite_target_curve"].pop("exit_fraction"),
+            lambda data: data["allocation"].pop("satellite_target_curve"),
             lambda data: data["regime_transitions"].update({"enabled": "yes"}),
             lambda data: data["regime_transitions"].update({"max_notches_per_review": 0}),
             lambda data: data["regime_transitions"].update({"max_notches_per_review": 3}),
@@ -229,7 +231,10 @@ class PolicyTests(unittest.TestCase):
                         load_policy(path)
         policy = load_policy()
         self.assertEqual(policy.allocation["satellite_soft_exit_score"], 57)
-        self.assertEqual(policy.allocation["satellite_soft_exit_fraction"], 0.5)
+        self.assertEqual(
+            policy.allocation["satellite_target_curve"],
+            {"soft_exit_fraction": 0.0, "exit_fraction": 0.2, "entry_fraction": 0.4, "full_fraction": 1.0},
+        )
         self.assertEqual(dict(policy.regime_transitions), {"enabled": True, "max_notches_per_review": 1})
 
     def test_scoring_profiles_and_event_multipliers_are_strict(self):

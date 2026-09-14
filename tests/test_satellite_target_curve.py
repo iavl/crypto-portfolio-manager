@@ -16,7 +16,7 @@ from crypto_portfolio.engine.allocation import (
     build_target_allocation,
     satellite_target_fraction,
 )
-from crypto_portfolio.models.policy import PolicyError, load_policy
+from crypto_portfolio.models.policy import load_policy
 
 CORE = {
     "BTC": {"weighted_score": 80, "confidence": "HIGH"},
@@ -73,7 +73,10 @@ class SatelliteTargetFractionTests(unittest.TestCase):
             self.assertLess(abs(right - left), 0.01, msg=f"discontinuity near {breakpoint}")
 
     def test_held_target_never_collapses_to_zero_above_soft_exit(self):
-        for score in (57, 60, 62, 64, 66.9, 67, 70, 85):
+        # Exactly at the soft-exit floor the curve is 0 by design; every
+        # score strictly above it keeps a positive held target.
+        self.assertEqual(_sol_target(57.0), 0.0)
+        for score in (57.1, 60, 62, 64, 66.9, 67, 70, 85):
             with self.subTest(score=score):
                 self.assertGreater(_sol_target(score), 0.0)
 

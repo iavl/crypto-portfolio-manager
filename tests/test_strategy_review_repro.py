@@ -11,7 +11,7 @@ pre-fix defect and are flipped when the corresponding phase lands:
 - A3 REDUCE with NO_TRADE scope    -> phase 3
 - F4 double deployment cap         -> phase 5
 - F6 post-action stable shortfall  -> phase 6
-- F1 satellite entry cliff         -> PENDING_POLICY_DECISION (8A)
+- F1 satellite entry cliff         -> fixed by the continuous target curve (phase 1)
 - F3 core temporary-cap targets    -> PENDING_POLICY_DECISION (8B)
 - F7 regime notch per review       -> PENDING_POLICY_DECISION (8D)
 """
@@ -54,14 +54,14 @@ def _sol_target(score: float) -> float:
 class F1SatelliteEntryCliffTests(unittest.TestCase):
     """Score improving across the entry boundary must not cut a held target."""
 
-    def test_documented_cliff_pending_8a(self):
-        # Current contract: 62-66 hold the current 10% (HOLD_ONLY band),
-        # 67 becomes ELIGIBLE with score_strength 0 and the target drops to
-        # zero.  Monotone repair is gated on the 8A hysteresis decision.
-        self.assertAlmostEqual(_sol_target(61), 0.05)
-        self.assertAlmostEqual(_sol_target(62), 0.10)
-        self.assertAlmostEqual(_sol_target(66), 0.10)
-        self.assertAlmostEqual(_sol_target(67), 0.0)
+    def test_continuous_curve_removed_the_entry_cliff(self):
+        # Fixed by the phase-1 continuous target curve: the held target is a
+        # monotone piecewise-linear function of score across the whole
+        # domain, so 66.9 -> 67.0 is an adjacent curve step, not a collapse.
+        self.assertAlmostEqual(_sol_target(61), 0.04)
+        self.assertAlmostEqual(_sol_target(62), 0.05)
+        self.assertAlmostEqual(_sol_target(66), 0.09)
+        self.assertAlmostEqual(_sol_target(67), 0.10)
         self.assertAlmostEqual(_sol_target(85), 0.25)
 
 
@@ -73,7 +73,7 @@ class F2MissingDataExitTests(unittest.TestCase):
             "critical_data_complete": False,
             "relative_strength_vs_btc": None,
         }
-        self.assertEqual(satellite_eligibility(assessment, current_weight=0.1), "HOLD_ONLY")
+        self.assertEqual(satellite_eligibility(assessment, current_weight=0.1), "HOLD_OR_REDUCE")
         self.assertEqual(satellite_eligibility(assessment, current_weight=0.0), "INELIGIBLE")
 
     def test_confirmed_negative_evidence_still_ineligible(self):
@@ -221,8 +221,8 @@ class F5RelativeStrengthUnitTests(unittest.TestCase):
         common = {"weighted_score": 85, "confidence": "HIGH", "critical_data_complete": True}
         self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 30}), "INELIGIBLE")
         self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 0.5}), "INELIGIBLE")
-        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 50}), "ELIGIBLE")
-        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 70}), "ELIGIBLE")
+        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 50}), "ELIGIBLE_INCREASE")
+        self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 70}), "ELIGIBLE_INCREASE")
         with self.assertRaisesRegex(ValueError, "in \\[0, 100\\]"):
             satellite_eligibility({**common, "relative_strength_vs_btc": -0.2})
 
@@ -583,7 +583,7 @@ class ReviewRound2Regressions(unittest.TestCase):
         # 0.3*50 + 0.7*60 = 57: inside the soft-exit band, but the missing
         # factor makes this incomplete evidence, not evidenced weakness.
         self.assertLess(scored.weighted_score, 67)
-        self.assertEqual(satellite_eligibility(scored, current_weight=0.1), "HOLD_ONLY")
+        self.assertEqual(satellite_eligibility(scored, current_weight=0.1), "HOLD_OR_REDUCE")
 
     def test_risk_tier_source_is_representation_independent(self):
         from crypto_portfolio.models.evidence import AssetAssessment

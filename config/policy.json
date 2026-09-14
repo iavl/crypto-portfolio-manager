@@ -180,8 +180,13 @@
     "satellite_entry_score": 67,
     "satellite_exit_score": 62,
     "satellite_soft_exit_score": 57,
-    "satellite_soft_exit_fraction": 0.5,
     "satellite_full_score": 85,
+    "satellite_target_curve": {
+      "soft_exit_fraction": 0.0,
+      "exit_fraction": 0.2,
+      "entry_fraction": 0.4,
+      "full_fraction": 1.0
+    },
     "risk_multipliers": {
       "normal": 1.0,
       "high_beta": 0.5,

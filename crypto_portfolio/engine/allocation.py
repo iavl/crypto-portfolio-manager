@@ -260,13 +260,108 @@ def _missing_factor_evidence(assessment: Any) -> bool:
     return False
 
 
+def _incomplete_evidence(assessment: Any) -> bool:
+    """Missing relative/critical/factor evidence blocks new risk fail-defensively."""
+    if assessment is None:
+        return True
+    return (
+        _relative_eligibility(_field(assessment, "relative_strength_vs_btc", None)) != "ELIGIBLE"
+        or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+        or _missing_factor_evidence(assessment)
+    )
+
+
+def _unresolved_event(assessment: Any) -> bool:
+    event_risk = _field(assessment, "event_risk", None)
+    if isinstance(event_risk, EventRiskAssessment):
+        return bool(event_risk.unresolved)
+    if isinstance(event_risk, Mapping):
+        return _flag(event_risk.get("unresolved", False), "event_risk.unresolved")
+    return False
+
+
+_SATELLITE_STATES = {"ELIGIBLE_INCREASE", "HOLD_OR_REDUCE", "SOFT_EXIT", "INELIGIBLE"}
+
+
+def satellite_target_fraction(
+    score: float,
+    *,
+    soft_exit_score: float,
+    exit_score: float,
+    entry_score: float,
+    full_score: float,
+    curve: Mapping[str, float],
+) -> float:
+    """Piecewise-linear score-to-target fraction for satellite sizing.
+
+    The curve is bounded to ``[0, 1]``, monotonic non-decreasing in score,
+    continuous at every configured breakpoint, and independent of the
+    current holding: it answers "what fraction of the satellite envelope
+    does this score deserve", never "what do we currently own".  This is
+    what removes the entry cliff: a held asset crossing
+    ``satellite_entry_score`` stays on the same curve instead of dropping
+    from preserve-current to a score-strength of zero.
+    """
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        raise ValueError("score must be a number")
+    score = float(score)
+    if not math.isfinite(score):
+        raise ValueError("score must be finite")
+    breakpoints = (soft_exit_score, exit_score, entry_score, full_score)
+    if not all(
+        isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(float(item))
+        for item in breakpoints
+    ):
+        raise ValueError("curve score breakpoints must be finite numbers")
+    if not (float(soft_exit_score) < float(exit_score) < float(entry_score) < float(full_score)):
+        raise ValueError("curve breakpoints must satisfy soft_exit < exit < entry < full")
+    fractions = {
+        name: curve.get(name)
+        for name in ("soft_exit_fraction", "exit_fraction", "entry_fraction", "full_fraction")
+    }
+    if not all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+        for value in fractions.values()
+    ):
+        raise ValueError("curve fractions must be finite numbers")
+    values = [float(fractions[name]) for name in ("soft_exit_fraction", "exit_fraction", "entry_fraction", "full_fraction")]
+    if any(value < 0.0 or value > 1.0 for value in values):
+        raise ValueError("curve fractions must be in [0, 1]")
+    if not (values[0] <= values[1] <= values[2] <= values[3]):
+        raise ValueError("curve fractions must be non-decreasing from soft_exit to full")
+    if values[3] != 1.0:
+        raise ValueError("curve full_fraction must be 1.0")
+    if score <= soft_exit_score:
+        return values[0]
+    if score >= full_score:
+        return values[3]
+    bounds = (float(soft_exit_score), float(exit_score), float(entry_score), float(full_score))
+    for lower, upper, base, top in zip(bounds, bounds[1:], values, values[1:]):
+        if score <= upper:
+            span = upper - lower
+            if span <= 0:
+                return top
+            return base + (score - lower) / span * (top - base)
+    return values[3]
+
+
 def satellite_eligibility(
     assessment: AssetAssessment | Mapping[str, Any] | None,
     policy: Policy | None = None,
     *,
     current_weight: float = 0.0,
 ) -> str:
-    """Return ELIGIBLE, HOLD_ONLY, SOFT_EXIT, or INELIGIBLE for a satellite assessment."""
+    """Classify whether a satellite may receive new risk this review.
+
+    Returns ``ELIGIBLE_INCREASE`` (new exposure may be added up to the
+    strategic/deployment target), ``HOLD_OR_REDUCE`` (no new risk; an
+    existing overweight may be reduced toward the strategic target),
+    ``SOFT_EXIT`` (reduce existing exposure gradually along the target
+    curve), or ``INELIGIBLE`` (target zero / exit according to hard-risk
+    rules).  Eligibility gates deployment, never the shape of the target
+    curve, so a state transition at the entry score cannot collapse target
+    sizing.
+    """
     resolved = policy or resolve_policy()
     if isinstance(assessment, AssetAssessment) and assessment.weighted_score is None:
         assessment, _ = score_assessment(assessment, policy=resolved)
@@ -279,6 +374,7 @@ def satellite_eligibility(
     entry_score = resolved.allocation["satellite_entry_score"]
     exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
     soft_exit_score = resolved.allocation.get("satellite_soft_exit_score", exit_score)
+    held = current_weight > 0
     # Confirmed hard risk first: a broken thesis or severe event is never
     # masked by data availability in either direction.
     if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
@@ -290,36 +386,28 @@ def satellite_eligibility(
     # score; missing evidence is the opposite signal and handled below.
     if relative_status == "INELIGIBLE":
         return "INELIGIBLE"
-    evidence_incomplete = (
-        relative_status == "HOLD_ONLY"
-        or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
-        or _missing_factor_evidence(assessment)
-    )
-    if score < entry_score:
-        if evidence_incomplete:
-            # Missing factors shrink the score toward neutral; the neutral
-            # score alone must not manufacture an exit for a held position.
-            return "HOLD_ONLY" if current_weight > 0 else "INELIGIBLE"
-        if current_weight > 0 and score >= exit_score:
-            return "HOLD_ONLY"
-        # A held satellite inside the soft-exit band de-risks gradually instead
-        # of facing the full-exit cliff one score point below the exit floor.
-        if current_weight > 0 and score >= soft_exit_score:
-            return "SOFT_EXIT"
+    if _incomplete_evidence(assessment) or _unresolved_event(assessment):
+        # Missing factors shrink the score toward neutral; the neutral score
+        # alone must not manufacture an exit for a held position, and an
+        # unheld one receives no target at all.
+        return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+    if score < soft_exit_score:
+        # Evidence-complete hard score floor: the exit is supported by the
+        # score itself, not by missing data.
         return "INELIGIBLE"
-    if evidence_incomplete:
-        return "HOLD_ONLY"
-    event_risk = _field(assessment, "event_risk", None)
-    unresolved = (
-        event_risk.unresolved
-        if isinstance(event_risk, EventRiskAssessment)
-        else _flag(event_risk.get("unresolved", False), "event_risk.unresolved")
-        if isinstance(event_risk, Mapping)
-        else False
-    )
-    if unresolved:
-        return "HOLD_ONLY"
-    return relative_status
+    if score < entry_score:
+        if relative_status == "HOLD_ONLY":
+            # Moderate BTC-relative weakness: no new risk on that evidence,
+            # but a held position is reduced normally, not forced out.
+            return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+        if score < exit_score:
+            # A held satellite inside the soft-exit band de-risks gradually
+            # along the curve instead of facing the full-exit cliff.
+            return "SOFT_EXIT" if held else "INELIGIBLE"
+        return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+    if relative_status == "HOLD_ONLY":
+        return "HOLD_OR_REDUCE"
+    return "ELIGIBLE_INCREASE"
 
 
 def _bounded_allocate(
@@ -484,72 +572,71 @@ def build_target_allocation(
                 raise ValueError(
                     "risk_tier_source must be POLICY_DEFAULT, MANUAL_ASSESSMENT, or DETERMINISTIC_ESTIMATE"
                 )
-            deployment_factor = min(
-                asset_confidence_factor,
-                event_multiplier,
-                decision_confidence_factor,
-                execution_overlay_factor,
-            )
-            relative_status = satellite_eligibility(
+            held_weight = normalized_current_weights.get(symbol, 0.0)
+            state = satellite_eligibility(
                 assessment,
                 resolved,
-                current_weight=normalized_current_weights.get(symbol, 0.0),
+                current_weight=held_weight,
             )
-            if relative_status == "HOLD_ONLY":
-                if current_weights.get(symbol, 0.0) > 0:
-                    satellite_hold[symbol] = current_weights[symbol]
-                evidence_incomplete = (
-                    _relative_eligibility(_field(assessment, "relative_strength_vs_btc", None)) != "ELIGIBLE"
-                    or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
-                    or _missing_factor_evidence(assessment)
+            curve_fraction = satellite_target_fraction(
+                score,
+                soft_exit_score=resolved.allocation["satellite_soft_exit_score"],
+                exit_score=resolved.allocation["satellite_exit_score"],
+                entry_score=resolved.allocation["satellite_entry_score"],
+                full_score=resolved.allocation["satellite_full_score"],
+                curve=resolved.allocation["satellite_target_curve"],
+            )
+            requested_strategic_weight = satellite_cap * curve_fraction * risk_multiplier
+            deployment_factor = (
+                min(
+                    asset_confidence_factor,
+                    event_multiplier,
+                    decision_confidence_factor,
+                    execution_overlay_factor,
                 )
-                reason = (
-                    "BTC-relative or critical evidence is incomplete; missing data preserves the position without adding risk"
-                    if evidence_incomplete
-                    else "score is inside the entry/exit hysteresis band"
-                )
-                reasons.append(f"{symbol} is HOLD_ONLY because {reason}")
-            elif relative_status == "SOFT_EXIT":
-                # Soft-exit targets ride the same preserve-existing bucket as
-                # HOLD_ONLY, at the configured fraction of current exposure.
-                fraction = float(resolved.allocation.get("satellite_soft_exit_fraction", 0.5))
-                if current_weights.get(symbol, 0.0) > 0:
-                    satellite_hold[symbol] = current_weights[symbol] * fraction
+                if state == "ELIGIBLE_INCREASE"
+                else 0.0
+            )
+            deployment_allowances[symbol] = {
+                "profile_name": resolved.scoring_profile_name(symbol),
+                "satellite_cap": satellite_cap,
+                "score": score,
+                "curve_fraction": curve_fraction,
+                "current_weight": held_weight,
+                "eligibility_state": state,
+                "risk_tier": risk_tier,
+                "risk_tier_source": risk_tier_source,
+                "risk_multiplier": risk_multiplier,
+                "asset_confidence": confidence,
+                "confidence_deployment_factor": asset_confidence_factor,
+                "event_risk": event_risk,
+                "event_risk_deployment_factor": event_multiplier,
+                "decision_confidence_factor": decision_confidence_factor,
+                "execution_overlay_factor": execution_overlay_factor,
+                "deployment_factor": deployment_factor,
+                "requested_strategic_weight": requested_strategic_weight,
+            }
+            if state == "INELIGIBLE":
                 reasons.append(
-                    f"{symbol} is SOFT_EXIT because the score is inside the soft-exit band; "
-                    f"the strategic target reduces existing exposure to {fraction:.0%}"
+                    f"{symbol} receives 0% satellite target because hard eligibility failed "
+                    "(score floor, broken thesis, severe event, or confirmed severe BTC-relative weakness)"
                 )
-            elif relative_status == "ELIGIBLE":
-                entry_score = resolved.allocation["satellite_entry_score"]
-                score_strength = min(
-                    1.0,
-                    max(0.0, (score - entry_score) / (
-                        resolved.allocation["satellite_full_score"]
-                        - entry_score
-                    )),
-                )
-                strategic_satellite_raw[symbol] = (
-                    satellite_cap
-                    * score_strength
-                    * risk_multiplier
-                )
-                deployment_allowances[symbol] = {
-                    "profile_name": resolved.scoring_profile_name(symbol),
-                    "satellite_cap": satellite_cap,
-                    "score": score,
-                    "score_strength": score_strength,
-                    "current_weight": normalized_current_weights.get(symbol, 0.0),
-                    "risk_tier": risk_tier,
-                    "risk_tier_source": risk_tier_source,
-                    "risk_multiplier": risk_multiplier,
-                    "asset_confidence": confidence,
-                    "confidence_deployment_factor": asset_confidence_factor,
-                    "event_risk": event_risk,
-                    "event_risk_deployment_factor": event_multiplier,
-                    "decision_confidence_factor": decision_confidence_factor,
-                    "execution_overlay_factor": execution_overlay_factor,
-                    "deployment_factor": deployment_factor,
-                }
+            elif _incomplete_evidence(assessment) or _unresolved_event(assessment):
+                # Fail-defensive preserve bucket: missing evidence blocks new
+                # risk and never manufactures an exit for a held position.
+                if held_weight > 0:
+                    satellite_hold[symbol] = held_weight
+                    deployment_allowances[symbol]["preserve_existing"] = True
+                    reasons.append(
+                        f"{symbol} is HOLD_OR_REDUCE because BTC-relative or critical evidence is "
+                        "incomplete; the existing position is preserved without adding risk"
+                    )
+                else:
+                    reasons.append(
+                        f"{symbol} has incomplete evidence and no position; no satellite target is created"
+                    )
+            elif state == "ELIGIBLE_INCREASE":
+                strategic_satellite_raw[symbol] = requested_strategic_weight
                 if event_multiplier < 1.0:
                     reasons.append(
                         f"{symbol} event-risk state {event_risk} limits immediate deployment to {event_multiplier:.0%}"
@@ -558,8 +645,20 @@ def build_target_allocation(
                     reasons.append(f"{symbol} immediate deployment is capped by asset confidence at {asset_confidence_factor:.0%}")
                 if decision_confidence_factor < 1.0:
                     reasons.append(f"{symbol} new deployment is capped by portfolio decision confidence at {decision_confidence_factor:.0%}")
+            elif held_weight > 0:
+                # Evidence-complete sub-entry band: the strategic target rides
+                # the same score curve, so crossing the entry score later
+                # cannot jump the target, and deployment stays blocked.
+                strategic_satellite_raw[symbol] = requested_strategic_weight
+                band = "the soft-exit band" if state == "SOFT_EXIT" else "the sub-entry band"
+                reasons.append(
+                    f"{symbol} is {state}: the strategic target follows the score curve through "
+                    f"{band} and no new risk may be added this review"
+                )
             else:
-                reasons.append(f"{symbol} receives 0% satellite target because eligibility failed or the soft-exit band was exhausted")
+                reasons.append(
+                    f"{symbol} is {state} without a position; no satellite target is created below the entry score"
+                )
         elif asset_type == "core":
             core_assessments[symbol] = assessment
 
@@ -579,11 +678,11 @@ def build_target_allocation(
         details["strategic_target_weight"] = strategic_weight
         # Capacity competition context: the envelope this satellite competed
         # in, how much preserve-existing buckets already consumed, and the
-        # pre-cap strategic weight it requested.
+        # pre-competition strategic weight it requested.
         details["satellite_envelope"] = satellite_cap
         details["held_satellite_weight"] = sum(held_satellite_weights.values())
         details["eligible_satellite_budget"] = eligible_satellite_budget
-        details["requested_strategic_weight"] = strategic_satellite_raw.get(symbol, 0.0)
+        details["envelope_competition_weight"] = strategic_satellite_raw.get(symbol, 0.0)
         details["max_immediate_increase_weight"] = strategic_weight * details["deployment_factor"]
     actual_satellite_weight = sum(satellite_weights.values())
     core_budget = risky_budget - actual_satellite_weight
@@ -644,4 +743,10 @@ def allocate(
     )
 
 
-__all__ = ["AllocationResult", "allocate", "build_target_allocation", "satellite_eligibility"]
+__all__ = [
+    "AllocationResult",
+    "allocate",
+    "build_target_allocation",
+    "satellite_eligibility",
+    "satellite_target_fraction",
+]

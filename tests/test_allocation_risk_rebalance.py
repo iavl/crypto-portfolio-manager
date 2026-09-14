@@ -181,7 +181,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
             )
 
         self.assertEqual(weight(score=66).target_weights.get("SOL", 0), 0)
-        self.assertEqual(satellite_eligibility({"weighted_score": 67, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}), "ELIGIBLE")
+        self.assertEqual(satellite_eligibility({"weighted_score": 67, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}), "ELIGIBLE_INCREASE")
         self.assertLess(weight(score=70).target_weights["SOL"], weight(score=80).target_weights["SOL"])
         self.assertEqual(weight(confidence="MEDIUM").target_weights["SOL"], weight(confidence="HIGH").target_weights["SOL"])
         self.assertLess(weight(confidence="MEDIUM").deployment_factors["SOL"], weight(confidence="HIGH").deployment_factors["SOL"])
@@ -200,23 +200,25 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
     def test_satellite_score_hysteresis(self):
         assessment = {"weighted_score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         self.assertEqual(satellite_eligibility(assessment), "INELIGIBLE")
-        self.assertEqual(satellite_eligibility(assessment, current_weight=0.05), "HOLD_ONLY")
+        self.assertEqual(satellite_eligibility(assessment, current_weight=0.05), "HOLD_OR_REDUCE")
         soft_band = {**assessment, "weighted_score": 61}
         self.assertEqual(satellite_eligibility(soft_band, current_weight=0.05), "SOFT_EXIT")
         self.assertEqual(satellite_eligibility(soft_band), "INELIGIBLE")
         result = build_target_allocation(assessments={"SOL": assessment}, current_weights={"SOL": 0.05, "USDT": 0.1, "BTC": 0.85})
-        self.assertAlmostEqual(result.target_weights.get("SOL", 0), 0.05)
+        # Score-driven sub-entry target rides the curve (0.36 of the 25% envelope).
+        self.assertAlmostEqual(result.target_weights.get("SOL", 0), 0.09)
 
     def test_satellite_soft_exit_band_reduces_instead_of_cliff_exiting(self):
         common = {"confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         # Inside [satellite_soft_exit_score, satellite_exit_score) a held
-        # satellite keeps the configured fraction of its exposure instead of
-        # facing the full-exit cliff one point below the exit floor.
+        # satellite reduces along the target curve (8% of the 25% envelope
+        # at score 59) instead of facing the full-exit cliff one point
+        # below the exit floor.
         soft = build_target_allocation(
             assessments={"SOL": {**common, "weighted_score": 59}},
             current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
         )
-        self.assertAlmostEqual(soft.target_weights["SOL"], 0.05)
+        self.assertAlmostEqual(soft.target_weights["SOL"], 0.02)
         below_band = build_target_allocation(
             assessments={"SOL": {**common, "weighted_score": 50}},
             current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},

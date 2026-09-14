@@ -90,9 +90,15 @@ _ALLOCATION_FIELDS = {
     "satellite_entry_score",
     "satellite_exit_score",
     "satellite_soft_exit_score",
-    "satellite_soft_exit_fraction",
     "satellite_full_score",
+    "satellite_target_curve",
     "risk_multipliers",
+}
+_SATELLITE_CURVE_FIELDS = {
+    "soft_exit_fraction",
+    "exit_fraction",
+    "entry_fraction",
+    "full_fraction",
 }
 _CORE_ALLOCATION_FIELDS = {"anchor", "eth", "confidence_multipliers"}
 _CORE_ANCHOR_FIELDS = {"BTC", "ETH"}
@@ -1835,12 +1841,11 @@ def _parse_policy(
     if not isinstance(allocation, dict):
         raise PolicyError("allocation must be an object")
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
-    common_allocation_fields = {"satellite_full_score", "risk_multipliers"}
+    common_allocation_fields = {"satellite_full_score", "risk_multipliers", "satellite_target_curve"}
     score_fields = {
         "satellite_entry_score",
         "satellite_exit_score",
         "satellite_soft_exit_score",
-        "satellite_soft_exit_fraction",
     }
     expected_allocation_fields = common_allocation_fields | score_fields
     if set(allocation) != expected_allocation_fields:
@@ -1878,17 +1883,31 @@ def _parse_policy(
         minimum=0,
         maximum=100,
     )
-    parsed_allocation["satellite_soft_exit_fraction"] = _fraction(
-        allocation["satellite_soft_exit_fraction"],
-        "allocation.satellite_soft_exit_fraction",
-        exclusive_minimum=True,
-    )
-    if not 0.0 < parsed_allocation["satellite_soft_exit_fraction"] < 1.0:
-        # Fraction 1 would collapse the band into HOLD_ONLY and fraction 0
-        # into the full-exit cliff the band exists to soften.
+    curve = allocation["satellite_target_curve"]
+    if not isinstance(curve, dict):
+        raise PolicyError("allocation.satellite_target_curve must be an object")
+    _unknown_fields(curve, _SATELLITE_CURVE_FIELDS, "allocation.satellite_target_curve")
+    if set(curve) != _SATELLITE_CURVE_FIELDS:
+        raise PolicyError("allocation.satellite_target_curve fields are incomplete")
+    parsed_curve = {
+        key: _fraction(curve[key], f"allocation.satellite_target_curve.{key}")
+        for key in _SATELLITE_CURVE_FIELDS
+    }
+    if not (
+        parsed_curve["soft_exit_fraction"]
+        <= parsed_curve["exit_fraction"]
+        <= parsed_curve["entry_fraction"]
+        <= parsed_curve["full_fraction"]
+    ):
         raise PolicyError(
-            "allocation.satellite_soft_exit_fraction must be strictly between 0 and 1"
+            "allocation.satellite_target_curve fractions must be non-decreasing "
+            "from soft_exit to full"
         )
+    if parsed_curve["full_fraction"] != 1.0:
+        # The curve scales the satellite envelope; a full score must be able
+        # to use all of it or the envelope itself is the real cap.
+        raise PolicyError("allocation.satellite_target_curve.full_fraction must be 1.0")
+    parsed_allocation["satellite_target_curve"] = parsed_curve
     if not (
         parsed_allocation["satellite_soft_exit_score"]
         < parsed_allocation["satellite_exit_score"]
