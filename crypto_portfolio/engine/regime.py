@@ -293,6 +293,101 @@ def _regime_confidence(
     )
 
 
+_BULLISH = {"BULLISH", "UP", "STRONG"}
+_FLOW_POSITIVE = {"POSITIVE", "INFLOW"}
+
+
+def _severity_key(domain: str, state: str) -> str | None:
+    """Map a raw domain state onto its canonical severity key.
+
+    ``None`` means unknown/unavailable: unknown states add no severity
+    (missing data must not manufacture risk-off) and stay penalized on the
+    confidence side instead.
+    """
+    if state in _UNKNOWN:
+        return None
+    if domain == "trend":
+        if state in _BEARISH:
+            return "BEARISH"
+        if state in _BULLISH:
+            return "BULLISH"
+        return "NEUTRAL" if state == "NEUTRAL" else None
+    if domain == "volatility":
+        return state if state in {"LOW", "NORMAL", "ELEVATED", "HIGH", "EXTREME"} else None
+    if domain == "flows":
+        if state in _RISK_OFF:
+            return "NEGATIVE"
+        if state in _FLOW_POSITIVE:
+            return "POSITIVE"
+        return "NEUTRAL" if state == "NEUTRAL" else None
+    if state in _RISK_OFF:
+        return "WEAK"
+    if state == "HEALTHY":
+        return "HEALTHY"
+    return "NEUTRAL" if state == "NEUTRAL" else None
+
+
+def _weighted_regime_risk_score(
+    inputs: RegimeInputs,
+    resolved: Policy,
+    reasons: list[str],
+) -> float:
+    """Weighted/severity regime risk score over the four ordinary domains.
+
+    ``risk_score = sum(domain_weight * severity(state))``.  Drawdown floors
+    and severe systemic events are hard overrides applied outside this
+    score and can never be diluted by it.
+    """
+    model = resolved.regime_model if isinstance(resolved.regime_model, Mapping) else {}
+    weights = model.get("domain_weights", {})
+    severity = model.get("severity", {})
+    states = {
+        "trend": _state(inputs.btc_trend),
+        "volatility": _state(inputs.volatility_state),
+        "flows": _state(inputs.flow_state),
+        "breadth": _state(inputs.breadth_state),
+    }
+    score = 0.0
+    parts: list[str] = []
+    unknowns: list[str] = []
+    for domain, state in states.items():
+        domain_severity = severity.get(domain, {}) if isinstance(severity, Mapping) else {}
+        weight = float(weights.get(domain, 0.0)) if isinstance(weights, Mapping) else 0.0
+        key = _severity_key(domain, state)
+        if key is None:
+            unknowns.append(domain)
+            continue
+        value = domain_severity.get(key) if isinstance(domain_severity, Mapping) else None
+        if value is None:
+            raise ValueError(
+                f"regime_model.severity.{domain} is missing the state {key} "
+                "the regime engine needs"
+            )
+        score += weight * float(value)
+        parts.append(f"{domain} {key} {float(value):.2f} x {weight:.2f}")
+    reasons.append(
+        "weighted regime risk score {:.3f} ({})".format(score, ", ".join(parts))
+        + ("; unknown domains add no severity" if unknowns else "")
+    )
+    return score
+
+
+def _weighted_regime(
+    inputs: RegimeInputs,
+    resolved: Policy,
+    reasons: list[str],
+) -> str:
+    model = resolved.regime_model if isinstance(resolved.regime_model, Mapping) else {}
+    score = _weighted_regime_risk_score(inputs, resolved, reasons)
+    normal_max = float(model.get("normal_max", 0.35))
+    defensive_max = float(model.get("defensive_max", 0.65))
+    if score <= normal_max:
+        return "NORMAL"
+    if score <= defensive_max:
+        return "DEFENSIVE"
+    return "CAPITAL_PRESERVATION"
+
+
 def determine_regime(
     inputs: RegimeInputs | dict[str, Any],
     *,
@@ -386,7 +481,14 @@ def determine_regime(
     elif breadth in _UNKNOWN:
         unknown += 1
 
-    if severe_count or risk_count >= 3:
+    model = resolved.regime_model if isinstance(resolved.regime_model, Mapping) else {}
+    mode = str(model.get("mode", "vote_count")).strip().lower()
+    if mode == "weighted":
+        # Weighted/severity classification over the ordinary domains; the
+        # drawdown floor and severe-event overrides below are re-asserted
+        # so a mid-range score can never dilute them.
+        regime = _weighted_regime(inputs, resolved, reasons)
+    elif severe_count or risk_count >= 3:
         regime = "CAPITAL_PRESERVATION"
     elif risk_count >= 2:
         regime = "DEFENSIVE"

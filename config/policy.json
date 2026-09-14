@@ -154,6 +154,18 @@
       "strong_abs": 0.01
     }
   },
+  "regime_model": {
+    "mode": "weighted",
+    "normal_max": 0.35,
+    "defensive_max": 0.65,
+    "domain_weights": {"trend": 0.3, "volatility": 0.25, "flows": 0.25, "breadth": 0.2},
+    "severity": {
+      "trend": {"BULLISH": 0.0, "NEUTRAL": 0.25, "BEARISH": 1.0},
+      "volatility": {"LOW": 0.0, "NORMAL": 0.0, "ELEVATED": 0.7, "HIGH": 0.85, "EXTREME": 1.0},
+      "flows": {"POSITIVE": 0.0, "NEUTRAL": 0.25, "NEGATIVE": 1.0},
+      "breadth": {"HEALTHY": 0.0, "NEUTRAL": 0.25, "WEAK": 1.0}
+    }
+  },
   "regime_transitions": {
     "enabled": true,
     "max_notches_per_review": 1

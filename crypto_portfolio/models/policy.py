@@ -67,8 +67,30 @@ _TOP_LEVEL_FIELDS = {
     "event_severity",
     "nav_history",
     "regime_transitions",
+    "regime_model",
 }
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
+_REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity"}
+_REGIME_MODEL_MODES = {"vote_count", "weighted"}
+_REGIME_MODEL_DOMAINS = ("trend", "volatility", "flows", "breadth")
+_REGIME_SEVERITY_STATES = {
+    "trend": {"BULLISH", "NEUTRAL", "BEARISH"},
+    "volatility": {"LOW", "NORMAL", "ELEVATED", "HIGH", "EXTREME"},
+    "flows": {"POSITIVE", "NEUTRAL", "NEGATIVE"},
+    "breadth": {"HEALTHY", "NEUTRAL", "WEAK"},
+}
+_DEFAULT_REGIME_MODEL: dict[str, Any] = {
+    "mode": "vote_count",
+    "normal_max": 0.35,
+    "defensive_max": 0.65,
+    "domain_weights": {"trend": 0.30, "volatility": 0.25, "flows": 0.25, "breadth": 0.20},
+    "severity": {
+        "trend": {"BULLISH": 0.0, "NEUTRAL": 0.25, "BEARISH": 1.0},
+        "volatility": {"LOW": 0.0, "NORMAL": 0.0, "ELEVATED": 0.7, "HIGH": 0.85, "EXTREME": 1.0},
+        "flows": {"POSITIVE": 0.0, "NEUTRAL": 0.25, "NEGATIVE": 1.0},
+        "breadth": {"HEALTHY": 0.0, "NEUTRAL": 0.25, "WEAK": 1.0},
+    },
+}
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
 _CHAIN_LIVENESS_FIELDS = {"degraded_deployment_factor", "BTC", "ETH", "BNB", "SOL"}
@@ -483,6 +505,49 @@ def _parse_regime_transitions(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_notches_per_review": max_notches}
 
 
+def _parse_regime_model(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {**_DEFAULT_REGIME_MODEL, "domain_weights": dict(_DEFAULT_REGIME_MODEL["domain_weights"]),
+                "severity": {name: dict(states) for name, states in _DEFAULT_REGIME_MODEL["severity"].items()}}
+    if not isinstance(value, dict):
+        raise PolicyError("regime_model must be an object")
+    _unknown_fields(value, _REGIME_MODEL_FIELDS, "regime_model")
+    if set(value) != _REGIME_MODEL_FIELDS:
+        raise PolicyError("regime_model fields are incomplete")
+    mode = str(value["mode"]).strip().lower()
+    if mode not in _REGIME_MODEL_MODES:
+        raise PolicyError("regime_model.mode must be vote_count or weighted")
+    parsed: dict[str, Any] = {"mode": mode}
+    parsed["normal_max"] = _fraction(value["normal_max"], "regime_model.normal_max")
+    parsed["defensive_max"] = _fraction(value["defensive_max"], "regime_model.defensive_max")
+    if not 0 < parsed["normal_max"] < parsed["defensive_max"] <= 1:
+        raise PolicyError("regime_model thresholds must satisfy 0 < normal_max < defensive_max <= 1")
+    weights = value["domain_weights"]
+    if not isinstance(weights, dict) or set(weights) != set(_REGIME_MODEL_DOMAINS):
+        raise PolicyError("regime_model.domain_weights must contain exactly " + ", ".join(_REGIME_MODEL_DOMAINS))
+    parsed_weights = {name: _fraction(weights[name], f"regime_model.domain_weights.{name}") for name in _REGIME_MODEL_DOMAINS}
+    if not math.isclose(sum(parsed_weights.values()), 1.0, abs_tol=1e-9):
+        raise PolicyError("regime_model.domain_weights must sum to 1")
+    parsed["domain_weights"] = parsed_weights
+    severity = value["severity"]
+    if not isinstance(severity, dict) or set(severity) != set(_REGIME_MODEL_DOMAINS):
+        raise PolicyError("regime_model.severity must contain exactly " + ", ".join(_REGIME_MODEL_DOMAINS))
+    parsed_severity: dict[str, dict[str, float]] = {}
+    for name in _REGIME_MODEL_DOMAINS:
+        states = severity[name]
+        expected = _REGIME_SEVERITY_STATES[name]
+        if not isinstance(states, dict) or set(states) != expected:
+            raise PolicyError(
+                f"regime_model.severity.{name} must contain exactly " + ", ".join(sorted(expected))
+            )
+        parsed_severity[name] = {
+            state: _fraction(states[state], f"regime_model.severity.{name}.{state}")
+            for state in expected
+        }
+    parsed["severity"] = parsed_severity
+    return parsed
+
+
 def _parse_core_allocation(value: Any) -> dict[str, Any]:
     if value is None:
         raise PolicyError("core_allocation is required")
@@ -585,6 +650,7 @@ class Policy:
     nav_history: Mapping[str, Any] = dataclass_field(default_factory=dict)
     high_impact_review: Mapping[str, float] = dataclass_field(default_factory=dict)
     regime_transitions: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    regime_model: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -697,6 +763,8 @@ class Policy:
             result["high_impact_review"] = dict(self.high_impact_review)
         if self.regime_transitions:
             result["regime_transitions"] = dict(self.regime_transitions)
+        if self.regime_model:
+            result["regime_model"] = _copy_mapping(self.regime_model)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -1882,6 +1950,7 @@ def _parse_policy(
     parsed_nav_history = _parse_nav_history(data.get("nav_history"))
     parsed_high_impact_review = _parse_high_impact_review(data.get("high_impact_review"))
     parsed_regime_transitions = _parse_regime_transitions(data.get("regime_transitions"))
+    parsed_regime_model = _parse_regime_model(data.get("regime_model"))
 
     regimes = data["regimes"]
     if not isinstance(regimes, dict):
@@ -2056,6 +2125,7 @@ def _parse_policy(
         nav_history=parsed_nav_history,
         high_impact_review=parsed_high_impact_review,
         regime_transitions=parsed_regime_transitions,
+        regime_model=parsed_regime_model,
     )
     return policy
 
