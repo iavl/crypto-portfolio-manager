@@ -147,7 +147,23 @@ class ScoringTests(unittest.TestCase):
         from crypto_portfolio.engine.allocation import satellite_eligibility
 
         for score in range(60, 67):
-            self.assertEqual(satellite_eligibility({"weighted_score": score, "relative_strength_vs_btc": "UNDERPERFORM"}, current_weight=0.05), "INELIGIBLE")
+            # Moderate UNDERPERFORM (>= hard-block threshold) blocks new risk
+            # but no longer hard-exits a held position: no double punishment
+            # with the scoring penalty.  MATERIALLY_WEAK still does.
+            self.assertEqual(
+                satellite_eligibility(
+                    {"weighted_score": score, "relative_strength_vs_btc": "UNDERPERFORM"},
+                    current_weight=0.05,
+                ),
+                "HOLD_OR_REDUCE",
+            )
+            self.assertEqual(
+                satellite_eligibility(
+                    {"weighted_score": score, "relative_strength_vs_btc": "MATERIALLY_WEAK"},
+                    current_weight=0.05,
+                ),
+                "INELIGIBLE",
+            )
 
     def test_reliability_metadata_mapping(self):
         self.assertEqual(calculate_factor_reliability(1, "CURRENT", "HIGH"), 1.0)

@@ -88,23 +88,36 @@ def _confidence(value: Any) -> str:
     return result
 
 
-def _relative_eligibility(value: Any) -> str:
+def _relative_eligibility(value: Any, policy: Policy | None = None) -> str:
     """Classify the BTC-relative comparison on the canonical 0-100 score unit.
 
-    Numeric values are factor scores: below 50 is the confirmed
-    UNDERPERFORM case (no new risk), at or above 50 is OUTPERFORM/NEUTRAL.
-    Excess returns are never read here; they are horizon-scoped fraction
-    facts on the relative-strength result. ``None``/UNKNOWN means the
-    comparison is missing and maps to HOLD_ONLY.
+    Two policy thresholds split the domain so moderate weakness is not
+    double-counted as both a scoring penalty and a hard ineligibility:
+
+    - at or above ``increase_min_score`` (OUTPERFORM/NEUTRAL): may increase;
+    - ``hard_block_below_score`` .. ``increase_min_score`` (UNDERPERFORM):
+      no new increase on that evidence, but a held position is reduced
+      normally, never forced out by this signal alone;
+    - below ``hard_block_below_score`` (MATERIALLY_WEAK): confirmed severe
+      weakness, a hard eligibility block.
+
+    ``None``/UNKNOWN means the comparison is missing and maps to HOLD_ONLY
+    (fail-defensive: no new risk, no manufactured exit).
     """
+    resolved = policy or resolve_policy()
+    thresholds = resolved.allocation.get("relative_strength") or {"increase_min_score": 50.0, "hard_block_below_score": 30.0}
+    increase_min = float(thresholds["increase_min_score"])
+    hard_block = float(thresholds["hard_block_below_score"])
     if value is None:
         return "HOLD_ONLY"
     if isinstance(value, str):
         state = value.strip().upper()
         if state in {"", "UNKNOWN"}:
             return "HOLD_ONLY"
-        if state in {"UNDERPERFORM", "MATERIALLY_WEAK"}:
+        if state == "MATERIALLY_WEAK":
             return "INELIGIBLE"
+        if state == "UNDERPERFORM":
+            return "HOLD_ONLY"
         if state in {"OUTPERFORM", "NEUTRAL"}:
             return "ELIGIBLE"
         raise ValueError("relative_strength_vs_btc is unsupported")
@@ -115,7 +128,11 @@ def _relative_eligibility(value: Any) -> str:
         raise ValueError("relative_strength_vs_btc must be finite")
     if not 0 <= score <= 100:
         raise ValueError("relative_strength_vs_btc score must be in [0, 100]")
-    return "ELIGIBLE" if score >= 50 else "INELIGIBLE"
+    if score >= increase_min:
+        return "ELIGIBLE"
+    if score < hard_block:
+        return "INELIGIBLE"
+    return "HOLD_ONLY"
 
 
 def _core_quality_multiplier(score: float) -> float:
@@ -264,12 +281,26 @@ def _missing_factor_evidence(assessment: Any) -> bool:
     return False
 
 
-def _incomplete_evidence(assessment: Any) -> bool:
+def _relative_missing(value: Any) -> bool:
+    """True only when the BTC-relative comparison itself is absent.
+
+    A confirmed moderate UNDERPERFORM reading is complete evidence that
+    gates new increases; it is not missing data and must never route a held
+    position into the fail-defensive preserve bucket.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip().upper() in {"", "UNKNOWN"}:
+        return True
+    return False
+
+
+def _incomplete_evidence(assessment: Any, policy: Policy | None = None) -> bool:
     """Missing relative/critical/factor evidence blocks new risk fail-defensively."""
     if assessment is None:
         return True
     return (
-        _relative_eligibility(_field(assessment, "relative_strength_vs_btc", None)) != "ELIGIBLE"
+        _relative_missing(_field(assessment, "relative_strength_vs_btc", None))
         or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
         or _missing_factor_evidence(assessment)
     )
@@ -385,12 +416,12 @@ def satellite_eligibility(
         _field(assessment, "thesis_broken", False), "thesis_broken"
     ):
         return "INELIGIBLE"
-    relative_status = _relative_eligibility(relative)
+    relative_status = _relative_eligibility(relative, resolved)
     # A confirmed materially-negative BTC-relative case is ineligible at any
     # score; missing evidence is the opposite signal and handled below.
     if relative_status == "INELIGIBLE":
         return "INELIGIBLE"
-    if _incomplete_evidence(assessment) or _unresolved_event(assessment):
+    if _incomplete_evidence(assessment, resolved) or _unresolved_event(assessment):
         # Missing factors shrink the score toward neutral; the neutral score
         # alone must not manufacture an exit for a held position, and an
         # unheld one receives no target at all.
@@ -410,7 +441,10 @@ def satellite_eligibility(
             return "SOFT_EXIT" if held else "INELIGIBLE"
         return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
     if relative_status == "HOLD_ONLY":
-        return "HOLD_OR_REDUCE"
+        # Moderate BTC-relative weakness above the entry score: no new risk
+        # on that evidence; a held position is reduced normally, and an
+        # unheld one never gains a target.
+        return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
     return "ELIGIBLE_INCREASE"
 
 
@@ -672,7 +706,7 @@ def build_target_allocation(
                     f"{symbol} receives 0% satellite target because hard eligibility failed "
                     "(score floor, broken thesis, severe event, or confirmed severe BTC-relative weakness)"
                 )
-            elif _incomplete_evidence(assessment) or _unresolved_event(assessment):
+            elif _incomplete_evidence(assessment, resolved) or _unresolved_event(assessment):
                 # Fail-defensive preserve bucket: missing evidence blocks new
                 # risk and never manufactures an exit for a held position.
                 if held_weight > 0:

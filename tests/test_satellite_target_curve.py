@@ -14,6 +14,7 @@ import unittest
 
 from crypto_portfolio.engine.allocation import (
     build_target_allocation,
+    satellite_eligibility,
     satellite_target_fraction,
 )
 from crypto_portfolio.models.policy import load_policy
@@ -237,6 +238,104 @@ class RiskTierCapTests(unittest.TestCase):
         self.assertFalse(allowance["risk_cap_applied"])
         self.assertAlmostEqual(result_normal.target_weights["AAVE"], 0.157333, places=5)
         self.assertGreater(result_normal.target_weights["AAVE"], result.target_weights["AAVE"])
+
+
+class RelativeStrengthGateTests(unittest.TestCase):
+    """Two-threshold BTC-relative gate: moderate weakness is not a hard block."""
+
+    COMMON = {"weighted_score": 85, "confidence": "HIGH", "critical_data_complete": True}
+
+    def test_numeric_threshold_split(self):
+        cases = {
+            20: "INELIGIBLE",
+            29.9: "INELIGIBLE",
+            30: "HOLD_OR_REDUCE",
+            40: "HOLD_OR_REDUCE",
+            49.9: "HOLD_OR_REDUCE",
+            50: "ELIGIBLE_INCREASE",
+            70: "ELIGIBLE_INCREASE",
+        }
+        for relative, expected in cases.items():
+            with self.subTest(relative=relative):
+                # Held: the moderate band keeps the position reducible; the
+                # unheld case receives no target at all.
+                self.assertEqual(
+                    satellite_eligibility(
+                        {**self.COMMON, "relative_strength_vs_btc": relative}, current_weight=0.10
+                    ),
+                    expected,
+                )
+                unheld = "INELIGIBLE" if expected != "ELIGIBLE_INCREASE" else expected
+                self.assertEqual(
+                    satellite_eligibility({**self.COMMON, "relative_strength_vs_btc": relative}),
+                    unheld,
+                )
+
+    def test_missing_relative_evidence_is_fail_defensive(self):
+        self.assertEqual(
+            satellite_eligibility({**self.COMMON, "relative_strength_vs_btc": None}, current_weight=0.10),
+            "HOLD_OR_REDUCE",
+        )
+        self.assertEqual(
+            satellite_eligibility({**self.COMMON, "relative_strength_vs_btc": None}),
+            "INELIGIBLE",
+        )
+
+    def test_string_states_map_onto_the_same_bands(self):
+        self.assertEqual(
+            satellite_eligibility({**self.COMMON, "relative_strength_vs_btc": "MATERIALLY_WEAK"}),
+            "INELIGIBLE",
+        )
+        self.assertEqual(
+            satellite_eligibility(
+                {**self.COMMON, "relative_strength_vs_btc": "UNDERPERFORM"}, current_weight=0.10
+            ),
+            "HOLD_OR_REDUCE",
+        )
+        self.assertEqual(
+            satellite_eligibility({**self.COMMON, "relative_strength_vs_btc": "NEUTRAL"}),
+            "ELIGIBLE_INCREASE",
+        )
+        self.assertEqual(
+            satellite_eligibility({**self.COMMON, "relative_strength_vs_btc": "OUTPERFORM"}),
+            "ELIGIBLE_INCREASE",
+        )
+
+    def test_moderate_weakness_preserves_a_held_target_without_new_risk(self):
+        def target(relative, held):
+            weights = {"BTC": 0.5, "ETH": 0.3, "SOL": 0.1, "USDT": 0.1} if held else {
+                "BTC": 0.5, "ETH": 0.3, "USDT": 0.2,
+            }
+            result = build_target_allocation(
+                regime="NORMAL",
+                assessments={
+                    "BTC": {"weighted_score": 80, "confidence": "HIGH"},
+                    "ETH": {"weighted_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                    "SOL": {**self.COMMON, "relative_strength_vs_btc": relative},
+                },
+                current_weights=weights,
+            )
+            return result.target_weights.get("SOL", 0.0), result.deployment_allowances["SOL"]
+
+        held_target, held_allowance = target(40, held=True)
+        self.assertAlmostEqual(held_target, 0.25)  # score 85 rides the curve
+        self.assertEqual(held_allowance["eligibility_state"], "HOLD_OR_REDUCE")
+        self.assertEqual(held_allowance["deployment_factor"], 0.0)
+        unheld_target, unheld_allowance = target(40, held=False)
+        self.assertEqual(unheld_target, 0.0)
+        self.assertEqual(unheld_allowance["eligibility_state"], "INELIGIBLE")
+
+    def test_severe_weakness_hard_blocks_at_any_score(self):
+        result = build_target_allocation(
+            regime="NORMAL",
+            assessments={
+                "BTC": {"weighted_score": 80, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "SOL": {**self.COMMON, "relative_strength_vs_btc": 20},
+            },
+            current_weights={"BTC": 0.5, "ETH": 0.3, "SOL": 0.1, "USDT": 0.1},
+        )
+        self.assertEqual(result.target_weights.get("SOL", 0.0), 0.0)
 
 
 if __name__ == "__main__":

@@ -117,7 +117,9 @@ _ALLOCATION_FIELDS = {
     "satellite_full_score",
     "satellite_target_curve",
     "risk_tier_caps",
+    "relative_strength",
 }
+_RELATIVE_STRENGTH_FIELDS = {"increase_min_score", "hard_block_below_score"}
 _SATELLITE_CURVE_FIELDS = {
     "soft_exit_fraction",
     "exit_fraction",
@@ -1905,7 +1907,9 @@ def _parse_policy(
     if not isinstance(allocation, dict):
         raise PolicyError("allocation must be an object")
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
-    common_allocation_fields = {"satellite_full_score", "risk_tier_caps", "satellite_target_curve"}
+    common_allocation_fields = {
+        "satellite_full_score", "risk_tier_caps", "satellite_target_curve", "relative_strength",
+    }
     score_fields = {
         "satellite_entry_score",
         "satellite_exit_score",
@@ -1972,6 +1976,27 @@ def _parse_policy(
         # to use all of it or the envelope itself is the real cap.
         raise PolicyError("allocation.satellite_target_curve.full_fraction must be 1.0")
     parsed_allocation["satellite_target_curve"] = parsed_curve
+    relative_strength = allocation["relative_strength"]
+    if not isinstance(relative_strength, dict):
+        raise PolicyError("allocation.relative_strength must be an object")
+    _unknown_fields(relative_strength, _RELATIVE_STRENGTH_FIELDS, "allocation.relative_strength")
+    if set(relative_strength) != _RELATIVE_STRENGTH_FIELDS:
+        raise PolicyError("allocation.relative_strength fields are incomplete")
+    parsed_relative_strength = {
+        key: _number(
+            relative_strength[key], f"allocation.relative_strength.{key}", minimum=0, maximum=100
+        )
+        for key in _RELATIVE_STRENGTH_FIELDS
+    }
+    if not (
+        0 <= parsed_relative_strength["hard_block_below_score"]
+        < parsed_relative_strength["increase_min_score"] <= 100
+    ):
+        raise PolicyError(
+            "allocation.relative_strength must satisfy "
+            "0 <= hard_block_below_score < increase_min_score <= 100"
+        )
+    parsed_allocation["relative_strength"] = parsed_relative_strength
     if not (
         parsed_allocation["satellite_soft_exit_score"]
         < parsed_allocation["satellite_exit_score"]

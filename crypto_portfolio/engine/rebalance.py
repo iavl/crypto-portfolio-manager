@@ -180,16 +180,26 @@ def build_no_trade_attribution(
         relative = _value_field(assessment, "relative_strength_vs_btc")
         if symbol == "ETH" or resolved.classify(symbol) == "satellite":
             btc_relative_gate = "PASS"
+            thresholds = resolved.allocation.get("relative_strength") or {
+                "increase_min_score": 50.0, "hard_block_below_score": 30.0,
+            }
             if relative is None:
                 relative_state = "UNKNOWN"
             elif isinstance(relative, str):
                 relative_state = relative.strip().upper()
             else:
-                # Canonical 0-100 score unit; below 50 is the confirmed weak case.
+                # Canonical 0-100 score unit read against the same two
+                # thresholds the allocation engine uses.
                 try:
-                    relative_state = "UNDERPERFORM" if float(relative) < 50 else "OUTPERFORM"
+                    score = float(relative)
                 except (TypeError, ValueError) as exc:
                     raise ValueError("relative_strength_vs_btc must be numeric or a supported state") from exc
+                if score < float(thresholds["hard_block_below_score"]):
+                    relative_state = "MATERIALLY_WEAK"
+                elif score < float(thresholds["increase_min_score"]):
+                    relative_state = "UNDERPERFORM"
+                else:
+                    relative_state = "OUTPERFORM"
             if relative_state in {"", "UNKNOWN", "UNDERPERFORM", "MATERIALLY_WEAK"}:
                 btc_relative_gate = "BLOCKED"
                 reasons.add("BTC_RELATIVE_WEAK")

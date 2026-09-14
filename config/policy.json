@@ -200,6 +200,10 @@
       "normal": 1.0,
       "high_beta": 0.5,
       "high": 0.5
+    },
+    "relative_strength": {
+      "increase_min_score": 50,
+      "hard_block_below_score": 30
     }
   },
   "core_allocation": {
