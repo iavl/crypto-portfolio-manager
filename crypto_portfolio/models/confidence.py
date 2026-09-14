@@ -263,6 +263,10 @@ class ConfidenceResult:
 
 @dataclass(frozen=True)
 class DecisionConfidence(ConfidenceResult):
+    """Decision Evidence Confidence: how strongly available evidence supports
+    the contemplated action.  It is not a win/probability-of-profit estimate;
+    serialized field names keep the decision_confidence spelling."""
+
     components: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     critical_blockers: tuple[str, ...] = ()
     allowed_actions: tuple[str, ...] = ()

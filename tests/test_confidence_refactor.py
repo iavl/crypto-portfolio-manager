@@ -6,6 +6,7 @@ from crypto_portfolio.engine.confidence import (
     aggregate_asset_evidence_confidence,
     calculate_data_confidence,
     calculate_decision_confidence,
+    confidence_deployment_factor,
 )
 from crypto_portfolio.engine.decision_packet import build_decision_review_packet
 from crypto_portfolio.engine.risk import run_risk_gate
@@ -163,3 +164,59 @@ class ConfidenceRefactorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DecisionEvidenceConfidenceSemanticsTests(unittest.TestCase):
+    """Phase-7 unified band -> deployment semantics (applied exactly once)."""
+
+    def _decision(self, score: float):
+        return calculate_decision_confidence(
+            {
+                "portfolio_data": score,
+                "regime_confidence": score,
+                "asset_evidence": {"assets": {"SOL": score}, "weights": {"SOL": 1.0}},
+                "portfolio_accounting": score,
+                "signal_agreement": score,
+            },
+            scope=DecisionScope("INCREASE", ("SOL",), {"SOL": 0.1}),
+        )
+
+    def test_medium_confidence_allows_scaled_increase(self):
+        decision = self._decision(0.7)
+        self.assertEqual(decision.band, "MEDIUM")
+        self.assertIn("INCREASE", decision.allowed_actions)
+        self.assertEqual(
+            confidence_deployment_factor(decision.score), 0.7,
+            "MEDIUM deployment factor comes from canonical policy",
+        )
+
+    def test_low_confidence_blocks_new_increase_but_keeps_risk_reductions(self):
+        decision = self._decision(0.3)
+        self.assertEqual(decision.band, "LOW")
+        self.assertNotIn("INCREASE", decision.allowed_actions)
+        self.assertIn("REDUCE", decision.allowed_actions)
+        self.assertIn("EXIT", decision.allowed_actions)
+
+    def test_high_confidence_allows_full_deployment(self):
+        decision = self._decision(0.95)
+        self.assertEqual(decision.band, "HIGH")
+        self.assertIn("INCREASE", decision.allowed_actions)
+        self.assertEqual(confidence_deployment_factor(decision.score), 1.0)
+
+    def test_medium_increase_is_scaled_exactly_once_in_rebalance(self):
+        from crypto_portfolio.engine.rebalance import recommend_rebalance
+
+        current = {"SOL": 0.05, "USDT": 0.95}
+        target = {"SOL": 0.15, "USDT": 0.85}
+        base = recommend_rebalance(current, target, 10000.0)
+        staged = recommend_rebalance(current, target, 10000.0, decision_confidence={"score": 0.7})
+        base_amount = next(a.amount_usd for a in base.actions if a.symbol == "SOL")
+        staged_amount = next(a.amount_usd for a in staged.actions if a.symbol == "SOL")
+        self.assertGreater(base_amount, 0)
+        # Exactly one 0.7 application on top of the staged step.
+        self.assertAlmostEqual(staged_amount, base_amount * 0.7)
+
+    def test_explanation_states_evidence_semantics(self):
+        decision = self._decision(0.9)
+        self.assertIn("evidence", decision.explanation)
+        self.assertIn("not a win probability", decision.explanation)

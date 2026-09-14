@@ -888,12 +888,24 @@ def calculate_decision_confidence(
     scoped_blockers = {
         cap.applies_to for cap in parsed_caps if cap.applies_to.startswith("ACTION:")
     }
-    blocked = tuple(sorted({str(item).strip().upper() for item in blocked_actions} | set(blockers) | scoped_blockers))
+    blocked = tuple(sorted({str(item).strip().upper() for item in blocked_actions} | set(blockers) | set(scoped_blockers)))
     medium, high = _thresholds_for_policy(policy)
-    allowed = ("HOLD", "NO_TRADE") if score < high else ("HOLD", "NO_TRADE", "INCREASE", "REDUCE", "EXIT")
+    # Band -> deployment semantics, applied exactly once downstream:
+    # LOW blocks new INCREASE entirely (hard-risk REDUCE/EXIT from the
+    # deterministic gates stays allowed); MEDIUM allows INCREASE scaled by
+    # the configured deployment factor in the rebalance/entry layers; HIGH
+    # deploys fully.
+    if score < medium:
+        allowed = ("HOLD", "NO_TRADE", "REDUCE", "EXIT")
+    else:
+        allowed = ("HOLD", "NO_TRADE", "INCREASE", "REDUCE", "EXIT")
     if parsed_caps:
         reasons.update(cap.code for cap in parsed_caps)
-    explanation = "confidence is capped by hard evidence constraints" if parsed_caps else "confidence is the action-scoped weighted evidence score"
+    explanation = (
+        "decision evidence confidence is capped by hard evidence constraints"
+        if parsed_caps
+        else "decision evidence confidence is the action-scoped weighted evidence score, not a win probability"
+    )
     if parsed_penalties:
         explanation += "; soft evidence penalties are applied once"
     return DecisionConfidence(
