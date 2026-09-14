@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
@@ -181,29 +181,33 @@ def _allocate_core(
             * event_multiplier
         )
     positive = {symbol: value for symbol, value in raw.items() if value > 0}
+    reasons = tuple(f"{symbol} core state {state}" for symbol, state in states.items())
     if not positive or budget <= 0:
-        return {}, max(0.0, budget), tuple(f"{symbol} core state {state}" for symbol, state in states.items())
+        return {}, max(0.0, budget), reasons
+    # Per-asset ceilings: single-asset cap, the ETH sleeve share, and the
+    # eligibility caps for gated states.  Only ELIGIBLE_INCREASE assets may
+    # absorb budget freed by a capped peer; gated sleeves are frozen at
+    # min(proportional share, cap) so a HOLD_ONLY/REDUCE state never grows
+    # back through redistribution.
+    caps: dict[str, float] = {}
+    redistributable: set[str] = set()
+    for symbol in positive:
+        cap = single_asset_cap
+        if symbol == "ETH":
+            cap = min(cap, budget * config["eth"]["max_core_sleeve_share"])
+        state = states.get(symbol)
+        if state in {"HOLD_ONLY", "UNDERWEIGHT"}:
+            cap = min(cap, current_weights.get(symbol, 0.0))
+        elif state == "REDUCE":
+            cap = min(cap, current_weights.get(symbol, 0.0) * 0.75)
+        caps[symbol] = cap
+        if state == "ELIGIBLE_INCREASE":
+            redistributable.add(symbol)
     total_raw = sum(positive.values())
     desired = {symbol: budget * value / total_raw for symbol, value in positive.items()}
-    caps = {symbol: single_asset_cap for symbol in desired}
-    if "BTC" in caps and states.get("BTC") == "HOLD_ONLY":
-        caps["BTC"] = min(caps["BTC"], current_weights.get("BTC", 0.0))
-    if "ETH" in caps:
-        caps["ETH"] = min(caps["ETH"], budget * config["eth"]["max_core_sleeve_share"])
-        if states.get("ETH") == "HOLD_ONLY":
-            caps["ETH"] = min(caps["ETH"], current_weights.get("ETH", 0.0))
-        elif states.get("ETH") == "UNDERWEIGHT":
-            caps["ETH"] = min(caps["ETH"], current_weights.get("ETH", 0.0))
-        elif states.get("ETH") == "REDUCE":
-            caps["ETH"] = min(caps["ETH"], current_weights.get("ETH", 0.0) * 0.75)
-    result = {symbol: min(desired[symbol], caps[symbol]) for symbol in desired}
-    residual = max(0.0, budget - sum(result.values()))
-    if residual > 1e-12 and states.get("ETH") in {"HOLD_ONLY", "UNDERWEIGHT", "REDUCE", "INELIGIBLE"} and states.get("BTC") == "ELIGIBLE_INCREASE":
-        btc_capacity = max(0.0, caps.get("BTC", single_asset_cap) - result.get("BTC", 0.0))
-        add = min(residual, btc_capacity)
-        result["BTC"] = result.get("BTC", 0.0) + add
-        residual -= add
-    reasons = tuple(f"{symbol} core state {state}" for symbol, state in states.items())
+    result, residual = _bounded_allocate_with_caps(
+        desired, budget, caps, redistributable=redistributable
+    )
     return {symbol: weight for symbol, weight in result.items() if weight > 1e-12}, residual, reasons
 
 
@@ -410,25 +414,63 @@ def satellite_eligibility(
     return "ELIGIBLE_INCREASE"
 
 
+def _bounded_allocate_with_caps(
+    raw: Mapping[str, float],
+    budget: float,
+    caps: Mapping[str, float],
+    *,
+    redistributable: Iterable[str] | None = None,
+) -> tuple[dict[str, float], float]:
+    """Allocate absolute requested weights under a budget and per-asset caps.
+
+    ``raw`` holds absolute requested weights; the total never exceeds
+    ``min(budget, sum(requests))``.  Assets listed in ``redistributable``
+    (default: all) compete for the budget proportionally to their request,
+    and budget freed by a capped peer is water-filled into the remaining
+    redistributable assets up to their caps.  Assets excluded from
+    ``redistributable`` are frozen at ``min(request, cap)`` first, so a
+    gated sleeve can never grow back through redistribution.  The returned
+    residual is budget the capped field could not absorb.
+    """
+    requests = {symbol: float(value) for symbol, value in raw.items() if float(value) > 0}
+    if not requests or budget <= 0:
+        return {}, max(0.0, budget)
+    result: dict[str, float] = {symbol: 0.0 for symbol in requests}
+    remaining = min(budget, sum(requests.values()))
+    frozen = (
+        set() if redistributable is None
+        else {symbol for symbol in requests if symbol not in redistributable}
+    )
+    for symbol in sorted(frozen):
+        take = min(requests[symbol], float(caps.get(symbol, requests[symbol])))
+        result[symbol] = take
+        remaining -= take
+    active = {symbol: request for symbol, request in requests.items() if symbol not in frozen}
+    while active and remaining > 1e-12:
+        total = sum(active.values())
+        capped = [
+            symbol for symbol, request in active.items()
+            if remaining * request / total > float(caps.get(symbol, budget)) - result[symbol] + 1e-15
+        ]
+        if not capped:
+            for symbol, request in active.items():
+                result[symbol] += remaining * request / total
+            remaining = 0.0
+            break
+        for symbol in sorted(capped):
+            give = min(float(caps.get(symbol, budget)) - result[symbol], remaining)
+            result[symbol] += give
+            remaining -= give
+            del active[symbol]
+    return result, max(0.0, remaining)
+
+
 def _bounded_allocate(
     raw: Mapping[str, float], budget: float, cap: float
 ) -> tuple[dict[str, float], float]:
-    result: dict[str, float] = {}
-    active = {symbol: weight for symbol, weight in raw.items() if weight > 0}
-    remaining = min(budget, sum(active.values()))
-    while active and remaining > 1e-12:
-        total_raw = sum(active.values())
-        capped = [symbol for symbol, weight in active.items() if remaining * weight / total_raw > cap]
-        if not capped:
-            for symbol, weight in active.items():
-                result[symbol] = result.get(symbol, 0.0) + remaining * weight / total_raw
-            remaining = 0.0
-            break
-        for symbol in capped:
-            result[symbol] = result.get(symbol, 0.0) + cap
-            remaining -= cap
-            del active[symbol]
-    return result, max(0.0, remaining)
+    return _bounded_allocate_with_caps(
+        raw, budget, {symbol: cap for symbol in raw}
+    )
 
 
 def _stable_targets(

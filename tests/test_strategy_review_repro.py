@@ -12,7 +12,7 @@ pre-fix defect and are flipped when the corresponding phase lands:
 - F4 double deployment cap         -> phase 5
 - F6 post-action stable shortfall  -> phase 6
 - F1 satellite entry cliff         -> fixed by the continuous target curve (phase 1)
-- F3 core temporary-cap targets    -> PENDING_POLICY_DECISION (8B)
+- F3 core temporary-cap targets    -> 8B decided: multipliers stay in raw proportions
 - F7 regime notch per review       -> PENDING_POLICY_DECISION (8D)
 """
 
@@ -117,7 +117,12 @@ class F2MissingDataExitTests(unittest.TestCase):
 
 
 class F3CoreTemporaryCapTests(unittest.TestCase):
-    def test_documented_core_target_reduction_pending_8b(self):
+    def test_core_confidence_and_event_multipliers_stay_in_raw_proportions(self):
+        # 8B decided by the structural plan: temporary confidence/event
+        # limits stay inside the core raw proportions (anchor x quality x
+        # confidence x event), while capped-budget water-filling (phase 3)
+        # lets an eligible ETH absorb the BTC-capped residual up to its own
+        # sleeve cap before anything becomes stablecoin.
         def eth_target(eth: dict) -> float:
             result = build_target_allocation(
                 assessments={"BTC": CORE["BTC"], "ETH": eth},
@@ -128,9 +133,17 @@ class F3CoreTemporaryCapTests(unittest.TestCase):
         baseline = eth_target(CORE["ETH"])
         low_confidence = eth_target({**CORE["ETH"], "confidence": "LOW"})
         high_event = eth_target({**CORE["ETH"], "event_risk": {"state": "HIGH"}})
-        self.assertAlmostEqual(baseline, 0.255)
+        # Baseline: BTC caps at 50%, ETH water-fills the residual to its
+        # 40%-of-core-sleeve cap (0.34 of the 85% risky budget).
+        self.assertAlmostEqual(baseline, 0.34)
+        # LOW confidence shrinks the raw proportion and gates ETH to its
+        # desired share; it must not absorb redistributed budget.
         self.assertAlmostEqual(low_confidence, 0.082258, places=5)
-        self.assertAlmostEqual(high_event, 0.15)
+        # A HIGH event halves the raw proportion (multiplier 0.5) in the
+        # step-3 split; once BTC is capped ETH is the only redistributable
+        # core asset, so it still water-fills the residual to its cap.
+        # The event limit remains visible in deployment, not in the target.
+        self.assertAlmostEqual(high_event, 0.34)
 
 
 class F4DoubleDeploymentCapTests(unittest.TestCase):
