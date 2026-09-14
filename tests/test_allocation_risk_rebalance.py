@@ -129,7 +129,9 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         actions = {item.symbol: item for item in result}
         self.assertEqual(actions["SOL"].action, "EXIT")
         self.assertEqual(actions["BTC"].action, "INCREASE")
-        self.assertAlmostEqual(actions["BTC"].amount_usd, 150)
+        # BTC is underweight vs target after new cash; the staged step is
+        # capped at 4pp of the $1100 post-cash total = $44.
+        self.assertAlmostEqual(actions["BTC"].amount_usd, 44)
         self.assertTrue(result.reconciliation["balanced"])
         self.assertAlmostEqual(
             result.reconciliation["external_new_cash"]
@@ -346,7 +348,10 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         )
         action = next(item for item in result if item.symbol == "AAVE")
         self.assertEqual(action.action, "INCREASE")
-        self.assertAlmostEqual(action.amount_usd, 50)
+        # Staged step: min(10pp gap x 0.5, 4pp) = 4pp -> $40, then the 0.5
+        # deployment allowance halves it to $20.
+        self.assertTrue(action.staging_applied)
+        self.assertAlmostEqual(action.amount_usd, 20)
 
 
 if __name__ == "__main__":

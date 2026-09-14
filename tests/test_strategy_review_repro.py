@@ -166,8 +166,13 @@ class F4DoubleDeploymentCapTests(unittest.TestCase):
             CURRENT, dict(allocation.target_weights), 10000.0,
             deployment_caps={"SOL": factor},
         )
-        amount = next(a.amount_usd for a in result.actions if a.symbol == "SOL")
-        self.assertAlmostEqual(amount, 910.0)
+        sol = next(a for a in result.actions if a.symbol == "SOL")
+        # Strategic gap 15pp; staged step min(7.5pp, 4pp) = 4pp = $400,
+        # then the folded 0.7 deployment cap leaves $280.
+        self.assertTrue(sol.staging_applied)
+        self.assertAlmostEqual(sol.amount_usd, 280.0)
+        self.assertAlmostEqual(sol.strategic_target_weight, 0.25)
+        self.assertAlmostEqual(sol.execution_target_weight, 0.128, places=3)
         # Re-expressing the same decision confidence alongside the folded
         # per-symbol cap is rejected instead of silently multiplying again.
         with self.assertRaisesRegex(ValueError, "mutually exclusive"):

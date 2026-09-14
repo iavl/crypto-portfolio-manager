@@ -84,7 +84,31 @@ _CHAIN_FINALIZED_FIELDS = {
     "halted_finalized_age_seconds",
 }
 _HORIZON_FIELDS = {"min", "max"}
-_REBALANCE_FIELDS = {"hold_below_pp", "watch_below_pp", "high_priority_above_pp"}
+_REBALANCE_FIELDS = {
+    "hold_below_pp",
+    "watch_below_pp",
+    "high_priority_above_pp",
+    "relative_target_floor",
+    "relative_watch",
+    "relative_high",
+    "staging",
+}
+_REBALANCE_STAGING_FIELDS = {
+    "enabled",
+    "max_gap_close_fraction",
+    "max_step_pp",
+    "bypass_reasons",
+}
+_ACTION_REASONS = (
+    "THESIS_BROKEN",
+    "EVENT_RISK",
+    "HARD_EXIT_SCORE",
+    "REGIME_DERISK",
+    "ALLOCATION_OVERWEIGHT",
+    "ALLOCATION_UNDERWEIGHT",
+    "CONFIDENCE_LIMIT",
+    "RISK_BUDGET_BREACH",
+)
 _HIGH_IMPACT_REVIEW_FIELDS = {"material_reduce_pp", "material_target_change_pp"}
 _ALLOCATION_FIELDS = {
     "satellite_entry_score",
@@ -617,7 +641,7 @@ class Policy:
                 "max_portfolio_drawdown": self.max_portfolio_drawdown,
             },
             "benchmarks": {name: dict(weights) for name, weights in self.benchmarks.items()},
-            "rebalance": dict(self.rebalance),
+            "rebalance": _copy_mapping(self.rebalance),
             "scoring": dict(self.scoring),
             "regimes": {
                 name: {
@@ -1766,15 +1790,55 @@ def _parse_policy(
     _unknown_fields(rebalance, _REBALANCE_FIELDS, "rebalance")
     if set(rebalance) != _REBALANCE_FIELDS:
         raise PolicyError("rebalance fields are incomplete")
-    parsed_rebalance = {
+    parsed_rebalance: dict[str, Any] = {
         key: _number(value, f"rebalance.{key}", minimum=0.0)
         for key, value in rebalance.items()
+        if key != "staging"
     }
     if not (
         parsed_rebalance["hold_below_pp"] < parsed_rebalance["watch_below_pp"]
         and parsed_rebalance["watch_below_pp"] < parsed_rebalance["high_priority_above_pp"]
     ):
         raise PolicyError("rebalance thresholds must be strictly ordered")
+    if parsed_rebalance["relative_target_floor"] <= 0:
+        raise PolicyError("rebalance.relative_target_floor must be > 0")
+    if parsed_rebalance["relative_watch"] <= 0:
+        raise PolicyError("rebalance.relative_watch must be > 0")
+    if parsed_rebalance["relative_high"] < parsed_rebalance["relative_watch"]:
+        raise PolicyError("rebalance.relative_high must be >= relative_watch")
+    staging = rebalance["staging"]
+    if not isinstance(staging, dict):
+        raise PolicyError("rebalance.staging must be an object")
+    _unknown_fields(staging, _REBALANCE_STAGING_FIELDS, "rebalance.staging")
+    if set(staging) != _REBALANCE_STAGING_FIELDS:
+        raise PolicyError("rebalance.staging fields are incomplete")
+    if not isinstance(staging["enabled"], bool):
+        raise PolicyError("rebalance.staging.enabled must be boolean")
+    max_gap_close_fraction = _fraction(
+        staging["max_gap_close_fraction"], "rebalance.staging.max_gap_close_fraction"
+    )
+    if not 0 < max_gap_close_fraction <= 1:
+        raise PolicyError("rebalance.staging.max_gap_close_fraction must be in (0, 1]")
+    max_step_pp = _number(staging["max_step_pp"], "rebalance.staging.max_step_pp", minimum=0.0)
+    if max_step_pp <= 0:
+        raise PolicyError("rebalance.staging.max_step_pp must be > 0")
+    bypass_reasons = staging["bypass_reasons"]
+    if not isinstance(bypass_reasons, list) or not bypass_reasons:
+        raise PolicyError("rebalance.staging.bypass_reasons must be a non-empty list")
+    normalized_reasons = []
+    for item in bypass_reasons:
+        reason = str(item).strip().upper()
+        if reason not in _ACTION_REASONS:
+            raise PolicyError(f"rebalance.staging.bypass_reasons contains unknown action reason {reason!r}")
+        normalized_reasons.append(reason)
+    if len(normalized_reasons) != len(set(normalized_reasons)):
+        raise PolicyError("rebalance.staging.bypass_reasons must not contain duplicates")
+    parsed_rebalance["staging"] = {
+        "enabled": staging["enabled"],
+        "max_gap_close_fraction": max_gap_close_fraction,
+        "max_step_pp": max_step_pp,
+        "bypass_reasons": tuple(normalized_reasons),
+    }
 
     parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
     parsed_asset_profiles = _parse_asset_scoring_profiles(

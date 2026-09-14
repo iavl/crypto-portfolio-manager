@@ -283,7 +283,23 @@ class PolicyTests(unittest.TestCase):
             },
         )
         self.assertEqual(policy.factor_rules["relative_strength"]["horizon_weights"], {"30d": 0.2, "90d": 0.4, "180d": 0.4})
-        self.assertEqual(policy.rebalance, {"hold_below_pp": 2.0, "watch_below_pp": 4.0, "high_priority_above_pp": 8.0})
+        self.assertEqual(
+            policy.rebalance,
+            {
+                "hold_below_pp": 2.0,
+                "watch_below_pp": 4.0,
+                "high_priority_above_pp": 8.0,
+                "relative_target_floor": 0.02,
+                "relative_watch": 0.5,
+                "relative_high": 1.0,
+                "staging": {
+                    "enabled": True,
+                    "max_gap_close_fraction": 0.5,
+                    "max_step_pp": 4.0,
+                    "bypass_reasons": ("THESIS_BROKEN", "EVENT_RISK", "HARD_EXIT_SCORE", "RISK_BUDGET_BREACH"),
+                },
+            },
+        )
         self.assertEqual(policy.regime("NORMAL").stablecoin_target, 0.15)
         self.assertEqual(policy.regime("DEFENSIVE").stablecoin_target, 0.30)
         self.assertEqual(policy.regime("CAPITAL_PRESERVATION").stablecoin_target, 0.50)

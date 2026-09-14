@@ -146,8 +146,12 @@ class AaveRefactorTests(unittest.TestCase):
             deployment_caps={"AAVE": 0.0},
         )
         action = next(item for item in result if item.symbol == "AAVE")
-        self.assertEqual(action.target_weight, 0.12)
+        # The strategic target survives in its own field; the blocked action
+        # executes nothing, so its execution target is the current weight.
+        self.assertEqual(action.strategic_target_weight, 0.12)
         self.assertEqual(action.action, "WAIT")
+        self.assertEqual(action.action_reason, "CONFIDENCE_LIMIT")
+        self.assertAlmostEqual(action.execution_target_weight, 0.05)
 
     def test_low_confidence_position_has_zero_immediate_allowance(self):
         result = build_target_allocation(assessments={

@@ -177,7 +177,25 @@
         "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
         "amount_usd": {"type": "number", "minimum": 0},
         "priority": {"type": "string", "minLength": 1},
-        "rationale": {"type": "string"}
+        "rationale": {"type": "string"},
+        "strategic_target_weight": {"type": ["number", "null"], "minimum": -1, "maximum": 1},
+        "execution_target_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "action_reason": {
+          "type": "string",
+          "enum": [
+            "",
+            "THESIS_BROKEN",
+            "EVENT_RISK",
+            "HARD_EXIT_SCORE",
+            "REGIME_DERISK",
+            "ALLOCATION_OVERWEIGHT",
+            "ALLOCATION_UNDERWEIGHT",
+            "CONFIDENCE_LIMIT",
+            "RISK_BUDGET_BREACH"
+          ]
+        },
+        "staging_applied": {"type": "boolean"},
+        "remaining_gap_after_action": {"type": ["number", "null"], "minimum": -1, "maximum": 1}
       },
       "allOf": [
         {

@@ -14,6 +14,19 @@ from .confidence import confidence_deployment_factor
 
 _ACTIONS = {"INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"}
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
+_ACTION_REASONS = {
+    "THESIS_BROKEN",
+    "EVENT_RISK",
+    "HARD_EXIT_SCORE",
+    "REGIME_DERISK",
+    "ALLOCATION_OVERWEIGHT",
+    "ALLOCATION_UNDERWEIGHT",
+    "CONFIDENCE_LIMIT",
+    "RISK_BUDGET_BREACH",
+}
+# Reasons a caller may attach to a risk-reducing action that rebalance
+# itself cannot observe (they mark hard exits that bypass staging).
+_CALLER_HARD_REASONS = {"EVENT_RISK", "RISK_BUDGET_BREACH"}
 
 
 def _weights(value: Mapping[str, Any], field: str) -> dict[str, float]:
@@ -254,6 +267,14 @@ def build_no_trade_attribution(
 
 @dataclass(frozen=True)
 class RebalanceAction:
+    """One recommended per-asset action.
+
+    ``strategic_target_weight`` is the long-run allocation-engine target;
+    ``target_weight``/``execution_target_weight`` are where THIS review's
+    action actually moves (staging can deliberately stop short of the
+    strategic target); ``remaining_gap_after_action`` is what is left.
+    """
+
     symbol: str
     action: str
     current_weight: float
@@ -261,6 +282,11 @@ class RebalanceAction:
     amount_usd: float
     priority: str
     rationale: str = ""
+    strategic_target_weight: float | None = None
+    execution_target_weight: float | None = None
+    action_reason: str = ""
+    staging_applied: bool = False
+    remaining_gap_after_action: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or not self.symbol.strip():
@@ -282,6 +308,26 @@ class RebalanceAction:
             if field != "amount_usd" and value > 1:
                 raise ValueError(f"{field} must be <= 1")
             object.__setattr__(self, field, value)
+        for field in (
+            "strategic_target_weight", "execution_target_weight", "remaining_gap_after_action",
+        ):
+            raw_value = getattr(self, field)
+            if raw_value is None:
+                continue
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                raise ValueError(f"{field} must be a number or null")
+            value = float(raw_value)
+            if not math.isfinite(value) or abs(value) > 1:
+                raise ValueError(f"{field} must be finite and within +/-1")
+            object.__setattr__(self, field, value)
+        if not isinstance(self.action_reason, str):
+            raise ValueError("action_reason must be a string")
+        reason = self.action_reason.strip().upper()
+        if reason and reason not in _ACTION_REASONS:
+            raise ValueError(f"action_reason must be one of {sorted(_ACTION_REASONS)}")
+        object.__setattr__(self, "action_reason", reason)
+        if not isinstance(self.staging_applied, bool):
+            raise ValueError("staging_applied must be boolean")
         executable = {"INCREASE", "REDUCE", "EXIT"}
         if action in executable and self.amount_usd <= 0:
             raise ValueError(f"{action} requires a positive executable amount")
@@ -301,6 +347,11 @@ class RebalanceAction:
             "amount_usd": self.amount_usd,
             "priority": self.priority,
             "rationale": self.rationale,
+            "strategic_target_weight": self.strategic_target_weight,
+            "execution_target_weight": self.execution_target_weight,
+            "action_reason": self.action_reason,
+            "staging_applied": self.staging_applied,
+            "remaining_gap_after_action": self.remaining_gap_after_action,
         }
 
 
@@ -397,6 +448,7 @@ def recommend_rebalance(
     regime: str = "NORMAL",
     decision_confidence: Any | None = None,
     deployment_caps: Mapping[str, float] | None = None,
+    hard_action_reasons: Mapping[str, str] | None = None,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -441,6 +493,21 @@ def recommend_rebalance(
         if not math.isfinite(factor) or not 0 <= factor <= 1:
             raise ValueError("deployment_caps values must be finite and in [0, 1]")
         normalized_deployment_caps[symbol] = factor
+
+    normalized_hard_reasons: dict[str, str] = {}
+    for raw_symbol, raw_reason in (hard_action_reasons or {}).items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol:
+            raise ValueError("hard_action_reasons contains an empty symbol")
+        if symbol in normalized_hard_reasons:
+            raise ValueError(f"hard_action_reasons contains duplicate symbol {symbol}")
+        reason = str(raw_reason).strip().upper()
+        if reason not in _CALLER_HARD_REASONS:
+            raise ValueError(
+                "hard_action_reasons values must be one of "
+                + ", ".join(sorted(_CALLER_HARD_REASONS))
+            )
+        normalized_hard_reasons[symbol] = reason
 
     if isinstance(thesis_broken, Mapping):
         broken = {
@@ -495,57 +562,129 @@ def recommend_rebalance(
         if not resolved.is_excluded(symbol)
     )
     candidates: list[dict[str, Any]] = []
+    staging_config = resolved.rebalance["staging"]
+    bypass_reasons = frozenset(staging_config["bypass_reasons"])
+    relative_floor = float(resolved.rebalance["relative_target_floor"])
+    relative_watch = float(resolved.rebalance["relative_watch"])
+    relative_high = float(resolved.rebalance["relative_high"])
     for symbol in symbols:
         current_amount = effective_current.get(symbol, 0.0)
         current_weight = current_amount / post_cash_total
-        target_weight = effective_target.get(symbol, 0.0)
-        difference = target_weight - current_weight
+        strategic_weight = effective_target.get(symbol, 0.0)
+        difference = strategic_weight - current_weight
         deviation_pp = abs(difference) * 100.0
-        small_target_watch = (
-            0 < target_weight < 0.05
-            and deviation_pp < resolved.rebalance["hold_below_pp"]
-            and difference != 0
-            and abs(difference) / target_weight >= 0.5
+        # Relative deviation answers "how far off the plan is this position";
+        # the floor keeps dust targets from manufacturing extreme priority
+        # purely through a tiny denominator.
+        relative_deviation = abs(difference) / max(strategic_weight, relative_floor)
+        below_hold = deviation_pp < resolved.rebalance["hold_below_pp"] and relative_deviation < relative_watch
+        high_priority = (
+            deviation_pp > resolved.rebalance["high_priority_above_pp"]
+            or relative_deviation > relative_high
         )
+        watch_band = not below_hold and not high_priority and (
+            deviation_pp <= resolved.rebalance["watch_below_pp"]
+            and relative_deviation <= relative_high
+        )
+        caller_hard_reason = normalized_hard_reasons.get(symbol)
+        if difference > 0:
+            base_reason = "ALLOCATION_UNDERWEIGHT"
+        else:
+            base_reason = "REGIME_DERISK" if regime_name != "NORMAL" else "ALLOCATION_OVERWEIGHT"
         if symbol in broken and current.get(symbol, 0.0) > 0:
             action = "EXIT"
+            action_reason = "THESIS_BROKEN"
             priority = "HIGH"
-            amount = current.get(symbol, 0.0) * portfolio_value
             rationale = "investment thesis is marked broken"
-        elif small_target_watch:
-            action = "WAIT"
-            priority = "WATCH"
-            amount = 0.0
-            rationale = "small target has a material relative deviation"
-        elif deviation_pp < resolved.rebalance["hold_below_pp"]:
+        elif caller_hard_reason is not None and difference <= 0 and (current.get(symbol, 0.0) > 0 or strategic_weight == 0):
+            action = "EXIT" if strategic_weight == 0 else "REDUCE"
+            action_reason = caller_hard_reason
+            priority = "HIGH"
+            rationale = f"hard risk reason {caller_hard_reason} forces risk reduction"
+        elif strategic_weight == 0 and difference < 0:
+            action = "EXIT"
+            action_reason = "HARD_EXIT_SCORE"
+            priority = "HIGH" if high_priority else "NORMAL"
+            rationale = "strategic target is zero; the position exits"
+        elif below_hold:
             action = "HOLD"
+            action_reason = base_reason
             priority = "LOW"
-            amount = 0.0
-            rationale = f"deviation {deviation_pp:.2f}pp is below the hold threshold"
-        elif deviation_pp <= resolved.rebalance["watch_below_pp"]:
+            rationale = (
+                f"deviation {deviation_pp:.2f}pp (relative {relative_deviation:.0%}) "
+                "is below the hold threshold"
+            )
+        elif watch_band:
             action = "WAIT"
+            action_reason = base_reason
             priority = "WATCH"
             amount = 0.0
-            rationale = f"deviation {deviation_pp:.2f}pp is in the watch band"
+            rationale = (
+                f"deviation {deviation_pp:.2f}pp (relative {relative_deviation:.0%}) "
+                "is in the watch band"
+            )
         elif difference > 0:
             action = "INCREASE"
-            priority = "HIGH" if deviation_pp > resolved.rebalance["high_priority_above_pp"] else "NORMAL"
-            amount = difference * post_cash_total
+            action_reason = base_reason
+            priority = "HIGH" if high_priority else "NORMAL"
             rationale = "underweight exceeds the active rebalance threshold"
         else:
-            action = "EXIT" if target_weight == 0 else "REDUCE"
-            priority = "HIGH" if deviation_pp > resolved.rebalance["high_priority_above_pp"] else "NORMAL"
-            amount = -difference * post_cash_total
+            action = "REDUCE"
+            action_reason = base_reason
+            priority = "HIGH" if high_priority else "NORMAL"
             rationale = "overweight exceeds the active rebalance threshold"
+        executable = action in {"INCREASE", "REDUCE", "EXIT"}
+        staging_applied = False
+        if executable and staging_config["enabled"] and action_reason not in bypass_reasons:
+            # Ordinary allocation corrections move at most
+            # max_gap_close_fraction of the remaining gap, capped by an
+            # absolute per-review step, so one review never forces a healthy
+            # position all the way to its long-run target.
+            step = min(
+                abs(difference) * float(staging_config["max_gap_close_fraction"]),
+                float(staging_config["max_step_pp"]) / 100.0,
+            )
+            execution_target = current_weight + (1.0 if difference > 0 else -1.0) * step
+            staging_applied = step < abs(difference) - 1e-12
+            if staging_applied:
+                rationale += (
+                    f"; staged execution closes {abs(execution_target - current_weight) / abs(difference):.0%} "
+                    f"of the {abs(difference) * 100:.2f}pp gap this review"
+                )
+        elif executable:
+            execution_target = strategic_weight
+        else:
+            execution_target = current_weight
+        if executable:
+            amount = abs(execution_target - current_weight) * post_cash_total
+        else:
+            amount = 0.0
+        if symbol in broken and current.get(symbol, 0.0) > 0:
+            amount = current.get(symbol, 0.0) * portfolio_value
+            execution_target = 0.0
         candidates.append({
             "symbol": symbol,
             "action": action,
             "current_weight": current_weight,
-            "target_weight": target_weight,
+            "target_weight": strategic_weight,
+            "execution_target": execution_target,
             "amount": max(0.0, amount),
             "priority": priority,
             "rationale": rationale,
+            "action_reason": action_reason,
+            "staging_applied": staging_applied,
+            "remaining_gap": strategic_weight - execution_target,
         })
+
+    # Caller-supplied hard reasons must mark risk-reducing actions only;
+    # an INCREASE can never be a hard exit.
+    for symbol, reason in normalized_hard_reasons.items():
+        item = next((entry for entry in candidates if entry["symbol"] == symbol), None)
+        if item is not None and item["action"] not in {"REDUCE", "EXIT"}:
+            raise ValueError(
+                f"hard_action_reasons.{symbol} ({reason}) requires a REDUCE/EXIT outcome, "
+                f"not {item['action']}"
+            )
 
     available_funding = sum(
         item["amount"] for item in candidates if item["action"] in {"REDUCE", "EXIT"}
@@ -575,6 +714,7 @@ def recommend_rebalance(
                             item["action"] = "WAIT"
                             item["amount"] = 0.0
                             item["priority"] = "WATCH"
+                            item["action_reason"] = "CONFIDENCE_LIMIT"
                             item["rationale"] = "new increase is blocked by LOW decision confidence"
                         else:
                             item["amount"] *= factor
@@ -588,20 +728,41 @@ def recommend_rebalance(
             item["action"] = "WAIT"
             item["amount"] = 0.0
             item["priority"] = "WATCH"
+            item["action_reason"] = "CONFIDENCE_LIMIT"
             item["rationale"] = "new increase is blocked by the deployment allowance"
         elif factor < 1.0:
             item["amount"] *= factor
             item["rationale"] += f"; deployment allowance caps immediate increase at {factor:.0%}"
+
+    # Normalize execution fields against the final (possibly capped or
+    # unfunded) amounts so target_weight/remaining_gap always describe what
+    # this review's action actually moves toward.
+    for item in candidates:
+        if item["action"] in {"INCREASE", "REDUCE", "EXIT"}:
+            direction = 1.0 if item["target_weight"] > item["current_weight"] else -1.0
+            item["execution_target"] = item["current_weight"] + direction * (
+                item["amount"] / post_cash_total
+            )
+        else:
+            item["execution_target"] = item["current_weight"]
+            item["staging_applied"] = False
+        item["execution_target"] = min(1.0, max(0.0, item["execution_target"]))
+        item["remaining_gap"] = item["target_weight"] - item["execution_target"]
 
     actions = [
         RebalanceAction(
             symbol=item["symbol"],
             action=item["action"],
             current_weight=item["current_weight"],
-            target_weight=item["target_weight"],
+            target_weight=item["execution_target"],
             amount_usd=item["amount"] if item["action"] in {"INCREASE", "REDUCE", "EXIT"} else 0.0,
             priority=item["priority"],
             rationale=item["rationale"],
+            strategic_target_weight=item["target_weight"],
+            execution_target_weight=item["execution_target"],
+            action_reason=item["action_reason"],
+            staging_applied=item["staging_applied"],
+            remaining_gap_after_action=item["remaining_gap"],
         )
         for item in candidates
     ]
@@ -707,6 +868,7 @@ def rebalance(
     regime: str = "NORMAL",
     decision_confidence: Any | None = None,
     deployment_caps: Mapping[str, float] | None = None,
+    hard_action_reasons: Mapping[str, str] | None = None,
 ) -> RebalanceResult:
     return recommend_rebalance(
         current_weights,
@@ -718,6 +880,7 @@ def rebalance(
         regime=regime,
         decision_confidence=decision_confidence,
         deployment_caps=deployment_caps,
+        hard_action_reasons=hard_action_reasons,
     )
 
 

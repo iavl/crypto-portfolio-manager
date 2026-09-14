@@ -50,7 +50,16 @@
   "rebalance": {
     "hold_below_pp": 2,
     "watch_below_pp": 4,
-    "high_priority_above_pp": 8
+    "high_priority_above_pp": 8,
+    "relative_target_floor": 0.02,
+    "relative_watch": 0.5,
+    "relative_high": 1.0,
+    "staging": {
+      "enabled": true,
+      "max_gap_close_fraction": 0.5,
+      "max_step_pp": 4.0,
+      "bypass_reasons": ["THESIS_BROKEN", "EVENT_RISK", "HARD_EXIT_SCORE", "RISK_BUDGET_BREACH"]
+    }
   },
   "high_impact_review": {
     "material_reduce_pp": 5,
