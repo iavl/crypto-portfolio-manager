@@ -33,6 +33,7 @@ Skill：   .agents/skills/crypto-portfolio-manager/SKILL.md
 - 配置后，可使用 SoSoValue 文档化的美国 BTC/ETH ETF 汇总历史记录作为结构化 ETF 资金流背景；清算数据不会归因于该来源。年化基差使用 Binance 最近的交易型 USDT 交割合约及精确的标记价格/指数价格；不支持的资产保持不可用。
 - 增加衍生品/社交持仓和 BTC 周期背景等非评分 overlay；这些 overlay 可以保守地限制即时部署规模。
 - 在匹配的评估周期内，对比 100% BTC 和 70/30 BTC/ETH 持有不动的基准。
+- 提供无未来函数的全流程回放评测工具（`scripts/evaluate_strategy.py`）：冻结复盘记录 → 评分 → 市场状态 → 战略目标 → 分阶段调仓 → 成本 → 已实现收益，可对比基准与候选策略参数。
 - 将稳定币和现金视为同一资金篮子，并允许 `NO_TRADE`。
 - 从 Binance 钱包截图导入结构化字段，并确定性地计算每个仓位的成本基础、未实现盈亏、收益率和数据覆盖率。
 - 基于带时间戳的现货数据和完整的 OHLCV，结合日历覆盖检查、确定性的 ATR 感知区间、已确认的摆动点、Volume Profile POC/价值区间/HVN 背景、分批方案以及 `WAIT` 处理，对获批的再平衡金额制定分阶段执行计划。
@@ -124,4 +125,10 @@ python3 -m compileall crypto_portfolio scripts
 
 ```bash
 python3 scripts/portfolio_snapshot.py path/to/snapshot.json
+```
+
+离线全流程回放评测（仅研究用途，不接触实时行情、不做参数自动寻优）：
+
+```bash
+python3 scripts/evaluate_strategy.py tests/fixtures/strategy_replay_basic.json --fee-bps 10
 ```

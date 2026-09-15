@@ -361,7 +361,7 @@ The detailed `Data Collection Log` is shown during evidence acquisition. The
 final report must still list every `FAILED`, `STALE`, or `CONFLICT` metric and
 its scoring/decision effect; do not silently omit collection failures. Explain
 which missing evidence lowered confidence, blocked an increase, forced
-`HOLD_ONLY`, or left the decision `NO_TRADE`. Optional and premium `SKIPPED`
+`HOLD_OR_REDUCE` (formerly `HOLD_ONLY`), or left the decision `NO_TRADE`. Optional and premium `SKIPPED`
 items must state that they were excluded from applicable coverage.
 Detailed final fetch failures are shown in `本轮数据抓取失败明细`; keep this
 section as the aggregate data-quality report rather than duplicating that table.

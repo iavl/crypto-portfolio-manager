@@ -169,7 +169,7 @@ must reflect weighted data coverage; poor coverage cannot be raised by a
 user-supplied base confidence.
 
 Altcoins must prove their BTC-relative risk/reward case. Missing critical
-BTC-relative comparison is `HOLD_ONLY`: preserve existing exposure where
+BTC-relative comparison is `HOLD_OR_REDUCE`: preserve existing exposure where
 appropriate, but do not add risk or force an exit solely for temporary missing
 data. A broken thesis, severe event, or materially negative BTC-relative case
 is ineligible.
@@ -183,7 +183,10 @@ regime -> score -> confidence -> risk tier -> volatility/correlation
 
 Always validate target sum, stable floor, regime stable target, satellite
 envelope, and single-asset concentration. A high-scoring asset cannot bypass
-caps. Satellite size must increase monotonically with score strength and
+caps. Satellite size must increase monotonically with score along the
+continuous policy target curve; risk tier caps maximum exposure rather than
+scaling every target; ordinary corrections are staged toward the strategic
+target and hard exits bypass staging. Satellite size must increase monotonically with score strength and
 confidence, and decrease with risk tier and worsening regime; minimum-score
 or low-confidence satellites receive no new risk.
 

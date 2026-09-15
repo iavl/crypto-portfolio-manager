@@ -1,19 +1,19 @@
 # Pending investment-policy decisions (phase 8)
 
-Status: 2026-09-13. These items were identified by the strategy review and
-implemented up to the deterministic-correctness boundary (phases 0-7). Each
-item below **changes investment semantics** and stays `PENDING_POLICY_DECISION`
-until the owner explicitly approves a specification. Writing a plan or this
-file is not approval. Every entry lists the current behavior, the candidate
-direction, and the synthetic evidence required before approval.
+Status: 2026-09-15. Items 8A-8E were decided by the 2026-09-15 structural
+refactor plan (portfolio strategy/scoring/allocation refactor) and
+implemented on the `strategy-structural-refactor` branch; each entry below
+records the decision and where it landed. New pending items would follow the
+same convention: current behavior, candidate direction, and the synthetic
+evidence required before approval.
 
 | ID | Decision | Status |
 |---|---|---|
-| 8A | Satellite hysteresis across the entry boundary | PENDING_POLICY_DECISION |
-| 8B | Core targets vs temporary confidence/event limits | PENDING_POLICY_DECISION |
-| 8C | Risk budget, BTC eligibility, AAVE risk multiplier | PENDING_POLICY_DECISION |
-| 8D | Regime debounce / idempotence | PENDING_POLICY_DECISION |
-| 8E | Sub-threshold risk-repair trades and friction | PENDING_POLICY_DECISION |
+| 8A | Satellite hysteresis across the entry boundary | DECIDED: continuous target curve (phase 1) |
+| 8B | Core targets vs temporary confidence/event limits | DECIDED: multipliers stay in core raw proportions; water-fill redistribution only to ELIGIBLE_INCREASE (phase 3) |
+| 8C | Risk budget, BTC eligibility, AAVE risk multiplier | DECIDED: risk tier becomes an exposure cap, not a multiplier (phase 2); BTC eligibility and the reactive drawdown budget stay unchanged |
+| 8D | Regime debounce / idempotence | DECIDED: weighted severity regime model + existing one-notch cap (phase 8); dwell-time requirements not adopted |
+| 8E | Sub-threshold risk-repair trades and friction | DECIDED: no repair trades; staged execution (phase 4/5) replaces one-review corrections, unresolved constraints stay explicit |
 
 ## 8A — Satellite hysteresis across the entry boundary
 
@@ -31,11 +31,13 @@ Candidate directions to choose between (not both silently):
 2. a bounded position-aware hysteresis curve (monotone in score for a fixed
    portfolio and holding).
 
-Required evidence before approval: a continuous score-grid sweep per regime
-showing targets never fall when the score rises; entry and exit sides; budget
-competition; repeated-review idempotence (the same evidence re-reviewed must
-not halve a soft-exit position twice). `max(current, target)` and a one-off
-special case at 67 are both rejected designs.
+Decision (2026-09-15): the continuous target curve implements direction 1
+plus a pure score-only curve — `satellite_target_fraction` is bounded,
+monotonic, continuous at every breakpoint, and independent of current weight,
+so repeated reviews of identical evidence are idempotent and the 66.9 -> 67.0
+cliff is gone. The score-grid sweep is a regression test
+(`tests/test_satellite_target_curve.py`); `max(current, target)` and a
+one-off special case at 67 were both rejected.
 
 ## 8B — Core targets vs temporary confidence/event limits
 

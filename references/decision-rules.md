@@ -32,14 +32,31 @@ applied immediately before that snapshot valuation. The primary benchmark is
 
 ## Rule 2 — Minimum rebalance thresholds
 
-Use absolute portfolio-weight deviation:
+Use both absolute and relative portfolio-weight deviation. Relative deviation
+is `|current - target| / max(target, relative_target_floor)` with
+`relative_target_floor = 0.02`, so dust targets cannot manufacture extreme
+priority from a tiny denominator:
 
-- <2 percentage points: normally `HOLD`.
-- 2–4 pp: `WATCH`; trade only with strong supporting evidence or when using new cash to rebalance naturally.
-- >4 pp: eligible for active rebalance.
-- >8 pp: high-priority rebalance unless a deliberate temporary tactical deviation is documented.
+- `HOLD`: absolute deviation <2 pp AND relative deviation <50%.
+- `WATCH`: not `HOLD`, and neither absolute nor relative deviation reaches the
+  active/high thresholds (2–4 pp absolute band).
+- Active rebalance: >4 pp absolute deviation.
+- High priority: >8 pp absolute OR >100% relative deviation, unless a
+  deliberate temporary tactical deviation is documented.
 
-For a very small target position, also consider relative deviation so that a 2 pp error on a 4% target is not ignored blindly.
+Every executable action carries a machine-readable `action_reason`
+(`ALLOCATION_OVERWEIGHT` / `ALLOCATION_UNDERWEIGHT` / `REGIME_DERISK` /
+`HARD_EXIT_SCORE` / `THESIS_BROKEN` / `EVENT_RISK` / `CONFIDENCE_LIMIT` /
+`RISK_BUDGET_BREACH`), plus `strategic_target_weight`,
+`execution_target_weight`, `staging_applied`, and `remaining_gap_after_action`.
+
+Ordinary allocation corrections are staged toward the strategic target: one
+review moves at most `rebalance.staging.max_gap_close_fraction` (0.5) of the
+remaining gap, bounded by `max_step_pp` (4 pp). A healthy position can
+therefore sit deliberately away from its long-run target after one review;
+the deviation bands decide when the next step happens. Hard exits (broken
+thesis, severe event, hard score floor, risk-budget breach) bypass staging
+and execute immediately.
 
 ## Rule 3 — Use new cash before forced selling when sensible
 
@@ -260,9 +277,15 @@ failure still forces LOW confidence.
 
 ## Rule 14 — Decision Confidence
 
-Decision confidence uses fixed weights for portfolio data, regime confidence,
-asset evidence, portfolio accounting, and signal agreement. It is calculated
+Decision confidence — Decision Evidence Confidence — uses fixed weights for
+portfolio data, regime confidence, asset evidence, portfolio accounting, and
+signal agreement. It measures how strongly the available evidence supports the
+contemplated action; it is not a probability of profit. It is calculated
 after the action/risk inputs exist and then capped by hard-critical security,
-liveness, valuation, drawdown, and conflict conditions. Low confidence blocks
-new risk where specified but does not force-sell otherwise valid holdings.
-`NO_TRADE` and `HOLD_ONLY` are valid conclusions, not missing output.
+liveness, valuation, drawdown, and conflict conditions.
+
+Band semantics are uniform and applied exactly once: HIGH deploys fully;
+MEDIUM allows new increases scaled by the configured deployment factor
+(0.70); LOW blocks new increases but does not force-sell otherwise valid
+holdings — hard-risk REDUCE/EXIT from deterministic gates stays allowed.
+`NO_TRADE` and `HOLD_OR_REDUCE` are valid conclusions, not missing output.

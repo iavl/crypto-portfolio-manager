@@ -115,7 +115,7 @@ Later layers answer different questions:
   `WAIT`?
 
 Missing evidence does not become positive evidence. Low confidence can turn an
-otherwise reasonable score into `HOLD_ONLY`, a restricted deployment, or
+otherwise reasonable score into `HOLD_OR_REDUCE`, a restricted deployment, or
 `NO_TRADE`; it does not by itself lower the strategic target.
 
 ### Strategic Target and Deployment Allowance
@@ -130,10 +130,16 @@ risk or a broken thesis may do so through its own gate.
 
 ### Confidence is action-scoped
 
-Decision Confidence describes the evidence for the contemplated action, not the
-weakest asset anywhere in the watchlist. A `HOLD` review uses current exposure;
-an `INCREASE` uses the target asset and portfolio constraints. Watchlist-only
-assets with zero exposure do not contaminate a held-portfolio decision.
+Decision Confidence — Decision Evidence Confidence — describes how strongly
+the available evidence supports the contemplated action. It is not a
+probability of profit: `0.90 HIGH` means the decision is strongly supported by
+the evidence, not that the trade has a 90% chance of gain. It is scoped to the
+contemplated action, not the weakest asset anywhere in the watchlist. A `HOLD`
+review uses current exposure; an `INCREASE` uses the target asset and portfolio
+constraints. Watchlist-only assets with zero exposure do not contaminate a
+held-portfolio decision. Bands apply exactly once: `HIGH` deploys fully,
+`MEDIUM` allows increases scaled by the configured deployment factor, `LOW`
+blocks new increases without force-selling otherwise valid holdings.
 
 Data Confidence measures coverage, freshness, source quality, and same-metric
 redundancy. Mixed factor directions are market information and are represented
@@ -242,17 +248,31 @@ and a credible BTC-relative case. Weak BTC-relative strength combined with
 weak fundamentals means no new allocation, even when the asset has fallen a
 long way.
 
-The current/default satellite thresholds are:
+The current/default satellite score thresholds are:
 
-- `67`: entry threshold;
-- `62`: exit threshold for the hysteresis decision;
-- `85`: full score strength.
+- `57`: soft-exit floor — the continuous target curve starts here at 0% of the
+  satellite envelope;
+- `62`: exit breakpoint — the curve reaches 20% of the envelope;
+- `67`: entry threshold — new risk may be added and the curve reaches 40%;
+- `85`: full score strength — the curve reaches 100% of the envelope.
 
-This creates a deliberate separation between “do not add”, “hold only”,
-“reduction candidate”, and “full conviction”. A held satellite in the 62–66
-band can remain `HOLD_ONLY`; a score below 62 is an ineligible/reduction
-candidate. A score below 62 is not by itself an automatic sell: thesis,
-current exposure, event risk, portfolio risk, and rebalance rules still apply.
+The strategic target is the continuous curve itself, so a held satellite
+crossing 67 cannot lose its target. Eligibility states gate deployment, not
+sizing: `ELIGIBLE_INCREASE` (may add), `HOLD_OR_REDUCE` (no new risk; reduce
+an overweight toward the curve target), `SOFT_EXIT` (reduce gradually), and
+`INELIGIBLE` (target zero under hard-risk rules). A held satellite in the
+62–66 band is `HOLD_OR_REDUCE`; a score below 57 with complete evidence is an
+exit candidate. A low score is not by itself a panic sell: thesis, current
+exposure, event risk, portfolio risk, and rebalance rules still apply, and
+ordinary reductions are staged rather than executed to the long-run target in
+one review.
+
+Risk tier caps maximum satellite exposure (high_beta/high at half the active
+envelope) instead of scaling every mid-score target. Moderate BTC-relative
+weakness (30–50 on the 0–100 relative score) blocks new increases without
+forcing an exit; below 30 is a hard block. An asset score of 80 does not mean
+an 80% probability of gain — scores rank evidence strength, they are not
+probabilities.
 
 ## 10. BTC / ETH Core Allocation
 
@@ -263,7 +283,7 @@ confidence, ETH/BTC opportunity cost, event risk, chain liveness, regime,
 concentration, stablecoin requirements, and portfolio caps.
 
 ETH can be attractive in absolute terms but still be held below its anchor or
-left `HOLD_ONLY` when its BTC-relative opportunity-cost case is weak. Missing
+left `HOLD_OR_REDUCE` when its BTC-relative opportunity-cost case is weak. Missing
 ETH/BTC evidence blocks a high-conviction ETH increase; an ETH core label does
 not restore a score floor or bypass the other gates.
 
@@ -319,7 +339,7 @@ coverage. Exact thresholds are policy-controlled.
 Hard-critical missing, stale, conflicting, or unresolved evidence reduces
 actionability. Missing security or liveness evidence does not mean “no
 problem”; it can block a high-conviction increase. The system fails closed by
-preserving uncertainty as `HOLD_ONLY`, `WAIT`, `NO_TRADE`, `PROVISIONAL`, or
+preserving uncertainty as `HOLD_OR_REDUCE`, `WAIT`, `NO_TRADE`, `PROVISIONAL`, or
 `BLOCKED` rather than guessing a reassuring value.
 
 Data Confidence does not include cross-factor signal consistency. Decision
@@ -375,19 +395,29 @@ can remove a crowding penalty but cannot become a positive exposure signal.
 
 ## 16. Rebalancing
 
-The current/default rebalance bands are:
+The current/default rebalance bands read both absolute and relative deviation
+(relative = `|current - target| / max(target, 2%)`):
 
-| Absolute deviation | Default interpretation |
-|---:|---|
-| `<2pp` | Normally `HOLD`. |
-| `2–4pp` | `WATCH`; act only with strong evidence or sensible new cash. |
-| `>4pp` | Eligible for active rebalance after all risk gates. |
-| `>8pp` | High-priority rebalance unless a deliberate deviation is documented. |
+| Deviation | Default interpretation |
+|---|---|
+| `<2pp` absolute AND `<50%` relative | Normally `HOLD`. |
+| Not `HOLD`, neither band reached | `WATCH`; act only with strong evidence or sensible new cash. |
+| `>4pp` absolute | Eligible for active rebalance after all risk gates. |
+| `>8pp` absolute OR `>100%` relative | High-priority rebalance unless a deliberate deviation is documented. |
+
+Every action separates the strategic target from this review's execution
+target: ordinary corrections are staged (at most half the remaining gap, max
+4pp per review), so a position can deliberately remain away from its
+strategic target after one review. Hard exits — broken thesis, severe event,
+hard score floor, risk-budget breach — bypass staging.
 
 Deviation alone does not override regime, event, liveness, stablecoin, or
 confidence constraints. When the thesis remains sound, new cash should repair
 underweights before forcing unnecessary sales. New cash does not justify
-preserving a broken thesis.
+preserving a broken thesis. The effective stable weight may exceed the
+strategic stable target only when every eligible risky capacity is capped or
+another explicit constraint requires it; that residue is reported separately
+as constraint residual cash.
 
 ## 17. Technical Execution and Staging
 
@@ -429,7 +459,7 @@ These examples are illustrative and do not set target weights:
    eligible for a bounded satellite allocation, subject to portfolio caps and
    the rebalance threshold.
 2. ETH or an altcoin has a reasonable absolute score but weak BTC opportunity-
-   cost evidence. It may remain `HOLD_ONLY` or underweight instead of receiving
+   cost evidence. It may remain `HOLD_OR_REDUCE` or underweight instead of receiving
    new capital.
 3. An asset has a high base score but `SEVERE` event risk. It receives no new
    risk; the existing position is evaluated under reduction and exit rules.

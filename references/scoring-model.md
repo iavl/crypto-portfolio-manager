@@ -169,8 +169,9 @@ not silently claim full certainty. The configured neutral band is `0.10` and
 saturation is `1.00`; the signal is neutral inside the band and continuously
 clamped to 0–100 outside it.
 
-For non-BTC satellites, missing BTC-relative evidence is `HOLD_ONLY`, while a
-materially negative comparison is ineligible for new risk.
+For non-BTC satellites, missing BTC-relative evidence is `HOLD_OR_REDUCE`
+(no new risk), while a confirmed materially negative comparison is
+ineligible for new risk.
 
 `relative_strength_vs_btc` carries one unit everywhere: a numeric value is the
 canonical 0–100 factor score (below 50 is the confirmed weak case, at or above
@@ -180,8 +181,8 @@ values outside `[0, 100]` are rejected, and core/satellite consumers read the
 field identically. Missing factors shrink the weighted score toward neutral
 but can never by themselves produce a satellite exit: without independent
 negative evidence (broken thesis, severe event, materially weak BTC-relative
-case, or hard portfolio risk) an incomplete held satellite stays `HOLD_ONLY`
-at its full current weight.
+case, or hard portfolio risk) an incomplete held satellite stays
+`HOLD_OR_REDUCE` at its full current weight.
 
 For BTC macro/liquidity interpretation, 90D rate/real-yield/USD changes, the
 13W Fed balance-sheet change, and 6M M2 change are the primary current-horizon
@@ -274,22 +275,41 @@ Positioning and BTC cycle overlays can cap immediate staged dollars or produce
 
 ## Hysteresis and interpretation
 
-Satellite entry uses `satellite_entry_score=67`, existing holdings remain
-`HOLD_ONLY` through `satellite_exit_score=62`, and full score strength is
-reached at `satellite_full_score=85`. A new/non-held satellite below 67 receives
-no new risk. A held satellite from 62 through 66 is held without adding risk.
-From `satellite_soft_exit_score=57` through 61 a held satellite is `SOFT_EXIT`:
-its strategic target becomes `satellite_soft_exit_fraction=0.5` of current
-exposure, so a noisy score de-risks gradually instead of cliff-exiting one
-point below the exit floor. Below 57 it becomes an ineligible/full-exit
-candidate. Score strength is
-monotonic from 67 to 85. Strategic satellite sizing uses score strength and
-structural risk; confidence, event risk, decision confidence, positioning, and
-execution overlays are deployment allowances.
+Satellite strategic sizing is a continuous, policy-configured piecewise-linear
+target curve (`allocation.satellite_target_curve`): the target fraction of the
+satellite envelope is 0.0 at `satellite_soft_exit_score=57`, 0.20 at
+`satellite_exit_score=62`, 0.40 at `satellite_entry_score=67`, and 1.0 at
+`satellite_full_score=85`, interpolated linearly between breakpoints. The curve
+is bounded to `[0, 1]`, monotonic non-decreasing in score, continuous at every
+breakpoint, and independent of the current holding, so a held satellite
+crossing the entry score cannot lose its target (the former 66.9 -> 67.0
+collapse).
 
-The current structural `risk_tier` is an assessment input rather than a
-continuous volatility/beta estimate. Allocation diagnostics label its default
-provenance as `MANUAL_ASSESSMENT`; empirical calibration is a separate task.
+Eligibility gates deployment, never the shape of the curve:
+
+- `ELIGIBLE_INCREASE` (score >= 67 with complete evidence): new exposure may
+  be added up to the strategic/deployment target;
+- `HOLD_OR_REDUCE` (sub-entry band 62-66, moderate BTC-relative weakness
+  30-50, or incomplete evidence on a held position): no new risk; an existing
+  overweight may be reduced toward the strategic target along the curve;
+- `SOFT_EXIT` (57-61 on a held position): reduce gradually along the curve;
+- `INELIGIBLE` (below 57 with complete evidence, broken thesis, SEVERE/CRITICAL
+  event, relative strength below 30, or incomplete evidence with no position):
+  target zero / exit under hard-risk rules.
+
+A new/non-held satellite below 67 receives no target at all. Repeated reviews
+of identical evidence are idempotent because the curve reads only score.
+Strategic satellite sizing uses the curve and the risk-tier cap; confidence,
+event risk, decision confidence, positioning, and execution overlays are
+deployment allowances.
+
+The structural `risk_tier` (`allocation.risk_tier_caps`) caps maximum exposure
+as a fraction of the active satellite envelope (normal 1.0, high_beta/high
+0.5); it never scales mid-score targets below the cap. The tier is an
+assessment input rather than a continuous volatility/beta estimate.
+Allocation diagnostics label its default provenance as `MANUAL_ASSESSMENT`
+and expose `raw_score_target_weight`, `risk_tier_cap_weight`, and
+`risk_cap_applied`; empirical calibration is a separate task.
 
 Materially negative BTC-relative evidence overrides the hold band.
 `event_risk.state` is the sole event-risk input; SEVERE and CRITICAL block new risk.

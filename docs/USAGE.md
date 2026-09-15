@@ -517,3 +517,28 @@ python3 scripts/events.py --smoke --asset BTC --asset ETH
 ```text
 不确定性降低行动性，而不是被猜测抹掉。
 ```
+
+
+## 离线全流程回放评测
+
+`scripts/evaluate_strategy.py` 是研究工具：把冻结的复盘记录（含下一期已
+实现收益标签）回放完整的 `评分 → 市场状态 → 战略目标 → 分阶段调仓 →
+成本 → 收益` 管线，输出总收益、年化收益、最大回撤、波动率、Sharpe 近似
+（无风险利率按 0 记）、换手、成本、平均稳定币权重、各市场状态停留次数、
+调仓与分阶段动作计数，以及同期的 BTC / 70-30 BTC-ETH 持有不动基准。
+
+- 决策代码只能看到 `FrozenReviewView`，结构上看不到下一期收益标签；
+  有回归测试监控任何泄漏。
+- 回放是闭环的：下一次复盘从上一次动作加真实收益演化出的持仓出发。
+- `--policy` / `--candidate` 对比两份策略文件；`--split train|validation|
+  holdout` 按时间顺序切分（校准只允许用 train/validation）。
+- 代码不会因为候选策略在 holdout 上表现更好而自动启用它。
+- 缺失持仓资产已实现收益的标签是硬错误（fail-closed）。
+
+示例：
+
+```bash
+python3 scripts/evaluate_strategy.py tests/fixtures/strategy_replay_basic.json \
+    --fee-bps 10 --slippage-bps 5
+python3 scripts/evaluate_strategy.py reviews.json --candidate candidate_policy.json
+```
