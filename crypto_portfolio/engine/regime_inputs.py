@@ -52,6 +52,116 @@ def flow_state(value: Any, *, policy: Policy | None = None) -> str:
     return classify_flow_state(value, policy=policy)
 
 
+def _flow_component(value: Any, name: str) -> dict[str, Any]:
+    """Normalize one asset's ETF-flow component to dollar flow, AUM, and ratio."""
+    if value is None:
+        return {"available": False}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} flow component must be an object or null")
+    unknown = set(value) - {"net_flow_usd", "aum_usd", "flow_ratio"}
+    if unknown:
+        raise ValueError(f"{name} flow component contains unknown fields: {', '.join(sorted(unknown))}")
+    net_flow = value.get("net_flow_usd")
+    aum = value.get("aum_usd")
+    ratio = value.get("flow_ratio")
+    result: dict[str, Any] = {"available": True}
+    for field, raw in (("net_flow_usd", net_flow), ("aum_usd", aum), ("flow_ratio", ratio)):
+        if raw is None:
+            result[field] = None
+            continue
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
+            raise ValueError(f"{name} flow component {field} must be a finite number or null")
+        result[field] = float(raw)
+    if result["net_flow_usd"] is not None and result["aum_usd"] not in (None, 0.0):
+        if result["aum_usd"] < 0:
+            raise ValueError(f"{name} flow component aum_usd must be >= 0")
+        if result["flow_ratio"] is None:
+            result["flow_ratio"] = result["net_flow_usd"] / result["aum_usd"]
+    if result["flow_ratio"] is not None and abs(result["flow_ratio"]) > 1.0:
+        raise ValueError(f"{name} flow component ratio must be a decimal fraction within +/-1")
+    if not any(result[field] is not None for field in ("net_flow_usd", "flow_ratio")):
+        # An AUM-only component carries no flow direction at all.
+        result["available"] = False
+    return result
+
+
+def aggregate_market_flow(
+    btc_flow: Mapping[str, Any] | None,
+    eth_flow: Mapping[str, Any] | None,
+    *,
+    policy: Policy | None = None,
+) -> dict[str, Any]:
+    """Aggregate BTC and ETH ETF flows into a market-level regime flow state.
+
+    The market regime's flow domain must describe broad market liquidity,
+    not a BTC alias: dollar flows are aggregated against combined AUM, and
+    pre-normalized ratios aggregate by AUM weight (equal weight only when
+    AUM is unavailable, with reduced confidence and explicit fallback
+    provenance). A single available major component is a documented
+    fallback, never a silent BTC substitution; asset-level states stay
+    available on the components for BTC/ETH scoring.
+    """
+    resolved = policy or resolve_policy()
+    components = {"BTC": _flow_component(btc_flow, "BTC"), "ETH": _flow_component(eth_flow, "ETH")}
+    available = [name for name, item in components.items() if item["available"]]
+    assessment: dict[str, Any] = {
+        "components": components,
+        "component_states": {
+            name: (classify_flow_state(item["flow_ratio"], policy=resolved) if item["available"] else "UNKNOWN")
+            for name, item in components.items()
+        },
+        "aggregate_flow_ratio": None,
+        "method": "unavailable",
+        "state": "UNKNOWN",
+        "confidence": "LOW",
+        "fallback_provenance": (),
+    }
+    if not available:
+        assessment["fallback_provenance"] = ("NO_MARKET_FLOW_COMPONENTS",)
+        return assessment
+    if len(available) == 1:
+        only = components[available[0]]
+        ratio = only["flow_ratio"]
+        assessment["aggregate_flow_ratio"] = ratio
+        assessment["state"] = classify_flow_state(ratio, policy=resolved)
+        assessment["method"] = "single_asset_fallback"
+        assessment["confidence"] = "MEDIUM"
+        assessment["fallback_provenance"] = (f"ONLY_{available[0]}_AVAILABLE",)
+        return assessment
+    btc, eth = components["BTC"], components["ETH"]
+    btc_aum, eth_aum = btc.get("aum_usd"), eth.get("aum_usd")
+    if (
+        btc.get("net_flow_usd") is not None and btc_aum
+        and eth.get("net_flow_usd") is not None and eth_aum
+    ):
+        total_flow = btc["net_flow_usd"] + eth["net_flow_usd"]
+        total_aum = btc_aum + eth_aum
+        assessment["aggregate_flow_ratio"] = total_flow / total_aum
+        assessment["method"] = "dollar_aum_aggregation"
+        assessment["confidence"] = "HIGH"
+    elif btc.get("flow_ratio") is not None and eth.get("flow_ratio") is not None:
+        if btc_aum and eth_aum:
+            weight = btc_aum / (btc_aum + eth_aum)
+            assessment["aggregate_flow_ratio"] = (
+                weight * btc["flow_ratio"] + (1.0 - weight) * eth["flow_ratio"]
+            )
+            assessment["method"] = "aum_weighted_ratios"
+            assessment["confidence"] = "HIGH"
+        else:
+            assessment["aggregate_flow_ratio"] = 0.5 * (btc["flow_ratio"] + eth["flow_ratio"])
+            assessment["method"] = "equal_weighted_ratios"
+            assessment["confidence"] = "MEDIUM"
+            assessment["fallback_provenance"] = ("COMPONENT_AUM_MISSING",)
+    else:
+        # One side has dollars, the other only a ratio: no common basis
+        # without AUM, so fail defensive rather than invent one.
+        assessment["method"] = "unavailable"
+        assessment["fallback_provenance"] = ("INCONSISTENT_COMPONENT_BASIS",)
+        return assessment
+    assessment["state"] = classify_flow_state(assessment["aggregate_flow_ratio"], policy=resolved)
+    return assessment
+
+
 def breadth_state(value: Any) -> str:
     if value is None:
         return "UNKNOWN"
@@ -118,6 +228,7 @@ def build_regime_inputs(
 
 __all__ = [
     "RegimeInputs",
+    "aggregate_market_flow",
     "breadth_state",
     "btc_trend_state",
     "build_regime_inputs",
