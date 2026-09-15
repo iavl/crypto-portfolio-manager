@@ -53,6 +53,11 @@ constants and deterministic factor thresholds. Python models and engine modules 
 the Agent supplies current evidence, bounded qualitative judgments, and
 explanations.
 
+Final reports must consume Python calculation receipts, score contribution
+breakdowns, target-change attribution, and diagnostic-only fill scenarios.
+Never infer a score change from a single indicator or treat an approved amount
+as a confirmed fill.
+
 Never collect or research an asset in `policy.universe.excluded`. Exclusion is
 an unmanaged-universe decision, not an automatic sell; an existing excluded
 holding remains visible in snapshot accounting with any supplied value.

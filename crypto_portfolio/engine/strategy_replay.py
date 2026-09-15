@@ -98,6 +98,7 @@ class FrozenReviewView:
     new_cash: float
     thesis_broken: tuple[str, ...]
     hard_action_reasons: Mapping[str, str] | None
+    technical_inputs: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class ReplayReview:
     thesis_broken: tuple[str, ...] = ()
     hard_action_reasons: Mapping[str, str] | None = None
     next_returns: Mapping[str, float] = field(default_factory=dict)
+    technical_inputs: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _parse_as_of(self.as_of)
@@ -153,6 +155,7 @@ class ReplayReview:
             as_of=self.as_of,
             current_weights=dict(self.current_weights if current_weights is None else current_weights),
             portfolio_value=float(self.portfolio_value if portfolio_value is None else portfolio_value),
+            technical_inputs=dict(self.technical_inputs),
             assessments=dict(self.assessments),
             regime_inputs=dict(self.regime_inputs),
             new_cash=float(self.new_cash),
@@ -165,7 +168,7 @@ class ReplayReview:
         known = {
             "as_of", "current_weights", "portfolio_value", "assessments",
             "regime_inputs", "new_cash", "thesis_broken", "hard_action_reasons",
-            "next_returns",
+            "next_returns", "technical_inputs",
         }
         unknown = sorted(set(value) - known)
         if unknown:
@@ -183,6 +186,7 @@ class ReplayReview:
             thesis_broken=tuple(value.get("thesis_broken", ())),
             hard_action_reasons=value.get("hard_action_reasons"),
             next_returns=value.get("next_returns", {}),
+            technical_inputs=value.get("technical_inputs", {}),
         )
 
 
@@ -201,6 +205,7 @@ def replay_strategy(
     policy: Policy | None = None,
     fee_bps: float = 0.0,
     slippage_bps: float = 0.0,
+    research_variant: str = "baseline",
 ) -> dict[str, Any]:
     """Replay the full deterministic pipeline over frozen review records.
 
@@ -221,6 +226,9 @@ def replay_strategy(
     if moments != sorted(moments) or len(set(moments)) != len(moments):
         raise ValueError("replay reviews must be unique and ordered by as_of")
 
+    from .research_variants import ResearchSignals
+    from .review_diagnostics import build_review_diagnostics
+    signals = ResearchSignals(research_variant, resolved)
     stables = set(resolved.stable_symbols)
     previous_regime: Any = None
     # Dollar positions, seeded from the first frozen record.
@@ -258,7 +266,7 @@ def replay_strategy(
         allocation = build_target_allocation(
             policy=resolved,
             regime=regime.regime,
-            assessments=view.assessments,
+            assessments=signals.assessments(view),
             current_weights=view.current_weights,
         )
         rebalance = recommend_rebalance(
@@ -277,11 +285,27 @@ def replay_strategy(
                 if value.get("hard_exposure_cap") is not None
             },
         )
-        executable = [a for a in rebalance.actions if a.action in {"INCREASE", "REDUCE", "EXIT"}]
+        executable = [a for a in signals.confirmed(view, rebalance.actions)
+                      if a.action in {"INCREASE", "REDUCE", "EXIT"} and a.symbol not in stables]
+        candidate_projection = None
+        if research_variant == "confirm_2":
+            def projection(selected):
+                return build_review_diagnostics(current_weights=view.current_weights,
+                    target_weights=allocation.target_weights, portfolio_value=view.portfolio_value,
+                    new_cash=view.new_cash, actions=selected, regime=regime.regime,
+                    policy=resolved)["scenarios"]["APPROVED_FULL"]
+            candidate_projection = projection(executable)
+            if not candidate_projection["feasible"]:
+                # A postponed sale cannot fund a purchase. Preserve hard risk
+                # reductions; postpone whole ordinary buys rather than resize.
+                executable = [a for a in executable if a.action != "INCREASE"]
+                candidate_projection = projection(executable)
+            if candidate_projection["weights"] is None:
+                raise ValueError("RESEARCH_PROJECTION_INFEASIBLE")
         if executable:
             rebalances += 1
-        staged_increases += sum(1 for a in rebalance.actions if a.staging_applied and a.action == "INCREASE")
-        staged_reductions += sum(1 for a in rebalance.actions if a.staging_applied and a.action in {"REDUCE", "EXIT"})
+        staged_increases += sum(1 for a in executable if a.staging_applied and a.action == "INCREASE")
+        staged_reductions += sum(1 for a in executable if a.staging_applied and a.action in {"REDUCE", "EXIT"})
 
         traded = sum(a.amount_usd for a in executable)
         turnover = traded / view.portfolio_value if view.portfolio_value > 0 else 0.0
@@ -293,39 +317,42 @@ def replay_strategy(
         # already folds funding constraints and undeployed cash into the
         # stable sleeve and conserves the total.
         projected = rebalance.post_action_projection or {}
-        post_weights = dict(projected.get("projected_weights", {}))
+        post_weights = dict(candidate_projection["weights"] if candidate_projection else projected.get("projected_weights", {}))
         if not post_weights:
             raise ValueError(f"replay review {review.as_of} produced no post-action projection")
-        post_total = view.portfolio_value + view.new_cash - cost
+        before_cost = view.portfolio_value + view.new_cash
+        post_dollars = {symbol: weight * before_cost for symbol, weight in post_weights.items()}
+        stable_dollars = sum(v for s, v in post_dollars.items() if s in stables)
+        if cost > stable_dollars + 1e-9:
+            raise ValueError("replay costs exceed available stable balance")
+        for symbol in post_dollars:
+            if symbol in stables and stable_dollars:
+                post_dollars[symbol] *= (stable_dollars - cost) / stable_dollars
+        post_total = before_cost - cost
+        if post_total <= 0:
+            raise ValueError("replay costs exhaust portfolio")
+        post_weights = {s: v / post_total for s, v in post_dollars.items()}
         stable_weight = sum(weight for symbol, weight in post_weights.items() if symbol in stables)
         stable_weight_sum += stable_weight
-
         label = review.next_returns
-        missing = sorted(
-            symbol for symbol, weight in post_weights.items()
-            if weight > 1e-12 and symbol not in stables and symbol not in label
-        )
+        missing = sorted(symbol for symbol, weight in post_weights.items()
+                         if weight > 1e-12 and symbol not in label)
         if missing:
-            raise ValueError(
-                f"replay review {review.as_of} is missing realized returns for "
-                "post-action exposure(s): " + ", ".join(missing)
-            )
-        period_return = sum(
-            weight * label.get(symbol, 0.0) for symbol, weight in post_weights.items()
-        ) - (cost / post_total if post_total > 0 else 0.0)
+            raise ValueError(f"replay review {review.as_of} is missing realized returns for "
+                             "post-action exposure(s): " + ", ".join(missing))
+        dollars = {symbol: amount * (1.0 + label.get(symbol, 0.0))
+                   for symbol, amount in post_dollars.items()}
+        period_return = sum(dollars.values()) / before_cost - 1.0
         period_returns.append(period_return)
         nav_path.append(nav_path[-1] * (1.0 + period_return))
-        dollars = {
-            symbol: weight * post_total * (1.0 + label.get(symbol, 0.0))
-            for symbol, weight in post_weights.items()
-        }
         value = sum(dollars.values())
         review_rows.append({
             "as_of": review.as_of,
             "regime": regime.regime,
             "decision": rebalance.decision,
             "executable_actions": len(executable),
-            "staged_actions": sum(1 for a in rebalance.actions if a.staging_applied),
+            "staged_actions": sum(1 for a in executable if a.staging_applied),
+            "actions": [a.as_dict() for a in executable],
             "turnover": turnover,
             "cost": cost,
             "period_return": period_return,
@@ -344,6 +371,7 @@ def replay_strategy(
     annualized = (final_nav ** (365.25 / elapsed_days)) - 1.0 if final_nav > 0 else -1.0
     sharpe_like = (annualized / volatility) if volatility > 0 else None
     return {
+        "research_variant": research_variant,
         "reviews": count,
         "final_nav": final_nav,
         "total_return": total_return,
@@ -390,6 +418,7 @@ def compare_policies(
     candidate_policy: Policy | None = None,
     fee_bps: float = 0.0,
     slippage_bps: float = 0.0,
+    research_variant: str = "baseline",
 ) -> dict[str, Any]:
     """Replay two policies over identical frozen periods and benchmarks.
 
@@ -398,10 +427,12 @@ def compare_policies(
     that judgement is explicitly left out of the code.
     """
     baseline = replay_strategy(
-        reviews, policy=baseline_policy, fee_bps=fee_bps, slippage_bps=slippage_bps
+        reviews, policy=baseline_policy, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        research_variant=research_variant
     )
     candidate = replay_strategy(
-        reviews, policy=candidate_policy, fee_bps=fee_bps, slippage_bps=slippage_bps
+        reviews, policy=candidate_policy, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        research_variant=research_variant
     )
     benchmarks = replay_benchmarks(reviews)
     return {

@@ -452,6 +452,49 @@
         "object",
         "null"
       ]
+    },
+    "calculation_context": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "as_of",
+        "resolved_policy",
+        "assessments",
+        "evidence"
+      ],
+      "properties": {
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resolved_policy": {
+          "type": "object"
+        },
+        "assessments": {
+          "type": "object"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "review_diagnostics": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "target_attribution": {
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "additionalProperties": false,

@@ -18,6 +18,7 @@ from .metric_normalization import (
     persist_collection_results,
 )
 from .report_packet import build_final_review_output, build_report_packet, validate_final_review_output, validate_report_packet
+from .review_diagnostics import build_review_diagnostics, portfolio_stress, target_change_attribution
 from .scoring import calculate_factor_reliability, ensure_acquisition_ready
 from .confidence import (
     DecisionScope,
@@ -100,6 +101,9 @@ __all__ = [
     "signal_consistency_score",
     "source_quality_score",
     "validate_report_packet",
+    "build_review_diagnostics",
+    "portfolio_stress",
+    "target_change_attribution",
     "normalize_metric_observation",
     "normalize_metric_result",
     "normalize_collection_results",

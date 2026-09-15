@@ -141,6 +141,10 @@ zone, but cannot create portfolio risk or a trade without an approved
 rebalance action.
 
 Avoid arbitrary “-5%, -10%, -15%” ladders without structural justification.
+
+Review outputs may include `CURRENT`, `FIRST_BUYS_ONLY`, `SALES_ONLY`, and
+`APPROVED_FULL` static fill scenarios. They describe approved-dollar accounting
+only; they are not confirmations, fills, or price forecasts.
 The engine may deploy less than the approved amount or return `WAIT` when
 history, structure, volatility, or freshness is inadequate. The approved
 amount is final approved dollars: portfolio-level confidence caps were

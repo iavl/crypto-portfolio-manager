@@ -69,6 +69,9 @@ class Decision:
     manual_asset_contexts: tuple[ManualAssetContext, ...] = ()
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None
     post_action_projection: Mapping[str, Any] | None = None
+    calculation_context: Mapping[str, Any] | None = None
+    review_diagnostics: Mapping[str, Any] | None = None
+    target_attribution: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -269,6 +272,16 @@ class Decision:
                 raise ValueError(
                     "each execution plan with a technical summary must have one matching execution_technical evidence record"
                 )
+        if self.calculation_context is not None:
+            from ..engine.calculation_evidence import validate_calculation_context
+            validate_calculation_context(thaw_packet_value(self.calculation_context), require_trend=True)
+        for name in ("calculation_context", "review_diagnostics", "target_attribution"):
+            value = getattr(self, name)
+            if value is not None:
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"{name} must be an object or null")
+                object.__setattr__(self, name, freeze_packet_value(value, path=name))
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "Decision":
         if not isinstance(value, Mapping):
@@ -284,6 +297,7 @@ class Decision:
             "manual_asset_contexts",
             "no_trade_attribution",
             "post_action_projection",
+            "calculation_context", "review_diagnostics", "target_attribution",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -328,11 +342,17 @@ class Decision:
             manual_asset_contexts=tuple(data.get("manual_asset_contexts", ())),
             no_trade_attribution=data.get("no_trade_attribution"),
             post_action_projection=data.get("post_action_projection"),
+            calculation_context=data.get("calculation_context"),
+            review_diagnostics=data.get("review_diagnostics"),
+            target_attribution=data.get("target_attribution"),
         )
 
     def as_dict(self) -> dict[str, Any]:
         evidence = [item.as_dict() for item in self.evidence]
         result = {
+            "calculation_context": thaw_packet_value(self.calculation_context),
+            "review_diagnostics": thaw_packet_value(self.review_diagnostics),
+            "target_attribution": thaw_packet_value(self.target_attribution),
             "timestamp": self.timestamp,
             "market_regime": self.market_regime,
             "current_weights": dict(self.current_weights),

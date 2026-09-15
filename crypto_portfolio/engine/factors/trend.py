@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ...facts.models import TrendFacts
@@ -26,6 +26,9 @@ class TrendFactorResult:
     confidence: str
     coverage: float
     evidence_ids: tuple[str, ...] = ()
+    contributions: Mapping[str, float] = field(default_factory=dict)
+    evidence_records: tuple[Any, ...] = ()
+    volume_thresholds: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         score = float(self.score)
@@ -56,6 +59,9 @@ class TrendFactorResult:
             "confidence": self.confidence,
             "coverage": self.coverage,
             "evidence_ids": list(self.evidence_ids),
+            "contributions": dict(self.contributions),
+            "evidence_records": [item.as_dict() for item in self.evidence_records],
+            "volume_thresholds": dict(self.volume_thresholds),
         }
 
 
@@ -126,6 +132,7 @@ def calculate_trend_factor(
     snapshot = _snapshot(value, spot=spot, policy=resolved, as_of=as_of)
     rules = _rules(resolved)
     score = rules["base_score"]
+    contributions = {"base": score, "alignment": 0.0, "momentum": 0.0, "support": 0.0, "volume": 0.0, "extension": 0.0}
     available_authority = 0.0
     total_authority = 0.0
     reasons: list[str] = []
@@ -134,15 +141,18 @@ def calculate_trend_factor(
         name = f"ma{window}"
         authority = rules["ma_points"][window]
         total_authority += authority
+        contributions[name] = 0.0
         moving_average = getattr(snapshot, name)
         if moving_average is None:
             continue
         available_authority += authority
         if snapshot.current_spot_price >= moving_average:
             score += authority
+            contributions[name] = authority
             reasons.append(f"price is above {name.upper()}")
         else:
             score -= authority
+            contributions[name] = -authority
             reasons.append(f"price is below {name.upper()}")
 
     alignment_authority = rules["alignment_points"]
@@ -157,9 +167,11 @@ def calculate_trend_factor(
         bearish = snapshot.current_spot_price < alignment[0] < alignment[1] < alignment[2]
         if bullish:
             score += alignment_authority
+            contributions["alignment"] = alignment_authority
             reasons.append("moving averages are bullishly aligned")
         elif bearish:
             score -= alignment_authority
+            contributions["alignment"] = -alignment_authority
             reasons.append("moving averages are bearishly aligned")
 
     momentum = rules["momentum"]
@@ -186,7 +198,8 @@ def calculate_trend_factor(
             momentum_scores[horizon] * momentum_weights[horizon]
             for horizon in momentum_scores
         ) / available_momentum_weight
-        score += (aggregate - 50.0) / 50.0 * momentum["max_points"]
+        contributions["momentum"] = (aggregate - 50.0) / 50.0 * momentum["max_points"]
+        score += contributions["momentum"]
 
     # An empty support set is an evaluated, neutral structural result. It is
     # not missing data; only an unavailable technical snapshot removes this
@@ -202,6 +215,7 @@ def calculate_trend_factor(
         available_authority += support_authority
         if snapshot.support_zones:
             score += support_authority
+            contributions["support"] = support_authority
             reasons.append("confirmed support structure is available")
         else:
             reasons.append("support structure was evaluated but no confirmed zone is present")
@@ -212,9 +226,11 @@ def calculate_trend_factor(
         available_authority += volume_authority
         if snapshot.volume_state == "SUPPORTIVE":
             score += volume_authority
+            contributions["volume"] = volume_authority
             reasons.append("volume confirms the move")
         elif snapshot.volume_state == "WEAK":
             score -= volume_authority
+            contributions["volume"] = -volume_authority
             reasons.append("volume confirmation is weak")
 
     # Drawdown belongs to valuation in v2; retain it only as trend context.
@@ -224,16 +240,23 @@ def calculate_trend_factor(
         extension = (snapshot.current_spot_price - nearest.midpoint) / snapshot.atr14
         if extension > rules["extension_threshold_atr"]:
             score -= rules["extension_penalty"]
+            contributions["extension"] = -rules["extension_penalty"]
             reasons.append("spot is extended above the nearest support")
 
     coverage = available_authority / total_authority if total_authority else 0.0
+    contributions["clipping"] = min(100.0, max(0.0, score)) - score
     score = min(100.0, max(0.0, score))
     source_values = list(evidence_ids)
-    if snapshot.ohlcv_hash:
+    if getattr(snapshot, "ohlcv_hash", None):
         source_values.append(snapshot.ohlcv_hash)
-    if snapshot.volume_profile_hash:
+    if getattr(snapshot, "volume_profile_hash", None):
         source_values.append(snapshot.volume_profile_hash)
+    receipt = None
     source_ids = tuple(dict.fromkeys(source_values))
+    if hasattr(snapshot, "as_of") and hasattr(snapshot, "data_confidence"):
+        from ..calculation_evidence import trend_calculation_evidence
+        receipt = trend_calculation_evidence(snapshot, resolved)
+        source_ids = (receipt.id,)
     facts = TrendFacts(
         symbol=snapshot.symbol,
         current={
@@ -273,6 +296,9 @@ def calculate_trend_factor(
         confidence=_confidence(coverage, snapshot.data_confidence),
         coverage=coverage,
         evidence_ids=source_ids,
+        contributions=contributions,
+        evidence_records=(receipt,) if receipt is not None else (),
+        volume_thresholds={"supportive_min": resolved.execution["breakout"]["minimum_relative_volume"], "weak_below": 1.0 / resolved.execution["breakout"]["minimum_relative_volume"]},
     )
 
 

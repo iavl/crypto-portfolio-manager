@@ -43,6 +43,7 @@ _TOP_LEVEL_FIELDS = {
     "investment_horizon_months",
     "universe",
     "risk",
+    "stress_scenario",
     "chain_liveness",
     "benchmarks",
     "rebalance",
@@ -710,6 +711,7 @@ class Policy:
     regimes: Mapping[str, RegimeLimits]
     allocation: Mapping[str, Any]
     event_risk_multipliers: Mapping[str, float]
+    stress_scenario: Mapping[str, float] = dataclass_field(default_factory=dict)
     core_allocation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
@@ -799,6 +801,7 @@ class Policy:
             },
             "allocation": dict(self.allocation),
         }
+        result["stress_scenario"] = dict(self.stress_scenario)
         result["scoring_profiles"] = {
             name: dict(weights) for name, weights in self.scoring_profiles.items()
         }
@@ -1925,6 +1928,15 @@ def _parse_policy(
     excluded = _symbols(universe["excluded"], "universe.excluded")
     _check_overlaps(core, satellites, stable, excluded)
 
+    scenario = data["stress_scenario"]
+    if not isinstance(scenario, dict):
+        raise PolicyError("stress_scenario must be an object")
+    if any(not isinstance(k, str) or not k or k != k.strip().upper() for k in scenario):
+        raise PolicyError("stress_scenario requires uppercase asset symbols")
+    parsed_scenario = {k: _number(v, f"stress_scenario.{k}", minimum=-1.0, maximum=0.0) for k, v in scenario.items()}
+    if any(k in stable and v != 0 for k, v in parsed_scenario.items()):
+        raise PolicyError("stable stress assumption must be zero in this diagnostic")
+
     risk = data["risk"]
     if not isinstance(risk, dict):
         raise PolicyError("risk must be an object")
@@ -2206,6 +2218,7 @@ def _parse_policy(
             "risk.max_portfolio_drawdown",
             exclusive_minimum=True,
         ),
+        stress_scenario=parsed_scenario,
         benchmarks=parsed_benchmarks,
         rebalance=parsed_rebalance,
         scoring_profiles=parsed_profiles,

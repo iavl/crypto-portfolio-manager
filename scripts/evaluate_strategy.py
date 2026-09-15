@@ -50,6 +50,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="chronological segment to replay (calibration belongs on train/validation only)",
     )
     parser.add_argument("--output", default=None, help="write the JSON result here instead of stdout")
+    parser.add_argument("--research-variant", choices=("baseline", "volume_mean_3", "confirm_2"),
+                        default="baseline", help="offline research variant; never changes canonical policy")
+    parser.add_argument("--cost-sensitivity", action="store_true",
+                        help="run fixed 0/10/25 bps cost sensitivity")
     return parser.parse_args(argv)
 
 
@@ -73,17 +77,24 @@ def main(argv: list[str] | None = None) -> int:
     reviews = load_replay_reviews(raw)
     reviews = _select_split(reviews, args.split)
     baseline = load_policy(args.policy) if args.policy else None
-    if args.candidate:
+    if args.cost_sensitivity:
+        result = {str(bps): replay_strategy(reviews, policy=baseline, fee_bps=bps,
+                                             slippage_bps=0.0,
+                                             research_variant=args.research_variant)
+                  for bps in (0.0, 10.0, 25.0)}
+    elif args.candidate:
         result = compare_policies(
             reviews,
             baseline_policy=baseline,
             candidate_policy=load_policy(args.candidate),
             fee_bps=args.fee_bps,
             slippage_bps=args.slippage_bps,
+            research_variant=args.research_variant,
         )
     else:
         result = replay_strategy(
-            reviews, policy=baseline, fee_bps=args.fee_bps, slippage_bps=args.slippage_bps
+            reviews, policy=baseline, fee_bps=args.fee_bps, slippage_bps=args.slippage_bps,
+            research_variant=args.research_variant
         )
         result["benchmarks"] = replay_benchmarks(reviews)
     payload = json.dumps(result, indent=2, ensure_ascii=False, default=str)

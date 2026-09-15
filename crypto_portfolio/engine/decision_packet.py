@@ -350,6 +350,13 @@ def build_decision_review_packet(
     manual_asset_contexts: Any = None,
     no_trade_attribution: NoTradeAttribution | Mapping[str, Any] | None = None,
     post_action_projection: Mapping[str, Any] | None = None,
+    calculation_context: Mapping[str, Any] | None = None,
+    review_diagnostics: Mapping[str, Any] | None = None,
+    target_attribution: Mapping[str, Any] | None = None,
+    portfolio_value: float | None = None,
+    new_cash: float = 0.0,
+    previous_allocation_inputs: Mapping[str, Any] | None = None,
+    current_allocation_inputs: Mapping[str, Any] | None = None,
 ) -> DecisionReviewPacket:
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
@@ -524,7 +531,23 @@ def build_decision_review_packet(
             critical_missing_data=critical_missing_data or source.get("critical_missing_data", ()),
             execution=execution_summary,
         )
+    calculation_context = calculation_context if calculation_context is not None else source.get("calculation_context")
+    if portfolio_value is not None:
+        from .review_diagnostics import build_review_diagnostics
+        from ..models.policy import policy_from_mapping
+        diagnostic_policy = policy_from_mapping(source["resolved_policy"]) if source.get("resolved_policy") else resolve_policy()
+        review_diagnostics = build_review_diagnostics(
+            current_weights=current, target_weights=target, actions=list(action_by_symbol.values()),
+            portfolio_value=portfolio_value, new_cash=new_cash,
+            drawdown=portfolio_drawdown, regime=regime, policy=diagnostic_policy,
+            execution_plans=source.get("execution_plans"))
+    if previous_allocation_inputs is not None and current_allocation_inputs is not None:
+        from .review_diagnostics import target_change_attribution
+        target_attribution = target_change_attribution(previous_allocation_inputs, current_allocation_inputs)
     return DecisionReviewPacket(
+        calculation_context=calculation_context,
+        review_diagnostics=review_diagnostics if review_diagnostics is not None else source.get("review_diagnostics"),
+        target_attribution=target_attribution if target_attribution is not None else source.get("target_attribution"),
         review_type=review,
         market_regime=regime,
         portfolio_drawdown=portfolio_drawdown if portfolio_drawdown is not None else source.get("portfolio_drawdown"),

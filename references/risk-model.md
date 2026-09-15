@@ -189,6 +189,10 @@ At minimum consider:
 
 Do not present a stress test as a probability forecast. Its purpose is to expose hidden concentration and beta.
 
+The canonical policy includes a fixed diagnostic scenario for reproducible
+reviews. Stable assets use an explicit zero-return assumption; this is a
+calculation convention, not a claim that stablecoins are risk-free.
+
 Python owns the arithmetic through `engine.risk.stress_diagnostic`: scenario
 inputs are explicit decimal-fraction returns for every asset carrying weight
 (stables included), a missing input is an error rather than a zero fill, and

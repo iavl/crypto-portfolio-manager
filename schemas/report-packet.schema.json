@@ -3,57 +3,274 @@
   "$id": "https://example.local/crypto-portfolio-manager/report-packet.schema.json",
   "title": "Final report packet",
   "type": "object",
-  "required": ["review_type", "market_regime", "scores", "current_weights", "target_weights", "actions", "approved_amounts", "execution_zones", "historical_changes", "risk_flags", "critical_missing_data", "data_quality", "failed_data_fetches", "optional_data", "script_failures"],
+  "required": [
+    "review_type",
+    "market_regime",
+    "scores",
+    "current_weights",
+    "target_weights",
+    "actions",
+    "approved_amounts",
+    "execution_zones",
+    "historical_changes",
+    "risk_flags",
+    "critical_missing_data",
+    "data_quality",
+    "failed_data_fetches",
+    "optional_data",
+    "script_failures"
+  ],
   "properties": {
-    "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
-    "market_regime": {"enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "scores": {"type": "object"},
-    "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "actions": {"type": "array"},
-    "approved_amounts": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
-    "execution_zones": {"type": "object"},
-    "historical_changes": {"type": "object"},
-    "risk_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "high_impact_review": {"type": ["object", "null"]},
-    "critical_missing_data": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "data_quality": {"type": "object"},
+    "review_type": {
+      "enum": [
+        "SNAPSHOT_REVIEW",
+        "FULL_REVIEW",
+        "EVENT_REVIEW"
+      ]
+    },
+    "market_regime": {
+      "enum": [
+        "NORMAL",
+        "DEFENSIVE",
+        "CAPITAL_PRESERVATION"
+      ]
+    },
+    "scores": {
+      "type": "object"
+    },
+    "current_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "target_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "actions": {
+      "type": "array"
+    },
+    "approved_amounts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "execution_zones": {
+      "type": "object"
+    },
+    "historical_changes": {
+      "type": "object"
+    },
+    "risk_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "high_impact_review": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "critical_missing_data": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "data_quality": {
+      "type": "object"
+    },
     "failed_data_fetches": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["asset", "metric_key", "status", "failure_stage", "reason", "critical", "decision_role", "decision_effect", "attempts"],
+        "required": [
+          "asset",
+          "metric_key",
+          "status",
+          "failure_stage",
+          "reason",
+          "critical",
+          "decision_role",
+          "decision_effect",
+          "attempts"
+        ],
         "properties": {
-          "asset": {"type": "string", "minLength": 1},
-          "metric_key": {"type": "string", "minLength": 1},
-          "status": {"enum": ["FAILED", "STALE"]},
-          "failure_stage": {"enum": ["PROVIDER", "WEB_FALLBACK", "EVENT_SCAN", "DERIVED", "VALIDATION", "UNKNOWN"]},
-          "reason": {"type": "string", "minLength": 1},
-          "error_code": {"type": ["string", "null"], "minLength": 1},
-          "provider": {"type": ["string", "null"], "minLength": 1},
-          "endpoint": {"type": ["string", "null"], "minLength": 1},
-          "last_observation_at": {"type": ["string", "null"], "format": "date-time"},
-          "critical": {"type": "boolean"},
-          "decision_role": {"enum": ["SCORING_FACTOR", "EVENT_RISK", "POSITIONING_OVERLAY", "CYCLE_CONTEXT", "EXECUTION_CONTEXT", "STRUCTURAL_RISK"]},
-          "decision_effect": {"type": "string", "minLength": 1},
+          "asset": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metric_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "FAILED",
+              "STALE"
+            ]
+          },
+          "failure_stage": {
+            "enum": [
+              "PROVIDER",
+              "WEB_FALLBACK",
+              "EVENT_SCAN",
+              "DERIVED",
+              "VALIDATION",
+              "UNKNOWN"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "last_observation_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "critical": {
+            "type": "boolean"
+          },
+          "decision_role": {
+            "enum": [
+              "SCORING_FACTOR",
+              "EVENT_RISK",
+              "POSITIONING_OVERLAY",
+              "CYCLE_CONTEXT",
+              "EXECUTION_CONTEXT",
+              "STRUCTURAL_RISK"
+            ]
+          },
+          "decision_effect": {
+            "type": "string",
+            "minLength": 1
+          },
           "attempts": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["provider", "status"],
+              "required": [
+                "provider",
+                "status"
+              ],
               "properties": {
-                "provider": {"type": "string", "minLength": 1},
-                "status": {"type": "string", "minLength": 1},
-                "error_code": {"type": ["string", "null"], "minLength": 1},
-                "reason": {"type": ["string", "null"], "minLength": 1},
-                "endpoint": {"type": ["string", "null"], "minLength": 1},
-                "status_code": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
-                "method": {"type": ["string", "null"], "minLength": 1},
-                "attempt": {"type": ["integer", "null"], "minimum": 1},
-                "exception_class": {"type": ["string", "null"], "minLength": 1},
-                "detail": {"type": ["string", "null"], "minLength": 1},
-                "retryable": {"type": ["boolean", "null"]},
-                "log": {"type": ["string", "null"], "minLength": 1}
+                "provider": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "error_code": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "endpoint": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "status_code": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 100,
+                  "maximum": 599
+                },
+                "method": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "attempt": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                },
+                "exception_class": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "retryable": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "log": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                }
               },
               "additionalProperties": false
             }
@@ -62,75 +279,405 @@
         "additionalProperties": false
       }
     },
-    "optional_data": {"type": "array", "items": {"type": "object"}},
-    "decision_blocking_failures": {"type": "array", "items": {"type": "object"}},
-    "required_scoring_failures": {"type": "array", "items": {"type": "object"}},
-    "optional_data_unavailable": {"type": "array", "items": {"type": "object"}},
-    "provider_operational_failures": {"type": "array", "items": {"type": "object"}},
+    "optional_data": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "decision_blocking_failures": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "required_scoring_failures": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "optional_data_unavailable": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "provider_operational_failures": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
     "script_failures": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["script", "command", "status", "exit_code", "log_source", "log"],
+        "required": [
+          "script",
+          "command",
+          "status",
+          "exit_code",
+          "log_source",
+          "log"
+        ],
         "properties": {
-          "script": {"type": "string", "minLength": 1},
-          "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-          "status": {"enum": ["FAILED", "TIMEOUT", "LAUNCH_FAILED"]},
-          "exit_code": {"type": ["integer", "null"]},
-          "log_source": {"enum": ["STDERR", "STDOUT", "LAUNCHER"]},
-          "log": {"type": "string", "minLength": 1}
+          "script": {
+            "type": "string",
+            "minLength": 1
+          },
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "status": {
+            "enum": [
+              "FAILED",
+              "TIMEOUT",
+              "LAUNCH_FAILED"
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "log_source": {
+            "enum": [
+              "STDERR",
+              "STDOUT",
+              "LAUNCHER"
+            ]
+          },
+          "log": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "additionalProperties": false
       }
     },
-    "positioning_summaries": {"type": "object", "additionalProperties": {"type": "object"}}
-    ,"btc_cycle_summary": {"type": ["object", "null"]}
-    ,"overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]}
-    ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
-    ,"effective_deployment_caps": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
-    ,"regime_confidence": {"type": ["object", "null"]}
-    ,"decision_confidence": {"type": ["object", "null"]}
-    ,"confidence_caps": {"type": "array"}
-    ,"signal_consistency_summary": {"type": ["object", "null"]}
-    ,"nav_performance": {"type": ["object", "null"]}
-    ,"benchmark_performance": {"type": ["object", "null"]}
-    ,"event_scan_summary": {"type": ["object", "null"]}
-    ,"manual_asset_contexts": {"type": "array", "items": {"$ref": "#/$defs/manualAssetContext"}}
-    ,"no_trade_attribution": {"oneOf": [{"$ref": "#/$defs/noTradeAttribution"}, {"type": "null"}]}
-    ,"post_action_projection": {"type": ["object", "null"]}
+    "positioning_summaries": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "btc_cycle_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "overlay_confidence": {
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "overlay_warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "effective_deployment_caps": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "regime_confidence": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "decision_confidence": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "confidence_caps": {
+      "type": "array"
+    },
+    "signal_consistency_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "nav_performance": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "benchmark_performance": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "event_scan_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "manual_asset_contexts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/manualAssetContext"
+      }
+    },
+    "no_trade_attribution": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/noTradeAttribution"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "post_action_projection": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "calculation_context": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "as_of",
+        "resolved_policy",
+        "assessments",
+        "evidence"
+      ],
+      "properties": {
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resolved_policy": {
+          "type": "object"
+        },
+        "assessments": {
+          "type": "object"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "review_diagnostics": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "target_attribution": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
   },
   "additionalProperties": false,
   "$defs": {
     "noTradeAttribution": {
       "type": "object",
-      "required": ["score_gate", "confidence_gate", "regime_gate", "event_gate", "liveness_gate", "btc_relative_gate", "allocation_delta_gate", "rebalance_gate", "execution_gate", "primary_reason", "secondary_reasons"],
+      "required": [
+        "score_gate",
+        "confidence_gate",
+        "regime_gate",
+        "event_gate",
+        "liveness_gate",
+        "btc_relative_gate",
+        "allocation_delta_gate",
+        "rebalance_gate",
+        "execution_gate",
+        "primary_reason",
+        "secondary_reasons"
+      ],
       "properties": {
-        "score_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "confidence_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "regime_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "event_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "liveness_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "btc_relative_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "allocation_delta_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "rebalance_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "execution_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "primary_reason": {"type": "string", "minLength": 1},
-        "secondary_reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "score_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "confidence_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "regime_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "event_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "liveness_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "btc_relative_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "allocation_delta_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "rebalance_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "execution_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "primary_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondary_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       },
       "additionalProperties": false
     },
     "manualAssetContext": {
       "type": "object",
-      "required": ["asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"],
+      "required": [
+        "asset",
+        "category",
+        "summary",
+        "impact",
+        "severity",
+        "scope",
+        "as_of",
+        "source"
+      ],
       "properties": {
-        "asset": {"type": "string", "minLength": 1},
-        "category": {"enum": ["GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"]},
-        "summary": {"type": "string", "minLength": 1},
-        "impact": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"]},
-        "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
-        "scope": {"enum": ["CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"]},
-        "as_of": {"type": "string", "format": "date-time"},
-        "source": {"const": "MANUAL_USER_INPUT"}
+        "asset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "GOVERNANCE",
+            "TOKENOMICS",
+            "LEGAL",
+            "PROTOCOL",
+            "OTHER"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "enum": [
+            "POSITIVE",
+            "NEGATIVE",
+            "MIXED",
+            "NEUTRAL"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "INFO",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "CONTEXT_ONLY",
+            "FUNDAMENTALS",
+            "RISK",
+            "EXECUTION"
+          ]
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "const": "MANUAL_USER_INPUT"
+        }
       },
       "additionalProperties": false
     }

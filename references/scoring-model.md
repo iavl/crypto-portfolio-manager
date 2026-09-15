@@ -102,6 +102,12 @@ than missing MA200, while an evaluated but empty support-zone result is not
 treated as missing data. A move more than 2 ATR above support keeps the
 8-point extension penalty.
 
+Each deterministic trend result also carries a calculation receipt and signed
+contribution breakdown. Reports must use that breakdown for score changes; a
+single relative-volume threshold must not be presented as an unexplained score
+change. The receipt binds the normalized technical snapshot, completed-candle
+boundary, dataset hashes, and resolved policy hash.
+
 ## Availability and reliability
 
 Every factor is explicitly `AVAILABLE`, `MISSING`, or `NOT_APPLICABLE`.

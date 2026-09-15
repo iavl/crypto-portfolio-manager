@@ -139,6 +139,9 @@ def build_report_packet(
     )
 
     return ReportPacket(
+        calculation_context=packet.calculation_context,
+        review_diagnostics=packet.review_diagnostics,
+        target_attribution=packet.target_attribution,
         review_type=packet.review_type,
         market_regime=packet.market_regime,
         scores=final_scores,
@@ -201,6 +204,7 @@ def build_final_review_output(
 ) -> dict[str, Any]:
     """Assemble and validate the immutable output before a caller persists it."""
     packet = report_packet if isinstance(report_packet, ReportPacket) else ReportPacket.from_mapping(report_packet)
+    validate_report_packet(packet)
     packet_value = packet.as_dict()
     if acquisition is not None:
         _require_acquisition_finalized(acquisition)
@@ -243,7 +247,12 @@ def build_final_review_output(
         for index, item in enumerate(packet_value["actions"])
         if item.get("confidence") or item.get("confidence_score") is not None
     }
+    from .calculation_evidence import validate_packet_calculations
+    calculations = validate_packet_calculations(packet.calculation_context, packet.actions, packet.scores)
     result = {
+        "calculations": calculations,
+        "review_diagnostics": packet_value["review_diagnostics"],
+        "target_attribution": packet_value["target_attribution"],
         "portfolio": {
             "current_weights": packet_value["current_weights"],
             "target_weights": packet_value["target_weights"],

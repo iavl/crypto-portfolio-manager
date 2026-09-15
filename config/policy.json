@@ -9,6 +9,7 @@
     "stable": ["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH", "U", "USD1"],
     "excluded": ["LUNC"]
   },
+  "stress_scenario": {"BTC": -0.20, "ETH": -0.30, "AAVE": -0.40, "BNB": -0.35},
   "risk": {
     "min_stablecoin_weight": 0.15,
     "max_portfolio_drawdown": 0.15
