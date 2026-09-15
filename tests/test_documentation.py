@@ -198,6 +198,29 @@ class DocumentationTests(unittest.TestCase):
         self.assertNotIn("result.event_source_scan_requests", skill)
         self.assertIn("not proof of an exploit, approval, or execution", template)
 
+    def test_report_language_follows_invocation_language(self):
+        template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
+        skill = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "Report language: match the language the user used to invoke the Skill",
+            template,
+        )
+        self.assertIn("### Chinese report rendering", template)
+        for text in (
+            "English invocation produces an English report",
+            "a Chinese invocation produces",
+            "结论依据",
+            "证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action",
+            "本轮数据抓取失败明细",
+            "术语解释与决策影响",
+            "成本数据覆盖率",
+            "本轮执行建议：",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, template)
+        self.assertIn("in the language of the user's invocation", skill)
+        self.assertIn("Chinese report rendering", skill)
+
     def test_provider_debugging_guide_matches_cli_contract(self):
         guide = (ROOT / "docs" / "DEVELOPMENT_DEBUGGING.md").read_text(encoding="utf-8")
         for text in (

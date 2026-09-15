@@ -24,7 +24,7 @@ screenshot or structured snapshot
     -> Python score / regime / allocation / risk / rebalance
     -> DecisionReviewPacket
     -> ReportPacket
-    -> English report and append-only history
+    -> report in the invocation language and append-only history
 ```
 
 The system only provides advice and execution ranges; it never connects to

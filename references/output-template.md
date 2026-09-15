@@ -5,7 +5,35 @@ scores, weights, actions, approved amounts, execution zones, historical
 changes, and risk flags are authoritative Python outputs. The report model may
 explain them in prose but must not recompute, alter, or invent them.
 
-Default language: English. Keep asset tickers and metric names verbatim.
+Report language: match the language the user used to invoke the Skill. An
+English invocation produces an English report; a Chinese invocation produces
+a Chinese report. Keep asset tickers, metric names, status enums, error
+codes, and code identifiers verbatim in English in every language.
+
+### Chinese report rendering
+
+When the report is in Chinese, keep this template's structure and render the
+fixed strings as follows. Headings not listed here keep their English text
+(matching historical Chinese reports).
+
+- Section names: `1. 结论`, `结论依据`, `Debug 报告`,
+  `本轮数据抓取失败明细`, `本轮脚本执行异常`, `2. 组合诊断`,
+  `当前持仓收益`, `3. 市场状态`, `术语解释与决策影响`, `4. 单币评估`,
+  `5. 当前仓位 vs 目标仓位`, `6. 操作计划`, `7. 风险检查`,
+  `8. 什么情况会改变建议`, `9. 数据质量`.
+- Decision basis chain: `证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action`.
+- Position P&L table headers: `资产 | 数量 | 当前价 | 平均成本 | 当前价值 |
+  持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比`; coverage bullet
+  `成本数据覆盖率`; never label it `总收益`.
+- Failed-fetch table headers: `资产/范围 | Metric | 最终状态 | 阶段 / Provider
+  | 错误码 | 失败原因 | 程序失败日志 | 最近可用数据 | 决策影响`; script table
+  headers `脚本 | 状态 | Exit code | 日志来源 | 直接失败日志`; term table
+  headers `术语 | 含义 | 本轮决策影响`.
+- Fixed phrases: `无法确认`, `本轮没有最终抓取失败的数据。`,
+  `本轮没有脚本执行异常。`, `未捕获直接日志`, `尝试路径：…`,
+  `本次未采集的可选数据`, labels `事实` / `判断`, and the final action line
+  `本轮执行建议：…`. For a `STALE` refresh failure write
+  `当前刷新失败；最近可用数据为 <timestamp>，因此本轮按 STALE 处理。`
 
 ## 1. Conclusion
 
