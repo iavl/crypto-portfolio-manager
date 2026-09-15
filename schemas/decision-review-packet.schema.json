@@ -3,81 +3,427 @@
   "$id": "https://example.local/crypto-portfolio-manager/decision-review-packet.schema.json",
   "title": "Compact decision review packet",
   "type": "object",
-  "required": ["review_type", "market_regime", "current_weights", "target_weights", "assets"],
+  "required": [
+    "review_type",
+    "market_regime",
+    "current_weights",
+    "target_weights",
+    "assets"
+  ],
   "properties": {
-    "review_type": {"enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
-    "market_regime": {"enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "portfolio_drawdown": {"type": ["number", "null"], "maximum": 0},
-    "risk_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "previous_target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "assets": {"type": "array", "items": {"$ref": "#/$defs/asset"}},
-    "execution_summary": {"type": "object"},
-    "positioning_summaries": {"type": "object", "additionalProperties": {"type": "object"}},
-    "btc_cycle_summary": {"type": ["object", "null"]},
-    "overlay_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
-    "overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "effective_deployment_caps": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "critical_missing_data": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "major_conflicts": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-    "major_event_risk": {"type": "boolean"},
-    "risk_budget_breach": {"type": "boolean"},
-    "risk_escalation": {"type": "boolean"},
-    "recommendation_reversal": {"type": "boolean"},
-    "regime_confidence": {"type": ["object", "null"]},
-    "decision_confidence": {"type": ["object", "null"]},
-    "nav_performance": {"type": ["object", "null"]},
-    "benchmark_performance": {"type": ["object", "null"]},
-    "event_scan_summary": {"type": ["object", "null"]},
-    "manual_asset_contexts": {"type": "array", "items": {"$ref": "#/$defs/manualAssetContext"}}
-    ,"no_trade_attribution": {"oneOf": [{"$ref": "#/$defs/noTradeAttribution"}, {"type": "null"}]}
-    ,"post_action_projection": {"type": ["object", "null"]}
+    "review_type": {
+      "enum": [
+        "SNAPSHOT_REVIEW",
+        "FULL_REVIEW",
+        "EVENT_REVIEW"
+      ]
+    },
+    "market_regime": {
+      "enum": [
+        "NORMAL",
+        "DEFENSIVE",
+        "CAPITAL_PRESERVATION"
+      ]
+    },
+    "portfolio_drawdown": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "maximum": 0
+    },
+    "risk_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "current_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "target_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "previous_target_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/asset"
+      }
+    },
+    "execution_summary": {
+      "type": "object"
+    },
+    "positioning_summaries": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "btc_cycle_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "overlay_confidence": {
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "overlay_warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "effective_deployment_caps": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "critical_missing_data": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "major_conflicts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "major_event_risk": {
+      "type": "boolean"
+    },
+    "risk_budget_breach": {
+      "type": "boolean"
+    },
+    "risk_escalation": {
+      "type": "boolean"
+    },
+    "recommendation_reversal": {
+      "type": "boolean"
+    },
+    "regime_confidence": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "decision_confidence": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "nav_performance": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "benchmark_performance": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "event_scan_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "manual_asset_contexts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/manualAssetContext"
+      }
+    },
+    "no_trade_attribution": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/noTradeAttribution"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "post_action_projection": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
   },
   "additionalProperties": false,
   "$defs": {
     "noTradeAttribution": {
       "type": "object",
-      "required": ["score_gate", "confidence_gate", "regime_gate", "event_gate", "liveness_gate", "btc_relative_gate", "allocation_delta_gate", "rebalance_gate", "execution_gate", "primary_reason", "secondary_reasons"],
+      "required": [
+        "score_gate",
+        "confidence_gate",
+        "regime_gate",
+        "event_gate",
+        "liveness_gate",
+        "btc_relative_gate",
+        "allocation_delta_gate",
+        "rebalance_gate",
+        "execution_gate",
+        "primary_reason",
+        "secondary_reasons"
+      ],
       "properties": {
-        "score_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "confidence_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "regime_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "event_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "liveness_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "btc_relative_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "allocation_delta_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "rebalance_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "execution_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "primary_reason": {"type": "string", "minLength": 1},
-        "secondary_reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "score_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "confidence_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "regime_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "event_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "liveness_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "btc_relative_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "allocation_delta_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "rebalance_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "execution_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "primary_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondary_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       },
       "additionalProperties": false
     },
     "asset": {
       "type": "object",
-      "required": ["symbol", "factor_scores", "score", "confidence", "current_weight", "target_weight", "action", "approved_amount_usd"],
+      "required": [
+        "symbol",
+        "factor_scores",
+        "score",
+        "confidence",
+        "current_weight",
+        "target_weight",
+        "action",
+        "approved_amount_usd"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "factor_scores": {"type": "object"},
-        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-        "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
-        "previous_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-        "key_facts": {"type": "object"},
-        "historical_changes": {"type": "object"},
-        "current_weight": {"type": "number", "minimum": 0, "maximum": 1},
-        "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
-        "action": {"enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
-        "approved_amount_usd": {"type": "number", "minimum": 0},
-        "supporting_evidence_ids": {"type": "array"},
-        "contrary_evidence_ids": {"type": "array"},
-        "thesis_broken": {"type": "boolean"},
-        "event_risk": {"type": ["object", "null"]},
-        "portfolio_constraint": {"type": "string"},
-        "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "confidence_explanation": {"type": ["object", "null"]},
-        "strategic_target_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "execution_target_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "factor_scores": {
+          "type": "object"
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "previous_score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "key_facts": {
+          "type": "object"
+        },
+        "historical_changes": {
+          "type": "object"
+        },
+        "current_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "target_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "action": {
+          "enum": [
+            "INCREASE",
+            "REDUCE",
+            "EXIT",
+            "HOLD",
+            "WAIT",
+            "NO_TRADE"
+          ]
+        },
+        "approved_amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "supporting_evidence_ids": {
+          "type": "array"
+        },
+        "contrary_evidence_ids": {
+          "type": "array"
+        },
+        "thesis_broken": {
+          "type": "boolean"
+        },
+        "event_risk": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "portfolio_constraint": {
+          "type": "string"
+        },
+        "confidence_score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence_explanation": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "strategic_target_weight": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "execution_target_weight": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
         "action_reason": {
           "type": "string",
           "enum": [
@@ -92,24 +438,94 @@
             "RISK_BUDGET_BREACH"
           ]
         },
-        "staging_applied": {"type": "boolean"},
-        "deviation_pp": {"type": ["number", "null"], "minimum": 0},
-        "relative_deviation": {"type": ["number", "null"], "minimum": 0}
+        "staging_applied": {
+          "type": "boolean"
+        },
+        "deviation_pp": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "relative_deviation": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sizing_attribution": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "manualAssetContext": {
       "type": "object",
-      "required": ["asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"],
+      "required": [
+        "asset",
+        "category",
+        "summary",
+        "impact",
+        "severity",
+        "scope",
+        "as_of",
+        "source"
+      ],
       "properties": {
-        "asset": {"type": "string", "minLength": 1},
-        "category": {"enum": ["GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"]},
-        "summary": {"type": "string", "minLength": 1},
-        "impact": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"]},
-        "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
-        "scope": {"enum": ["CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"]},
-        "as_of": {"type": "string", "format": "date-time"},
-        "source": {"const": "MANUAL_USER_INPUT"}
+        "asset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "GOVERNANCE",
+            "TOKENOMICS",
+            "LEGAL",
+            "PROTOCOL",
+            "OTHER"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "enum": [
+            "POSITIVE",
+            "NEGATIVE",
+            "MIXED",
+            "NEUTRAL"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "INFO",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "CONTEXT_ONLY",
+            "FUNDAMENTALS",
+            "RISK",
+            "EXECUTION"
+          ]
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "const": "MANUAL_USER_INPUT"
+        }
       },
       "additionalProperties": false
     }

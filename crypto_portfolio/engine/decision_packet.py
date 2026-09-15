@@ -142,6 +142,7 @@ def _asset_summary(
     amount = float(action_dict.get("amount_usd", 0.0))
     if action_name in {"HOLD", "WAIT", "NO_TRADE"}:
         amount = 0.0
+    sizing_attribution = action_dict.get("sizing_attribution")
     raw_event_risk = (
         assessment.event_risk
         if isinstance(assessment, AssetAssessment)
@@ -203,6 +204,7 @@ def _asset_summary(
         staging_applied=bool(staging_raw),
         deviation_pp=deviation_pp,
         relative_deviation=relative_deviation,
+        sizing_attribution=sizing_attribution,
     )
 
 

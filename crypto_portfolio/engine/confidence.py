@@ -174,6 +174,45 @@ def confidence_deployment_factor(score: Any, policy: Any | None = None) -> float
     return _bounded(configured[band], f"confidence deployment factor {band}")
 
 
+def compose_deployment_factors(
+    factors: Mapping[str, float],
+    *,
+    policy: Any | None = None,
+) -> float:
+    """Compose named deployment allowances exactly once under the policy mode.
+
+    Each entry is a maximum deployment allowance in ``[0, 1]``. By default
+    (``execution.deployment_factor_composition = minimum_cap``) independent
+    upper bounds combine by their minimum — multiplying conceptually
+    independent caps compounds conservatism silently. A policy may only
+    multiply factors when it explicitly selects ``multiplicative`` mode for
+    factors it defines as multiplicative.
+    """
+    parsed: dict[str, float] = {}
+    for raw_name, raw_value in factors.items():
+        name = str(raw_name).strip().lower()
+        if not name:
+            raise ValueError("deployment factor names must be non-empty")
+        if name in parsed:
+            raise ValueError(f"deployment factor {name} is supplied twice")
+        parsed[name] = _bounded(raw_value, f"deployment factor {name}")
+    if not parsed:
+        return 1.0
+    execution = getattr(policy, "execution", None) if policy is not None else None
+    if execution is None and isinstance(policy, Mapping):
+        execution = policy.get("execution")
+    mode = execution.get("deployment_factor_composition", "minimum_cap") if isinstance(execution, Mapping) else "minimum_cap"
+    mode = str(mode).strip().lower()
+    if mode not in {"minimum_cap", "multiplicative"}:
+        raise ValueError("deployment_factor_composition must be minimum_cap or multiplicative")
+    if mode == "multiplicative":
+        result = 1.0
+        for value in parsed.values():
+            result *= value
+        return result
+    return min(parsed.values())
+
+
 def _action_field(action: Any, name: str, default: Any = None) -> Any:
     if isinstance(action, Mapping):
         return action.get(name, default)
@@ -938,6 +977,7 @@ __all__ = [
     "apply_confidence_caps",
     "calculate_data_confidence",
     "calculate_decision_confidence",
+    "compose_deployment_factors",
     "confidence_attribution",
     "confidence_deployment_factor",
     "calculate_freshness",

@@ -3,183 +3,856 @@
   "$id": "https://example.local/crypto-portfolio-manager/decision.schema.json",
   "title": "Persisted Crypto Portfolio Decision",
   "type": "object",
-  "required": ["decision_id", "timestamp", "market_regime", "policy_hash", "resolved_policy", "current_weights", "target_weights", "actions", "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "review_type"],
+  "required": [
+    "decision_id",
+    "timestamp",
+    "market_regime",
+    "policy_hash",
+    "resolved_policy",
+    "current_weights",
+    "target_weights",
+    "actions",
+    "risk_checks",
+    "evidence",
+    "evidence_ids",
+    "factor_scores",
+    "status",
+    "review_type"
+  ],
   "properties": {
-    "decision_id": {"type": "string", "minLength": 1},
-    "based_on_snapshot_id": {"type": ["string", "null"], "minLength": 1},
-    "timestamp": {"type": "string", "format": "date-time"},
-    "market_regime": {"type": "string", "enum": ["NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"]},
-    "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "resolved_policy": {"type": "object"},
-    "current_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "target_weights": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "actions": {"type": "array", "items": {"$ref": "#/$defs/rebalanceAction"}},
-    "risk_checks": {"type": "array"},
-    "constraints_applied": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "based_on_snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "market_regime": {
+      "type": "string",
+      "enum": [
+        "NORMAL",
+        "DEFENSIVE",
+        "CAPITAL_PRESERVATION"
+      ]
+    },
+    "policy_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "resolved_policy": {
+      "type": "object"
+    },
+    "current_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "target_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rebalanceAction"
+      }
+    },
+    "risk_checks": {
+      "type": "array"
+    },
+    "constraints_applied": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "evidence": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "asset", "factor", "source", "observed_at", "fetched_at", "freshness", "confidence"],
+        "required": [
+          "id",
+          "asset",
+          "factor",
+          "source",
+          "observed_at",
+          "fetched_at",
+          "freshness",
+          "confidence"
+        ],
         "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "asset": {"type": "string", "minLength": 1},
-          "factor": {"type": "string", "minLength": 1},
-          "source": {"type": "string", "minLength": 1},
-          "observed_at": {"type": "string", "format": "date-time"},
-          "fetched_at": {"type": "string", "format": "date-time"},
-          "freshness": {"type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"]},
-          "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asset": {
+            "type": "string",
+            "minLength": 1
+          },
+          "factor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "CURRENT",
+              "STALE",
+              "UNKNOWN"
+            ]
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ]
+          },
           "value": {},
-          "summary": {"type": ["string", "null"]},
-          "metadata": {"type": ["object", "null"]},
-          "source_group": {"type": ["string", "null"], "minLength": 1},
-          "authority_tier": {"type": ["integer", "null"], "enum": [1, 2, 3, null]},
-          "source_quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-          "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-          "conflict_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "source_group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "authority_tier": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "enum": [
+              1,
+              2,
+              3,
+              null
+            ]
+          },
+          "source_quality": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "conflict_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         },
         "additionalProperties": false
       }
     },
-    "evidence_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
     "factor_scores": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["symbol", "factor_scores", "weighted_score", "confidence", "asset_type", "relative_strength_vs_btc", "thesis_broken", "critical_data_complete", "risk_tier"],
+        "required": [
+          "symbol",
+          "factor_scores",
+          "weighted_score",
+          "confidence",
+          "asset_type",
+          "relative_strength_vs_btc",
+          "thesis_broken",
+          "critical_data_complete",
+          "risk_tier"
+        ],
         "properties": {
-          "symbol": {"type": "string", "minLength": 1},
+          "symbol": {
+            "type": "string",
+            "minLength": 1
+          },
           "factor_scores": {
             "type": "object",
             "additionalProperties": {
               "oneOf": [
-                {"type": "null"},
-                {"type": "number", "minimum": 0, "maximum": 100},
-                {"$ref": "#/$defs/factorScore"}
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                {
+                  "$ref": "#/$defs/factorScore"
+                }
               ]
             }
           },
-          "weighted_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-          "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-          "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
-          "relative_strength_vs_btc": {"oneOf": [
-            {"type": "null"},
-            {"type": "string", "enum": ["OUTPERFORM", "NEUTRAL", "UNDERPERFORM", "MATERIALLY_WEAK", "UNKNOWN"]},
-            {"type": "number", "minimum": 0, "maximum": 100}
-          ]},
-          "thesis_broken": {"type": "boolean"},
-          "critical_data_complete": {"type": "boolean"},
-        "risk_tier": {"type": "string", "minLength": 1},
-        "risk_tier_source": {"oneOf": [{"type": "null"}, {"type": "string", "enum": ["POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"]}]},
-        "event_risk": {"oneOf": [{"$ref": "#/$defs/eventRisk"}, {"type": "null"}]},
-        "scoring_profile_name": {"type": ["string", "null"]},
-        "score_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "confidence_explanation": {"type": ["object", "null"]},
-        "data_confidence": {"type": ["object", "null"]}
+          "weighted_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ]
+          },
+          "asset_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "satellite",
+              "stablecoin",
+              "cash",
+              "other"
+            ]
+          },
+          "relative_strength_vs_btc": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "OUTPERFORM",
+                  "NEUTRAL",
+                  "UNDERPERFORM",
+                  "MATERIALLY_WEAK",
+                  "UNKNOWN"
+                ]
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            ]
+          },
+          "thesis_broken": {
+            "type": "boolean"
+          },
+          "critical_data_complete": {
+            "type": "boolean"
+          },
+          "risk_tier": {
+            "type": "string",
+            "minLength": 1
+          },
+          "risk_tier_source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "POLICY_DEFAULT",
+                  "MANUAL_ASSESSMENT",
+                  "DETERMINISTIC_ESTIMATE"
+                ]
+              }
+            ]
+          },
+          "event_risk": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/eventRisk"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scoring_profile_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "score_coverage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence_explanation": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "data_confidence": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
         },
         "additionalProperties": false
       }
     },
-    "status": {"type": "string", "enum": ["PENDING", "CONFIRMED", "NOT_EXECUTED"]},
-    "review_type": {"type": "string", "enum": ["SNAPSHOT_REVIEW", "FULL_REVIEW", "EVENT_REVIEW"]},
-    "config": {"type": ["object", "null"]},
-    "execution_plans": {"type": ["object", "null"], "additionalProperties": {"$ref": "#/$defs/executionPlan"}}
-    ,"market_overlays": {"type": ["object", "null"]}
-    ,"regime_confidence": {"type": ["object", "null"]}
-    ,"decision_confidence": {"type": ["object", "null"]}
-    ,"nav_performance": {"type": ["object", "null"]}
-    ,"benchmark_performance": {"type": ["object", "null"]}
-    ,"event_scan_summary": {"type": ["object", "null"]}
-    ,"manual_asset_contexts": {"type": "array", "items": {"$ref": "#/$defs/manualAssetContext"}}
-    ,"no_trade_attribution": {"oneOf": [{"$ref": "#/$defs/noTradeAttribution"}, {"type": "null"}]}
-    ,"post_action_projection": {"type": ["object", "null"]}
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "CONFIRMED",
+        "NOT_EXECUTED"
+      ]
+    },
+    "review_type": {
+      "type": "string",
+      "enum": [
+        "SNAPSHOT_REVIEW",
+        "FULL_REVIEW",
+        "EVENT_REVIEW"
+      ]
+    },
+    "config": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "execution_plans": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/executionPlan"
+      }
+    },
+    "market_overlays": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "regime_confidence": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "decision_confidence": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "nav_performance": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "benchmark_performance": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "event_scan_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "manual_asset_contexts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/manualAssetContext"
+      }
+    },
+    "no_trade_attribution": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/noTradeAttribution"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "post_action_projection": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
   },
   "additionalProperties": false,
   "$defs": {
     "noTradeAttribution": {
       "type": "object",
-      "required": ["score_gate", "confidence_gate", "regime_gate", "event_gate", "liveness_gate", "btc_relative_gate", "allocation_delta_gate", "rebalance_gate", "execution_gate", "primary_reason", "secondary_reasons"],
+      "required": [
+        "score_gate",
+        "confidence_gate",
+        "regime_gate",
+        "event_gate",
+        "liveness_gate",
+        "btc_relative_gate",
+        "allocation_delta_gate",
+        "rebalance_gate",
+        "execution_gate",
+        "primary_reason",
+        "secondary_reasons"
+      ],
       "properties": {
-        "score_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "confidence_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "regime_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "event_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "liveness_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "btc_relative_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "allocation_delta_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "rebalance_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "execution_gate": {"enum": ["PASS", "WATCH", "BLOCKED", "NOT_APPLICABLE", "UNKNOWN"]},
-        "primary_reason": {"type": "string", "minLength": 1},
-        "secondary_reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "score_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "confidence_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "regime_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "event_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "liveness_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "btc_relative_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "allocation_delta_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "rebalance_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "execution_gate": {
+          "enum": [
+            "PASS",
+            "WATCH",
+            "BLOCKED",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ]
+        },
+        "primary_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondary_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       },
       "additionalProperties": false
     },
     "manualAssetContext": {
       "type": "object",
-      "required": ["asset", "category", "summary", "impact", "severity", "scope", "as_of", "source"],
+      "required": [
+        "asset",
+        "category",
+        "summary",
+        "impact",
+        "severity",
+        "scope",
+        "as_of",
+        "source"
+      ],
       "properties": {
-        "asset": {"type": "string", "minLength": 1},
-        "category": {"enum": ["GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"]},
-        "summary": {"type": "string", "minLength": 1},
-        "impact": {"enum": ["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"]},
-        "severity": {"enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]},
-        "scope": {"enum": ["CONTEXT_ONLY", "FUNDAMENTALS", "RISK", "EXECUTION"]},
-        "as_of": {"type": "string", "format": "date-time"},
-        "source": {"const": "MANUAL_USER_INPUT"}
+        "asset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "GOVERNANCE",
+            "TOKENOMICS",
+            "LEGAL",
+            "PROTOCOL",
+            "OTHER"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "enum": [
+            "POSITIVE",
+            "NEGATIVE",
+            "MIXED",
+            "NEUTRAL"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "INFO",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "CONTEXT_ONLY",
+            "FUNDAMENTALS",
+            "RISK",
+            "EXECUTION"
+          ]
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "const": "MANUAL_USER_INPUT"
+        }
       },
       "additionalProperties": false
     },
     "eventRisk": {
       "type": "object",
-      "required": ["state", "reasons", "evidence_ids", "unresolved"],
+      "required": [
+        "state",
+        "reasons",
+        "evidence_ids",
+        "unresolved"
+      ],
       "properties": {
-        "state": {"enum": ["NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL"]},
-        "reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "unresolved": {"type": "boolean"}
+        "state": {
+          "enum": [
+            "NORMAL",
+            "ELEVATED",
+            "HIGH",
+            "SEVERE",
+            "CRITICAL"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "unresolved": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "factorScore": {
       "type": "object",
-      "required": ["factor", "score"],
+      "required": [
+        "factor",
+        "score"
+      ],
       "properties": {
-        "factor": {"type": "string", "minLength": 1},
-        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "availability": {"enum": ["AVAILABLE", "MISSING", "NOT_APPLICABLE"]},
-        "reliability": {"type": "number", "minimum": 0, "maximum": 1},
-        "freshness": {"type": ["string", "null"], "enum": ["CURRENT", "STALE", "UNKNOWN", null]},
-        "source_quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "redundancy": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+        "factor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "evidence_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "availability": {
+          "enum": [
+            "AVAILABLE",
+            "MISSING",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "reliability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "freshness": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "CURRENT",
+            "STALE",
+            "UNKNOWN",
+            null
+          ]
+        },
+        "source_quality": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "redundancy": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        }
       },
       "allOf": [
         {
-          "if": {"properties": {"availability": {"const": "AVAILABLE"}}, "required": ["availability"]},
-          "then": {"properties": {"score": {"type": "number"}}}
+          "if": {
+            "properties": {
+              "availability": {
+                "const": "AVAILABLE"
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "score": {
+                "type": "number"
+              }
+            }
+          }
         },
         {
-          "if": {"properties": {"availability": {"enum": ["MISSING", "NOT_APPLICABLE"]}}, "required": ["availability"]},
-          "then": {"properties": {"score": {"type": "null"}, "reliability": {"const": 0}}}
+          "if": {
+            "properties": {
+              "availability": {
+                "enum": [
+                  "MISSING",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "score": {
+                "type": "null"
+              },
+              "reliability": {
+                "const": 0
+              }
+            }
+          }
         }
       ],
       "additionalProperties": true
     },
     "rebalanceAction": {
       "type": "object",
-      "required": ["symbol", "action", "current_weight", "target_weight", "amount_usd", "priority", "rationale"],
+      "required": [
+        "symbol",
+        "action",
+        "current_weight",
+        "target_weight",
+        "amount_usd",
+        "priority",
+        "rationale"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
-        "current_weight": {"type": "number", "minimum": 0, "maximum": 1},
-        "target_weight": {"type": "number", "minimum": 0, "maximum": 1},
-        "amount_usd": {"type": "number", "minimum": 0},
-        "priority": {"type": "string", "minLength": 1},
-        "rationale": {"type": "string"},
-        "strategic_target_weight": {"type": ["number", "null"], "minimum": -1, "maximum": 1},
-        "execution_target_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "INCREASE",
+            "REDUCE",
+            "EXIT",
+            "HOLD",
+            "WAIT",
+            "NO_TRADE"
+          ]
+        },
+        "current_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "target_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "priority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "strategic_target_weight": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 1
+        },
+        "execution_target_weight": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
         "action_reason": {
           "type": "string",
           "enum": [
@@ -194,172 +867,889 @@
             "RISK_BUDGET_BREACH"
           ]
         },
-        "staging_applied": {"type": "boolean"},
-        "remaining_gap_after_action": {"type": ["number", "null"], "minimum": -1, "maximum": 1}
+        "staging_applied": {
+          "type": "boolean"
+        },
+        "remaining_gap_after_action": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 1
+        },
+        "sizing_attribution": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/executionSizingAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       },
       "allOf": [
         {
-          "if": {"properties": {"action": {"enum": ["INCREASE", "REDUCE", "EXIT"]}}, "required": ["action"]},
-          "then": {"properties": {"amount_usd": {"exclusiveMinimum": 0}}}
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "INCREASE",
+                  "REDUCE",
+                  "EXIT"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "amount_usd": {
+                "exclusiveMinimum": 0
+              }
+            }
+          }
         },
         {
-          "if": {"properties": {"action": {"enum": ["HOLD", "WAIT", "NO_TRADE"]}}, "required": ["action"]},
-          "then": {"properties": {"amount_usd": {"const": 0}}}
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "HOLD",
+                  "WAIT",
+                  "NO_TRADE"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "amount_usd": {
+                "const": 0
+              }
+            }
+          }
         }
       ],
       "additionalProperties": false
     },
     "executionPlan": {
       "type": "object",
-      "required": ["symbol", "action", "approved_amount_usd", "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode", "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash", "technical_summary"],
+      "required": [
+        "symbol",
+        "action",
+        "approved_amount_usd",
+        "planned_amount_usd",
+        "unallocated_amount_usd",
+        "current_price",
+        "entry_mode",
+        "technical_confidence",
+        "tranches",
+        "invalidation",
+        "rationale",
+        "ohlcv_hash",
+        "technical_summary"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
-        "approved_amount_usd": {"type": "number", "minimum": 0},
-        "planned_amount_usd": {"type": "number", "minimum": 0},
-        "unallocated_amount_usd": {"type": "number", "minimum": 0},
-        "current_price": {"type": "number", "exclusiveMinimum": 0},
-        "entry_mode": {"type": "string", "enum": ["PULLBACK", "BREAKOUT", "WAIT"]},
-        "technical_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-        "tranches": {"type": "array", "items": {"$ref": "#/$defs/executionTranche"}},
-        "invalidation": {"oneOf": [{"$ref": "#/$defs/invalidation"}, {"type": "null"}]},
-        "rationale": {"type": "string"},
-        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "volume_profile_metadata": {"type": ["object", "null"]},
-        "ohlcv_metadata": {"$ref": "#/$defs/ohlcvMetadata"},
-        "technical_summary": {"$ref": "#/$defs/technicalSummary"}
-        ,"positioning_summary": {"type": ["object", "null"]}
-        ,"btc_cycle_summary": {"type": ["object", "null"]}
-        ,"effective_deployment_factor": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
-        ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "INCREASE",
+            "REDUCE",
+            "EXIT",
+            "HOLD",
+            "WAIT",
+            "NO_TRADE"
+          ]
+        },
+        "approved_amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "planned_amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unallocated_amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "current_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "entry_mode": {
+          "type": "string",
+          "enum": [
+            "PULLBACK",
+            "BREAKOUT",
+            "WAIT"
+          ]
+        },
+        "technical_confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "tranches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executionTranche"
+          }
+        },
+        "invalidation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/invalidation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "ohlcv_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volume_profile_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volume_profile_metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "ohlcv_metadata": {
+          "$ref": "#/$defs/ohlcvMetadata"
+        },
+        "technical_summary": {
+          "$ref": "#/$defs/technicalSummary"
+        },
+        "positioning_summary": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "btc_cycle_summary": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "effective_deployment_factor": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "overlay_warnings": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       },
       "additionalProperties": false
     },
     "executionTranche": {
       "type": "object",
-      "required": ["sequence", "allocation_fraction", "amount_usd", "price_low", "price_high", "reference_price", "estimated_quantity", "rationale", "structural_sources", "zone_quality"],
+      "required": [
+        "sequence",
+        "allocation_fraction",
+        "amount_usd",
+        "price_low",
+        "price_high",
+        "reference_price",
+        "estimated_quantity",
+        "rationale",
+        "structural_sources",
+        "zone_quality"
+      ],
       "properties": {
-        "sequence": {"type": "integer", "minimum": 1},
-        "allocation_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "amount_usd": {"type": "number", "exclusiveMinimum": 0},
-        "price_low": {"type": "number", "exclusiveMinimum": 0},
-        "price_high": {"type": "number", "exclusiveMinimum": 0},
-        "reference_price": {"type": "number", "exclusiveMinimum": 0},
-        "estimated_quantity": {"type": "number", "exclusiveMinimum": 0},
-        "rationale": {"type": "string"},
-        "structural_sources": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "zone_quality": {"type": "number", "minimum": 0, "maximum": 100}
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allocation_fraction": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "amount_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "price_low": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "price_high": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "reference_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "estimated_quantity": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "structural_sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "zone_quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
       },
       "additionalProperties": false
     },
     "invalidation": {
       "type": "object",
-      "required": ["kind", "trigger", "reference_price", "review_only", "automatic_order"],
+      "required": [
+        "kind",
+        "trigger",
+        "reference_price",
+        "review_only",
+        "automatic_order"
+      ],
       "properties": {
-        "kind": {"type": "string", "minLength": 1},
-        "trigger": {"type": "string", "minLength": 1},
-        "reference_price": {"type": "number", "exclusiveMinimum": 0},
-        "review_only": {"const": true},
-        "automatic_order": {"const": false}
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "review_only": {
+          "const": true
+        },
+        "automatic_order": {
+          "const": false
+        }
       },
       "additionalProperties": false
     },
     "ohlcvMetadata": {
-      "type": ["object", "null"],
-      "required": ["symbol", "source", "timeframe", "start_timestamp", "end_timestamp", "candle_count", "fetched_at", "ohlcv_hash"],
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "symbol",
+        "source",
+        "timeframe",
+        "start_timestamp",
+        "end_timestamp",
+        "candle_count",
+        "fetched_at",
+        "ohlcv_hash"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "source": {"type": "string", "minLength": 1},
-        "timeframe": {"enum": ["1H", "4H", "1D"]},
-        "start_timestamp": {"type": "string", "format": "date-time"},
-        "end_timestamp": {"type": "string", "format": "date-time"},
-        "candle_count": {"type": "integer", "minimum": 1},
-        "fetched_at": {"type": ["string", "null"], "format": "date-time"},
-        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "calendar_span_days": {"type": "integer", "minimum": 1},
-        "missing_day_count": {"type": "integer", "minimum": 0},
-        "coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-        "max_gap_days": {"type": "integer", "minimum": 0},
-        "observation_lag_days": {"type": "integer", "minimum": 0},
-        "latest_completed_candle_date": {"type": "string", "format": "date"},
-        "expected_latest_completed_date": {"type": "string", "format": "date"},
-        "maximum_daily_candle_lag_days": {"type": "integer", "minimum": 0},
-        "daily_candle_status": {"enum": ["CURRENT", "STALE"]},
-        "latest_candle_timestamp": {"type": "string", "format": "date-time"},
-        "as_of": {"type": "string", "format": "date-time"},
-        "venue": {"type": ["string", "null"]},
-        "market": {"type": ["string", "null"]},
-        "quote_currency": {"type": ["string", "null"]}
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeframe": {
+          "enum": [
+            "1H",
+            "4H",
+            "1D"
+          ]
+        },
+        "start_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "candle_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fetched_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "ohlcv_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "calendar_span_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "missing_day_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_gap_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_lag_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latest_completed_candle_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "expected_latest_completed_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "maximum_daily_candle_lag_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "daily_candle_status": {
+          "enum": [
+            "CURRENT",
+            "STALE"
+          ]
+        },
+        "latest_candle_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "venue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "market": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "zone": {
       "type": "object",
-      "required": ["low", "high", "midpoint", "kind", "strength", "sources"],
+      "required": [
+        "low",
+        "high",
+        "midpoint",
+        "kind",
+        "strength",
+        "sources"
+      ],
       "properties": {
-        "low": {"type": "number", "exclusiveMinimum": 0},
-        "high": {"type": "number", "exclusiveMinimum": 0},
-        "midpoint": {"type": "number", "exclusiveMinimum": 0},
-        "kind": {"type": "string", "minLength": 1},
-        "strength": {"type": "number", "minimum": 0, "maximum": 100},
-        "sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "low": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "high": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "midpoint": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       },
       "additionalProperties": false
     },
     "volumeNode": {
       "type": "object",
-      "required": ["price_low", "price_high", "midpoint", "kind", "strength", "volume_fraction"],
+      "required": [
+        "price_low",
+        "price_high",
+        "midpoint",
+        "kind",
+        "strength",
+        "volume_fraction"
+      ],
       "properties": {
-        "price_low": {"type": "number", "exclusiveMinimum": 0},
-        "price_high": {"type": "number", "exclusiveMinimum": 0},
-        "midpoint": {"type": "number", "exclusiveMinimum": 0},
-        "kind": {"enum": ["HVN", "LVN"]},
-        "strength": {"type": "number", "minimum": 0, "maximum": 100},
-        "volume_fraction": {"type": "number", "minimum": 0, "maximum": 1}
+        "price_low": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "price_high": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "midpoint": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "kind": {
+          "enum": [
+            "HVN",
+            "LVN"
+          ]
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "volume_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       },
       "additionalProperties": false
     },
     "technicalSummary": {
       "type": "object",
-      "required": ["symbol", "spot_price", "spot_observed_at", "spot_source", "data_confidence", "setup_quality", "selected_zones", "ohlcv_hash"],
+      "required": [
+        "symbol",
+        "spot_price",
+        "spot_observed_at",
+        "spot_source",
+        "data_confidence",
+        "setup_quality",
+        "selected_zones",
+        "ohlcv_hash"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "spot_price": {"type": "number", "exclusiveMinimum": 0},
-        "spot_observed_at": {"type": "string", "format": "date-time"},
-        "spot_source": {"type": "string", "minLength": 1},
-        "spot_fetched_at": {"type": ["string", "null"], "format": "date-time"},
-        "spot_venue": {"type": ["string", "null"]},
-        "spot_market": {"type": ["string", "null"]},
-        "spot_quote_currency": {"type": ["string", "null"]},
-        "ma20": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "ma50": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "ma100": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "ma200": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "atr14": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "atr_percent": {"type": ["number", "null"], "minimum": 0},
-        "return_30d": {"type": ["number", "null"], "minimum": -1},
-        "return_90d": {"type": ["number", "null"], "minimum": -1},
-        "return_180d": {"type": ["number", "null"], "minimum": -1},
-        "realized_vol_30d": {"type": ["number", "null"], "minimum": 0},
-        "realized_vol_90d": {"type": ["number", "null"], "minimum": 0},
-        "relative_volume": {"type": ["number", "null"], "minimum": 0},
-        "trend_state": {"type": "string", "minLength": 1},
-        "data_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-        "setup_quality": {"type": "number", "minimum": 0, "maximum": 100},
-        "data_quality": {"type": "string", "minLength": 1},
-        "data_quality_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "selected_zones": {"type": "array", "items": {"$ref": "#/$defs/zone"}},
-        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "volume_profile_confidence": {"type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", "UNAVAILABLE", null]},
-        "volume_profile_poc": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "volume_profile_val": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "volume_profile_vah": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "volume_hvns": {"type": "array", "items": {"$ref": "#/$defs/volumeNode"}},
-        "volume_lvns": {"type": "array", "items": {"$ref": "#/$defs/volumeNode"}},
-        "volume_profile_summary": {"type": ["object", "null"]},
-        "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "volume_profile_metadata": {"type": ["object", "null"]}
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spot_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "spot_observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "spot_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spot_fetched_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "spot_venue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spot_market": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spot_quote_currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ma20": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "ma50": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "ma100": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "ma200": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "atr14": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "atr_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "return_30d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1
+        },
+        "return_90d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1
+        },
+        "return_180d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1
+        },
+        "realized_vol_30d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "realized_vol_90d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "relative_volume": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "trend_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "setup_quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "data_quality": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_quality_flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "selected_zones": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/zone"
+          }
+        },
+        "ohlcv_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volume_profile_confidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNAVAILABLE",
+            null
+          ]
+        },
+        "volume_profile_poc": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "volume_profile_val": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "volume_profile_vah": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "volume_hvns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/volumeNode"
+          }
+        },
+        "volume_lvns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/volumeNode"
+          }
+        },
+        "volume_profile_summary": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "volume_profile_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volume_profile_metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "executionSizingAttribution": {
+      "type": "object",
+      "required": [
+        "current_weight",
+        "strategic_target_weight",
+        "strategic_gap",
+        "staging_enabled",
+        "staging_gap_close_fraction",
+        "staging_max_step_pp",
+        "staged_gap",
+        "deployment_factors",
+        "deployment_composition_mode",
+        "effective_deployment_factor",
+        "executable_gap",
+        "executable_amount_usd",
+        "funding_available_usd",
+        "funding_shortfall_usd",
+        "approved_amount_usd",
+        "execution_target_weight",
+        "effective_strategic_gap_close"
+      ],
+      "properties": {
+        "current_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "strategic_target_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "strategic_gap": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "staging_enabled": {
+          "type": "boolean"
+        },
+        "staging_gap_close_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "staging_max_step_pp": {
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "staged_gap": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "deployment_factors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "deployment_composition_mode": {
+          "enum": [
+            "minimum_cap",
+            "multiplicative"
+          ]
+        },
+        "effective_deployment_factor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "executable_gap": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "executable_amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "funding_available_usd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "funding_shortfall_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "approved_amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "execution_target_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "effective_strategic_gap_close": {
+          "type": "number",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     }

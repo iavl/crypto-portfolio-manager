@@ -212,10 +212,12 @@ _EXECUTION_FIELDS = {
     "zone_quality",
     "volatility_atr_percent",
     "confidence_deployment_factor",
+    "deployment_factor_composition",
     "max_initial_tranche",
     "tranche_templates",
     "breakout",
 }
+_DEPLOYMENT_COMPOSITION_MODES = {"minimum_cap", "multiplicative"}
 _VOLATILITY_FIELDS = {"low_max", "normal_max", "high_max"}
 _BREAKOUT_FIELDS = {"minimum_relative_volume", "max_atr_extension", "max_initial_tranche"}
 _ZONE_QUALITY_FIELDS = {"minimum_for_entry", "high_quality"}
@@ -1079,6 +1081,12 @@ def _parse_execution(value: Any) -> dict[str, Any]:
         key: _fraction(item, f"execution.confidence_deployment_factor.{key}")
         for key, item in confidence_factor.items()
     }
+    composition_mode = str(value["deployment_factor_composition"]).strip().lower()
+    if composition_mode not in _DEPLOYMENT_COMPOSITION_MODES:
+        raise PolicyError(
+            "execution.deployment_factor_composition must be one of "
+            + ", ".join(sorted(_DEPLOYMENT_COMPOSITION_MODES))
+        )
 
     templates = value["tranche_templates"]
     template_names = {"NORMAL_LOW_VOL", "NORMAL_HIGH_VOL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
@@ -1163,6 +1171,7 @@ def _parse_execution(value: Any) -> dict[str, Any]:
         "zone_quality": parsed_zone_quality,
         "volatility_atr_percent": volatility_limits,
         "confidence_deployment_factor": parsed_confidence_factor,
+        "deployment_factor_composition": composition_mode,
         "max_initial_tranche": max_initial_parsed,
         "tranche_templates": parsed_templates,
         "breakout": parsed_breakout,

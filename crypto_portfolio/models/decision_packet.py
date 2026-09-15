@@ -220,6 +220,7 @@ class AssetDecisionSummary:
     staging_applied: bool = False
     deviation_pp: float | None = None
     relative_deviation: float | None = None
+    sizing_attribution: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "asset summary symbol").upper())
@@ -301,6 +302,14 @@ class AssetDecisionSummary:
         if not isinstance(self.portfolio_constraint, str):
             raise ValueError("portfolio_constraint must be a string")
         object.__setattr__(self, "portfolio_constraint", self.portfolio_constraint.strip())
+        if self.sizing_attribution is not None:
+            if not isinstance(self.sizing_attribution, Mapping):
+                raise ValueError("sizing_attribution must be an object or null")
+            object.__setattr__(
+                self,
+                "sizing_attribution",
+                freeze_packet_value(dict(self.sizing_attribution), path="sizing_attribution"),
+            )
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any], symbol: str | None = None) -> "AssetDecisionSummary":
@@ -337,6 +346,9 @@ class AssetDecisionSummary:
             "staging_applied": self.staging_applied,
             "deviation_pp": self.deviation_pp,
             "relative_deviation": self.relative_deviation,
+            "sizing_attribution": (
+                thaw_packet_value(self.sizing_attribution) if self.sizing_attribution is not None else None
+            ),
         }
         return result
 

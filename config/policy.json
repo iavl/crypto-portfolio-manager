@@ -376,6 +376,7 @@
       "MEDIUM": 0.70,
       "LOW": 0.0
     },
+    "deployment_factor_composition": "minimum_cap",
     "max_initial_tranche": {
       "NORMAL": 0.50,
       "DEFENSIVE": 0.35,

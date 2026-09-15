@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping
 from ..models.decision_packet import NoTradeAttribution
 from ..models.confidence import DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.policy import Policy, resolve_policy
-from .confidence import confidence_deployment_factor
+from .confidence import compose_deployment_factors, confidence_deployment_factor
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"}
@@ -276,6 +276,157 @@ def build_no_trade_attribution(
 
 
 @dataclass(frozen=True)
+class ExecutionSizingAttribution:
+    """Explicit single-pass sizing chain from strategic target to approved amount.
+
+    Every layer that can shrink an executable trade records its own entry
+    exactly once: staging closes at most ``staging_gap_close_fraction`` of the
+    strategic gap; the composed deployment allowance scales the staged gap;
+    funding competition can only cut the executable amount further, never
+    enlarge it. ``effective_strategic_gap_close`` is the final
+    ``|execution_target - current| / |strategic_gap|`` a report may quote, so
+    a "closes 50%" claim can never silently mask a 35% outcome.
+    """
+
+    current_weight: float
+    strategic_target_weight: float
+    strategic_gap: float
+    staging_enabled: bool
+    staging_gap_close_fraction: float
+    staging_max_step_pp: float | None
+    staged_gap: float
+    deployment_factors: Mapping[str, float]
+    deployment_composition_mode: str
+    effective_deployment_factor: float
+    executable_gap: float
+    executable_amount_usd: float
+    funding_available_usd: float | None
+    funding_shortfall_usd: float
+    approved_amount_usd: float
+    execution_target_weight: float
+    effective_strategic_gap_close: float
+
+    def __post_init__(self) -> None:
+        fraction_fields = (
+            "current_weight", "strategic_target_weight", "staging_gap_close_fraction",
+            "effective_deployment_factor", "execution_target_weight",
+        )
+        for field in ("strategic_gap", "staged_gap", "executable_gap", *fraction_fields):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"sizing attribution {field} must be a number")
+            if not math.isfinite(float(value)) or abs(float(value)) > 1:
+                raise ValueError(f"sizing attribution {field} must be finite and within +/-1")
+        # A hard exit can legitimately close (and overshoot) a tiny strategic
+        # gap by selling the entire position, so the final close fraction is
+        # bounded only by the position itself, not by 1.
+        raw_close = getattr(self, "effective_strategic_gap_close")
+        if isinstance(raw_close, bool) or not isinstance(raw_close, (int, float)):
+            raise ValueError("sizing attribution effective_strategic_gap_close must be a number")
+        close = float(raw_close)
+        if not math.isfinite(close) or close < 0:
+            raise ValueError("sizing attribution effective_strategic_gap_close must be finite and >= 0")
+        object.__setattr__(self, "effective_strategic_gap_close", close)
+        for field in (
+            "strategic_gap", "staged_gap", "executable_gap", "effective_strategic_gap_close",
+        ):
+            object.__setattr__(self, field, float(getattr(self, field)))
+        for field in fraction_fields:
+            object.__setattr__(self, field, float(getattr(self, field)))
+        for field in ("current_weight", "strategic_target_weight", "staging_gap_close_fraction",
+                      "effective_deployment_factor", "execution_target_weight", "effective_strategic_gap_close"):
+            if getattr(self, field) < 0:
+                raise ValueError(f"sizing attribution {field} must be >= 0")
+        for field in ("executable_amount_usd", "approved_amount_usd", "funding_shortfall_usd"):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"sizing attribution {field} must be a number")
+            value = float(value)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"sizing attribution {field} must be finite and >= 0")
+            object.__setattr__(self, field, value)
+        if self.funding_available_usd is not None:
+            available = self.funding_available_usd
+            if isinstance(available, bool) or not isinstance(available, (int, float)):
+                raise ValueError("sizing attribution funding_available_usd must be a number or null")
+            available = float(available)
+            if not math.isfinite(available) or available < 0:
+                raise ValueError("sizing attribution funding_available_usd must be finite and >= 0")
+            object.__setattr__(self, "funding_available_usd", available)
+        if self.staging_max_step_pp is not None:
+            step = self.staging_max_step_pp
+            if isinstance(step, bool) or not isinstance(step, (int, float)):
+                raise ValueError("sizing attribution staging_max_step_pp must be a number or null")
+            step = float(step)
+            if not math.isfinite(step) or step <= 0:
+                raise ValueError("sizing attribution staging_max_step_pp must be > 0")
+            object.__setattr__(self, "staging_max_step_pp", step)
+        if not isinstance(self.staging_enabled, bool):
+            raise ValueError("sizing attribution staging_enabled must be boolean")
+        if not isinstance(self.deployment_factors, Mapping):
+            raise ValueError("sizing attribution deployment_factors must be an object")
+        factors: dict[str, float] = {}
+        for raw_name, raw_value in self.deployment_factors.items():
+            name = str(raw_name).strip().lower()
+            if not name:
+                raise ValueError("sizing attribution deployment factor names must be non-empty")
+            if name in factors:
+                raise ValueError(f"sizing attribution deployment factor {name} is supplied twice")
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                raise ValueError(f"sizing attribution deployment factor {name} must be a number")
+            value = float(raw_value)
+            if not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(f"sizing attribution deployment factor {name} must be in [0, 1]")
+            factors[name] = value
+        object.__setattr__(self, "deployment_factors", factors)
+        mode = str(self.deployment_composition_mode).strip().lower()
+        if mode not in {"minimum_cap", "multiplicative"}:
+            raise ValueError("sizing attribution deployment_composition_mode is unsupported")
+        object.__setattr__(self, "deployment_composition_mode", mode)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "current_weight": self.current_weight,
+            "strategic_target_weight": self.strategic_target_weight,
+            "strategic_gap": self.strategic_gap,
+            "staging_enabled": self.staging_enabled,
+            "staging_gap_close_fraction": self.staging_gap_close_fraction,
+            "staging_max_step_pp": self.staging_max_step_pp,
+            "staged_gap": self.staged_gap,
+            "deployment_factors": dict(self.deployment_factors),
+            "deployment_composition_mode": self.deployment_composition_mode,
+            "effective_deployment_factor": self.effective_deployment_factor,
+            "executable_gap": self.executable_gap,
+            "executable_amount_usd": self.executable_amount_usd,
+            "funding_available_usd": self.funding_available_usd,
+            "funding_shortfall_usd": self.funding_shortfall_usd,
+            "approved_amount_usd": self.approved_amount_usd,
+            "execution_target_weight": self.execution_target_weight,
+            "effective_strategic_gap_close": self.effective_strategic_gap_close,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ExecutionSizingAttribution":
+        if not isinstance(value, Mapping):
+            raise ValueError("sizing attribution must be an object")
+        allowed = {
+            "current_weight", "strategic_target_weight", "strategic_gap", "staging_enabled",
+            "staging_gap_close_fraction", "staging_max_step_pp", "staged_gap",
+            "deployment_factors", "deployment_composition_mode", "effective_deployment_factor",
+            "executable_gap", "executable_amount_usd", "funding_available_usd",
+            "funding_shortfall_usd", "approved_amount_usd", "execution_target_weight",
+            "effective_strategic_gap_close",
+        }
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"sizing attribution contains unknown fields: {', '.join(sorted(unknown))}")
+        missing = [field for field in allowed if field not in value]
+        if missing:
+            raise ValueError(f"sizing attribution is missing fields: {', '.join(missing)}")
+        return cls(**{field: value[field] for field in allowed})
+
+
+@dataclass(frozen=True)
 class RebalanceAction:
     """One recommended per-asset action.
 
@@ -297,6 +448,7 @@ class RebalanceAction:
     action_reason: str = ""
     staging_applied: bool = False
     remaining_gap_after_action: float | None = None
+    sizing_attribution: ExecutionSizingAttribution | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or not self.symbol.strip():
@@ -347,6 +499,13 @@ class RebalanceAction:
             raise ValueError("priority must be a non-empty string")
         if not isinstance(self.rationale, str):
             raise ValueError("rationale must be a string")
+        if self.sizing_attribution is None:
+            object.__setattr__(self, "sizing_attribution", None)
+        else:
+            attribution = self.sizing_attribution
+            if not isinstance(attribution, ExecutionSizingAttribution):
+                attribution = ExecutionSizingAttribution.from_mapping(attribution)
+            object.__setattr__(self, "sizing_attribution", attribution)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -362,6 +521,7 @@ class RebalanceAction:
             "action_reason": self.action_reason,
             "staging_applied": self.staging_applied,
             "remaining_gap_after_action": self.remaining_gap_after_action,
+            "sizing_attribution": self.sizing_attribution.as_dict() if self.sizing_attribution else None,
         }
 
 
@@ -571,6 +731,24 @@ def recommend_rebalance(
         for symbol in set(effective_current) | set(effective_target) | broken
         if not resolved.is_excluded(symbol)
     )
+    # The sizing pipeline is explicit and single-pass per asset:
+    #   strategic gap -> staged gap -> composed deployment allowance
+    #   -> executable amount -> funding-constrained approved amount.
+    # Deployment allowances are maximum caps composed under the policy mode
+    # (minimum_cap by default) and are consumed exactly once, here; the
+    # pullback/entry planner downstream only decides when/where approved
+    # dollars execute and can never rescale them.
+    composition_mode = str(resolved.execution.get("deployment_factor_composition", "minimum_cap"))
+    if composition_mode not in {"minimum_cap", "multiplicative"}:
+        raise ValueError("execution.deployment_factor_composition is unsupported")
+    decision_confidence_factor: float | None = None
+    if decision_confidence is not None:
+        confidence_score = getattr(decision_confidence, "score", None) if not isinstance(decision_confidence, Mapping) else decision_confidence.get("score", decision_confidence.get("confidence_score"))
+        if confidence_score is not None:
+            confidence_score = float(confidence_score)
+            if not math.isfinite(confidence_score) or not 0 <= confidence_score <= 1:
+                raise ValueError("decision_confidence score must be finite and in [0, 1]")
+            decision_confidence_factor = confidence_deployment_factor(confidence_score, resolved)
     candidates: list[dict[str, Any]] = []
     staging_config = resolved.rebalance["staging"]
     bypass_reasons = frozenset(staging_config["bypass_reasons"])
@@ -628,7 +806,6 @@ def recommend_rebalance(
             action = "WAIT"
             action_reason = base_reason
             priority = "WATCH"
-            amount = 0.0
             rationale = (
                 f"deviation {deviation_pp:.2f}pp (relative {relative_deviation:.0%}) "
                 "is in the watch band"
@@ -644,8 +821,10 @@ def recommend_rebalance(
             priority = "HIGH" if high_priority else "NORMAL"
             rationale = "overweight exceeds the active rebalance threshold"
         executable = action in {"INCREASE", "REDUCE", "EXIT"}
-        staging_applied = False
-        if executable and staging_config["enabled"] and action_reason not in bypass_reasons:
+        staging_active = executable and staging_config["enabled"] and action_reason not in bypass_reasons
+        if not executable:
+            staged_gap = 0.0
+        elif staging_active:
             # Ordinary allocation corrections move at most
             # max_gap_close_fraction of the remaining gap, capped by an
             # absolute per-review step, so one review never forces a healthy
@@ -654,36 +833,75 @@ def recommend_rebalance(
                 abs(difference) * float(staging_config["max_gap_close_fraction"]),
                 float(staging_config["max_step_pp"]) / 100.0,
             )
-            execution_target = current_weight + (1.0 if difference > 0 else -1.0) * step
-            staging_applied = step < abs(difference) - 1e-12
-            if staging_applied:
-                rationale += (
-                    f"; staged execution closes {abs(execution_target - current_weight) / abs(difference):.0%} "
-                    f"of the {abs(difference) * 100:.2f}pp gap this review"
-                )
+            staged_gap = (1.0 if difference > 0 else -1.0) * step
+        else:
+            staged_gap = difference
+        staging_applied = executable and staging_active and abs(staged_gap) < abs(difference) - 1e-12
+        # Deployment allowance: a single named factor from the one configured
+        # source (decision_confidence and deployment_caps are mutually
+        # exclusive), composed under the policy mode. Only new increases are
+        # scaled; hard risk-reducing moves are never delayed by confidence.
+        named_factors: dict[str, float] = {}
+        if action == "INCREASE":
+            if decision_confidence_factor is not None:
+                named_factors["decision_confidence"] = decision_confidence_factor
+            elif symbol in normalized_deployment_caps:
+                named_factors["deployment_allowance"] = normalized_deployment_caps[symbol]
+        effective_deployment_factor = (
+            compose_deployment_factors(named_factors, policy=resolved)
+            if named_factors else 1.0
+        )
+        if action == "INCREASE" and effective_deployment_factor == 0.0:
+            action = "WAIT"
+            executable = False
+            priority = "WATCH"
+            action_reason = "CONFIDENCE_LIMIT"
+            rationale = (
+                "new increase is blocked by LOW decision confidence"
+                if "decision_confidence" in named_factors
+                else "new increase is blocked by the deployment allowance"
+            )
+            executable_gap = 0.0
         elif executable:
-            execution_target = strategic_weight
+            executable_gap = (
+                staged_gap * effective_deployment_factor if action == "INCREASE" else staged_gap
+            )
         else:
-            execution_target = current_weight
-        if executable:
-            amount = abs(execution_target - current_weight) * post_cash_total
-        else:
-            amount = 0.0
+            executable_gap = 0.0
+        if staging_applied:
+            rationale += (
+                f"; staged execution closes {abs(staged_gap) / abs(difference):.0%} "
+                f"of the {abs(difference) * 100:.2f}pp gap this review"
+            )
+        if action == "INCREASE" and 0.0 < effective_deployment_factor < 1.0:
+            if "decision_confidence" in named_factors:
+                rationale += f"; decision confidence caps deployment at {effective_deployment_factor:.0%}"
+            else:
+                rationale += f"; deployment allowance caps immediate increase at {effective_deployment_factor:.0%}"
+        amount = abs(executable_gap) * post_cash_total if executable else 0.0
         if symbol in broken and current.get(symbol, 0.0) > 0:
             amount = current.get(symbol, 0.0) * portfolio_value
-            execution_target = 0.0
+            executable_gap = -current_weight
         candidates.append({
             "symbol": symbol,
             "action": action,
             "current_weight": current_weight,
             "target_weight": strategic_weight,
-            "execution_target": execution_target,
+            "execution_target": current_weight if not executable else None,
             "amount": max(0.0, amount),
             "priority": priority,
             "rationale": rationale,
             "action_reason": action_reason,
             "staging_applied": staging_applied,
-            "remaining_gap": strategic_weight - execution_target,
+            "staging_active": staging_active,
+            "staged_gap": staged_gap,
+            "named_factors": named_factors,
+            "effective_deployment_factor": effective_deployment_factor,
+            "executable_gap": executable_gap,
+            "executable_amount": max(0.0, abs(executable_gap) * post_cash_total),
+            "funding_available": None,
+            "funding_shortfall": 0.0,
+            "remaining_gap": strategic_weight - current_weight,
         })
 
     # Caller-supplied hard reasons must mark risk-reducing actions only;
@@ -696,60 +914,43 @@ def recommend_rebalance(
                 f"not {item['action']}"
             )
 
+    # Funding competition: executable sales (plus any new cash already folded
+    # into effective_current) are the only dollars buys may draw on. When the
+    # pool cannot cover an executable amount the shortfall is recorded and
+    # explained, never silently reported as a fully staged move.
     available_funding = sum(
         item["amount"] for item in candidates if item["action"] in {"REDUCE", "EXIT"}
     )
     for item in sorted(
         (item for item in candidates if item["action"] == "INCREASE"),
-        key=lambda value: (-value["amount"], value["symbol"]),
+        key=lambda value: (-value["executable_amount"], value["symbol"]),
     ):
-        item["amount"] = min(item["amount"], available_funding)
-        available_funding -= item["amount"]
-        if item["amount"] <= 1e-9:
+        item["funding_available"] = available_funding
+        approved = min(item["executable_amount"], available_funding)
+        item["funding_shortfall"] = item["executable_amount"] - approved
+        item["amount"] = approved
+        available_funding -= approved
+        if approved <= 1e-9:
             item["action"] = "WAIT"
+            item["executable_gap"] = 0.0
             item["priority"] = "WATCH"
             item["rationale"] = "underweight is not funded by available cash or executable sales"
-
-    if decision_confidence is not None:
-        confidence_score = getattr(decision_confidence, "score", None) if not isinstance(decision_confidence, Mapping) else decision_confidence.get("score", decision_confidence.get("confidence_score"))
-        if confidence_score is not None:
-            confidence_score = float(confidence_score)
-            if not math.isfinite(confidence_score) or not 0 <= confidence_score <= 1:
-                raise ValueError("decision_confidence score must be finite and in [0, 1]")
-            factor = confidence_deployment_factor(confidence_score, resolved)
-            if factor < 1.0:
-                for item in candidates:
-                    if item["action"] == "INCREASE":
-                        if factor == 0.0:
-                            item["action"] = "WAIT"
-                            item["amount"] = 0.0
-                            item["priority"] = "WATCH"
-                            item["action_reason"] = "CONFIDENCE_LIMIT"
-                            item["rationale"] = "new increase is blocked by LOW decision confidence"
-                        else:
-                            item["amount"] *= factor
-                            item["rationale"] += f"; decision confidence caps deployment at {factor:.0%}"
-
-    for item in candidates:
-        if item["action"] != "INCREASE" or item["symbol"] not in normalized_deployment_caps:
-            continue
-        factor = normalized_deployment_caps[item["symbol"]]
-        if factor == 0.0:
-            item["action"] = "WAIT"
-            item["amount"] = 0.0
-            item["priority"] = "WATCH"
-            item["action_reason"] = "CONFIDENCE_LIMIT"
-            item["rationale"] = "new increase is blocked by the deployment allowance"
-        elif factor < 1.0:
-            item["amount"] *= factor
-            item["rationale"] += f"; deployment allowance caps immediate increase at {factor:.0%}"
+        elif item["funding_shortfall"] > 1e-9:
+            item["rationale"] += (
+                f"; executable sales and cash fund {approved:,.2f} USD of the "
+                f"{item['executable_amount']:,.2f} USD executable amount this review"
+            )
 
     # Normalize execution fields against the final (possibly capped or
     # unfunded) amounts so target_weight/remaining_gap always describe what
-    # this review's action actually moves toward.
+    # this review's action actually moves toward, and attach the explicit
+    # sizing attribution each action was produced by.
     for item in candidates:
         if item["action"] in {"INCREASE", "REDUCE", "EXIT"}:
-            direction = 1.0 if item["target_weight"] > item["current_weight"] else -1.0
+            # Direction follows the executable gap, not target-vs-current: a
+            # broken-thesis EXIT sells the whole position even when the
+            # strategic target still sits above the current weight.
+            direction = 1.0 if item["executable_gap"] > 0 else -1.0
             item["execution_target"] = item["current_weight"] + direction * (
                 item["amount"] / post_cash_total
             )
@@ -758,6 +959,32 @@ def recommend_rebalance(
             item["staging_applied"] = False
         item["execution_target"] = min(1.0, max(0.0, item["execution_target"]))
         item["remaining_gap"] = item["target_weight"] - item["execution_target"]
+        strategic_gap = item["target_weight"] - item["current_weight"]
+        item["sizing_attribution"] = ExecutionSizingAttribution(
+            current_weight=item["current_weight"],
+            strategic_target_weight=item["target_weight"],
+            strategic_gap=strategic_gap,
+            staging_enabled=bool(item["staging_active"]),
+            staging_gap_close_fraction=(
+                abs(item["staged_gap"]) / abs(strategic_gap)
+                if abs(strategic_gap) > 1e-12 else 0.0
+            ),
+            staging_max_step_pp=float(staging_config["max_step_pp"]),
+            staged_gap=item["staged_gap"],
+            deployment_factors=item["named_factors"],
+            deployment_composition_mode=composition_mode,
+            effective_deployment_factor=item["effective_deployment_factor"],
+            executable_gap=item["executable_gap"],
+            executable_amount_usd=item["executable_amount"],
+            funding_available_usd=item["funding_available"],
+            funding_shortfall_usd=item["funding_shortfall"],
+            approved_amount_usd=item["amount"],
+            execution_target_weight=item["execution_target"],
+            effective_strategic_gap_close=(
+                abs(item["execution_target"] - item["current_weight"]) / abs(strategic_gap)
+                if abs(strategic_gap) > 1e-12 else 0.0
+            ),
+        )
 
     actions = [
         RebalanceAction(
@@ -773,6 +1000,7 @@ def recommend_rebalance(
             action_reason=item["action_reason"],
             staging_applied=item["staging_applied"],
             remaining_gap_after_action=item["remaining_gap"],
+            sizing_attribution=item["sizing_attribution"],
         )
         for item in candidates
     ]
@@ -897,6 +1125,7 @@ def rebalance(
 
 
 __all__ = [
+    "ExecutionSizingAttribution",
     "RebalanceAction",
     "RebalanceResult",
     "build_no_trade_attribution",

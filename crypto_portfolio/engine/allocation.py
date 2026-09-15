@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping
 from ..models.evidence import AssetAssessment, EventRiskAssessment
 from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
-from .confidence import confidence_deployment_factor
+from .confidence import compose_deployment_factors, confidence_deployment_factor
 from .core_eligibility import eth_core_eligibility
 from .scoring import score_assessment
 
@@ -686,11 +686,14 @@ def build_target_allocation(
             risk_cap_applied = raw_score_target_weight > risk_tier_cap_weight + 1e-12
             requested_strategic_weight = min(raw_score_target_weight, risk_tier_cap_weight)
             deployment_factor = (
-                min(
-                    asset_confidence_factor,
-                    event_multiplier,
-                    decision_confidence_factor,
-                    execution_overlay_factor,
+                compose_deployment_factors(
+                    {
+                        "asset_confidence": asset_confidence_factor,
+                        "event_risk": event_multiplier,
+                        "decision_confidence": decision_confidence_factor,
+                        "execution_overlay": execution_overlay_factor,
+                    },
+                    policy=resolved,
                 )
                 if state == "ELIGIBLE_INCREASE"
                 else 0.0
