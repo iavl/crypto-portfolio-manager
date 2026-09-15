@@ -21,6 +21,16 @@ class AllocationResult:
     constraints_applied: tuple[str, ...]
     stable_sleeve_target: float = 0.0
     deployment_allowances: Mapping[str, Mapping[str, Any]] | None = None
+    strategic_stable_target: float = 0.0
+
+    @property
+    def constraint_residual_cash(self) -> float:
+        """Core budget no capped core asset could absorb; it lands in stable."""
+        return max(0.0, self.stable_sleeve_target - self.strategic_stable_target)
+
+    @property
+    def effective_stable_target(self) -> float:
+        return self.stable_sleeve_target
 
     @property
     def strategic_target_weights(self) -> Mapping[str, float]:
@@ -40,6 +50,11 @@ class AllocationResult:
             "constraints_applied": list(self.constraints_applied),
             "stable_sleeve_target": self.stable_sleeve_target,
             "strategic_target_weights": dict(self.strategic_target_weights),
+            "stable_targets": {
+                "strategic_stable_target": self.strategic_stable_target,
+                "constraint_residual_cash": self.constraint_residual_cash,
+                "effective_stable_target": self.effective_stable_target,
+            },
             "deployment_allowances": {
                 symbol: dict(value)
                 for symbol, value in (self.deployment_allowances or {}).items()
@@ -581,6 +596,7 @@ def build_target_allocation(
         raise ValueError("current_weights must sum to no more than 1")
 
     stable_target = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
+    strategic_stable_only = stable_target
     risky_budget = 1.0 - stable_target
     satellite_cap = min(limits.satellite_max, risky_budget)
     candidates = _assessment_symbols(assessments, resolved)
@@ -787,6 +803,11 @@ def build_target_allocation(
     )
     reasons.extend(core_reasons)
     constraints.append("v3 core sleeve uses configurable BTC/ETH anchor and ETH gates")
+    if residual_core > 1e-12:
+        reasons.append(
+            f"{residual_core:.2%} of core budget stayed unabsorbed after every core cap; "
+            "it becomes constraint residual cash in the stable sleeve"
+        )
     stable_target += residual_core
 
     target: dict[str, float] = _stable_targets(
@@ -812,7 +833,10 @@ def build_target_allocation(
     reasons.append("satellite strategic targets are separated from immediate deployment allowances")
     if current_weights:
         reasons.append("current weights are inputs for later rebalance decisions, not allocation entitlement")
-    return AllocationResult(target, tuple(reasons), tuple(constraints), stable_target, deployment_allowances)
+    return AllocationResult(
+        target, tuple(reasons), tuple(constraints), stable_target, deployment_allowances,
+        strategic_stable_target=strategic_stable_only,
+    )
 
 
 def allocate(

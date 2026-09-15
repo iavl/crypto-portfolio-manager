@@ -75,7 +75,26 @@
         "event_risk": {"type": ["object", "null"]},
         "portfolio_constraint": {"type": "string"},
         "confidence_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "confidence_explanation": {"type": ["object", "null"]}
+        "confidence_explanation": {"type": ["object", "null"]},
+        "strategic_target_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "execution_target_weight": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "action_reason": {
+          "type": "string",
+          "enum": [
+            "",
+            "THESIS_BROKEN",
+            "EVENT_RISK",
+            "HARD_EXIT_SCORE",
+            "REGIME_DERISK",
+            "ALLOCATION_OVERWEIGHT",
+            "ALLOCATION_UNDERWEIGHT",
+            "CONFIDENCE_LIMIT",
+            "RISK_BUDGET_BREACH"
+          ]
+        },
+        "staging_applied": {"type": "boolean"},
+        "deviation_pp": {"type": ["number", "null"], "minimum": 0},
+        "relative_deviation": {"type": ["number", "null"], "minimum": 0}
       },
       "additionalProperties": false
     },

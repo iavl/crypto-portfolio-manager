@@ -182,6 +182,18 @@ def _scores(value: Any) -> Mapping[str, float | None]:
     return MappingProxyType(result)
 
 
+_ASSET_ACTION_REASONS = {
+    "THESIS_BROKEN",
+    "EVENT_RISK",
+    "HARD_EXIT_SCORE",
+    "REGIME_DERISK",
+    "ALLOCATION_OVERWEIGHT",
+    "ALLOCATION_UNDERWEIGHT",
+    "CONFIDENCE_LIMIT",
+    "RISK_BUDGET_BREACH",
+}
+
+
 @dataclass(frozen=True)
 class AssetDecisionSummary:
     symbol: str
@@ -202,6 +214,12 @@ class AssetDecisionSummary:
     event_risk: Mapping[str, Any] | None = None
     confidence_score: float | None = None
     confidence_explanation: Mapping[str, Any] | None = None
+    strategic_target_weight: float | None = None
+    execution_target_weight: float | None = None
+    action_reason: str = ""
+    staging_applied: bool = False
+    deviation_pp: float | None = None
+    relative_deviation: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "asset summary symbol").upper())
@@ -253,6 +271,19 @@ class AssetDecisionSummary:
         amount = float(self.approved_amount_usd)
         if not math.isfinite(amount) or amount < 0:
             raise ValueError("approved_amount_usd must be finite and >= 0")
+        for field_name in ("strategic_target_weight", "execution_target_weight", "deviation_pp", "relative_deviation"):
+            raw = getattr(self, field_name)
+            if raw is None:
+                continue
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)) or float(raw) < 0:
+                raise ValueError(f"{field_name} must be a finite non-negative number or null")
+            object.__setattr__(self, field_name, float(raw))
+        reason = _text(self.action_reason, "asset summary action_reason").upper() if self.action_reason else ""
+        if reason and reason not in _ASSET_ACTION_REASONS:
+            raise ValueError(f"asset summary action_reason is unsupported: {reason}")
+        object.__setattr__(self, "action_reason", reason)
+        if not isinstance(self.staging_applied, bool):
+            raise ValueError("staging_applied must be boolean")
         if action in {"HOLD", "WAIT", "NO_TRADE"} and amount != 0:
             raise ValueError(f"{action} must have zero approved_amount_usd")
         object.__setattr__(self, "approved_amount_usd", amount)
@@ -300,6 +331,12 @@ class AssetDecisionSummary:
             "event_risk": thaw_packet_value(self.event_risk) if self.event_risk is not None else None,
             "confidence_score": self.confidence_score,
             "confidence_explanation": thaw_packet_value(self.confidence_explanation) if self.confidence_explanation is not None else None,
+            "strategic_target_weight": self.strategic_target_weight,
+            "execution_target_weight": self.execution_target_weight,
+            "action_reason": self.action_reason,
+            "staging_applied": self.staging_applied,
+            "deviation_pp": self.deviation_pp,
+            "relative_deviation": self.relative_deviation,
         }
         return result
 

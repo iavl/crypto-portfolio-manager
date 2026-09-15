@@ -203,3 +203,58 @@ class RelativeDeviationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PacketExplainabilityTests(unittest.TestCase):
+    """Decision summaries expose strategic/execution/deviation fields."""
+
+    def _packet(self):
+        from crypto_portfolio.engine.decision_packet import build_decision_review_packet
+        from crypto_portfolio.engine.rebalance import recommend_rebalance
+
+        current = {"AAVE": 0.18, "BTC": 0.55, "USDT": 0.27}
+        target = {"AAVE": 0.10, "BTC": 0.55, "USDT": 0.35}
+        result = recommend_rebalance(current, target, 10000.0)
+        return build_decision_review_packet(
+            review_type="SNAPSHOT_REVIEW",
+            market_regime="NORMAL",
+            current_weights=current,
+            target_weights=target,
+            assessments={"AAVE": {"weighted_score": 74, "confidence": "HIGH"}},
+            actions=[action.as_dict() for action in result.actions],
+        )
+
+    def test_asset_summary_carries_strategic_execution_and_deviation_fields(self):
+        packet = self._packet()
+        aave = next(item for item in packet.assets if item.symbol == "AAVE")
+        self.assertAlmostEqual(aave.strategic_target_weight, 0.10)
+        self.assertAlmostEqual(aave.execution_target_weight, 0.14)
+        self.assertEqual(aave.action_reason, "ALLOCATION_OVERWEIGHT")
+        self.assertTrue(aave.staging_applied)
+        self.assertAlmostEqual(aave.deviation_pp, 8.0)
+        self.assertAlmostEqual(aave.relative_deviation, 0.8)
+        dumped = aave.as_dict()
+        for key in ("strategic_target_weight", "execution_target_weight", "action_reason",
+                    "staging_applied", "deviation_pp", "relative_deviation"):
+            self.assertIn(key, dumped)
+
+    def test_allocation_reports_the_stable_target_triple(self):
+        from crypto_portfolio.engine.allocation import build_target_allocation
+
+        # BTC capped at 50%, ETH water-fills to its 34% sleeve cap, and the
+        # leftover 1pp is constraint residual cash, not strategic stable.
+        result = build_target_allocation(
+            assessments={
+                "BTC": {"weighted_score": 65.52, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+            },
+            current_weights={"BTC": 0.40, "ETH": 0.30, "USDT": 0.30},
+        )
+        self.assertAlmostEqual(result.strategic_stable_target, 0.15)
+        self.assertAlmostEqual(result.constraint_residual_cash, 0.01, places=6)
+        self.assertAlmostEqual(result.effective_stable_target, 0.16, places=6)
+        stable = result.as_dict()["stable_targets"]
+        self.assertEqual(
+            sorted(stable),
+            ["constraint_residual_cash", "effective_stable_target", "strategic_stable_target"],
+        )

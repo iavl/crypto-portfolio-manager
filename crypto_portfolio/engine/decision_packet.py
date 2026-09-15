@@ -97,6 +97,7 @@ def _asset_summary(
     target_weights: Mapping[str, float],
     previous_assessment: Any = None,
     factor_packet: AssetFactorPacket | None = None,
+    policy: Policy | None = None,
 ) -> AssetDecisionSummary:
     assessment_dict = _as_dict(assessment) if assessment is not None else {}
     action_dict = dict(action or {})
@@ -153,6 +154,26 @@ def _asset_summary(
         if raw_event_risk is not None
         else None
     )
+    current_weight = float(current_weights.get(symbol, action_dict.get("current_weight", 0.0)))
+    strategic_target = action_dict.get("strategic_target_weight")
+    if strategic_target is None:
+        strategic_target = float(target_weights.get(symbol, action_dict.get("target_weight", 0.0)))
+    else:
+        strategic_target = float(strategic_target)
+    execution_target = action_dict.get("execution_target_weight")
+    execution_target = float(execution_target) if execution_target is not None else None
+    deviation_pp = abs(strategic_target - current_weight) * 100.0
+    resolved = policy or resolve_policy()
+    relative_floor = float(resolved.rebalance.get("relative_target_floor", 0.02))
+    relative_deviation = abs(strategic_target - current_weight) / max(strategic_target, relative_floor)
+    staging_raw = action_dict.get("staging_applied", False)
+    if not isinstance(staging_raw, bool):
+        if staging_raw in (1, "TRUE", "true"):
+            staging_raw = True
+        elif staging_raw in (0, "", "FALSE", "false", None):
+            staging_raw = False
+        else:
+            raise ValueError("staging_applied must be boolean")
     return AssetDecisionSummary(
         symbol=symbol,
         factor_scores=factor_scores,
@@ -167,7 +188,7 @@ def _asset_summary(
         historical_changes=historical,
         supporting_evidence_ids=tuple(dict.fromkeys(evidence_ids)),
         contrary_evidence_ids=tuple(dict.fromkeys(contrary_ids)),
-        current_weight=float(current_weights.get(symbol, action_dict.get("current_weight", 0.0))),
+        current_weight=current_weight,
         target_weight=float(target_weights.get(symbol, action_dict.get("target_weight", 0.0))),
         action=action_name,
         approved_amount_usd=amount,
@@ -176,6 +197,12 @@ def _asset_summary(
         event_risk=event_risk,
         confidence_score=assessment_dict.get("confidence_score"),
         confidence_explanation=assessment_dict.get("confidence_explanation", assessment_dict.get("data_confidence")),
+        strategic_target_weight=strategic_target,
+        execution_target_weight=execution_target,
+        action_reason=str(action_dict.get("action_reason", "") or ""),
+        staging_applied=bool(staging_raw),
+        deviation_pp=deviation_pp,
+        relative_deviation=relative_deviation,
     )
 
 
