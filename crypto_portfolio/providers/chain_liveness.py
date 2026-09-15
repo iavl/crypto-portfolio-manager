@@ -68,9 +68,13 @@ _DEFAULT_SOURCES = {
         ("btc-blockstream", "BTC", "https://blockstream.info/api/blocks", "bitcoin_esplora", 10, "blockstream"),
         ("btc-mempool", "BTC", "https://mempool.space/api/v1/blocks", "bitcoin_mempool", 20, "mempool"),
     ),
+    # ETH is quorum-first: two independent primary sources decide health and
+    # publicnode is a secondary/degraded corroborator only, so a frozen
+    # publicnode checkpoint can never override two agreeing fresh primaries.
     "ETH": (
-        ("eth-publicnode", "ETH", "https://ethereum-rpc.publicnode.com", "evm_json_rpc", 10, "publicnode"),
-        ("eth-flashbots", "ETH", "https://rpc.flashbots.net", "evm_json_rpc", 20, "flashbots"),
+        ("eth-flashbots", "ETH", "https://rpc.flashbots.net", "evm_json_rpc", 20, "flashbots", "primary"),
+        ("eth-drpc", "ETH", "https://eth.drpc.org", "evm_json_rpc", 25, "drpc", "primary"),
+        ("eth-publicnode", "ETH", "https://ethereum-rpc.publicnode.com", "evm_json_rpc", 10, "publicnode", "secondary"),
     ),
     "BNB": (
         ("bnb-dataseed", "BNB", "https://bsc-dataseed.bnbchain.org", "evm_json_rpc", 10, "bnb-dataseed"),
@@ -135,7 +139,12 @@ def _safe_json_mapping(value: Mapping[str, Any], field: str) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class ChainLivenessSource:
-    """One structured chain-liveness source and its independence group."""
+    """One structured chain-liveness source and its independence group.
+
+    ``role`` separates decision-making primaries from a secondary source
+    that may only corroborate: assets with a configured secondary are
+    evaluated quorum-first.
+    """
 
     id: str
     asset: str
@@ -143,6 +152,7 @@ class ChainLivenessSource:
     source_type: str
     priority: int
     independent_group: str
+    role: str = "primary"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "source.id"))
@@ -155,6 +165,10 @@ class ChainLivenessSource:
         if isinstance(self.priority, bool) or not isinstance(self.priority, int) or self.priority < 0:
             raise ValueError("source.priority must be a non-negative integer")
         object.__setattr__(self, "independent_group", _text(self.independent_group, "source.independent_group"))
+        role = _text(self.role, "source.role").lower()
+        if role not in {"primary", "secondary"}:
+            raise ValueError("source.role must be primary or secondary")
+        object.__setattr__(self, "role", role)
 
     @property
     def safe_url(self) -> str:
@@ -168,6 +182,7 @@ class ChainLivenessSource:
             "source_type": self.source_type,
             "priority": self.priority,
             "independent_group": self.independent_group,
+            "role": self.role,
         }
 
 
@@ -420,7 +435,9 @@ class ChainLivenessProvider:
             source = _source_from_value(item)
             grouped[source.asset].append(source)
         return {
-            asset: tuple(sorted(values, key=lambda source: (source.priority, source.id)))
+            # Primaries are consulted before any secondary corroborator so a
+            # quorum decision never waits on the most failure-prone source.
+            asset: tuple(sorted(values, key=lambda source: (source.role != "primary", source.priority, source.id)))
             for asset, values in grouped.items()
         }
 
@@ -624,31 +641,37 @@ class ChainLivenessProvider:
             return True
         return progress.finalized_age_seconds is not None and progress.finalized_age_seconds > settings.get("healthy_finalized_age_seconds", math.inf)
 
-    def _conflicts(self, asset: str, progress: tuple[_Progress, ...]) -> bool:
+    def _consistent(self, asset: str, left: _Progress, right: _Progress) -> bool:
+        """Pairwise source agreement using the asset's freshness windows."""
         settings = self._settings(asset)
         recent_limit = max(
             float(settings.get("degraded_head_age_seconds", 0)),
             float(settings.get("degraded_finalized_age_seconds", 0)),
             1.0,
         )
+        both_recent = left.head_age_seconds <= recent_limit and right.head_age_seconds <= recent_limit
+        if (
+            left.head_height_or_slot == right.head_height_or_slot
+            and left.head_hash is not None
+            and right.head_hash is not None
+            and left.head_hash != right.head_hash
+        ):
+            return False
+        if both_recent and abs(left.head_height_or_slot - right.head_height_or_slot) > 6:
+            return False
+        if (
+            left.finalized_height_or_slot is not None
+            and right.finalized_height_or_slot is not None
+            and both_recent
+            and abs(left.finalized_height_or_slot - right.finalized_height_or_slot) > 6
+        ):
+            return False
+        return True
+
+    def _conflicts(self, asset: str, progress: tuple[_Progress, ...]) -> bool:
         for left_index, left in enumerate(progress):
             for right in progress[left_index + 1:]:
-                both_recent = left.head_age_seconds <= recent_limit and right.head_age_seconds <= recent_limit
-                if (
-                    left.head_height_or_slot == right.head_height_or_slot
-                    and left.head_hash is not None
-                    and right.head_hash is not None
-                    and left.head_hash != right.head_hash
-                ):
-                    return True
-                if both_recent and abs(left.head_height_or_slot - right.head_height_or_slot) > 6:
-                    return True
-                if (
-                    left.finalized_height_or_slot is not None
-                    and right.finalized_height_or_slot is not None
-                    and both_recent
-                    and abs(left.finalized_height_or_slot - right.finalized_height_or_slot) > 6
-                ):
+                if not self._consistent(asset, left, right):
                     return True
         return False
 
@@ -670,11 +693,13 @@ class ChainLivenessProvider:
         attempted: tuple[str, ...],
         progress: tuple[_Progress, ...],
         failures: tuple[Mapping[str, Any], ...],
+        configured: tuple[ChainLivenessSource, ...] = (),
     ) -> ChainLivenessAssessment:
         settings = self._settings(asset)
         evidence_progress = tuple({
             "source_id": item.source.id,
             "independent_group": item.source.independent_group,
+            "role": item.source.role,
             "head_height_or_slot": item.head_height_or_slot,
             "head_hash": item.head_hash,
             "head_observed_at": item.head_observed_at,
@@ -688,7 +713,7 @@ class ChainLivenessProvider:
             ),
             "finalized_supported": item.finalized_supported,
         } for item in progress)
-        common_evidence = {
+        common_evidence: dict[str, Any] = {
             "progress": evidence_progress,
             "independent_groups": tuple(dict.fromkeys(item.source.independent_group for item in progress)),
             "thresholds": settings,
@@ -698,30 +723,37 @@ class ChainLivenessProvider:
                 asset, UNKNOWN, checked_at, "LOW", None, None, None, None,
                 None, None, None, attempted, (), failures, common_evidence,
             )
-        best = self._best(progress)
-        conflict = self._conflicts(asset, progress)
-        severe = tuple(item for item in progress if self._severe(asset, item))
-        severe_groups = {item.source.independent_group for item in severe}
-        required_sources = int(settings["halted_minimum_independent_sources"])
-        if not conflict and len(severe_groups) >= required_sources:
-            status = HALTED
-        elif conflict:
-            status = CONFLICT
+        quorum_asset = any(source.role == "secondary" for source in configured)
+        if quorum_asset:
+            status, confidence, best, healthy, quorum_evidence = self._quorum_assessment(
+                asset, progress, settings
+            )
+            common_evidence["quorum"] = quorum_evidence
         else:
-            status = DEGRADED if self._degraded(asset, best) else HEALTHY
-        if status == "HALTED":
-            confidence = "HIGH"
-        elif status == "CONFLICT" or status == DEGRADED:
-            confidence = "LOW"
-        elif failures or len(progress) > 1 or not best.finalized_supported:
-            confidence = "MEDIUM"
-        else:
-            confidence = "HIGH"
+            best = self._best(progress)
+            conflict = self._conflicts(asset, progress)
+            severe = tuple(item for item in progress if self._severe(asset, item))
+            severe_groups = {item.source.independent_group for item in severe}
+            required_sources = int(settings["halted_minimum_independent_sources"])
+            if not conflict and len(severe_groups) >= required_sources:
+                status = HALTED
+            elif conflict:
+                status = CONFLICT
+            else:
+                status = DEGRADED if self._degraded(asset, best) else HEALTHY
+            if status == "HALTED":
+                confidence = "HIGH"
+            elif status == "CONFLICT" or status == DEGRADED:
+                confidence = "LOW"
+            elif failures or len(progress) > 1 or not best.finalized_supported:
+                confidence = "MEDIUM"
+            else:
+                confidence = "HIGH"
+            healthy = tuple(item.source.id for item in progress)
         if any(item.finalized_error for item in progress):
             common_evidence["finalized_provider_warnings"] = tuple(
                 item.finalized_error for item in progress if item.finalized_error
             )
-        healthy = tuple(item.source.id for item in progress)
         return ChainLivenessAssessment(
             asset=asset,
             status=status,
@@ -740,16 +772,114 @@ class ChainLivenessProvider:
             evidence=common_evidence,
         )
 
+    def _quorum_assessment(
+        self,
+        asset: str,
+        progress: tuple[_Progress, ...],
+        settings: Mapping[str, Any],
+    ) -> tuple[str, str, _Progress, tuple[str, ...], dict[str, Any]]:
+        """Quorum-first evaluation for assets with a secondary source.
+
+        Two independently agreeing fresh primaries decide health outright; a
+        stale or frozen source (primary or secondary) is excluded with its
+        reason and can never override them. Without a primary pair, a fresh
+        secondary may corroborate a fresh primary at reduced confidence; no
+        corroboration at all is an insufficient quorum reported fail-defensive.
+        """
+        primaries = tuple(item for item in progress if item.source.role == "primary")
+        secondaries = tuple(item for item in progress if item.source.role == "secondary")
+        fresh_primaries = tuple(item for item in primaries if not self._needs_secondary(asset, item))
+        agreeing: list[_Progress] = []
+        for item in fresh_primaries:
+            if all(self._consistent(asset, item, other) for other in fresh_primaries if other is not item):
+                agreeing.append(item)
+        mode: str
+        chosen: _Progress
+        corroborator: _Progress | None = None
+        if len(agreeing) >= 2:
+            mode = "PRIMARY_QUORUM"
+            chosen = self._best(tuple(agreeing))
+            confidence = "HIGH"
+        else:
+            fresh_secondaries = tuple(
+                item for item in secondaries if not self._needs_secondary(asset, item)
+            )
+            corroborator = next(
+                (
+                    item for item in fresh_secondaries
+                    if fresh_primaries and self._consistent(asset, item, fresh_primaries[0])
+                ),
+                None,
+            )
+            if corroborator is not None and fresh_primaries:
+                mode = "SECONDARY_CORROBORATION"
+                chosen = self._best((fresh_primaries[0], corroborator))
+                confidence = "MEDIUM"
+            else:
+                mode = "INSUFFICIENT_QUORUM"
+                chosen = self._best(progress)
+                confidence = "LOW"
+        if mode == "PRIMARY_QUORUM":
+            participants = tuple(agreeing)
+        elif corroborator is not None and fresh_primaries:
+            participants = (fresh_primaries[0], corroborator)
+        else:
+            participants = (chosen,)
+        # Only sources excluded from the final decision are diagnostics:
+        # frozen/stale readings and fresh readings that disagreed with it.
+        excluded = []
+        for item in progress:
+            if any(item is member for member in participants):
+                continue
+            reason = (
+                "FROZEN_STALE_READING"
+                if self._needs_secondary(asset, item)
+                else "DISAGREES_WITH_QUORUM"
+            )
+            excluded.append({"source_id": item.source.id, "reason": reason})
+        # Material disagreement between independently fresh readings is a
+        # conflict regardless of quorum mode; stale/frozen readings cannot
+        # conflict because their ages already exclude them from agreement.
+        fresh_all = tuple(item for item in progress if not self._needs_secondary(asset, item))
+        conflict = any(
+            not self._consistent(asset, left, right)
+            for index, left in enumerate(fresh_all)
+            for right in fresh_all[index + 1:]
+        )
+        severe_groups = {
+            item.source.independent_group for item in participants if self._severe(asset, item)
+        }
+        required_sources = int(settings["halted_minimum_independent_sources"])
+        if conflict:
+            status = CONFLICT
+        elif len(severe_groups) >= required_sources and len(participants) >= required_sources:
+            status = HALTED
+        else:
+            status = DEGRADED if self._degraded(asset, chosen) else HEALTHY
+        if status in {"CONFLICT", HALTED}:
+            confidence = "HIGH" if status == HALTED else "LOW"
+        elif status == DEGRADED and confidence == "HIGH":
+            confidence = "MEDIUM"
+        evidence = {
+            "mode": mode,
+            "agreeing_sources": tuple(item.source.id for item in participants if item is not chosen),
+            "excluded_sources": tuple(excluded),
+        }
+        healthy = tuple(item.source.id for item in participants)
+        return status, confidence, chosen, healthy, evidence
+
     def assess(self, asset: str, *, checked_at: str | datetime | None = None) -> ChainLivenessAssessment:
         normalized_asset = _text(asset, "asset").upper()
         if normalized_asset not in CHAIN_NATIVE_ASSETS:
             raise ValueError(f"chain liveness asset must be one of {CHAIN_NATIVE_ASSETS}")
         checked = self._now(checked_at)
         self._network_requests = 0
+        sources = self.sources_for(normalized_asset)
+        quorum_asset = any(source.role == "secondary" for source in sources)
         attempted: list[str] = []
         progress: list[_Progress] = []
         failures: list[Mapping[str, Any]] = []
-        for source in self.sources_for(normalized_asset):
+        for source in sources:
             attempted.append(source.id)
             try:
                 current = self._collect_source(source, checked)
@@ -757,7 +887,22 @@ class ChainLivenessProvider:
                 failures.append(self._failure(source, exc))
                 continue
             progress.append(current)
-            if len(progress) >= 2 or not self._needs_secondary(normalized_asset, current):
+            if quorum_asset:
+                # Quorum-first: stop once two independently agreeing fresh
+                # primaries are in hand; remaining sources (including the
+                # secondary) are not needed to decide.
+                fresh_primaries = [
+                    item for item in progress
+                    if item.source.role == "primary"
+                    and not self._needs_secondary(normalized_asset, item)
+                ]
+                if len(fresh_primaries) >= 2 and all(
+                    self._consistent(normalized_asset, left, right)
+                    for index, left in enumerate(fresh_primaries)
+                    for right in fresh_primaries[index + 1:]
+                ):
+                    break
+            elif len(progress) >= 2 or not self._needs_secondary(normalized_asset, current):
                 break
         return self._assessment(
             normalized_asset,
@@ -765,6 +910,7 @@ class ChainLivenessProvider:
             tuple(attempted),
             tuple(progress),
             tuple(failures),
+            configured=sources,
         )
 
     def _observation(self, assessment: ChainLivenessAssessment) -> Mapping[str, Any]:

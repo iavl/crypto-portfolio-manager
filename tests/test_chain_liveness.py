@@ -41,6 +41,18 @@ def source(asset, source_id, source_type, group, url=None):
     )
 
 
+def eth_quorum_source(source_id, group, role, priority):
+    return ChainLivenessSource(
+        source_id,
+        "ETH",
+        f"https://{source_id}.example.test/rpc",
+        "evm_json_rpc",
+        priority,
+        group,
+        role,
+    )
+
+
 def btc_tip(age_seconds, *, height=100, block_hash="0xabc"):
     return [{
         "height": height,
@@ -264,6 +276,91 @@ class ChainLivenessProviderTests(unittest.TestCase):
         with self.assertRaises(ProviderUnavailable):
             provider.collect(ProviderRequest("chain_liveness", "chain_liveness", "BTC", {}, ("risk.chain_liveness_status",)))
         self.assertNotEqual(assessment.status, "HALTED")
+
+
+class EthQuorumTests(unittest.TestCase):
+    """Quorum-first ETH liveness: two agreeing primaries decide, one frozen source cannot."""
+
+    FLASHBOTS = eth_quorum_source("eth-flashbots", "flashbots", "primary", 20)
+    DRPC = eth_quorum_source("eth-drpc", "drpc", "primary", 25)
+    PUBLICNODE = eth_quorum_source("eth-publicnode", "publicnode", "secondary", 10)
+
+    def provider(self, client, *sources):
+        return ChainLivenessProvider(client=client, clock=lambda: NOW, sources=sources)
+
+    def test_two_fresh_agreeing_primaries_stop_early_and_stay_healthy(self):
+        client = RpcClient(post={
+            "eth_getBlockByNumber": [
+                evm_block(10), evm_block(60),
+                evm_block(12), evm_block(80, number="0x64"),
+            ],
+        })
+        result = self.provider(client, self.FLASHBOTS, self.DRPC, self.PUBLICNODE).assess("ETH")
+        self.assertEqual(result.status, "HEALTHY")
+        self.assertEqual(result.confidence, "HIGH")
+        self.assertEqual(result.evidence["quorum"]["mode"], "PRIMARY_QUORUM")
+        # The secondary was never consulted: the primary quorum closed early.
+        self.assertEqual(result.sources_checked, ("eth-flashbots", "eth-drpc"))
+
+    def test_frozen_primary_falls_back_to_secondary_corroboration(self):
+        # flashbots head is fresh but its finalized checkpoint is frozen at
+        # 5000s; drpc is fresh and the publicnode secondary corroborates it
+        # at reduced confidence while flashbots is recorded as excluded.
+        client = RpcClient(post={
+            "eth_getBlockByNumber": [
+                evm_block(10), evm_block(5000),                      # flashbots: frozen finalized
+                evm_block(12), evm_block(80, number="0x64"),         # drpc fresh
+                evm_block(13), evm_block(90, number="0x64"),         # publicnode fresh
+            ],
+        })
+        result = self.provider(client, self.FLASHBOTS, self.DRPC, self.PUBLICNODE).assess("ETH")
+        self.assertEqual(result.status, "HEALTHY")
+        self.assertEqual(result.confidence, "MEDIUM")
+        self.assertEqual(result.evidence["quorum"]["mode"], "SECONDARY_CORROBORATION")
+        excluded = result.evidence["quorum"]["excluded_sources"]
+        self.assertEqual(len(excluded), 1)
+        self.assertEqual(excluded[0]["source_id"], "eth-flashbots")
+        self.assertEqual(excluded[0]["reason"], "FROZEN_STALE_READING")
+
+    def test_single_fresh_source_without_corroboration_is_insufficient_quorum(self):
+        failure = ProviderUnavailable("RPC down")
+        client = RpcClient(post={
+            "eth_getBlockByNumber": [
+                failure,                    # flashbots unavailable
+                evm_block(10), evm_block(60),  # drpc fresh
+                failure,                    # publicnode unavailable
+            ],
+        })
+        result = self.provider(client, self.FLASHBOTS, self.DRPC, self.PUBLICNODE).assess("ETH")
+        # Fail-defensive: a lone healthy reading never certifies HIGH confidence.
+        self.assertEqual(result.confidence, "LOW")
+        self.assertEqual(result.evidence["quorum"]["mode"], "INSUFFICIENT_QUORUM")
+        self.assertNotEqual(result.status, "HALTED")
+
+    def test_two_primaries_disagreeing_materially_is_conflict(self):
+        client = RpcClient(post={
+            "eth_getBlockByNumber": [
+                evm_block(10, number="0x3e8"), evm_block(60, number="0x3e8"),
+                evm_block(12, number="0x44c"), evm_block(80, number="0x44c"),
+                evm_block(13, number="0x3e8"), evm_block(90, number="0x3e8"),
+            ],
+        })
+        result = self.provider(client, self.FLASHBOTS, self.DRPC, self.PUBLICNODE).assess("ETH")
+        self.assertEqual(result.status, CONFLICT)
+
+    def test_default_eth_catalog_is_quorum_first(self):
+        from crypto_portfolio.providers.chain_liveness import chain_liveness_sources
+
+        catalog = {item.id: item for item in chain_liveness_sources({}) if item.asset == "ETH"}
+        self.assertEqual(catalog["eth-publicnode"].role, "secondary")
+        self.assertEqual(catalog["eth-flashbots"].role, "primary")
+        self.assertEqual(catalog["eth-drpc"].role, "primary")
+        provider = ChainLivenessProvider(
+            client=RpcClient(),
+            clock=lambda: NOW,
+        )
+        self.assertEqual(provider.sources_for("ETH")[0].role, "primary")
+        self.assertEqual(provider.sources_for("ETH")[-1].role, "secondary")
 
     def test_conflicting_current_sources_fail_closed(self):
         client = RpcClient(get=[btc_tip(4 * 3600, block_hash="0xabc"), btc_tip(4 * 3600, block_hash="0xdef")])
