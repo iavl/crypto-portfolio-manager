@@ -68,6 +68,7 @@ _TOP_LEVEL_FIELDS = {
     "nav_history",
     "regime_transitions",
     "regime_model",
+    "scoring_families",
 }
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
 _REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity"}
@@ -505,6 +506,75 @@ def _parse_regime_transitions(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_notches_per_review": max_notches}
 
 
+def _parse_scoring_families(
+    value: Any,
+    profiles: Mapping[str, Mapping[str, float]],
+) -> dict[str, Mapping[str, Mapping[str, Any]]]:
+    """Optional two-stage factor-family scoring trees, keyed by profile name.
+
+    An empty object keeps every profile on the flat compatibility path.  A
+    configured tree derives flat factor weights as
+    ``sum(family_weight * in_family_weight)`` so MISSING/reliability/coverage
+    semantics stay identical; the family grouping exists for attribution and
+    for capping correlated signals inside a family.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise PolicyError("scoring_families must be an object")
+    parsed: dict[str, Mapping[str, Mapping[str, Any]]] = {}
+    for raw_name, tree in value.items():
+        name = str(raw_name).strip().lower()
+        if not name:
+            raise PolicyError("scoring_families profile names must be non-empty")
+        if name in parsed:
+            raise PolicyError(f"scoring_families contains duplicate profile {name}")
+        if name not in profiles:
+            raise PolicyError(f"scoring_families references unknown scoring profile {name}")
+        if not isinstance(tree, dict) or not tree:
+            raise PolicyError(f"scoring_families.{name} must be a non-empty object")
+        family_weights: dict[str, float] = {}
+        family_factors: dict[str, dict[str, float]] = {}
+        seen_factors: set[str] = set()
+        for raw_family, raw_spec in tree.items():
+            family = str(raw_family).strip().lower()
+            if not family or family in family_weights:
+                raise PolicyError(f"scoring_families.{name} contains invalid or duplicate family {raw_family!r}")
+            if not isinstance(raw_spec, dict) or set(raw_spec) != {"weight", "factors"}:
+                raise PolicyError(f"scoring_families.{name}.{family} must contain exactly weight and factors")
+            family_weights[family] = _fraction(raw_spec["weight"], f"scoring_families.{name}.{family}.weight")
+            factors = raw_spec["factors"]
+            if not isinstance(factors, dict) or not factors:
+                raise PolicyError(f"scoring_families.{name}.{family}.factors must be a non-empty object")
+            weights: dict[str, float] = {}
+            for raw_factor, raw_weight in factors.items():
+                factor = str(raw_factor).strip().lower()
+                if factor not in SCORING_FACTORS:
+                    raise PolicyError(f"scoring_families.{name}.{family} references unknown factor {factor}")
+                if factor in seen_factors:
+                    raise PolicyError(
+                        f"scoring_families.{name} assigns factor {factor} to more than one family"
+                    )
+                seen_factors.add(factor)
+                weights[factor] = _fraction(raw_weight, f"scoring_families.{name}.{family}.factors.{factor}")
+            if not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+                raise PolicyError(f"scoring_families.{name}.{family}.factors weights must sum to 1")
+            family_factors[family] = weights
+        if not math.isclose(sum(family_weights.values()), 1.0, abs_tol=1e-9):
+            raise PolicyError(f"scoring_families.{name} family weights must sum to 1")
+        profile_factors = {factor for factor, weight in profiles[name].items() if weight > 0}
+        if seen_factors != profile_factors:
+            raise PolicyError(
+                f"scoring_families.{name} must cover exactly the positive-weight factors of "
+                f"profile {name}"
+            )
+        parsed[name] = {
+            family: {"weight": family_weights[family], "factors": dict(family_factors[family])}
+            for family in family_weights
+        }
+    return parsed
+
+
 def _parse_regime_model(value: Any) -> dict[str, Any]:
     if value is None:
         return {**_DEFAULT_REGIME_MODEL, "domain_weights": dict(_DEFAULT_REGIME_MODEL["domain_weights"]),
@@ -651,6 +721,7 @@ class Policy:
     high_impact_review: Mapping[str, float] = dataclass_field(default_factory=dict)
     regime_transitions: Mapping[str, Any] = dataclass_field(default_factory=dict)
     regime_model: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -765,6 +836,9 @@ class Policy:
             result["regime_transitions"] = dict(self.regime_transitions)
         if self.regime_model:
             result["regime_model"] = _copy_mapping(self.regime_model)
+        # Required top-level field: serialize even when empty so canonical
+        # policy records round-trip through as_dict()/policy_from_mapping.
+        result["scoring_families"] = _copy_mapping(self.scoring_families)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -1911,6 +1985,7 @@ def _parse_policy(
     }
 
     parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
+    parsed_scoring_families = _parse_scoring_families(data.get("scoring_families"), parsed_profiles)
     parsed_asset_profiles = _parse_asset_scoring_profiles(
         data.get("asset_scoring_profiles"), parsed_profiles
     )
@@ -2126,6 +2201,7 @@ def _parse_policy(
         high_impact_review=parsed_high_impact_review,
         regime_transitions=parsed_regime_transitions,
         regime_model=parsed_regime_model,
+        scoring_families=parsed_scoring_families,
     )
     return policy
 

@@ -154,6 +154,7 @@
       "strong_abs": 0.01
     }
   },
+  "scoring_families": {},
   "regime_model": {
     "mode": "weighted",
     "normal_max": 0.35,

@@ -85,6 +85,8 @@ class ScoreResult:
     source_groups: tuple[str, ...] = ()
     conflict_ids: tuple[str, ...] = ()
     fallback_used: bool = False
+    family_weights: Mapping[str, float] | None = None
+    family_contributions: Mapping[str, float] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +110,8 @@ class ScoreResult:
             "source_groups": list(self.source_groups),
             "conflict_ids": list(self.conflict_ids),
             "fallback_used": self.fallback_used,
+            "family_weights": dict(self.family_weights or {}),
+            "family_contributions": dict(self.family_contributions or {}),
         }
 
     def __float__(self) -> float:
@@ -553,19 +557,49 @@ def score_factors(
     factors = _factor_mapping(factor_scores)
     if not isinstance(critical_data_complete, bool):
         raise ValueError("critical_data_complete must be boolean")
+    family_tree = None
     if weights is None:
         profile_name = resolved_policy.scoring_profile_name(symbol)
         raw_weights = resolved_policy.scoring_profile(symbol)
+        family_tree = (resolved_policy.scoring_families or {}).get(profile_name)
     else:
         profile_name = "custom"
         raw_weights = weights
-    return _score_factors(
+    if family_tree:
+        # Two-stage family scoring: derive the flat factor weights as
+        # sum(family_weight * in_family_weight).  The linear aggregation
+        # makes this exactly equivalent to flat scoring with the derived
+        # weights, so MISSING shrinkage, reliability, and coverage keep
+        # their deterministic semantics; the family grouping adds
+        # attribution and caps correlated signals inside a family.
+        derived: dict[str, float] = {}
+        for family, spec in family_tree.items():
+            for factor, factor_weight in spec["factors"].items():
+                derived[factor] = derived.get(factor, 0.0) + float(spec["weight"]) * float(factor_weight)
+        raw_weights = derived
+    result = _score_factors(
         factors,
         raw_weights,
         critical_data_complete=critical_data_complete,
         policy=resolved_policy,
         profile_name=profile_name,
         symbol=symbol,
+    )
+    if not family_tree:
+        return result
+    family_weights = {family: float(spec["weight"]) for family, spec in family_tree.items()}
+    family_contributions = {
+        family: float(spec["weight"]) * sum(
+            float(factor_weight) * (result.effective_factor_scores or {}).get(factor, 50.0)
+            for factor, factor_weight in spec["factors"].items()
+        )
+        for family, spec in family_tree.items()
+    }
+    from dataclasses import replace as _replace
+    return _replace(
+        result,
+        family_weights=family_weights,
+        family_contributions=family_contributions,
     )
 
 
