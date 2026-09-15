@@ -177,10 +177,17 @@ display data, so the engine uses value ÷ quantity and records a note.
     no prior decision exists). The result then moves at most
     `regime_transitions.max_notches_per_review` notches per review; severe
     systemic events and the mandatory drawdown floors stay immediate.
+    The regime flow domain is market-level: aggregate BTC and ETH ETF flows
+    with `aggregate_market_flow` instead of feeding BTC-only flow into the
+    regime; BTC-specific flow stays in BTC scoring.
 12. Run the allocation engine.
 13. Run the risk gate and stop on `ERROR` violations.
 14. Recalculate post-new-cash economic weights.
-15. Run the rebalance engine.
+15. Run the rebalance engine. Every executable action carries a
+    `sizing_attribution` (strategic gap -> staged gap -> composed deployment
+    allowance -> funding-constrained approved amount); render the sizing
+    chain for each active trade with `format_execution_sizing_chain` and
+    quote `effective_strategic_gap_close`, never a bare staging percentage.
 16. Reconcile executable trade dollars.
 17. Evaluate `NO_TRADE` before proposing a transaction.
     When the result is `NO_TRADE` or `WAIT`, persist deterministic gate outcomes
@@ -266,7 +273,7 @@ halving clock is descriptive and cannot alone create `WAIT`, `INCREASE`,
 
 Allocation and risk remain authoritative for strategic target weights and
 approved dollars. Execution may use `min(base, positioning, cycle)` to cap
-immediate deployment, retain the remainder as unallocated, reject chasing when
+immediate deployment, retain the remainder as an approved conditional reserve (PULLBACK_RESERVE), reject chasing when
 extension and confirmed long crowding agree, or return `WAIT`. Confidence and
 event restrictions affect deployment allowance, not the strategic target.
 
@@ -410,7 +417,7 @@ Use at least 200 completed daily candles, preferably 240, plus a timestamped
 spot observation and reliable volume where available. When adequate OHLCV exists, do not
 manually invent moving averages, ATR, swing levels, zone prices, tranche
 arithmetic, or estimated quantities. The technical engine may return `WAIT` or
-leave part of the approved amount unallocated, but it can never increase the
+leave part of the approved amount as conditional reserve, but it can never increase the
 approved amount or place an order. The planner generates pullback plans only:
 `BREAKOUT` returns `WAIT` and `MIXED` is rejected until those semantics are
 implemented.

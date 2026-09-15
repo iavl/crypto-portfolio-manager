@@ -1124,6 +1124,65 @@ def recommend_rebalance(
     )
 
 
+def format_execution_sizing_chain(
+    attribution: ExecutionSizingAttribution | Mapping[str, Any],
+) -> str:
+    """Render one trade's explicit sizing chain for review reports.
+
+    The plan-required layout: every layer between the strategic target and
+    the approved amount is shown with its own numbers, so a 50% staging rule
+    can never be quoted alone when deployment caps or funding competition
+    reduced the effective close.
+    """
+    value = (
+        attribution if isinstance(attribution, ExecutionSizingAttribution)
+        else ExecutionSizingAttribution.from_mapping(attribution)
+    )
+    def _pp(gap: float) -> str:
+        return f"{gap * 100:+.2f}pp"
+
+    def _usd(amount: float) -> str:
+        return f"${amount:,.2f}"
+
+    lines = [
+        f"Current weight                  {value.current_weight:.2%}",
+        f"Strategic target                {value.strategic_target_weight:.2%}",
+        f"Strategic gap                   {_pp(value.strategic_gap)}",
+        "",
+        "Staging:",
+        (
+            f"  configured gap-close          {value.staging_gap_close_fraction:.0%}"
+            if value.staging_enabled
+            else "  disabled (hard exit or staging bypass)"
+        ),
+        f"  post-staging gap              {_pp(value.staged_gap)}",
+        "",
+        "Deployment constraints:",
+    ]
+    if value.deployment_factors:
+        for name, factor in sorted(value.deployment_factors.items()):
+            lines.append(f"  {name:<30}{factor:.2f}")
+    else:
+        lines.append("  none                           1.00")
+    lines.extend([
+        f"  composition                   {value.deployment_composition_mode}",
+        f"  effective factor              {value.effective_deployment_factor:.2f}",
+        "",
+        "Executable:",
+        f"  executable gap                {_pp(value.executable_gap)}",
+        f"  execution target              {value.execution_target_weight:.2%}",
+        f"  executable amount             {_usd(value.executable_amount_usd)}",
+    ])
+    if value.funding_available_usd is not None:
+        lines.append(f"  funding available             {_usd(value.funding_available_usd)}")
+        lines.append(f"  funding shortfall             {_usd(value.funding_shortfall_usd)}")
+    lines.extend([
+        f"  approved amount               {_usd(value.approved_amount_usd)}",
+        f"  effective strategic-gap close {value.effective_strategic_gap_close:.1%}",
+    ])
+    return "\n".join(lines)
+
+
 def rebalance(
     current_weights: Mapping[str, float],
     target_weights: Mapping[str, float],
@@ -1160,6 +1219,7 @@ __all__ = [
     "RebalanceAction",
     "RebalanceResult",
     "build_no_trade_attribution",
+    "format_execution_sizing_chain",
     "rebalance",
     "reconcile_trade_dollars",
     "recommend_rebalance",

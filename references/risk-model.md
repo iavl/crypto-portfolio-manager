@@ -5,6 +5,11 @@ owns regimes, drawdown, event/liveness, and portfolio risk authority.
 
 Python builds the structured `RegimeInputs` (BTC trend, volatility, flow,
 breadth, and cash-flow-aware drawdown) before the deterministic regime engine.
+The regime flow domain is market-level, not a BTC alias: BTC and ETH ETF
+flows aggregate via `aggregate_market_flow` (dollar flows over combined
+AUM, AUM-weighted ratios, or an explicit single-component fallback with
+reduced confidence), while BTC-specific ETF flow remains a BTC scoring
+input.
 Semantic event risk may override the normal confirmation path, but no model
 may replace the portfolio-level risk authority.
 

@@ -17,6 +17,7 @@ import unittest
 from crypto_portfolio.engine.confidence import compose_deployment_factors
 from crypto_portfolio.engine.rebalance import (
     ExecutionSizingAttribution,
+    format_execution_sizing_chain,
     recommend_rebalance,
 )
 
@@ -339,6 +340,46 @@ class HardExposureCapTests(unittest.TestCase):
         aave = _action(result, "AAVE")
         self.assertEqual(aave.action, "REDUCE")
         self.assertEqual(aave.action_reason, "EVENT_RISK")
+
+
+class ExecutionSizingChainRenderingTests(unittest.TestCase):
+    def test_btc_chain_names_every_layer(self):
+        result = recommend_rebalance(
+            RUNTIME_CURRENT,
+            RUNTIME_TARGET,
+            RUNTIME_PORTFOLIO_VALUE,
+            regime="NORMAL",
+        )
+        chain = format_execution_sizing_chain(_action(result, "BTC").sizing_attribution)
+        for needle in (
+            "Current weight",
+            "Strategic target",
+            "Strategic gap                   +5.54pp",
+            "Staging:",
+            "post-staging gap              +2.77pp",
+            "Deployment constraints:",
+            "none                           1.00",
+            "composition                   minimum_cap",
+            "executable gap                +2.77pp",
+            "funding available",
+            "funding shortfall             $635.8",
+            "approved amount",
+            "effective strategic-gap close 34.7%",
+        ):
+            self.assertIn(needle, chain)
+
+    def test_named_factor_chain_shows_the_source(self):
+        result = recommend_rebalance(
+            {"BTC": 0.4277, "USDT": 0.5723},
+            {"BTC": 0.4831, "USDT": 0.5169},
+            100000.0,
+            regime="NORMAL",
+            deployment_caps={"BTC": 0.70},
+        )
+        chain = format_execution_sizing_chain(_action(result, "BTC").sizing_attribution)
+        self.assertIn("deployment_allowance", chain)
+        self.assertIn("0.70", chain)
+        self.assertIn("effective strategic-gap close 35.0%", chain)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,14 @@ For historical performance, an external cash flow attached to a snapshot is
 applied immediately before that snapshot valuation. The primary benchmark is
 100% BTC buy-and-hold and the secondary benchmark is 70/30 BTC/ETH buy-and-hold.
 
+An internal stablecoin-to-stablecoin exchange is neither external cash flow
+nor market P&L: it keeps `external_cash_flow = 0` and NAV finality, and is
+attributed via `INTERNAL_REALLOCATION` (user/exchange confirmed) or
+`INFERRED_INTERNAL_REALLOCATION` (matched opposite-direction stable deltas
+from snapshots, with inference confidence and source recorded). The matched
+principal leaves market-change attribution and its magnitude mismatch
+surfaces as swap cost/slippage.
+
 ## Rule 2 — Minimum rebalance thresholds
 
 Use both absolute and relative portfolio-weight deviation. Relative deviation
@@ -48,7 +56,14 @@ Every executable action carries a machine-readable `action_reason`
 (`ALLOCATION_OVERWEIGHT` / `ALLOCATION_UNDERWEIGHT` / `REGIME_DERISK` /
 `HARD_EXIT_SCORE` / `THESIS_BROKEN` / `EVENT_RISK` / `CONFIDENCE_LIMIT` /
 `RISK_BUDGET_BREACH`), plus `strategic_target_weight`,
-`execution_target_weight`, `staging_applied`, and `remaining_gap_after_action`.
+`execution_target_weight`, `staging_applied`, `remaining_gap_after_action`,
+and a `sizing_attribution` object recording the single-pass chain
+(strategic gap -> staged gap -> composed deployment allowance under
+`execution.deployment_factor_composition` -> executable amount ->
+funding-constrained approved amount). Reports quote
+`effective_strategic_gap_close` from that attribution, never a bare staging
+percentage: when deployment caps or funding competition reduced the move, the
+exact source and shortfall are shown (`format_execution_sizing_chain`).
 
 Ordinary allocation corrections are staged toward the strategic target: one
 review moves at most `rebalance.staging.max_gap_close_fraction` (0.5) of the
@@ -56,7 +71,10 @@ remaining gap, bounded by `max_step_pp` (4 pp). A healthy position can
 therefore sit deliberately away from its long-run target after one review;
 the deviation bands decide when the next step happens. Hard exits (broken
 thesis, severe event, hard score floor, risk-budget breach) bypass staging
-and execute immediately.
+and execute immediately. A hard exposure cap breach (current weight above the
+tier's strategic envelope plus buffer) forces a `RISK_BUDGET_BREACH` REDUCE
+regardless of the ordinary bands, while a strategic overshoot inside the
+buffer stays band-governed.
 
 ## Rule 3 — Use new cash before forced selling when sensible
 
@@ -235,9 +253,9 @@ context is low confidence and cannot create `WAIT`, `INCREASE`, `REDUCE`, or
 flow/liquidity, or positioning confirmation.
 
 After allocation, risk, and rebalance approve an `INCREASE`, execution may cap
-the staged amount with `min(base, positioning, cycle)`. It may leave the
-remainder unallocated or return `WAIT` for confirmed technical extension plus
-long crowding. It may never increase approved dollars. `DELEVERAGED` only
+the staged amount with `min(base, positioning, cycle)`. It may keep the
+remainder as an approved conditional reserve (`PULLBACK_RESERVE`) or return
+`WAIT` (`GATE_HOLD`) for confirmed technical extension plus long crowding. It may never increase approved dollars. `DELEVERAGED` only
 removes a crowding penalty; it is not a positive exposure signal.
 
 ## Rule 13 — Event scan semantics

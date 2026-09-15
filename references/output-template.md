@@ -250,7 +250,7 @@ For BTC, show `Halving Context`, `Market Cycle State`, `Cycle Risk`,
 `Confidence`, and key non-clock drivers. State explicitly that cycle context is
 not a deterministic top/bottom forecast. State the effective deployment cap and
 whether the target is unchanged, immediate deployment is reduced, or the
-remaining approved amount is `WAIT`/unallocated.
+remaining approved amount is held as `WAIT`/`GATE_HOLD` conditional reserve.
 
 Example:
 
@@ -316,7 +316,7 @@ Also report:
 
 - Approved total capacity;
 - Staged amount (`planned_amount_usd`), which is a recommendation rather than a fill;
-- Still unallocated / reserved amount;
+- Conditional reserve amount (`reserve_amount_usd` with its `reserve_policy`);
 - Technical confidence;
 - Data confidence and setup quality;
 - Spot `observed_at`, OHLCV observation freshness, and `ohlcv_hash` when available;
@@ -326,7 +326,7 @@ If new capital is supplied, explicitly state:
 
 - available capital;
 - amount staged now;
-- amount retained as cash / still unallocated;
+- amount retained as approved conditional reserve;
 - reason not to deploy the remainder.
 
 ## 7. 风险检查
@@ -349,8 +349,9 @@ State:
 
 - analysis timestamp;
 - the compact `Data Collection Summary`: requested metrics, counts for each
-  status, critical failures, weighted evidence coverage, and decision
-  confidence;
+  status, critical failures, coverage with its named denominator (required
+  request completion, applicable required coverage, decision-scope weighted
+  coverage), optional/premium availability, and decision confidence;
 - missing or stale factors;
 - score confidence impact;
 - any conflicting data;

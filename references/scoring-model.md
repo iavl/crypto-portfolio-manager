@@ -303,13 +303,16 @@ Strategic satellite sizing uses the curve and the risk-tier cap; confidence,
 event risk, decision confidence, positioning, and execution overlays are
 deployment allowances.
 
-The structural `risk_tier` (`allocation.risk_tier_caps`) caps maximum exposure
-as a fraction of the active satellite envelope (normal 1.0, high_beta/high
-0.5); it never scales mid-score targets below the cap. The tier is an
-assessment input rather than a continuous volatility/beta estimate.
-Allocation diagnostics label its default provenance as `MANUAL_ASSESSMENT`
-and expose `raw_score_target_weight`, `risk_tier_cap_weight`, and
-`risk_cap_applied`; empirical calibration is a separate task.
+The structural `risk_tier` (`allocation.risk_tier_caps`) defines the asset's
+risk envelope as a fraction of the active satellite envelope (normal 1.0,
+high_beta/high 0.5): the strategic target is the score curve evaluated inside
+that envelope, so a full score reaches exactly the envelope and every lower
+score stays strictly below it. The tier is an assessment input rather than a
+continuous volatility/beta estimate. Allocation diagnostics label its default
+provenance as `MANUAL_ASSESSMENT` and expose `risk_envelope_weight` and
+`hard_exposure_cap` (envelope plus the configured `hard_cap_buffer_pp`, a
+genuine risk ceiling the rebalance layer enforces via
+`RISK_BUDGET_BREACH` reductions); empirical calibration is a separate task.
 
 Materially negative BTC-relative evidence overrides the hold band.
 `event_risk.state` is the sole event-risk input; SEVERE and CRITICAL block new risk.

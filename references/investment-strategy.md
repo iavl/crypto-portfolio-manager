@@ -267,8 +267,11 @@ exposure, event risk, portfolio risk, and rebalance rules still apply, and
 ordinary reductions are staged rather than executed to the long-run target in
 one review.
 
-Risk tier caps maximum satellite exposure (high_beta/high at half the active
-envelope) instead of scaling every mid-score target. Moderate BTC-relative
+Risk tier caps bound the satellite's risk envelope (high_beta/high at half
+the active envelope) and the score curve fills that envelope, so targets stay
+score-sensitive all the way to the configured full score. A separate hard
+exposure cap (envelope plus a policy buffer) forces risk reduction when
+breached, independent of ordinary rebalance bands. Moderate BTC-relative
 weakness (30–50 on the 0–100 relative score) blocks new increases without
 forcing an exit; below 30 is a hard block. An asset score of 80 does not mean
 an 80% probability of gain — scores rank evidence strength, they are not
@@ -434,9 +437,11 @@ not automatic support. The implemented planner generates `PULLBACK` plans.
 `BREAKOUT` returns `WAIT` until deterministic breakout/retest planning exists,
 and `MIXED` is rejected.
 
-Execution may stage less than the approved amount, retain the remainder as
-unallocated cash, or return `WAIT`. It can never increase approved exposure or
-place an order.
+Execution may place less than the approved amount into structural tranches and
+keeps the remainder as an approved conditional reserve (`PULLBACK_RESERVE`, or
+`GATE_HOLD` while a gate blocks placement); placed plus reserve always equals
+the approved budget. It can never increase approved exposure or place an
+order.
 
 ## 18. NO_TRADE / WAIT as Valid Decisions
 

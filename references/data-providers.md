@@ -194,13 +194,18 @@ LINK are protocol/token assets and are not treated as independent chains.
 | Asset | Structured sources | Operational input |
 |---|---|---|
 | BTC | `https://blockstream.info/api/blocks`; `https://mempool.space/api/v1/blocks` | canonical block height/hash and timestamp |
-| ETH | `https://ethereum-rpc.publicnode.com`; `https://rpc.flashbots.net` | latest/finalized EVM blocks |
+| ETH | primaries `https://rpc.flashbots.net`, `https://eth.drpc.org`; secondary `https://ethereum-rpc.publicnode.com` | latest/finalized EVM blocks |
 | BNB | `https://bsc-dataseed.bnbchain.org`; `https://bsc-dataseed-public.bnbchain.org` | latest EVM blocks |
 | SOL | `https://api.mainnet-beta.solana.com`; `https://solana-rpc.publicnode.com` | health, finalized slot, and block time |
 
 Python produces `risk.chain_liveness_status` as `HEALTHY`, `DEGRADED`,
-`HALTED`, or `UNKNOWN`. Source groups, age, finality and quorum remain in
-metadata. DNS/TLS/timeout/HTTP/rate-limit/provider failure is unavailable
+`HALTED`, or `UNKNOWN`. ETH is quorum-first: two independently agreeing
+fresh primary sources decide health, a stale/frozen source is excluded with
+its reason, a fresh secondary may corroborate a lone fresh primary at
+reduced confidence, and a lone fresh reading without corroboration is
+`INSUFFICIENT_QUORUM` reported fail-defensive. Source groups, roles, ages,
+finality, quorum mode, and excluded sources remain in metadata.
+DNS/TLS/timeout/HTTP/rate-limit/provider failure is unavailable
 evidence, not a halt. Chain-liveness responses use a 300-second cache TTL.
 Optional local URL/RPC overrides are redacted in diagnostics and never persist
 credentials.
