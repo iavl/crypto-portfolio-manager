@@ -271,6 +271,11 @@ def replay_strategy(
             regime=regime.regime,
             deployment_caps=dict(allocation.deployment_factors),
             hard_action_reasons=dict(view.hard_action_reasons) if view.hard_action_reasons else None,
+            hard_exposure_caps={
+                symbol: float(value["hard_exposure_cap"])
+                for symbol, value in allocation.deployment_allowances.items()
+                if value.get("hard_exposure_cap") is not None
+            },
         )
         executable = [a for a in rebalance.actions if a.action in {"INCREASE", "REDUCE", "EXIT"}]
         if executable:

@@ -178,6 +178,26 @@ class PolicyTests(unittest.TestCase):
             invalid_overlap = json.loads(json.dumps(original))
             invalid_overlap["universe"]["excluded"] = [invalid_overlap["universe"][group][0]]
             cases.append(invalid_overlap)
+        # Risk-tier caps must carry both the strategic envelope fraction and
+        # the hard-cap buffer; a bare fraction is the retired flat contract.
+        invalid_tier_flat = json.loads(json.dumps(original))
+        invalid_tier_flat["allocation"]["risk_tier_caps"]["high_beta"] = 0.5
+        cases.append(invalid_tier_flat)
+        invalid_tier_fraction = json.loads(json.dumps(original))
+        invalid_tier_fraction["allocation"]["risk_tier_caps"]["high_beta"][
+            "strategic_fraction_of_satellite_envelope"
+        ] = 0.0
+        cases.append(invalid_tier_fraction)
+        invalid_tier_buffer = json.loads(json.dumps(original))
+        invalid_tier_buffer["allocation"]["risk_tier_caps"]["high_beta"]["hard_cap_buffer_pp"] = -1.0
+        cases.append(invalid_tier_buffer)
+        invalid_tier_unknown = json.loads(json.dumps(original))
+        invalid_tier_unknown["allocation"]["risk_tier_caps"]["high_beta"]["extra"] = 1
+        cases.append(invalid_tier_unknown)
+        # Deployment-factor composition is a closed enum.
+        invalid_composition = json.loads(json.dumps(original))
+        invalid_composition["execution"]["deployment_factor_composition"] = "product"
+        cases.append(invalid_composition)
         for data in cases:
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "policy.json"

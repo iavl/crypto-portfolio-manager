@@ -6,6 +6,7 @@ decision path.
 """
 
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -131,8 +132,14 @@ class ReplayStrategyTests(unittest.TestCase):
             for name, fn in originals.items():
                 setattr(module, name, fn)
         dumped = "\n".join(captured)
-        for mark in {"0.040", "-0.095", "0.036"}:
-            self.assertNotIn(mark, dumped, f"label value {mark} leaked into decision inputs")
+        # Match whole numeric tokens only: a label like 0.04 must not be
+        # flagged merely because some drifted weight happens to start with
+        # the same digits (e.g. 0.0404...).
+        for mark in {"0.04", "-0.095", "0.036"}:
+            pattern = re.compile(rf"(?<![0-9.-]){re.escape(mark)}(?![0-9])")
+            self.assertIsNone(
+                pattern.search(dumped), f"label value {mark} leaked into decision inputs"
+            )
 
     def test_benchmarks_and_policy_comparison_share_periods(self):
         reviews = _reviews()

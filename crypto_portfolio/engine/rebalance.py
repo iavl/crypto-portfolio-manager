@@ -619,6 +619,7 @@ def recommend_rebalance(
     decision_confidence: Any | None = None,
     deployment_caps: Mapping[str, float] | None = None,
     hard_action_reasons: Mapping[str, str] | None = None,
+    hard_exposure_caps: Mapping[str, float] | None = None,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -679,6 +680,25 @@ def recommend_rebalance(
             )
         normalized_hard_reasons[symbol] = reason
 
+    # Hard exposure caps are a genuine risk ceiling distinct from strategic
+    # target caps: a current weight above the cap forces a REDUCE regardless
+    # of ordinary rebalance bands (and bypasses staging via the
+    # RISK_BUDGET_BREACH bypass reason). Small strategic overshoots inside
+    # the buffer stay governed by the normal bands.
+    normalized_hard_caps: dict[str, float] = {}
+    for raw_symbol, raw_cap in (hard_exposure_caps or {}).items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol:
+            raise ValueError("hard_exposure_caps contains an empty symbol")
+        if symbol in normalized_hard_caps:
+            raise ValueError(f"hard_exposure_caps contains duplicate symbol {symbol}")
+        if isinstance(raw_cap, bool) or not isinstance(raw_cap, (int, float)):
+            raise ValueError("hard_exposure_caps values must be numbers")
+        cap = float(raw_cap)
+        if not math.isfinite(cap) or not 0 < cap <= 1:
+            raise ValueError("hard_exposure_caps values must be finite and in (0, 1]")
+        normalized_hard_caps[symbol] = cap
+
     if isinstance(thesis_broken, Mapping):
         broken = {
             str(symbol).strip().upper()
@@ -724,6 +744,11 @@ def recommend_rebalance(
     )
     unallocated = max(0.0, 1.0 - current_total) * portfolio_value
     effective_current[stable_symbol] = effective_current.get(stable_symbol, 0.0) + unallocated + new_cash_available
+    for symbol, cap in normalized_hard_caps.items():
+        if symbol in normalized_hard_reasons or symbol in broken:
+            continue
+        if effective_current.get(symbol, 0.0) / post_cash_total > cap + 1e-12:
+            normalized_hard_reasons[symbol] = "RISK_BUDGET_BREACH"
     effective_target = {symbol: weight for symbol, weight in target.items() if symbol not in stable_symbols}
     effective_target.update(stable_target)
     symbols = sorted(
@@ -789,6 +814,10 @@ def recommend_rebalance(
             action_reason = caller_hard_reason
             priority = "HIGH"
             rationale = f"hard risk reason {caller_hard_reason} forces risk reduction"
+            if symbol in normalized_hard_caps:
+                rationale += (
+                    f"; current weight exceeds the {normalized_hard_caps[symbol]:.2%} hard exposure cap"
+                )
         elif strategic_weight == 0 and difference < 0:
             action = "EXIT"
             action_reason = "HARD_EXIT_SCORE"
@@ -1107,6 +1136,7 @@ def rebalance(
     decision_confidence: Any | None = None,
     deployment_caps: Mapping[str, float] | None = None,
     hard_action_reasons: Mapping[str, str] | None = None,
+    hard_exposure_caps: Mapping[str, float] | None = None,
 ) -> RebalanceResult:
     return recommend_rebalance(
         current_weights,
@@ -1119,6 +1149,7 @@ def rebalance(
         decision_confidence=decision_confidence,
         deployment_caps=deployment_caps,
         hard_action_reasons=hard_action_reasons,
+        hard_exposure_caps=hard_exposure_caps,
     )
 
 

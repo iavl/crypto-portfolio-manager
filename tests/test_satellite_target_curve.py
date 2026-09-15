@@ -172,7 +172,7 @@ class SatelliteCurvePolicyTests(unittest.TestCase):
 
 
 class RiskTierCapTests(unittest.TestCase):
-    """Risk tier caps maximum exposure; it never scales mid-score targets."""
+    """The risk tier bounds the envelope; the curve fills it score-sensitively."""
 
     def _aave(self, score: float = 73.88):
         # The 2026-09-14 review asset: high_beta tier, held ~12.9%.
@@ -189,28 +189,34 @@ class RiskTierCapTests(unittest.TestCase):
             current_weights={"BTC": 0.44, "ETH": 0.24, "AAVE": 0.129, "USDT": 0.191},
         )
 
-    def test_high_beta_target_comes_from_the_cap_not_a_half_scaled_curve(self):
+    def test_high_beta_curve_fills_the_risk_envelope(self):
         result = self._aave()
         allowance = result.deployment_allowances["AAVE"]
-        # Raw score target 0.6293 of the 25% envelope; high_beta cap 0.5 of
-        # the envelope binds: 4.78% (score-strength x 0.5) is gone.
-        self.assertAlmostEqual(allowance["raw_score_target_weight"], 0.157333, places=5)
-        self.assertAlmostEqual(allowance["risk_tier_cap_weight"], 0.125)
-        self.assertTrue(allowance["risk_cap_applied"])
-        self.assertAlmostEqual(allowance["requested_strategic_weight"], 0.125)
-        self.assertAlmostEqual(result.target_weights["AAVE"], 0.125)
+        # The high_beta envelope is 0.5 of the 25% satellite envelope = 12.5%.
+        # The score curve (0.6293 at 73.88) is evaluated INSIDE that envelope,
+        # so a broad score range can never saturate at 12.5%.
+        self.assertAlmostEqual(allowance["risk_envelope_weight"], 0.125)
+        self.assertAlmostEqual(allowance["risk_tier_cap_fraction"], 0.5)
+        self.assertAlmostEqual(allowance["curve_fraction"], 0.629333, places=5)
+        self.assertAlmostEqual(allowance["requested_strategic_weight"], 0.078667, places=5)
+        self.assertAlmostEqual(result.target_weights["AAVE"], 0.078667, places=5)
+        # The hard exposure cap is the envelope plus the configured buffer.
+        self.assertAlmostEqual(allowance["hard_exposure_cap"], 0.125 + 0.03)
 
-    def test_cap_does_not_halve_below_cap_score_targets(self):
-        result = self._aave(score=68)
-        allowance = result.deployment_allowances["AAVE"]
-        # Curve at 68 is 0.4333 of the envelope = 10.83%, below the 12.5%
-        # high-beta cap: the target must NOT be scaled to ~5.4%.
-        self.assertAlmostEqual(allowance["raw_score_target_weight"], 0.108333, places=5)
-        self.assertFalse(allowance["risk_cap_applied"])
-        self.assertAlmostEqual(allowance["requested_strategic_weight"], 0.108333, places=5)
-        self.assertAlmostEqual(result.target_weights["AAVE"], 0.108333, places=5)
+    def test_target_stays_score_sensitive_below_full_score(self):
+        targets = {score: self._aave(score=score).target_weights.get("AAVE", 0.0) for score in (67, 70, 74, 82, 82.36, 85, 100)}
+        self.assertLess(targets[67], targets[70])
+        self.assertLess(targets[70], targets[74])
+        self.assertLess(targets[74], targets[82])
+        self.assertLess(targets[82], targets[85])
+        # Full score and above reach exactly the risk envelope and stay there.
+        self.assertAlmostEqual(targets[85], 0.125)
+        self.assertAlmostEqual(targets[100], 0.125)
+        # The 2026-09-15 review score sits strictly between, not saturated.
+        self.assertGreater(targets[82.36], targets[82])
+        self.assertLess(targets[82.36], 0.125)
 
-    def test_high_beta_strategic_target_stays_monotonic_and_under_the_cap(self):
+    def test_high_beta_strategic_target_stays_monotonic_and_under_the_envelope(self):
         previous = -1.0
         for score in SCORE_GRID:
             with self.subTest(score=score):
@@ -235,7 +241,8 @@ class RiskTierCapTests(unittest.TestCase):
             current_weights={"BTC": 0.44, "ETH": 0.24, "AAVE": 0.129, "USDT": 0.191},
         )
         allowance = result_normal.deployment_allowances["AAVE"]
-        self.assertFalse(allowance["risk_cap_applied"])
+        self.assertAlmostEqual(allowance["risk_envelope_weight"], 0.25)
+        # A normal-tier satellite rides the unscaled 25% envelope curve.
         self.assertAlmostEqual(result_normal.target_weights["AAVE"], 0.157333, places=5)
         self.assertGreater(result_normal.target_weights["AAVE"], result.target_weights["AAVE"])
 

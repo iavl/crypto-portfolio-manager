@@ -210,9 +210,18 @@
       "full_fraction": 1.0
     },
     "risk_tier_caps": {
-      "normal": 1.0,
-      "high_beta": 0.5,
-      "high": 0.5
+      "normal": {
+        "strategic_fraction_of_satellite_envelope": 1.0,
+        "hard_cap_buffer_pp": 3.0
+      },
+      "high_beta": {
+        "strategic_fraction_of_satellite_envelope": 0.5,
+        "hard_cap_buffer_pp": 3.0
+      },
+      "high": {
+        "strategic_fraction_of_satellite_envelope": 0.5,
+        "hard_cap_buffer_pp": 3.0
+      }
     },
     "relative_strength": {
       "increase_min_score": 50,

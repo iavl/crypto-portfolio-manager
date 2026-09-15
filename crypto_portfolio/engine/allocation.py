@@ -644,9 +644,13 @@ def build_target_allocation(
             supplied_tier = _field(assessment, "risk_tier", None) if assessment is not None else None
             risk_tier = str(supplied_tier).lower() if supplied_tier is not None else "normal"
             risk_tier_caps = resolved.allocation["risk_tier_caps"]
-            risk_tier_cap_fraction = risk_tier_caps.get(
-                risk_tier, risk_tier_caps.get(risk_tier.replace("-", "_"), 1.0)
+            tier_caps = (
+                risk_tier_caps.get(risk_tier)
+                or risk_tier_caps.get(risk_tier.replace("-", "_"))
+                or risk_tier_caps["normal"]
             )
+            risk_tier_cap_fraction = float(tier_caps["strategic_fraction_of_satellite_envelope"])
+            hard_cap_buffer_pp = float(tier_caps["hard_cap_buffer_pp"])
             asset_confidence_factor = float(
                 resolved.execution["confidence_deployment_factor"].get(confidence, 1.0)
             )
@@ -678,13 +682,17 @@ def build_target_allocation(
                 full_score=resolved.allocation["satellite_full_score"],
                 curve=resolved.allocation["satellite_target_curve"],
             )
-            # Risk tier caps maximum exposure as a fraction of the active
-            # satellite envelope; it never scales mid-score targets, which
-            # already price risk in through the score and regime envelope.
-            raw_score_target_weight = satellite_cap * curve_fraction
-            risk_tier_cap_weight = satellite_cap * float(risk_tier_cap_fraction)
-            risk_cap_applied = raw_score_target_weight > risk_tier_cap_weight + 1e-12
-            requested_strategic_weight = min(raw_score_target_weight, risk_tier_cap_weight)
+            # The risk tier defines the asset's risk envelope: the strategic
+            # target is the score curve evaluated INSIDE that envelope (a
+            # full score reaches exactly the envelope), so targets stay
+            # score-sensitive everywhere below full_score. A hard exposure
+            # cap (envelope plus the configured buffer) is a separate risk
+            # ceiling for the rebalance layer, not a target-shaping input.
+            risk_envelope_weight = satellite_cap * risk_tier_cap_fraction
+            hard_exposure_cap = min(
+                1.0, risk_envelope_weight + hard_cap_buffer_pp / 100.0
+            )
+            requested_strategic_weight = risk_envelope_weight * curve_fraction
             deployment_factor = (
                 compose_deployment_factors(
                     {
@@ -707,10 +715,10 @@ def build_target_allocation(
                 "eligibility_state": state,
                 "risk_tier": risk_tier,
                 "risk_tier_source": risk_tier_source,
-                "risk_tier_cap_fraction": float(risk_tier_cap_fraction),
-                "raw_score_target_weight": raw_score_target_weight,
-                "risk_tier_cap_weight": risk_tier_cap_weight,
-                "risk_cap_applied": risk_cap_applied,
+                "risk_tier_cap_fraction": risk_tier_cap_fraction,
+                "hard_cap_buffer_pp": hard_cap_buffer_pp,
+                "risk_envelope_weight": risk_envelope_weight,
+                "hard_exposure_cap": hard_exposure_cap,
                 "asset_confidence": confidence,
                 "confidence_deployment_factor": asset_confidence_factor,
                 "event_risk": event_risk,
@@ -741,11 +749,11 @@ def build_target_allocation(
                     )
             elif state == "ELIGIBLE_INCREASE":
                 strategic_satellite_raw[symbol] = requested_strategic_weight
-                if risk_cap_applied:
-                    reasons.append(
-                        f"{symbol} risk tier {risk_tier} caps the strategic target at "
-                        f"{risk_tier_cap_weight:.2%} instead of the {raw_score_target_weight:.2%} score target"
-                    )
+                reasons.append(
+                    f"{symbol} risk tier {risk_tier} bounds the strategic target by the "
+                    f"{risk_envelope_weight:.2%} risk envelope; the score curve fills up to it "
+                    f"(full score {resolved.allocation['satellite_full_score']:.0f} reaches the envelope)"
+                )
                 if event_multiplier < 1.0:
                     reasons.append(
                         f"{symbol} event-risk state {event_risk} limits immediate deployment to {event_multiplier:.0%}"

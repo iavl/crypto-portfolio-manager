@@ -278,5 +278,68 @@ class DeploymentCompositionTests(unittest.TestCase):
         )
 
 
+class HardExposureCapTests(unittest.TestCase):
+    """Strategic cap and hard exposure cap have distinct semantics."""
+
+    def test_breach_forces_reduce_regardless_of_rebalance_bands(self):
+        # Current 16.4% sits above the 15.5% hard cap even though the
+        # strategic target (8.4%) implies a >4pp gap that ordinary bands
+        # would stage; a hard breach must force an unstaged REDUCE.
+        result = recommend_rebalance(
+            {"AAVE": 0.164, "USDT": 0.836},
+            {"AAVE": 0.084, "USDT": 0.916},
+            10000.0,
+            hard_exposure_caps={"AAVE": 0.155},
+        )
+        aave = _action(result, "AAVE")
+        self.assertEqual(aave.action, "REDUCE")
+        self.assertEqual(aave.action_reason, "RISK_BUDGET_BREACH")
+        self.assertEqual(aave.priority, "HIGH")
+        self.assertFalse(aave.sizing_attribution.staging_enabled)
+        self.assertAlmostEqual(aave.execution_target_weight, 0.084)
+        self.assertIn("hard exposure cap", aave.rationale)
+
+    def test_strategic_overshoot_inside_the_buffer_stays_band_governed(self):
+        # 13.12% vs a 12.5% strategic cap with a 3pp buffer: this is a small
+        # strategic overshoot, not a risk breach, so the hold band governs.
+        result = recommend_rebalance(
+            {"AAVE": 0.1312, "USDT": 0.8688},
+            {"AAVE": 0.125, "USDT": 0.875},
+            10000.0,
+            hard_exposure_caps={"AAVE": 0.155},
+        )
+        aave = _action(result, "AAVE")
+        self.assertEqual(aave.action, "HOLD")
+        self.assertEqual(aave.action_reason, "ALLOCATION_OVERWEIGHT")
+
+    def test_hard_caps_are_validated(self):
+        with self.assertRaises(ValueError):
+            recommend_rebalance(
+                {"AAVE": 0.10, "USDT": 0.90},
+                {"AAVE": 0.10, "USDT": 0.90},
+                10000.0,
+                hard_exposure_caps={"AAVE": 1.5},
+            )
+        with self.assertRaises(ValueError):
+            recommend_rebalance(
+                {"AAVE": 0.10, "USDT": 0.90},
+                {"AAVE": 0.10, "USDT": 0.90},
+                10000.0,
+                hard_exposure_caps={"AAVE": 0.0},
+            )
+
+    def test_caller_hard_reason_still_wins_over_derived_breach(self):
+        result = recommend_rebalance(
+            {"AAVE": 0.16, "USDT": 0.84},
+            {"AAVE": 0.08, "USDT": 0.92},
+            10000.0,
+            hard_action_reasons={"AAVE": "EVENT_RISK"},
+            hard_exposure_caps={"AAVE": 0.155},
+        )
+        aave = _action(result, "AAVE")
+        self.assertEqual(aave.action, "REDUCE")
+        self.assertEqual(aave.action_reason, "EVENT_RISK")
+
+
 if __name__ == "__main__":
     unittest.main()

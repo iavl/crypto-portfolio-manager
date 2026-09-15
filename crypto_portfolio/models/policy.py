@@ -143,6 +143,10 @@ _ALLOCATION_FIELDS = {
     "relative_strength",
 }
 _RELATIVE_STRENGTH_FIELDS = {"increase_min_score", "hard_block_below_score"}
+_RISK_TIER_CAP_FIELDS = {
+    "strategic_fraction_of_satellite_envelope",
+    "hard_cap_buffer_pp",
+}
 _SATELLITE_CURVE_FIELDS = {
     "soft_exit_fraction",
     "exit_fraction",
@@ -2076,10 +2080,27 @@ def _parse_policy(
         raise PolicyError("allocation.risk_tier_caps must be an object")
     if set(risk_tier_caps) != {"normal", "high_beta", "high"}:
         raise PolicyError("allocation.risk_tier_caps must contain normal, high_beta, and high")
-    parsed_risk_tier_caps = {
-        key: _fraction(value, f"allocation.risk_tier_caps.{key}")
-        for key, value in risk_tier_caps.items()
-    }
+    parsed_risk_tier_caps: dict[str, dict[str, float]] = {}
+    for tier, raw_caps in risk_tier_caps.items():
+        if not isinstance(raw_caps, dict):
+            raise PolicyError(f"allocation.risk_tier_caps.{tier} must be an object")
+        _unknown_fields(raw_caps, _RISK_TIER_CAP_FIELDS, f"allocation.risk_tier_caps.{tier}")
+        if set(raw_caps) != _RISK_TIER_CAP_FIELDS:
+            raise PolicyError(f"allocation.risk_tier_caps.{tier} fields are incomplete")
+        strategic_fraction = _fraction(
+            raw_caps["strategic_fraction_of_satellite_envelope"],
+            f"allocation.risk_tier_caps.{tier}.strategic_fraction_of_satellite_envelope",
+            exclusive_minimum=True,
+        )
+        buffer_pp = _number(
+            raw_caps["hard_cap_buffer_pp"],
+            f"allocation.risk_tier_caps.{tier}.hard_cap_buffer_pp",
+            minimum=0.0,
+        )
+        parsed_risk_tier_caps[tier] = {
+            "strategic_fraction_of_satellite_envelope": strategic_fraction,
+            "hard_cap_buffer_pp": buffer_pp,
+        }
     parsed_allocation = {
         "satellite_full_score": _number(
             allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100

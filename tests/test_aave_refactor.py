@@ -134,7 +134,10 @@ class AaveRefactorTests(unittest.TestCase):
         })
         self.assertEqual(manual.deployment_allowances["AAVE"]["risk_tier_source"], "MANUAL_ASSESSMENT")
         self.assertEqual(manual.deployment_allowances["AAVE"]["risk_tier_cap_fraction"], 0.5)
-        self.assertTrue(manual.deployment_allowances["AAVE"]["risk_cap_applied"])
+        # The high_beta envelope is half the satellite envelope and the score
+        # curve fills it; a full-score manual tier reaches exactly 12.5%.
+        self.assertAlmostEqual(manual.deployment_allowances["AAVE"]["risk_envelope_weight"], 0.125)
+        self.assertAlmostEqual(manual.target_weights["AAVE"], 0.125)
         self.assertLess(medium.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
         self.assertLess(elevated.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
 
