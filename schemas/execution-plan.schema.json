@@ -8,7 +8,7 @@
     "action",
     "approved_amount_usd",
     "planned_amount_usd",
-    "unallocated_amount_usd",
+    "reserve_amount_usd",
     "current_price",
     "entry_mode",
     "technical_confidence",
@@ -16,29 +16,137 @@
     "invalidation",
     "rationale",
     "ohlcv_hash",
-    "technical_summary"
+    "technical_summary",
+    "reserve_policy"
   ],
   "properties": {
-    "symbol": {"type": "string", "minLength": 1},
-    "action": {"type": "string", "enum": ["INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"]},
-    "approved_amount_usd": {"type": "number", "minimum": 0},
-    "planned_amount_usd": {"type": "number", "minimum": 0},
-    "unallocated_amount_usd": {"type": "number", "minimum": 0},
-    "current_price": {"type": "number", "exclusiveMinimum": 0},
-    "entry_mode": {"type": "string", "enum": ["PULLBACK", "BREAKOUT", "WAIT"]},
-    "technical_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-    "tranches": {"type": "array", "items": {"$ref": "#/$defs/tranche"}},
-    "invalidation": {"oneOf": [{"$ref": "#/$defs/invalidation"}, {"type": "null"}]},
-    "rationale": {"type": "string"},
-    "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "volume_profile_metadata": {"type": ["object", "null"]},
-    "ohlcv_metadata": {"$ref": "#/$defs/ohlcvMetadata"},
-  "technical_summary": {"$ref": "#/$defs/technicalSummary"}
-    ,"positioning_summary": {"type": ["object", "null"]}
-    ,"btc_cycle_summary": {"type": ["object", "null"]}
-    ,"effective_deployment_factor": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
-    ,"overlay_warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+    "symbol": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "INCREASE",
+        "REDUCE",
+        "EXIT",
+        "HOLD",
+        "WAIT",
+        "NO_TRADE"
+      ]
+    },
+    "approved_amount_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "planned_amount_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "reserve_amount_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "current_price": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "entry_mode": {
+      "type": "string",
+      "enum": [
+        "PULLBACK",
+        "BREAKOUT",
+        "WAIT"
+      ]
+    },
+    "technical_confidence": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "tranches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tranche"
+      }
+    },
+    "invalidation": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/invalidation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "ohlcv_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "volume_profile_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "volume_profile_metadata": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "ohlcv_metadata": {
+      "$ref": "#/$defs/ohlcvMetadata"
+    },
+    "technical_summary": {
+      "$ref": "#/$defs/technicalSummary"
+    },
+    "positioning_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "btc_cycle_summary": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "effective_deployment_factor": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "overlay_warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "reserve_policy": {
+      "enum": [
+        "NONE",
+        "PULLBACK_RESERVE",
+        "GATE_HOLD"
+      ]
+    }
   },
   "additionalProperties": false,
   "$defs": {
@@ -57,126 +165,541 @@
         "zone_quality"
       ],
       "properties": {
-        "sequence": {"type": "integer", "minimum": 1},
-        "allocation_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "amount_usd": {"type": "number", "exclusiveMinimum": 0},
-        "price_low": {"type": "number", "exclusiveMinimum": 0},
-        "price_high": {"type": "number", "exclusiveMinimum": 0},
-        "reference_price": {"type": "number", "exclusiveMinimum": 0},
-        "estimated_quantity": {"type": "number", "exclusiveMinimum": 0},
-        "rationale": {"type": "string"},
-        "structural_sources": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "zone_quality": {"type": "number", "minimum": 0, "maximum": 100}
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allocation_fraction": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "amount_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "price_low": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "price_high": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "reference_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "estimated_quantity": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "structural_sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "zone_quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
       },
       "additionalProperties": false
     },
     "invalidation": {
       "type": "object",
-      "required": ["kind", "trigger", "reference_price", "review_only", "automatic_order"],
+      "required": [
+        "kind",
+        "trigger",
+        "reference_price",
+        "review_only",
+        "automatic_order"
+      ],
       "properties": {
-        "kind": {"type": "string", "minLength": 1},
-        "trigger": {"type": "string", "minLength": 1},
-        "reference_price": {"type": "number", "exclusiveMinimum": 0},
-        "review_only": {"const": true},
-        "automatic_order": {"const": false}
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "review_only": {
+          "const": true
+        },
+        "automatic_order": {
+          "const": false
+        }
       },
       "additionalProperties": false
     },
     "ohlcvMetadata": {
-      "type": ["object", "null"],
-      "required": ["symbol", "source", "timeframe", "start_timestamp", "end_timestamp", "candle_count", "fetched_at", "ohlcv_hash"],
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "symbol",
+        "source",
+        "timeframe",
+        "start_timestamp",
+        "end_timestamp",
+        "candle_count",
+        "fetched_at",
+        "ohlcv_hash"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "source": {"type": "string", "minLength": 1},
-        "timeframe": {"enum": ["1H", "4H", "1D"]},
-        "start_timestamp": {"type": "string", "format": "date-time"},
-        "end_timestamp": {"type": "string", "format": "date-time"},
-        "candle_count": {"type": "integer", "minimum": 1},
-        "fetched_at": {"type": ["string", "null"], "format": "date-time"},
-        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "calendar_span_days": {"type": "integer", "minimum": 1},
-        "missing_day_count": {"type": "integer", "minimum": 0},
-        "coverage_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-        "max_gap_days": {"type": "integer", "minimum": 0},
-        "observation_lag_days": {"type": "integer", "minimum": 0},
-        "latest_completed_candle_date": {"type": "string", "format": "date"},
-        "expected_latest_completed_date": {"type": "string", "format": "date"},
-        "maximum_daily_candle_lag_days": {"type": "integer", "minimum": 0},
-        "daily_candle_status": {"enum": ["CURRENT", "STALE"]},
-        "latest_candle_timestamp": {"type": "string", "format": "date-time"},
-        "as_of": {"type": "string", "format": "date-time"},
-        "venue": {"type": ["string", "null"]},
-        "market": {"type": ["string", "null"]},
-        "quote_currency": {"type": ["string", "null"]}
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeframe": {
+          "enum": [
+            "1H",
+            "4H",
+            "1D"
+          ]
+        },
+        "start_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "candle_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fetched_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "ohlcv_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "calendar_span_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "missing_day_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_gap_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_lag_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latest_completed_candle_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "expected_latest_completed_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "maximum_daily_candle_lag_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "daily_candle_status": {
+          "enum": [
+            "CURRENT",
+            "STALE"
+          ]
+        },
+        "latest_candle_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "venue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "market": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "zone": {
       "type": "object",
-      "required": ["low", "high", "midpoint", "kind", "strength", "sources"],
+      "required": [
+        "low",
+        "high",
+        "midpoint",
+        "kind",
+        "strength",
+        "sources"
+      ],
       "properties": {
-        "low": {"type": "number", "exclusiveMinimum": 0},
-        "high": {"type": "number", "exclusiveMinimum": 0},
-        "midpoint": {"type": "number", "exclusiveMinimum": 0},
-        "kind": {"type": "string", "minLength": 1},
-        "strength": {"type": "number", "minimum": 0, "maximum": 100},
-        "sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "low": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "high": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "midpoint": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       },
       "additionalProperties": false
     },
     "volumeNode": {
       "type": "object",
-      "required": ["price_low", "price_high", "midpoint", "kind", "strength", "volume_fraction"],
+      "required": [
+        "price_low",
+        "price_high",
+        "midpoint",
+        "kind",
+        "strength",
+        "volume_fraction"
+      ],
       "properties": {
-        "price_low": {"type": "number", "exclusiveMinimum": 0},
-        "price_high": {"type": "number", "exclusiveMinimum": 0},
-        "midpoint": {"type": "number", "exclusiveMinimum": 0},
-        "kind": {"enum": ["HVN", "LVN"]},
-        "strength": {"type": "number", "minimum": 0, "maximum": 100},
-        "volume_fraction": {"type": "number", "minimum": 0, "maximum": 1}
+        "price_low": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "price_high": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "midpoint": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "kind": {
+          "enum": [
+            "HVN",
+            "LVN"
+          ]
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "volume_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       },
       "additionalProperties": false
     },
     "technicalSummary": {
       "type": "object",
-      "required": ["symbol", "spot_price", "spot_observed_at", "spot_source", "data_confidence", "setup_quality", "selected_zones", "ohlcv_hash"],
+      "required": [
+        "symbol",
+        "spot_price",
+        "spot_observed_at",
+        "spot_source",
+        "data_confidence",
+        "setup_quality",
+        "selected_zones",
+        "ohlcv_hash"
+      ],
       "properties": {
-        "symbol": {"type": "string", "minLength": 1},
-        "spot_price": {"type": "number", "exclusiveMinimum": 0},
-        "spot_observed_at": {"type": "string", "format": "date-time"},
-        "spot_source": {"type": "string", "minLength": 1},
-        "spot_fetched_at": {"type": ["string", "null"], "format": "date-time"},
-        "spot_venue": {"type": ["string", "null"]},
-        "spot_market": {"type": ["string", "null"]},
-        "spot_quote_currency": {"type": ["string", "null"]},
-        "ma20": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "ma50": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "ma100": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "ma200": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "atr14": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "atr_percent": {"type": ["number", "null"], "minimum": 0},
-        "return_30d": {"type": ["number", "null"], "minimum": -1},
-        "return_90d": {"type": ["number", "null"], "minimum": -1},
-        "return_180d": {"type": ["number", "null"], "minimum": -1},
-        "realized_vol_30d": {"type": ["number", "null"], "minimum": 0},
-        "realized_vol_90d": {"type": ["number", "null"], "minimum": 0},
-        "relative_volume": {"type": ["number", "null"], "minimum": 0},
-        "trend_state": {"type": "string", "minLength": 1},
-        "data_confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-        "setup_quality": {"type": "number", "minimum": 0, "maximum": 100},
-        "data_quality": {"type": "string", "minLength": 1},
-        "data_quality_flags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "selected_zones": {"type": "array", "items": {"$ref": "#/$defs/zone"}},
-        "ohlcv_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "volume_profile_confidence": {"type": ["string", "null"], "enum": ["HIGH", "MEDIUM", "LOW", "UNAVAILABLE", null]},
-        "volume_profile_poc": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "volume_profile_val": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "volume_profile_vah": {"type": ["number", "null"], "exclusiveMinimum": 0},
-        "volume_hvns": {"type": "array", "items": {"$ref": "#/$defs/volumeNode"}},
-        "volume_lvns": {"type": "array", "items": {"$ref": "#/$defs/volumeNode"}},
-        "volume_profile_summary": {"type": ["object", "null"]},
-        "volume_profile_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "volume_profile_metadata": {"type": ["object", "null"]}
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spot_price": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "spot_observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "spot_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spot_fetched_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "spot_venue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spot_market": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spot_quote_currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ma20": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "ma50": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "ma100": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "ma200": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "atr14": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "atr_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "return_30d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1
+        },
+        "return_90d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1
+        },
+        "return_180d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1
+        },
+        "realized_vol_30d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "realized_vol_90d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "relative_volume": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "trend_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "setup_quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "data_quality": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_quality_flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "selected_zones": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/zone"
+          }
+        },
+        "ohlcv_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volume_profile_confidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNAVAILABLE",
+            null
+          ]
+        },
+        "volume_profile_poc": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "volume_profile_val": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "volume_profile_vah": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "volume_hvns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/volumeNode"
+          }
+        },
+        "volume_lvns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/volumeNode"
+          }
+        },
+        "volume_profile_summary": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "volume_profile_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "volume_profile_metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     }

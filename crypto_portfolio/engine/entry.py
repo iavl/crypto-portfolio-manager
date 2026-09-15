@@ -114,7 +114,10 @@ def _wait_plan(
         action=action,
         approved_amount_usd=approved,
         planned_amount_usd=0.0,
-        unallocated_amount_usd=approved,
+        reserve_amount_usd=approved,
+        # A gated plan keeps the whole approved budget on hold; it is still
+        # approved spend, just not executable until the gate lifts.
+        reserve_policy="GATE_HOLD" if approved > 0 else "NONE",
         current_price=snapshot.current_spot_price,
         entry_mode="WAIT",
         technical_confidence=snapshot.data_confidence,
@@ -453,16 +456,24 @@ def build_entry_plan(
         )
         if active
     )
+    reserve = approved - planned
     rationale = (
         f"{mode} entry from {len(selected)} confirmed support zone(s); "
-        f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity{overlay_note}"
+        f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity"
+        + (
+            f"; conditional reserve {reserve:.2f} USD ({reserve / approved:.0%}) awaits deeper zones"
+            if reserve > 1e-9
+            else ""
+        )
+        + overlay_note
     )
     return ExecutionPlan(
         symbol=normalized_symbol,
         action="INCREASE",
         approved_amount_usd=approved,
         planned_amount_usd=planned,
-        unallocated_amount_usd=approved - planned,
+        reserve_amount_usd=reserve,
+        reserve_policy="PULLBACK_RESERVE" if reserve > 1e-9 else "NONE",
         current_price=technical_snapshot.current_spot_price,
         entry_mode=mode,
         technical_confidence=technical_snapshot.data_confidence,

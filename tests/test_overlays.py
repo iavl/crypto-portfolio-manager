@@ -125,7 +125,7 @@ class OverlayTests(unittest.TestCase):
         deployment = apply_overlay_deployment_cap(2000, positioning=positioning)
         self.assertEqual(deployment.effective_factor, 0.5)
         self.assertEqual(deployment.planned_amount_usd, 1000)
-        self.assertEqual(deployment.unallocated_amount_usd, 1000)
+        self.assertEqual(deployment.reserve_amount_usd, 1000)
 
     def test_entry_planner_caps_only_staged_dollars(self):
         snapshot = build_technical_snapshot(

@@ -946,7 +946,7 @@
         "action",
         "approved_amount_usd",
         "planned_amount_usd",
-        "unallocated_amount_usd",
+        "reserve_amount_usd",
         "current_price",
         "entry_mode",
         "technical_confidence",
@@ -954,7 +954,8 @@
         "invalidation",
         "rationale",
         "ohlcv_hash",
-        "technical_summary"
+        "technical_summary",
+        "reserve_policy"
       ],
       "properties": {
         "symbol": {
@@ -980,7 +981,7 @@
           "type": "number",
           "minimum": 0
         },
-        "unallocated_amount_usd": {
+        "reserve_amount_usd": {
           "type": "number",
           "minimum": 0
         },
@@ -1076,6 +1077,13 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "reserve_policy": {
+          "enum": [
+            "NONE",
+            "PULLBACK_RESERVE",
+            "GATE_HOLD"
+          ]
         }
       },
       "additionalProperties": false

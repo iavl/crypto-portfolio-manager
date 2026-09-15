@@ -61,7 +61,19 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertAlmostEqual(
             sum(tranche.amount_usd for tranche in plan.tranches), plan.planned_amount_usd
         )
-        self.assertAlmostEqual(plan.planned_amount_usd + plan.unallocated_amount_usd, 2000)
+        self.assertAlmostEqual(plan.planned_amount_usd + plan.reserve_amount_usd, 2000)
+        # The planner may only decide when/where approved dollars execute:
+        # placed + conditional reserve always equals the approved budget, the
+        # reserve stays approved spend, and its policy/fraction are recorded.
+        self.assertIn(plan.reserve_policy, {"PULLBACK_RESERVE", "NONE"})
+        if plan.reserve_amount_usd > 1e-9:
+            self.assertEqual(plan.reserve_policy, "PULLBACK_RESERVE")
+            self.assertAlmostEqual(
+                plan.reserve_fraction, plan.reserve_amount_usd / plan.approved_amount_usd
+            )
+        else:
+            self.assertEqual(plan.reserve_policy, "NONE")
+            self.assertEqual(plan.reserve_fraction, 0.0)
         self.assertTrue(plan.invalidation["review_only"])
         self.assertTrue(validate_execution_plan(plan))
         self.assertTrue(validate_execution_plan(plan.as_dict()))
@@ -74,7 +86,9 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(wait.action, "WAIT")
         self.assertEqual(wait.entry_mode, "WAIT")
         self.assertEqual(wait.planned_amount_usd, 0)
-        self.assertEqual(wait.unallocated_amount_usd, 2000)
+        self.assertEqual(wait.reserve_amount_usd, 2000)
+        # A gated plan holds the approved budget, it does not un-approve it.
+        self.assertEqual(wait.reserve_policy, "GATE_HOLD")
         capital = build_entry_plan("ETH", 2000, self.snapshot, "CAPITAL_PRESERVATION", "HIGH")
         self.assertEqual(capital.action, "WAIT")
         self.assertEqual(capital.planned_amount_usd, 0)
@@ -94,7 +108,7 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(low.action, "WAIT")
         self.assertEqual(low.entry_mode, "WAIT")
         self.assertEqual(low.planned_amount_usd, 0)
-        self.assertEqual(low.unallocated_amount_usd, 2000)
+        self.assertEqual(low.reserve_amount_usd, 2000)
         self.assertTrue(validate_execution_plan(low))
 
     def test_regime_and_confidence_are_monotonic(self):
@@ -253,9 +267,9 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_plan_model_rejects_mixed_and_invalid_invalidation(self):
         with self.assertRaises(ValueError):
-            ExecutionPlan("ETH", "WAIT", 0, 0, 0, 100, "MIXED", "LOW")
+            ExecutionPlan("ETH", "WAIT", 0, 0, 0, "NONE", 100, "MIXED", "LOW")
         with self.assertRaises(ValueError):
-            ExecutionPlan("ETH", "WAIT", 0, 0, 0, 100, "WAIT", "LOW")
+            ExecutionPlan("ETH", "WAIT", 0, 0, 0, "NONE", 100, "WAIT", "LOW")
         with self.assertRaises(ValueError):
             Invalidation("BAD", "review", 100, review_only=False)
         plan = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")

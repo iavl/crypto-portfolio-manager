@@ -15,6 +15,7 @@ from .factor_packet import freeze_packet_value, thaw_packet_value
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
 _ENTRY_MODES = {"PULLBACK", "BREAKOUT", "WAIT"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
+_RESERVE_POLICIES = {"NONE", "PULLBACK_RESERVE", "GATE_HOLD"}
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
@@ -254,11 +255,21 @@ class ExecutionTranche:
 
 @dataclass(frozen=True)
 class ExecutionPlan:
+    """Approved vs placed execution budgets for one asset.
+
+    ``approved_amount_usd`` is what the rebalance engine approved; the
+    pullback planner only decides when/where those dollars may execute:
+    ``planned_amount_usd`` is placed into structural tranches now, and
+    ``reserve_amount_usd`` is the still-approved remainder waiting for its
+    trigger (a pullback zone or a gate lifting), never "unapproved" budget.
+    """
+
     symbol: str
     action: str
     approved_amount_usd: float
     planned_amount_usd: float
-    unallocated_amount_usd: float
+    reserve_amount_usd: float
+    reserve_policy: str
     current_price: float
     entry_mode: str
     technical_confidence: str
@@ -275,6 +286,12 @@ class ExecutionPlan:
     effective_deployment_factor: float | None = None
     overlay_warnings: tuple[str, ...] = ()
 
+    @property
+    def reserve_fraction(self) -> float:
+        if self.approved_amount_usd <= 0:
+            return 0.0
+        return self.reserve_amount_usd / self.approved_amount_usd
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "execution symbol").upper())
         action = _text(self.action, "execution action").upper()
@@ -283,20 +300,28 @@ class ExecutionPlan:
         object.__setattr__(self, "action", action)
         amounts = {
             field: _number(getattr(self, field), field, minimum=0.0)
-            for field in ("approved_amount_usd", "planned_amount_usd", "unallocated_amount_usd")
+            for field in ("approved_amount_usd", "planned_amount_usd", "reserve_amount_usd")
         }
         if amounts["planned_amount_usd"] > amounts["approved_amount_usd"] + 1e-9:
             raise ValueError("planned_amount_usd must not exceed approved_amount_usd")
         if not math.isclose(
-            amounts["planned_amount_usd"] + amounts["unallocated_amount_usd"],
+            amounts["planned_amount_usd"] + amounts["reserve_amount_usd"],
             amounts["approved_amount_usd"],
             rel_tol=1e-9,
             abs_tol=1e-7,
         ):
-            raise ValueError("planned_amount_usd plus unallocated_amount_usd must equal approved_amount_usd")
+            raise ValueError("planned_amount_usd plus reserve_amount_usd must equal approved_amount_usd")
         object.__setattr__(self, "approved_amount_usd", amounts["approved_amount_usd"])
         object.__setattr__(self, "planned_amount_usd", amounts["planned_amount_usd"])
-        object.__setattr__(self, "unallocated_amount_usd", amounts["unallocated_amount_usd"])
+        object.__setattr__(self, "reserve_amount_usd", amounts["reserve_amount_usd"])
+        reserve_policy = _text(self.reserve_policy, "reserve_policy").upper()
+        if reserve_policy not in _RESERVE_POLICIES:
+            raise ValueError(f"reserve_policy must be one of {sorted(_RESERVE_POLICIES)}")
+        if reserve_policy == "NONE" and amounts["reserve_amount_usd"] > 1e-7:
+            raise ValueError("a reserved budget requires a non-NONE reserve_policy")
+        if reserve_policy != "NONE" and amounts["reserve_amount_usd"] <= 1e-7:
+            raise ValueError(f"{reserve_policy} requires a positive reserve_amount_usd")
+        object.__setattr__(self, "reserve_policy", reserve_policy)
         object.__setattr__(self, "current_price", _number(self.current_price, "current_price", minimum=0.0))
         if self.current_price <= 0:
             raise ValueError("current_price must be > 0")
@@ -560,7 +585,8 @@ class ExecutionPlan:
             "action": self.action,
             "approved_amount_usd": self.approved_amount_usd,
             "planned_amount_usd": self.planned_amount_usd,
-            "unallocated_amount_usd": self.unallocated_amount_usd,
+            "reserve_amount_usd": self.reserve_amount_usd,
+            "reserve_policy": self.reserve_policy,
             "current_price": self.current_price,
             "entry_mode": self.entry_mode,
             "technical_confidence": self.technical_confidence,
@@ -594,7 +620,7 @@ class ExecutionPlan:
             raise ValueError("execution plan must be an object")
         allowed = {
             "symbol", "action", "approved_amount_usd",
-            "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
+            "planned_amount_usd", "reserve_amount_usd", "reserve_policy", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
             "volume_profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
             "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings",
@@ -604,7 +630,7 @@ class ExecutionPlan:
             raise ValueError(f"execution plan contains unknown fields: {', '.join(sorted(unknown))}")
         required = (
             "symbol", "action", "approved_amount_usd",
-            "planned_amount_usd", "unallocated_amount_usd", "current_price", "entry_mode",
+            "planned_amount_usd", "reserve_amount_usd", "reserve_policy", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
         )
         missing = [field for field in required if field not in value]

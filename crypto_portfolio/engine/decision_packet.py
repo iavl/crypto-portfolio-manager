@@ -216,7 +216,7 @@ def _execution_summary(execution: Any) -> dict[str, Any]:
         key: value[key]
         for key in (
             "symbol", "action", "approved_amount_usd", "planned_amount_usd",
-            "unallocated_amount_usd", "entry_mode", "technical_confidence",
+            "reserve_amount_usd", "reserve_policy", "entry_mode", "technical_confidence",
             "current_price", "rationale", "ohlcv_hash", "volume_profile_hash",
             "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings",
         )

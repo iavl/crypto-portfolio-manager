@@ -160,7 +160,7 @@ def overlay_wait_required(
 class OverlayDeployment:
     approved_amount_usd: float
     planned_amount_usd: float
-    unallocated_amount_usd: float
+    reserve_amount_usd: float
     effective_factor: float
     positioning_factor: float
     cycle_factor: float
@@ -171,14 +171,14 @@ class OverlayDeployment:
         for field_name in (
             "approved_amount_usd",
             "planned_amount_usd",
-            "unallocated_amount_usd",
+            "reserve_amount_usd",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value < 0:
                 raise ValueError(f"{field_name} must be finite and >= 0")
         if self.planned_amount_usd > self.approved_amount_usd + 1e-9:
             raise ValueError("planned_amount_usd must not exceed approved_amount_usd")
-        if not math.isclose(self.planned_amount_usd + self.unallocated_amount_usd, self.approved_amount_usd, abs_tol=1e-7):
+        if not math.isclose(self.planned_amount_usd + self.reserve_amount_usd, self.approved_amount_usd, abs_tol=1e-7):
             raise ValueError("overlay deployment amounts must reconcile")
         object.__setattr__(self, "effective_factor", _factor(self.effective_factor, "effective_factor"))
         object.__setattr__(self, "positioning_factor", _factor(self.positioning_factor, "positioning_factor"))
@@ -192,7 +192,7 @@ class OverlayDeployment:
         return {
             "approved_amount_usd": float(self.approved_amount_usd),
             "planned_amount_usd": float(self.planned_amount_usd),
-            "unallocated_amount_usd": float(self.unallocated_amount_usd),
+            "reserve_amount_usd": float(self.reserve_amount_usd),
             "effective_factor": self.effective_factor,
             "positioning_factor": self.positioning_factor,
             "cycle_factor": self.cycle_factor,
@@ -240,7 +240,7 @@ def apply_overlay_deployment_cap(
     return OverlayDeployment(
         approved_amount_usd=approved,
         planned_amount_usd=planned,
-        unallocated_amount_usd=approved - planned,
+        reserve_amount_usd=approved - planned,
         effective_factor=factor,
         positioning_factor=pos_factor,
         cycle_factor=cyc_factor,
