@@ -4,7 +4,9 @@ import unittest
 
 from crypto_portfolio.engine.benchmark import benchmark_return_with_cash_flows
 from crypto_portfolio.engine.cash_flow import (
+    InternalReallocation,
     apply_cash_flow_resolutions,
+    attribute_asset_changes,
     cash_flow_adjusted_performance,
     find_unresolved_cash_flow_snapshots,
 )
@@ -284,6 +286,102 @@ class CashFlowResolutionModelTests(unittest.TestCase):
             CashFlowResolution.from_mapping(_resolution("CONFIRMED_AMOUNT", 0.0, "DEPOSIT"))
         with self.assertRaises(ValueError):
             CashFlowResolution.from_mapping(_resolution("CONFIRMED_AMOUNT", 100.0, None))
+
+
+class InternalReallocationTests(unittest.TestCase):
+    """A stable-to-stable exchange is neither external flow nor market P&L."""
+
+    @staticmethod
+    def _snapshot(**positions: float) -> dict:
+        return {
+            "snapshot_id": "snap",
+            "timestamp": "2026-09-15T01:05:00Z",
+            "total_value_usd": sum(positions.values()),
+            "positions": [
+                {"symbol": symbol, "value_usd": value}
+                for symbol, value in sorted(positions.items())
+            ],
+        }
+
+    def test_matched_usdt_u_swap_is_internal_reallocation(self):
+        # The 2026-09-15 review case: USDT -3000, U +2999.5, external flow 0.
+        previous = self._snapshot(BTC=50000.0, USDT=20000.0, U=3000.0)
+        current = self._snapshot(BTC=50000.0, USDT=17000.0, U=5999.5)
+        attribution = attribute_asset_changes(previous, current)
+        self.assertEqual(attribution["external_cash_flow"], 0.0)
+        reallocation = attribution["internal_reallocation"]
+        self.assertIsNotNone(reallocation)
+        self.assertEqual(reallocation["attribution"], "INFERRED_INTERNAL_REALLOCATION")
+        self.assertEqual(reallocation["from_symbol"], "USDT")
+        self.assertEqual(reallocation["to_symbol"], "U")
+        self.assertAlmostEqual(reallocation["amount_usd"], 2999.5)
+        self.assertGreater(reallocation["confidence"], 0.99)
+        # Market P&L does not receive the +/- ~3000 transfer principal.
+        self.assertAlmostEqual(attribution["market_change_usd"]["USDT"], -0.5)
+        self.assertAlmostEqual(attribution["market_change_usd"]["U"], 0.0)
+        self.assertAlmostEqual(attribution["market_change_usd"]["BTC"], 0.0)
+        # The magnitude mismatch surfaces as swap cost/slippage, not P&L.
+        self.assertAlmostEqual(attribution["swap_cost_slippage_usd"], 0.5)
+
+    def test_dollars_conserve_across_the_attribution(self):
+        previous = self._snapshot(BTC=50000.0, USDT=20000.0, U=3000.0)
+        current = self._snapshot(BTC=50800.0, USDT=17000.0, U=5999.5)
+        attribution = attribute_asset_changes(previous, current)
+        # With zero external flow, market attribution plus the matched
+        # reallocation principal plus its visible residual reconciles to the
+        # portfolio's total dollar change exactly.
+        total_market = sum(attribution["market_change_usd"].values())
+        self.assertAlmostEqual(
+            total_market,
+            current["total_value_usd"] - previous["total_value_usd"],
+            places=6,
+        )
+
+    def test_no_match_returns_none_instead_of_guessing(self):
+        # Unmatched magnitudes (3000 vs 500) must not be forced into a swap.
+        previous = self._snapshot(USDT=20000.0, U=3000.0)
+        current = self._snapshot(USDT=17000.0, U=3500.0)
+        attribution = attribute_asset_changes(previous, current)
+        self.assertIsNone(attribution["internal_reallocation"])
+        self.assertAlmostEqual(attribution["market_change_usd"]["USDT"], -3000.0)
+        self.assertAlmostEqual(attribution["market_change_usd"]["U"], 500.0)
+
+    def test_explicit_reallocation_wins_over_inference(self):
+        previous = self._snapshot(USDT=20000.0, U=3000.0)
+        current = self._snapshot(USDT=17000.0, U=5999.5)
+        attribution = attribute_asset_changes(
+            previous,
+            current,
+            explicit_reallocation={
+                "from_symbol": "USDT",
+                "to_symbol": "U",
+                "amount_usd": 3000.0,
+                "attribution": "INTERNAL_REALLOCATION",
+                "confidence": 1.0,
+                "source": "USER_EXPLICIT",
+                "rationale": "user confirmed USDT->U swap on the venue",
+            },
+        )
+        reallocation = attribution["internal_reallocation"]
+        self.assertEqual(reallocation["attribution"], "INTERNAL_REALLOCATION")
+        self.assertEqual(reallocation["source"], "USER_EXPLICIT")
+        self.assertAlmostEqual(attribution["market_change_usd"]["USDT"], 0.0)
+
+    def test_inference_respects_stable_boundary(self):
+        # BTC dropping while USDT rises is a market move, not a sleeve swap.
+        previous = self._snapshot(BTC=50000.0, USDT=20000.0)
+        current = self._snapshot(BTC=47000.0, USDT=23000.0)
+        attribution = attribute_asset_changes(previous, current)
+        self.assertIsNone(attribution["internal_reallocation"])
+        self.assertAlmostEqual(attribution["market_change_usd"]["BTC"], -3000.0)
+
+    def test_model_validates(self):
+        with self.assertRaises(ValueError):
+            InternalReallocation("USDT", "USDT", 100.0, "INTERNAL_REALLOCATION", 1.0, "USER_EXPLICIT", "x")
+        with self.assertRaises(ValueError):
+            InternalReallocation("USDT", "U", -1.0, "INTERNAL_REALLOCATION", 1.0, "USER_EXPLICIT", "x")
+        with self.assertRaises(ValueError):
+            InternalReallocation("USDT", "U", 100.0, "GUESS", 1.0, "USER_EXPLICIT", "x")
 
 
 if __name__ == "__main__":
