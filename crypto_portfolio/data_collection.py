@@ -538,7 +538,34 @@ def collection_summary(
         factor: sum(event.status == "SUCCESS" for event in factor_events) / len(factor_events)
         for factor, factor_events in by_factor.items()
     }
+    skipped_optional = sum(
+        event.status == "SKIPPED"
+        and metric_availability(event.asset, event.metric_key).requirement == "OPTIONAL"
+        for event in values
+    )
+    skipped_premium = sum(
+        event.status == "SKIPPED"
+        and metric_availability(event.asset, event.metric_key).requirement == "PREMIUM_ONLY"
+        for event in values
+    )
     per_request_coverage = sum(event.status == "SUCCESS" for event in applicable) / len(applicable) if applicable else 0.0
+    # Coverage percentages are only meaningful with their denominator named:
+    # request completion counts every requested metric, while applicable
+    # required coverage excludes deliberately filtered NOT_APPLICABLE and
+    # non-scoring context metrics so an intentional skip never reads as a
+    # gap.
+    request_completion_rate = (
+        counts.get("SUCCESS", 0) / len(values) if values else 0.0
+    )
+    if skipped_optional or skipped_premium:
+        optional_metric_availability = "DEGRADED"
+    elif any(
+        metric_availability(event.asset, event.metric_key).requirement in {"OPTIONAL", "PREMIUM_ONLY"}
+        for event in values
+    ):
+        optional_metric_availability = "FULL"
+    else:
+        optional_metric_availability = "NOT_REQUESTED"
     weighted_factors = {
         factor: coverage
         for factor, coverage in factor_coverage.items()
@@ -582,16 +609,6 @@ def collection_summary(
         confidence = "MEDIUM"
     else:
         confidence = "HIGH"
-    skipped_optional = sum(
-        event.status == "SKIPPED"
-        and metric_availability(event.asset, event.metric_key).requirement == "OPTIONAL"
-        for event in values
-    )
-    skipped_premium = sum(
-        event.status == "SKIPPED"
-        and metric_availability(event.asset, event.metric_key).requirement == "PREMIUM_ONLY"
-        for event in values
-    )
     result = {
         "requested": len(values),
         "counts": {status: counts.get(status, 0) for status in _STATUS_ORDER},
@@ -599,6 +616,8 @@ def collection_summary(
         "coverage": policy_weighted_coverage,
         "evidence_coverage": policy_weighted_coverage,
         "per_request_coverage": per_request_coverage,
+        "request_completion_rate": request_completion_rate,
+        "applicable_required_metric_coverage": per_request_coverage,
         "policy_weighted_coverage": policy_weighted_coverage,
         "factor_sufficiency_coverage": factor_sufficiency_coverage,
         "factor_coverage": factor_coverage,
@@ -610,8 +629,10 @@ def collection_summary(
         "confidence": confidence,
         "overlay_requested": len(values) - len(scoring_events),
         "review_type": review_type,
+        "asset": asset,
         "skipped_optional": skipped_optional,
         "skipped_premium": skipped_premium,
+        "optional_metric_availability": optional_metric_availability,
     }
     result["counts"].update({
         "SKIPPED_OPTIONAL": skipped_optional,
@@ -667,22 +688,34 @@ def format_collection_event(
 
 def format_collection_summary(summary: Mapping[str, Any]) -> str:
     counts = summary["counts"]
-    return "\n".join(
-        (
-            "Data Collection Summary",
-            f"Requested metrics: {summary['requested']}",
-            f"SUCCESS: {counts['SUCCESS']}  STALE: {counts['STALE']}  FAILED: {counts['FAILED']}",
-            f"CONFLICT: {counts['CONFLICT']}  NOT_APPLICABLE: {counts['NOT_APPLICABLE']}",
-            f"SKIPPED_OPTIONAL: {counts.get('SKIPPED_OPTIONAL', 0)}  SKIPPED_PREMIUM: {counts.get('SKIPPED_PREMIUM', 0)}",
-            f"Critical failures: {summary['critical_failures']}",
-            f"Per-request coverage: {summary.get('per_request_coverage', summary['coverage']):.0%}",
-            f"Policy-weighted coverage: {summary.get('policy_weighted_coverage', summary['coverage']):.0%}",
-            f"Factor-sufficiency coverage: {summary.get('factor_sufficiency_coverage', summary.get('policy_weighted_coverage', summary['coverage'])):.0%}",
-            f"Decision confidence: {summary['confidence']}",
-            f"Pending external resolution: {summary.get('pending_external_resolution', 0)}",
-            f"Overlay context metrics: {summary.get('overlay_requested', 0)}",
-        )
-    )
+    requested = summary["requested"]
+    applicable = summary.get("applicable_required_metric_coverage")
+    lines = [
+        "Data Collection Summary",
+        f"Requested metrics: {requested}",
+        f"SUCCESS: {counts['SUCCESS']}  STALE: {counts['STALE']}  FAILED: {counts['FAILED']}",
+        f"CONFLICT: {counts['CONFLICT']}  NOT_APPLICABLE: {counts['NOT_APPLICABLE']}",
+        f"SKIPPED_OPTIONAL: {counts.get('SKIPPED_OPTIONAL', 0)}  SKIPPED_PREMIUM: {counts.get('SKIPPED_PREMIUM', 0)}",
+        f"Critical failures: {summary['critical_failures']}",
+        # Every coverage percentage names its denominator: request
+        # completion spans all requested metrics, applicable coverage
+        # excludes deliberately filtered NOT_APPLICABLE and non-scoring
+        # context metrics, and decision coverage is policy-factor weighted.
+        "Required request completion: "
+        f"{summary.get('request_completion_rate', 0.0):.0%} (denominator: {requested} requested metrics)",
+        "Applicable required coverage: "
+        f"{(applicable if applicable is not None else summary.get('per_request_coverage', summary['coverage'])):.0%}"
+        " (denominator: applicable scoring metrics; NOT_APPLICABLE excluded)",
+        "Decision-scope weighted coverage: "
+        f"{summary.get('policy_weighted_coverage', summary['coverage']):.0%} (denominator: policy factor weights)",
+        "Factor-sufficiency coverage: "
+        f"{summary.get('factor_sufficiency_coverage', summary.get('policy_weighted_coverage', summary['coverage'])):.0%}",
+        f"Decision confidence: {summary['confidence']}",
+        f"Optional/premium availability: {summary.get('optional_metric_availability', 'NOT_REQUESTED')}",
+        f"Pending external resolution: {summary.get('pending_external_resolution', 0)}",
+        f"Overlay context metrics: {summary.get('overlay_requested', 0)}",
+    ]
+    return "\n".join(lines)
 
 
 def format_overlay_summary(overlays: Any) -> str:

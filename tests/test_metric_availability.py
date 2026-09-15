@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import unittest
 
 from crypto_portfolio.acquisition import AcquisitionManager
-from crypto_portfolio.data_collection import collection_summary
+from crypto_portfolio.data_collection import collection_summary, format_collection_summary
 from crypto_portfolio.engine.derived_metrics import derive_open_interest_to_market_cap
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
@@ -39,6 +39,47 @@ class MetricAvailabilityTests(unittest.TestCase):
         summary = collection_summary((required, optional))
         self.assertEqual(summary["per_request_coverage"], 1.0)
         self.assertEqual(summary["policy_weighted_coverage"], 1.0)
+
+    def test_coverage_metrics_name_their_denominators(self):
+        # Request completion spans every requested metric; applicable
+        # required coverage excludes optional/non-scoring requests, so a
+        # failed optional metric lowers one and not the other.
+        required = CollectionEvent(
+            "required", NOW, "BTC", "onchain.transaction_count", "SUCCESS",
+            source="test", observed_at=NOW, fetched_at=NOW,
+        )
+        optional = CollectionEvent(
+            "optional", NOW, "ETH", "fundamentals.developer_activity", "FAILED",
+            source="test", reason="PROVIDER_UNSUPPORTED",
+        )
+        summary = collection_summary((required, optional))
+        self.assertAlmostEqual(summary["request_completion_rate"], 0.5)
+        self.assertEqual(summary["applicable_required_metric_coverage"], 1.0)
+        self.assertEqual(summary["asset"], None)
+
+    def test_optional_availability_states(self):
+        required = CollectionEvent(
+            "required", NOW, "BTC", "onchain.transaction_count", "SUCCESS",
+            source="test", observed_at=NOW, fetched_at=NOW,
+        )
+        clean = collection_summary((required,))
+        self.assertEqual(clean["optional_metric_availability"], "NOT_REQUESTED")
+        skipped_optional = CollectionEvent(
+            "skipped", NOW, "ETH", "fundamentals.developer_activity", "SKIPPED",
+            source="test", reason="PROVIDER_UNSUPPORTED",
+        )
+        degraded = collection_summary((required, skipped_optional))
+        self.assertEqual(degraded["optional_metric_availability"], "DEGRADED")
+        # Optional metrics that succeeded are FULL availability, not a gap.
+        succeeded_optional = CollectionEvent(
+            "optional", NOW, "ETH", "fundamentals.developer_activity", "SUCCESS",
+            source="test", observed_at=NOW, fetched_at=NOW,
+        )
+        full = collection_summary((required, succeeded_optional))
+        self.assertEqual(full["optional_metric_availability"], "FULL")
+        rendered = format_collection_summary(full)
+        self.assertIn("denominator", rendered)
+        self.assertIn("Optional/premium availability: FULL", rendered)
 
     def test_skipped_is_event_only_and_excluded_from_coverage(self):
         skipped = normalize_metric_result({
