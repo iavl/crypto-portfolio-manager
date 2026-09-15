@@ -3,34 +3,35 @@
 The report is rendered from a finalized immutable `ReportPacket`. Numeric
 scores, weights, actions, approved amounts, execution zones, historical
 changes, and risk flags are authoritative Python outputs. The report model may
-explain them in Chinese but must not recompute, alter, or invent them.
+explain them in prose but must not recompute, alter, or invent them.
 
-Default language: Chinese. Keep asset tickers and metric names in English.
+Default language: English. Keep asset tickers and metric names verbatim.
 
-## 1. 结论
+## 1. Conclusion
 
 Start with the actual decision in 2–5 concise bullets, for example:
 
-- 当前市场状态：`DEFENSIVE (MEDIUM confidence)`
-- 本轮建议：`NO TRADE` / deploy only part of available cash / rebalance specific assets
-- 最优先动作
+- Current regime: `DEFENSIVE (MEDIUM confidence)`
+- This round's recommendation: `NO TRADE` / deploy only part of available cash / rebalance specific assets
+- Top-priority action
 - Stablecoin target after actions
 
-### 结论依据
+### Decision basis
 
 After the bullets, give a compact portfolio-level bridge:
 
 ```text
-证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action
+Evidence → fact meaning → portfolio constraint → risk gate → rebalance threshold → Action
 ```
 
 Name the matching Evidence IDs, sources, observed times, collection status,
 and the effect on confidence or trade eligibility. State the current-versus-
 target deviation, active threshold, stablecoin floor, concentration and
-turnover constraints. If evidence is missing, say `无法确认` and state the
-decision effect; never replace missing evidence with a neutral assumption.
-For daily OHLCV-derived metrics, also show the completed-candle close boundary
-as `freshness_reference_at` and verify it equals `metadata.completed_through`.
+turnover constraints. If evidence is missing, say `cannot be confirmed` and
+state the decision effect; never replace missing evidence with a neutral
+assumption. For daily OHLCV-derived metrics, also show the completed-candle
+close boundary as `freshness_reference_at` and verify it equals
+`metadata.completed_through`.
 
 Report compliance from the frozen post-action projection, not the strategic
 target: if the recommended actions leave the stable sleeve below its floor or
@@ -41,7 +42,7 @@ independent confirmations; never label it as such. Every number in the report
 comes from the validated packets — scores, dates, confidence, scope, targets,
 and actions are read, never recomputed by hand.
 
-### Debug 报告
+### Debug report
 
 Render the finalized failure categories separately when present:
 
@@ -56,39 +57,40 @@ Provider diagnostics: ReportPacket.provider_operational_failures
 the final failure table. A provider error code remains visible in provider
 diagnostics even when the affected metric is non-blocking.
 
-### 本轮数据抓取失败明细
+### Failed data fetches this round
 
 Render every item from `ReportPacket.failed_data_fetches` using this table. The
 list is metric-centric: one row per final `(asset/scope, metric)` result, with
 matching provider attempts shown as one compact ordered path under the failure
 reason when needed.
 
-| 资产/范围 | Metric | 最终状态 | 阶段 / Provider | 错误码 | 失败原因 | 程序失败日志 | 最近可用数据 | 决策影响 |
+| Asset/Scope | Metric | Final status | Stage / Provider | Error code | Failure reason | Program failure log | Last usable data | Decision impact |
 |---|---|---|---|---|---|---|---|---|
 
-If the list is empty, write `本轮没有最终抓取失败的数据。` For a `STALE`
-refresh failure, write `当前刷新失败；最近可用数据为 <timestamp>，因此本轮按 STALE 处理。`
+If the list is empty, write `No final data fetch failures this round.` For a
+`STALE` refresh failure, write `The current refresh failed; the last usable data is <timestamp>, so this round is treated as STALE.`
 Use the structured reason, error code, stage/provider, timestamp, and decision
 effect exactly as supplied by the packet. `SKIPPED` and `NOT_APPLICABLE` are not failed fetches
 and must not appear in this subsection; keep them in section 9.
 
 When multiple attempts belong to one final metric, keep them under the same
-row, for example: `尝试路径：CoinGecko HTTP_429 → Coin Metrics Community PROVIDER_UNSUPPORTED`.
+row, for example: `Attempt path: CoinGecko HTTP_429 → Coin Metrics Community PROVIDER_UNSUPPORTED`.
 For each attempt, show `exception_class`, `detail`, and the bounded `log` when
-present. If no direct program log was captured, write `未捕获直接日志` and keep
-the structured reason unchanged.
+present. If no direct program log was captured, write `no direct log captured`
+and keep the structured reason unchanged.
 
-### 本轮脚本执行异常
+### Script execution failures this round
 
 Render every item from `ReportPacket.script_failures`:
 
-| 脚本 | 状态 | Exit code | 日志来源 | 直接失败日志 |
+| Script | Status | Exit code | Log source | Direct failure log |
 |---|---|---:|---|---|
 
-If the list is empty, write `本轮没有脚本执行异常。` The log must be the
-sanitized, bounded `stderr` excerpt from `scripts/run_with_debug.py`, or the
-captured `stdout`/launcher error when stderr is empty. Do not treat a successful
-script with ordinary warnings as an execution failure.
+If the list is empty, write `No script execution failures this round.` The log
+must be the sanitized, bounded `stderr` excerpt from
+`scripts/run_with_debug.py`, or the captured `stdout`/launcher error when
+stderr is empty. Do not treat a successful script with ordinary warnings as an
+execution failure.
 
 ### Excluded holdings
 
@@ -99,7 +101,7 @@ exclusion is not an automatic sell signal. Pass-1 diagnostics may separately
 show `PENDING_EXTERNAL_RESOLUTION`, but a final portfolio report requires
 `pending_external_resolution == 0`.
 
-## 2. 组合诊断
+## 2. Portfolio diagnostics
 
 Include:
 
@@ -112,24 +114,24 @@ Include:
 
 When position cost data is available, also include:
 
-### 当前持仓收益
+### Current position returns
 
-| 资产 | 数量 | 当前价 | 平均成本 | 当前价值 | 持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比 |
+| Asset | Quantity | Current price | Average cost | Current value | Position cost | Unrealized P&L | Position return | Portfolio share |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 
 Rows with unknown cost show `--` for cost, unrealized P&L, and Position
 return. Stablecoin/cash rows still contribute to portfolio value and the
 stable sleeve. Below the table, report:
 
-- 已知成本仓位的未实现盈亏;
-- 已知成本仓位的加权未实现收益率;
-- 成本数据覆盖率 (`pnl_value_coverage_ratio`);
+- unrealized P&L of positions with known cost;
+- the weighted unrealized return of positions with known cost;
+- cost data coverage (`pnl_value_coverage_ratio`);
 - reported total and visible-value coverage when the screenshot is partial.
 
 Position unrealized return is not Portfolio NAV Return and must not be called
-`总收益`.
+`total portfolio return`.
 
-## 3. 市场状态
+## 3. Market Regime
 
 Explain the regime using only the most decision-relevant evidence:
 
@@ -141,34 +143,34 @@ Explain the regime using only the most decision-relevant evidence:
 
 Separate fact from judgment.
 
-Use explicit labels such as `事实` and `判断`. For a phrase such as
-“整体是混合状态”, explain that market breadth and core-asset trend disagree,
-identify the measured breadth/trend evidence, and state that this lowers
-confidence for broad satellite additions rather than automatically creating a
-sell signal.
+Use explicit labels such as `Fact` and `Judgment`. For a phrase such as
+"the overall state is mixed", explain that market breadth and core-asset
+trend disagree, identify the measured breadth/trend evidence, and state that
+this lowers confidence for broad satellite additions rather than
+automatically creating a sell signal.
 
-### 术语解释与决策影响
+### Term explanations and decision impact
 
 Add this subsection only for terms used in the report that could be
 misunderstood. Keep entries short and use this format:
 
-| 术语 | 含义 | 本轮决策影响 |
+| Term | Meaning | Decision impact this round |
 |---|---|---|
 | `MATERIAL_EVENT_FOUND` | Scanned security or regulatory sources contain a material event. It is not proof of an exploit, approval, or execution. | State whether it lowers confidence, blocks an increase, supports HOLD, or creates a concrete REDUCE/EXIT trigger. |
-| `协议提案/升级活动` | An Ethereum protocol roadmap, upgrade, or developer-economics proposal. | State the affected risk assumption and what confirmation would change the Action. |
+| `Protocol proposal/upgrade activity` | An Ethereum protocol roadmap, upgrade, or developer-economics proposal. | State the affected risk assumption and what confirmation would change the Action. |
 | `ManualAssetContext` | User-supplied governance, tokenomics, legal, or protocol context with explicit impact, severity, and scope. | Preserve `source=MANUAL_USER_INPUT`; apply only the selected scope and do not infer a provider-confidence penalty. |
 | `STALE` / `FAILED` / `SKIPPED` | Old evidence / attempted collection without usable evidence / intentionally omitted decision-active optional evidence. | State the affected factor, confidence, and trade eligibility. |
 | `Position P&L` | Remaining-position unrealized P&L based on usable cost basis. | Do not call it Portfolio NAV Return or use it as a buy signal. |
 | `NAV Return` | Cash-flow-adjusted portfolio performance. | No disclosure is `ASSUMED_NONE` and `FINAL`; mark it `PROVISIONAL` only for explicit unresolved cash flows. |
-| `成本数据覆盖率` | Current-value share of positions with usable cost data. | Explain how much of the Position P&L is known. |
+| `Cost data coverage` | Current-value share of positions with usable cost data. | Explain how much of the Position P&L is known. |
 
 Use the actual source term when it is more precise. Do not call a proposal a
-“治理案件” or a security incident unless the Evidence explicitly supports
-that classification.
+"governance case" or a security incident unless the Evidence explicitly
+supports that classification.
 
-## 4. 单币评估
+## 4. Per-Asset Assessment
 
-先给出概览表：
+Start with the overview table:
 
 | Asset | Score | Confidence | Trend | Fundamentals | vs BTC | Thesis |
 |---|---:|---|---|---|---|---|
@@ -214,19 +216,19 @@ never add it as a seventh base-score row.
 
 Below the factor table, include this compact decision bridge:
 
-- **支持证据**：the strongest positive factors and their evidence.
-- **反对证据 / 风险**：the strongest negative, missing, stale, or conflicting
-  factors and their effect on confidence.
-- **组合层面约束**：current weight, target weight, deviation, active
-  rebalance threshold, regime envelope, stablecoin floor, concentration, and
-  funding/turnover constraints that matter.
-- **为什么是这个 Action**：explain why the chain ends in `HOLD`/`WAIT`,
+- **Supporting evidence**: the strongest positive factors and their evidence.
+- **Counterevidence / risks**: the strongest negative, missing, stale, or
+  conflicting factors and their effect on confidence.
+- **Portfolio-level constraints**: current weight, target weight, deviation,
+  active rebalance threshold, regime envelope, stablecoin floor,
+  concentration, and funding/turnover constraints that matter.
+- **Why this Action**: explain why the chain ends in `HOLD`/`WAIT`,
   `INCREASE`, `REDUCE`, or `EXIT`, rather than mapping the score directly to a
   trade. If a high score still produces `HOLD`, state the deviation and
   threshold explicitly and explain any retained stablecoin optionality or
   turnover concern.
-- **什么会改变建议**：link to the concrete invalidation/catalyst in section
-  8.
+- **What would change the recommendation**: link to the concrete
+  invalidation/catalyst in section 8.
 
 Make each bridge distinguish four layers: the observed fact, its bounded
 meaning, the portfolio-level constraint, and the resulting Action. A high score
@@ -278,14 +280,14 @@ Gates: score=<...>, confidence=<...>, regime=<...>, event=<...>, liveness=<...>,
 
 Do not replace these reason codes with model judgment.
 
-## 5. 当前仓位 vs 目标仓位
+## 5. Current vs Target Allocation
 
 | Asset | Current | Target | Deviation | Action | Priority |
 |---|---:|---:|---:|---|---|
 
 Targets should sum to approximately 100%.
 
-## 6. 操作计划
+## 6. Action Plan
 
 For each approved recommendation:
 
@@ -298,17 +300,17 @@ For staged buys, use the validated execution plan:
 
 | Asset | Tranche | Price Zone | USD | Est. Qty | Structural Basis |
 |---|---:|---|---:|---:|---|
-| ETH | 1 | 结构区间 | 600U | ~0.157 ETH | MA50 + confirmed swing support |
+| ETH | 1 | structural zone | 600U | ~0.157 ETH | MA50 + confirmed swing support |
 
 When available, add:
 
 ```text
-Volume Profile：4H / 120D / MEDIUM
-POC：$...
-VAL / VAH：$... / $...
-重要 HVN：$...
-依据：MA50 + confirmed swing + 60D POC + 120D HVN
-说明：历史成交密集区代理，不是所有持币者真实成本；LVN 仅作过渡区背景。
+Volume Profile: 4H / 120D / MEDIUM
+POC: $...
+VAL / VAH: $... / $...
+Key HVN: $...
+Basis: MA50 + confirmed swing + 60D POC + 120D HVN
+Note: proxy for historical volume concentration, not the true cost of all holders; LVN is transition-zone context only.
 ```
 
 Label quantity as approximate and use the zone midpoint as the reference price.
@@ -329,7 +331,7 @@ If new capital is supplied, explicitly state:
 - amount retained as approved conditional reserve;
 - reason not to deploy the remainder.
 
-## 7. 风险检查
+## 7. Risk Checks
 
 State:
 
@@ -339,11 +341,11 @@ State:
 - whether the portfolio appears consistent with the configured drawdown risk budget (15% by default);
 - note that the risk budget cannot guarantee a loss ceiling.
 
-## 8. 什么情况会改变建议
+## 8. What Would Change the Recommendation
 
 List 2–5 concrete invalidation/catalyst conditions.
 
-## 9. 数据质量
+## 9. Data Quality
 
 State:
 
@@ -364,14 +366,15 @@ its scoring/decision effect; do not silently omit collection failures. Explain
 which missing evidence lowered confidence, blocked an increase, forced
 `HOLD_OR_REDUCE` (formerly `HOLD_ONLY`), or left the decision `NO_TRADE`. Optional and premium `SKIPPED`
 items must state that they were excluded from applicable coverage.
-Detailed final fetch failures are shown in `本轮数据抓取失败明细`; keep this
-section as the aggregate data-quality report rather than duplicating that table.
+Detailed final fetch failures are shown in `Failed data fetches this round`;
+keep this section as the aggregate data-quality report rather than duplicating
+that table.
 
-Render `ReportPacket.optional_data` separately as `本次未采集的可选数据` with
-asset, metric, reason/provider/history issue, and the explicit effect
-`non-blocking`. Optional `SKIPPED` values are excluded from applicable coverage;
-they must not be promoted to final required failures or silently counted as
-success.
+Render `ReportPacket.optional_data` separately as `Optional data not collected
+this round` with asset, metric, reason/provider/history issue, and the
+explicit effect `non-blocking`. Optional `SKIPPED` values are excluded from
+applicable coverage; they must not be promoted to final required failures or
+silently counted as success.
 
 For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
 show the change in percentage points when both cost bases are usable. For
@@ -382,11 +385,11 @@ present.
 
 End with one unambiguous sentence such as:
 
-> 本轮执行建议：ETH 分三档增持 1,500U；BTC 持有；AAVE 减持 800U；剩余 2,700U 保持为稳定币。
+> This round's execution recommendation: stage 1,500U of ETH buys across three tranches; hold BTC; reduce AAVE by 800U; keep the remaining 2,700U in stablecoins.
 
 or:
 
-> 本轮执行建议：NO TRADE，5000U 全部保留为稳定币，等待风险收益比改善。
+> This round's execution recommendation: NO TRADE; keep all 5,000U in stablecoins while waiting for the risk/reward balance to improve.
 
 ## 11. Confidence and performance chain
 

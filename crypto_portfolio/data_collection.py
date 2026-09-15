@@ -336,8 +336,8 @@ def _failure_reason(event: CollectionEvent, attempt: Mapping[str, Any] | None, e
         if text is not None:
             return text
     if error_code is not None:
-        return _ERROR_CODE_DESCRIPTIONS.get(error_code, "原因未提供")
-    return "原因未提供"
+        return _ERROR_CODE_DESCRIPTIONS.get(error_code, "reason not provided")
+    return "reason not provided"
 
 
 def _failure_error_code(

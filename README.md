@@ -1,62 +1,100 @@
 
 # crypto-portfolio-manager
 
-`crypto-portfolio-manager` 是一个 Agent Skill，用于在约 3–6 个月的主动配置周期内，以保守均衡、仅现货的方式研究加密货币投资组合。它将当前市场证据与确定性的记账、风险、配置、基准和再平衡计算结合起来，可由支持 Agent Skills 的 Codex、Claude Code 和 ZCode 使用。
+`crypto-portfolio-manager` is an Agent Skill for studying cryptocurrency
+portfolios in a conservative-balanced, spot-only way over an approximately
+3–6 month active-allocation horizon. It combines current market evidence with
+deterministic accounting, risk, allocation, benchmark, and rebalancing
+calculations, and is usable from Codex, Claude Code, and ZCode hosts that
+support Agent Skills.
 
-详细的复盘流程、输入示例、历史数据行为和故障排查请参阅[使用指南](docs/USAGE.md)。
+For the detailed review workflow, input examples, history behavior, and
+troubleshooting, see the [Usage Guide](docs/USAGE.md).
 
-投资理念和组合策略请参阅[投资策略](references/investment-strategy.md)。
+For the investment philosophy and portfolio strategy, see
+[Investment Strategy](references/investment-strategy.md).
 
-架构与实现细节请参阅[工作原理](docs/HOW_IT_WORKS.md)。
+For architecture and implementation details, see
+[How It Works](docs/HOW_IT_WORKS.md).
 
-术语不熟悉？请先查看[中文术语表](docs/GLOSSARY.zh-CN.md)。
+Unfamiliar with the terminology? Start with the [Glossary](docs/GLOSSARY.md).
 
-模型选择由 Codex、ZCode、Claude Code 等宿主控制；Skill 使用用户当前会话的模型和推理设置，不进行仓库级模型切换。
+Model selection is controlled by the host (Codex, ZCode, Claude Code, etc.);
+the Skill uses the model and reasoning settings of the user's current session
+and performs no repository-level model switching.
 
-## 概览
+## Overview
 
 ```text
-调用：    $crypto-portfolio-manager
-Skill：   .agents/skills/crypto-portfolio-manager/SKILL.md
-历史数据：~/.local/share/crypto-portfolio-manager/
-交易：    仅提供建议；不会自动执行
+Invoke:   $crypto-portfolio-manager
+Skill:    .agents/skills/crypto-portfolio-manager/SKILL.md
+History:  ~/.local/share/crypto-portfolio-manager/
+Trading:  advice only; never executed automatically
 ```
 
-## 功能
+## Features
 
-- 根据规范的 `config/policy.json` 策略校验持仓。
-- 执行现金流调整后的 NAV、风险、配置、基准和再平衡计算。
-- 使用 Python 优先的流程：由注册表驱动的指标计划、规范化观测值、确定性 Facts，以及紧凑且不可变的复盘/报告数据包。
-- 保留证据、因子评分和追加写入的决策历史。
-- 持久化与决策相关的 `MetricObservation` 历史记录和采集失败记录，用于紧凑的当前与此前趋势比较。
-- 按需通过免费的结构化公共 API 获取数据，并使用考虑新鲜度的本地 provider 缓存；无需后台服务。
-- 配置后，可使用 SoSoValue 文档化的美国 BTC/ETH ETF 汇总历史记录作为结构化 ETF 资金流背景；清算数据不会归因于该来源。年化基差使用 Binance 最近的交易型 USDT 交割合约及精确的标记价格/指数价格；不支持的资产保持不可用。
-- 增加衍生品/社交持仓和 BTC 周期背景等非评分 overlay；这些 overlay 可以保守地限制即时部署规模。
-- 在匹配的评估周期内，对比 100% BTC 和 70/30 BTC/ETH 持有不动的基准。
-- 提供无未来函数的全流程回放评测工具（`scripts/evaluate_strategy.py`）：冻结复盘记录 → 评分 → 市场状态 → 战略目标 → 分阶段调仓 → 成本 → 已实现收益，可对比基准与候选策略参数。
-- 将稳定币和现金视为同一资金篮子，并允许 `NO_TRADE`。
-- 从 Binance 钱包截图导入结构化字段，并确定性地计算每个仓位的成本基础、未实现盈亏、收益率和数据覆盖率。
-- 基于带时间戳的现货数据和完整的 OHLCV，结合日历覆盖检查、确定性的 ATR 感知区间、已确认的摆动点、Volume Profile POC/价值区间/HVN 背景、分批方案以及 `WAIT` 处理，对获批的再平衡金额制定分阶段执行计划。
-- Python 负责确定性金融计算；Agent 负责有界语义研究、解释和报告文字。
+- Validate holdings against the canonical policy in `config/policy.json`.
+- Perform cash-flow-adjusted NAV, risk, allocation, benchmark, and rebalancing
+  calculations.
+- Follow a Python-first flow: registry-driven metric plans, normalized
+  observations, deterministic Facts, and compact immutable review/report
+  packets.
+- Preserve evidence, factor scores, and append-only decision history.
+- Persist decision-relevant `MetricObservation` history and collection failure
+  records for compact current-versus-previous trend comparison.
+- Fetch data on demand through free structured public APIs with
+  freshness-aware local provider caching; no background services required.
+- When configured, use SoSoValue's documented US BTC/ETH ETF aggregate history
+  as structured ETF flow context; liquidation data is never attributed to that
+  source. Annualized basis uses Binance's most recent traded USDT delivery
+  contracts with exact mark/index prices; unsupported assets stay unavailable.
+- Add non-scoring overlays such as derivatives/social positioning and BTC
+  cycle context; these overlays can conservatively cap immediate deployment.
+- Compare against 100% BTC and 70/30 BTC/ETH buy-and-hold benchmarks over
+  matching evaluation periods.
+- Provide a look-ahead-free end-to-end replay evaluation tool
+  (`scripts/evaluate_strategy.py`): frozen review records → scoring → market
+  regime → strategic targets → staged rebalancing → costs → realized returns,
+  comparable against benchmarks and candidate strategy parameters.
+- Treat stablecoins and cash as one money basket and allow `NO_TRADE`.
+- Import structured fields from Binance wallet screenshots and
+  deterministically compute each position's cost basis, unrealized P&L,
+  return, and data coverage.
+- Build staged execution plans for approved rebalance amounts from timestamped
+  spot data and complete OHLCV, with calendar coverage checks, deterministic
+  ATR-aware zones, confirmed swing points, Volume Profile POC/value-area/HVN
+  context, tranches, and `WAIT` handling.
+- Python owns deterministic financial calculations; the Agent owns bounded
+  semantic research, interpretation, and report prose.
 
-## 安全边界 / 它不是什么
+## Safety Boundary / What It Is Not
 
-此 Skill 提供分析结果和建议的执行区间。它不会下单，也不会请求交易所交易或提现权限。
+The Skill produces analysis and suggested execution ranges. It does not place
+orders and never requests exchange trading or withdrawal permissions.
 
-它不是短线交易机器人，也不是杠杆或保证金系统、期货/永续合约系统或托管式交易所集成。绝不要提供私钥、助记词或交易凭证。
+It is not a short-term trading bot, nor a leverage or margin system, a
+futures/perpetuals system, or a custodial exchange integration. Never provide
+private keys, seed phrases, or trading credentials.
 
-投资组合配置决定总的美元敞口。技术执行层只决定如何分批执行已经获批的金额；每个计划都绑定对应的再平衡批准，可以只执行其中一部分，并且不会下单。`planned_amount_usd` 表示分阶段建议的额度，不代表已成交订单。
+Portfolio allocation decides total dollar exposure. The technical execution
+layer only decides how already-approved amounts are staged; every plan is
+bound to its rebalance approval, may be partially executed, and never places
+orders. `planned_amount_usd` is a staged recommendation, not a filled order.
 
-## 环境要求
+## Requirements
 
-- 支持 Agent Skills 的 Codex、Claude Code 或 ZCode 宿主。
-- Python 3.11 或更高版本，用于包含的脚本和开发检查。
-- Git，用于克隆和开发。
-- 运行 Agent 的环境需要具备网络/网页访问能力，以进行实时研究或按需刷新公共 provider 数据。
+- A Codex, Claude Code, or ZCode host that supports Agent Skills.
+- Python 3.11 or later, for the included scripts and development checks.
+- Git, for cloning and development.
+- The environment running the Agent needs network/web access for live
+  research or on-demand refresh of public provider data.
 
-正常使用 Skill 不需要安装 Python 包。仓库没有运行时 Python 依赖；`jsonschema` 和 `ruff` 仅是开发依赖。
+Normal Skill usage does not require installing Python packages. The repository
+has no runtime Python dependencies; `jsonschema` and `ruff` are
+development-only dependencies.
 
-## Skill 安装与使用
+## Skill Installation and Usage
 
 ```bash
 git clone https://github.com/iavl/crypto-portfolio-manager.git
@@ -64,48 +102,75 @@ cd crypto-portfolio-manager
 ./install.sh --target all
 ```
 
-仓库唯一 source of truth 是：
+The repository's single source of truth is:
 
 ```text
 .agents/skills/crypto-portfolio-manager/SKILL.md
 ```
 
-Codex 从仓库根目录或其子目录启动即可自动发现该 Skill；Claude Code 和 ZCode
-需要各自的 Skill 目录或 Import 操作。所有宿主都应使用 symlink 指向上述目录，
-避免产生过期副本。完整命令、旧版迁移和运行时数据边界请参阅[多宿主安装指南](docs/USAGE.md#多宿主-skill-使用与安装)。
+Codex discovers the Skill automatically when started from the repository root
+or a subdirectory; Claude Code and ZCode need their own Skill directory or an
+Import action. All hosts should use symlinks pointing at the directory above
+to avoid stale copies. For the full commands, legacy migration, and runtime
+data boundaries, see the
+[multi-host installation guide](docs/USAGE.md#11-multi-host-skill-installation-and-usage).
 
-`install.sh` 默认同时为 Codex、Claude Code 和 ZCode 创建用户级 symlink；也可用
-`--target codex|claude|zcode` 只安装一个宿主。脚本不会复制 payload，也不会覆盖未知已有路径；
-当前仓库根目录的旧 Codex symlink 会被定向修复。
+`install.sh` creates user-level symlinks for Codex, Claude Code, and ZCode by
+default; use `--target codex|claude|zcode` to install for a single host. The
+script never copies the payload and never overwrites unknown existing paths;
+a legacy Codex symlink at the current repository root is repaired in place.
 
-仓库 Skill 不需要单独的 Python 安装；如果需要运行开发检查，再执行：
+The repository Skill needs no separate Python installation; if you want to run
+development checks, run:
 
 ```bash
 python3 -m pip install -e ".[dev]"
 ```
 
-## 使用
+## Usage
 
-截图/JSON 输入、复盘类型、可复制提示词、试运行、外部数据和本地历史数据请从[使用指南](docs/USAGE.md)开始。
+For screenshot/JSON input, review types, copyable prompts, dry runs, external
+data, and local history, start from the [Usage Guide](docs/USAGE.md).
 
-对于标准 Binance 流程，请将钱包总览的显示货币设置为 USD，截取资产/数量/价格-成本/浮动盈亏列，并上传截图。Agent 会提取可见字段；Python 会计算所有派生的盈亏值。显示为 `--` 的行会保持未知；部分截图会被报告为不完整，而不会被当作完整投资组合。
+For the standard Binance flow, set the wallet overview display currency to
+USD, capture the asset/quantity/price-cost/floating P&L columns in a
+screenshot, and upload it. The Agent extracts the visible fields; Python
+computes all derived P&L values. Rows shown as `--` stay unknown; a partial
+screenshot is reported as incomplete rather than treated as the full
+portfolio.
 
-## 运行时数据与隐私
+## Runtime Data and Privacy
 
-默认情况下，历史数据位于 Git 检出目录之外：
+By default, history lives outside the Git checkout:
 
 ```text
 ~/.local/share/crypto-portfolio-manager/
 ```
 
-设置 `CRYPTO_PORTFOLIO_DATA_DIR` 可使用其他目录。免费的公共 provider 不需要 API key；可选 provider 的 key 仅通过环境变量提供。仓库只支持当前运行时数据契约；破坏性变更后的不兼容生成状态必须手动重新生成。绝不要提交真实余额、数量、成本基础、交易历史、账户标识符、凭证、私钥或助记词。
+Set `CRYPTO_PORTFOLIO_DATA_DIR` to use another directory. Free public
+providers need no API key; keys for optional providers are supplied only
+through environment variables. The repository supports only the current
+runtime data contract; incompatible generated state after a breaking change
+must be regenerated manually. Never commit real balances, quantities, cost
+basis, trade history, account identifiers, credentials, private keys, or seed
+phrases.
 
-内容寻址的公共 OHLCV 回放数据存储在同一运行时目录下的 `market-data/sha256/<ohlcv_hash>.json` 中。指标观测和采集事件存储在 `metrics/` 下；缓存的 Volume Profile 结果存储在 `volume-profiles/sha256/<profile_hash>.json` 下。Volume Profile 是历史成交量集中度的代理指标，不是精确的持仓成本基础。
+Content-addressed public OHLCV replay data is stored under
+`market-data/sha256/<ohlcv_hash>.json` in the same runtime directory. Metric
+observations and collection events live under `metrics/`; cached Volume
+Profile results live under `volume-profiles/sha256/<profile_hash>.json`.
+Volume Profile is a proxy for historical volume concentration, not an exact
+holder cost basis.
 
-Provider 响应和序列清单缓存在 `provider-cache/` 下；模式和清理方式请参阅[数据 Provider](references/data-providers.md)。仓位盈亏是剩余仓位的未实现表现；此功能不声称提供已实现盈亏、手续费、税务批次或生命周期收益率。
-Provider 或 API 出现问题？请参阅[开发与 Provider 排查指南](docs/DEVELOPMENT_DEBUGGING.md)。
+Provider responses and recording manifests are cached under
+`provider-cache/`; for schemas and cleanup see
+[Data Providers](references/data-providers.md). Position P&L is the
+unrealized performance of the remaining position; this feature makes no claim
+about realized P&L, fees, tax lots, or lifetime returns.
+Having provider or API trouble? See the
+[Development and Provider Debugging Guide](docs/DEVELOPMENT_DEBUGGING.md).
 
-## 开发
+## Development
 
 ```bash
 git clone https://github.com/iavl/crypto-portfolio-manager.git
@@ -113,7 +178,7 @@ cd crypto-portfolio-manager
 python3 -m pip install -e ".[dev]"
 ```
 
-运行 CI 使用的检查：
+Run the checks used by CI:
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -121,13 +186,14 @@ ruff check .
 python3 -m compileall crypto_portfolio scripts
 ```
 
-规范化结构化快照：
+Normalize a structured snapshot:
 
 ```bash
 python3 scripts/portfolio_snapshot.py path/to/snapshot.json
 ```
 
-离线全流程回放评测（仅研究用途，不接触实时行情、不做参数自动寻优）：
+Offline end-to-end replay evaluation (research only; no live market data, no
+parameter auto-tuning):
 
 ```bash
 python3 scripts/evaluate_strategy.py tests/fixtures/strategy_replay_basic.json --fee-bps 10

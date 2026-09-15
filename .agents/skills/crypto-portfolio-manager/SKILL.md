@@ -104,11 +104,12 @@ these steps before portfolio analysis:
 7. Assess visible-value coverage against the reported total; do not treat
    visible rows as the whole portfolio when the screenshot is partial.
 8. Continue the review and include the Position P&L table and known-cost
-   coverage summary in the Chinese output.
+   coverage summary in the English output.
 
-The Binance row convention is: the top number in `资产价格 / 成本价` is the
-current price and the bottom number is average cost; the top number in
-`数量` is quantity and the bottom number is current position value. A
+The Binance row convention is: the top number in `资产价格 / 成本价`
+(asset price / cost) is the current price and the bottom number is average
+cost; the top number in `数量` (quantity) is quantity and the bottom number
+is current position value. A
 displayed `$0.00` current price with positive quantity and value is rounded
 display data, so the engine uses value ÷ quantity and records a note.
 
@@ -218,7 +219,7 @@ display data, so the engine uses value ÷ quantity and records a note.
     resolutions; do not discard final failed metric events or provider
     attempts. Python determines `failed_data_fetches` (final status, failure
     stage, provider, error code, structured reason, and decision effect), and
-    the report writer only formats those finalized values. Produce the Chinese
+    the report writer only formats those finalized values. Produce the English
     user-facing report using `references/output-template.md`. At the end of
     section 1, render every `ReportPacket.failed_data_fetches` item, including
     the no-failure message when empty; never invent a cause, change an error
@@ -227,17 +228,17 @@ display data, so the engine uses value ÷ quantity and records a note.
     Run every repository script used by this review through
     `scripts/run_with_debug.py`; pass its execution records through
     `build_report_packet(..., script_executions=...)`. Render every non-success
-    script in the section 1 `Debug 报告` with its exit status and captured
+    script in the section 1 `Debug report` with its exit status and captured
     failure log. Keep logs redacted and bounded; do not include raw response
     bodies, credentials, headers, or private reasoning.
     Every normal review shows Position P&L
-    when available, using `平均成本`, `持仓成本`, `当前价值`, `未实现盈亏`,
-    `持仓收益率`, and `成本数据覆盖率`; do not label it total portfolio
-    return. `FULL_REVIEW` also compares the prior/current return by asset in
+    when available, using `Average cost`, `Position cost`, `Current value`,
+    `Unrealized P&L`, `Position return`, and `Cost data coverage`; do not
+    label it total portfolio return. `FULL_REVIEW` also compares the prior/current return by asset in
     percentage points; `SNAPSHOT_REVIEW` shows the current table without
     treating cost basis as a buy signal. Every portfolio conclusion and
     risk-asset Action must show the auditable chain:
-    `证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action`.
+    `Evidence → fact meaning → portfolio constraint → risk gate → rebalance threshold → Action`.
     Cite the matching Evidence ID, source, observed time, and collection
     status; explain the effect on score, confidence, regime, eligibility, or
     trade size; state current-versus-target deviation and the threshold that
@@ -247,7 +248,8 @@ display data, so the engine uses value ÷ quantity and records a note.
     For `NO_TRADE`/`WAIT`, include the finalized `NoTradeAttribution` gate
     states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
-    `术语解释与决策影响` entry. Explain only terms used or material to the
+    `Term explanations and decision impact` entry. Explain only terms used or
+    material to the
     decision. `MATERIAL_EVENT_FOUND` means a relevant security or regulatory
     event was found in the scanned source; it does not mean an exploit,
     approval, or execution. Record important user-supplied governance or

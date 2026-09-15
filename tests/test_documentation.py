@@ -15,15 +15,14 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(skill.is_file())
         self.assertIn("name: crypto-portfolio-manager", skill.read_text(encoding="utf-8"))
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("[使用指南](docs/USAGE.md)", readme)
+        self.assertIn("[Usage Guide](docs/USAGE.md)", readme)
         self.assertIn(
-            "[中文术语表](docs/GLOSSARY.zh-CN.md)",
+            "[Glossary](docs/GLOSSARY.md)",
             readme,
         )
-        self.assertNotIn("[English", readme)
         self.assertFalse((ROOT / "README.zh-CN.md").exists())
         self.assertIn(
-            "[中文术语表](GLOSSARY.zh-CN.md)",
+            "[Glossary](GLOSSARY.md)",
             (ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8"),
         )
 
@@ -31,7 +30,7 @@ class DocumentationTests(unittest.TestCase):
             "docs/USAGE.md",
             "docs/HOW_IT_WORKS.md",
             "docs/DEVELOPMENT_DEBUGGING.md",
-            "docs/GLOSSARY.zh-CN.md",
+            "docs/GLOSSARY.md",
             "config/policy.json",
             "references/investment-policy.md",
             "references/investment-strategy.md",
@@ -75,7 +74,7 @@ class DocumentationTests(unittest.TestCase):
         with (ROOT / "pyproject.toml").open("rb") as stream:
             project = tomllib.load(stream)
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
-        self.assertIn("Python 3.11 或更高版本", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("Python 3.11 or later", (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_data_sources_document_source_policy(self):
         source_policy = (ROOT / "references/data-sources.md").read_text(encoding="utf-8")
@@ -122,7 +121,7 @@ class DocumentationTests(unittest.TestCase):
             "INSUFFICIENT_SOURCE_COVERAGE",
             "pending_responses",
             "host-assisted",
-            "来源不可达不能解释成",
+            "Unreachable sources must never be interpreted as",
         ):
             with self.subTest(text=text):
                 self.assertTrue(text in guide or text in usage)
@@ -147,48 +146,47 @@ class DocumentationTests(unittest.TestCase):
         skill = SKILL_PATH.read_text(encoding="utf-8")
         template = (ROOT / "references/output-template.md").read_text(encoding="utf-8")
         for text in (
-            "证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action",
+            "Evidence → fact meaning → portfolio constraint → risk gate → rebalance threshold → Action",
             "Evidence ID",
             "MATERIAL_EVENT_FOUND",
-            "协议提案/升级活动",
+            "Protocol proposal/upgrade activity",
             "ManualAssetContext",
-            "无法确认",
+            "cannot be confirmed",
         ):
             with self.subTest(text=text):
                 self.assertTrue(text in skill or text in template)
         for text in (
-            "### 结论依据",
-            "### 本轮数据抓取失败明细",
+            "### Decision basis",
+            "### Failed data fetches this round",
             "failed_data_fetches",
-            "失败原因",
-            "错误码",
-            "最近可用数据",
-            "决策影响",
-            "### 术语解释与决策影响",
-            "事实",
-            "判断",
+            "Failure reason",
+            "Error code",
+            "Last usable data",
+            "Decision impact",
+            "### Term explanations and decision impact",
+            "labels such as `Fact` and `Judgment`",
             "STALE",
             "Position P&L",
             "NAV Return",
-            "成本数据覆盖率",
+            "Cost data coverage",
             "performance_finality",
             "cash_flow_resolution_status",
             "scoring/decision effect",
-            "Debug 报告",
-            "脚本执行异常",
-            "程序失败日志",
-            "直接失败日志",
+            "Debug report",
+            "Script execution failures",
+            "Program failure log",
+            "Direct failure log",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, template)
         self.assertIn("`SKIPPED` and `NOT_APPLICABLE` are not failed fetches", template)
         self.assertLess(
-            template.index("### 结论依据"),
-            template.index("### 本轮数据抓取失败明细"),
+            template.index("### Decision basis"),
+            template.index("### Failed data fetches this round"),
         )
         self.assertLess(
-            template.index("### 本轮数据抓取失败明细"),
-            template.index("## 2. 组合诊断"),
+            template.index("### Failed data fetches this round"),
+            template.index("## 2. Portfolio diagnostics"),
         )
         self.assertIn("MATERIAL_EVENT_FOUND` means a relevant security or regulatory", skill)
         self.assertIn("result.pending_event_scans", skill)
@@ -205,8 +203,8 @@ class DocumentationTests(unittest.TestCase):
         for text in (
             "--status", "--doctor", "--probe", "--contract", "--smoke",
             "HTTP_403_UNKNOWN", "CONNECT_TIMEOUT", "READ_TIMEOUT",
-            "PROVIDER_SCHEMA_CHANGED", "CIRCUIT_OPEN", "记录 / 回放",
-            "run_with_debug.py", "凭证", "TLS 校验",
+            "PROVIDER_SCHEMA_CHANGED", "CIRCUIT_OPEN", "Record / Replay",
+            "run_with_debug.py", "credential", "TLS verification",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, guide)
@@ -229,35 +227,33 @@ class DocumentationTests(unittest.TestCase):
             "Codex",
             "Claude Code",
             "ZCode",
-            "docs/USAGE.md#多宿主-skill-使用与安装",
+            "docs/USAGE.md#11-multi-host-skill-installation-and-usage",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, readme)
         for text in (
             "### Codex",
-            "直接从当前 Git working tree 读取实现",
+            "reads the implementation directly from the current",
             "### Claude Code",
-            "用户级 symlink",
+            "user-level symlink",
             "### ZCode",
             ".claude/skills",
             ".zcode/skills",
             "Settings → Skills → Import",
-            "安装脚本使用 symlink",
+            "The install script uses symlinks",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, guide)
-        for content in (readme, guide):
-            self.assertNotIn("安装到：", content)
 
     def test_glossary_covers_current_terms_and_boundaries(self):
-        glossary = (ROOT / "docs" / "GLOSSARY.zh-CN.md").read_text(encoding="utf-8")
+        glossary = (ROOT / "docs" / "GLOSSARY.md").read_text(encoding="utf-8")
         for text in (
-            "# 术语表（新手版）",
-            "## 1. 复盘类型、结论与动作",
-            "## 2. 组合与风险",
-            "## 3. 记账与表现",
-            "## 4. 市场数据与指标",
-            "## 5. 证据、评分与系统",
+            "# Glossary (Beginner Edition)",
+            "## 1. Review Types, Conclusions, and Actions",
+            "## 2. Portfolio and Risk",
+            "## 3. Accounting and Performance",
+            "## 4. Market Data and Metrics",
+            "## 5. Evidence, Scoring, and System",
             "SNAPSHOT_REVIEW",
             "NO_TRADE",
             "HOLD_ONLY",
@@ -267,7 +263,7 @@ class DocumentationTests(unittest.TestCase):
             "ATR14",
             "Volume Profile",
             "MVRV / SOPR / LTH net-position change",
-            "trend、valuation、fundamentals、onchain、capital_flows 和 relative_strength_btc",
+            "trend, valuation, fundamentals, onchain, capital_flows, and relative_strength_btc",
             "NOT_APPLICABLE",
             "SKIPPED",
             "MetricObservation",
@@ -275,10 +271,10 @@ class DocumentationTests(unittest.TestCase):
             "AUTO / CACHE_ONLY / REFRESH",
             "DecisionReviewPacket",
             "ReportPacket",
-            "score > 某值就买",
-            "不是持仓者的精确成本基础",
-            "链数据传输失败不等于链已 HALTED",
-            "不是系统错误",
+            "score > X means buy",
+            "not the exact cost basis of position holders",
+            "a chain data transport failure does not mean the chain is HALTED",
+            "not a system error",
             "observed_at",
             "fetched_at",
             "as_of",

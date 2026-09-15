@@ -1,86 +1,97 @@
-# 工作原理
+# How It Works
 
-本文档说明 `crypto-portfolio-manager` 当前的架构、Python 与 Agent 的边界、
-数据流、历史记录和可复现性。
-策略概念和决策原则见[投资策略](../references/investment-strategy.md)。
+This document describes the current architecture of `crypto-portfolio-manager`,
+the Python/Agent boundary, the data flow, history records, and
+reproducibility. For strategy concepts and decision principles, see
+[Investment Strategy](../references/investment-strategy.md).
 
-## 1. 系统总览
+## 1. System Overview
 
-`.agents/skills/crypto-portfolio-manager/SKILL.md` 负责工作流编排；`AcquisitionManager` 和 `ProviderRouter` 负责
-缓存优先的数据获取；规范化、记账、评分、regime、allocation、risk、rebalance
-和 execution 由 Python 完成。
+`.agents/skills/crypto-portfolio-manager/SKILL.md` owns workflow orchestration;
+`AcquisitionManager` and `ProviderRouter` own cache-first data acquisition;
+normalization, accounting, scoring, regime, allocation, risk, rebalance, and
+execution are done by Python.
 
 ```text
-截图或结构化 snapshot
-    -> Python snapshot 校验与 Position P&L
-    -> 历史 context 与 resolved policy
+screenshot or structured snapshot
+    -> Python snapshot validation and Position P&L
+    -> historical context and resolved policy
     -> Python metric collection plan
-    -> 新鲜 observation / provider cache / structured provider
-    -> MetricObservation 与 CollectionEvent
-    -> Python Facts 与确定性指标
-    -> 受限语义判断
+    -> fresh observation / provider cache / structured provider
+    -> MetricObservation and CollectionEvent
+    -> Python Facts and deterministic indicators
+    -> bounded semantic judgment
     -> Python score / regime / allocation / risk / rebalance
     -> DecisionReviewPacket
     -> ReportPacket
-    -> 中文报告与 append-only 历史
+    -> English report and append-only history
 ```
 
-系统只提供建议和执行区间，不连接交易下单、提现、杠杆、保证金或自动交易。
+The system only provides advice and execution ranges; it never connects to
+order placement, withdrawals, leverage, margin, or autonomous trading.
 
-## 2. Python 与 Agent 的边界
+## 2. Python and Agent Boundaries
 
-如果结果可以从结构化数据确定性推导，Python 拥有该结果。Agent 只处理截图
-字段提取、未解决来源检索、有界语义判断、重大事件解释和报告文字。
+If a result can be derived deterministically from structured data, Python owns
+it. The Agent only handles screenshot field extraction, unresolved-source
+retrieval, bounded semantic judgment, material-event interpretation, and
+report prose.
 
-| 责任 | 所有者 | 说明 |
+| Responsibility | Owner | Notes |
 |---|---|---|
-| 截图字段提取 | Agent | 读取可见 Binance 行，不计算金融结果。 |
-| metric 计划 | Python | 从 registry 选择适用 metric key。 |
-| provider 获取与规范化 | Python | 负责 route、cache、单位、时间、freshness、provenance。 |
-| Position P&L | Python | 计算成本基础、未实现盈亏、收益率和覆盖率。 |
-| 指标数学 | Python | MA、ATR、收益、波动率、回撤、Volume Profile。 |
-| 语义判断 | Agent | 解释 fundamentals、event、冲突和不确定性。 |
-| 评分、regime、allocation、risk、rebalance | Python | Agent 不能覆盖确定性输出。 |
-| 高影响复核 | Agent，在 Python predicate 触发时 | 只做高影响批评，不改金融数学。 |
-| 最终报告 | Agent | 只能解释 finalized `ReportPacket`。 |
+| Screenshot field extraction | Agent | Reads visible Binance rows; computes no financial results. |
+| Metric plan | Python | Selects applicable metric keys from the registry. |
+| Provider fetching and normalization | Python | Owns routing, cache, units, times, freshness, provenance. |
+| Position P&L | Python | Computes cost basis, unrealized P&L, return, and coverage. |
+| Indicator math | Python | MA, ATR, returns, volatility, drawdown, Volume Profile. |
+| Semantic judgment | Agent | Interprets fundamentals, events, conflicts, and uncertainty. |
+| Scoring, regime, allocation, risk, rebalance | Python | The Agent cannot override deterministic outputs. |
+| High-impact review | Agent, when a Python predicate triggers | High-impact criticism only; never changes financial math. |
+| Final report | Agent | May only explain the finalized `ReportPacket`. |
 
-这里的 Agent 指用户在宿主中选择的当前模型/会话。仓库不选择或切换模型，也不
-选择或切换推理设置。数据包不传递原始网页、完整 OHLCV、完整历史或私有 reasoning。Evidence、
-来源、时间和 hash 会保留在规范化记录和 finalized packet 中。
+`Agent` here means the current model/session selected by the user in the host.
+The repository does not choose or switch models, nor reasoning settings.
+Packets never carry raw web pages, full OHLCV, full history, or private
+reasoning. Evidence, sources, times, and hashes are preserved in normalized
+records and finalized packets.
 
-## 3. 策略与资产分类
+## 3. Policy and Asset Classification
 
-`config/policy.json` 是 canonical policy，包含 universe、benchmark、stablecoin
-floor、drawdown budget、scoring weights、regime limits、rebalance thresholds、
-high-impact review thresholds 和 execution constants。
+`config/policy.json` is the canonical policy, containing the universe,
+benchmark, stablecoin floor, drawdown budget, scoring weights, regime limits,
+rebalance thresholds, high-impact review thresholds, and execution constants.
 
 ```text
 canonical policy
     -> resolved policy
-    -> 每个 symbol 的 core/satellite/stablecoin/cash/other 分类
+    -> per-symbol core/satellite/stablecoin/cash/other classification
 ```
 
-snapshot 可以提供明确的局部 `config` override。解析后会保存 resolved policy
-和 policy hash，使历史 decision 不依赖未来 checkout 的配置变化。资产 hint
-必须与 resolved classification 一致；重叠分组和冲突 hint 会失败。
+A snapshot may supply an explicit partial `config` override. The resolved
+policy and policy hash are saved after resolution so historical decisions do
+not depend on future checkout config changes. Asset hints must agree with the
+resolved classification; overlapping groups and conflicting hints fail.
 
-## 4. 组合输入
+## 4. Portfolio Inputs
 
-标准 Binance 钱包截图由以下链路处理：
+A standard Binance wallet screenshot is processed through:
 
 ```text
-可见截图字段
+visible screenshot fields
     -> symbol/quantity/value/price/cost/P&L
     -> PortfolioSnapshot
     -> Position P&L engine
     -> normalized snapshot
 ```
 
-行布局中价格/成本列的上行是当前价，下行是平均成本；数量列的上行是数量，
-下行是当前价值。`--` 成本和盈亏保持未知。正数量配合 `$0.00` 当前价时，
-Python 可用 `value / quantity` 作为当前价，并记录四舍五入警告。
+In the row layout, the top value of the price/cost column is the current price
+and the bottom value is the average cost; the top value of the quantity column
+is the quantity and the bottom value is the current position value. `--` costs
+and P&L stay unknown. With a positive quantity and a `$0.00` current price,
+Python uses `value / quantity` as the current price and records a rounding
+note.
 
-Python 校验：
+Python validates:
 
 ```text
 quantity * current price  ≈ current value
@@ -88,14 +99,16 @@ quantity * average cost   ≈ cost basis
 current value - cost basis ≈ exchange floating P&L
 ```
 
-小于较大者 `$0.05` 或预期值 `0.5%` 的差异保留为 rounding warning；material
-mismatch 不应直接持久化。可见行与 reported total 不一致时，结果保留
-visible-value coverage，并说明截图可能不完整。
+Differences smaller than the larger of `$0.05` or `0.5%` of the expected
+value are kept as rounding warnings; material mismatches should not be
+persisted directly. When visible rows disagree with the reported total, the
+result keeps visible-value coverage and notes that the screenshot may be
+incomplete.
 
-## 5. 历史与记账
+## 5. History and Accounting
 
-运行时状态默认位于 `~/.local/share/crypto-portfolio-manager/`，可以用
-`CRYPTO_PORTFOLIO_DATA_DIR` 修改。
+Runtime state defaults to `~/.local/share/crypto-portfolio-manager/` and can
+be moved with `CRYPTO_PORTFOLIO_DATA_DIR`.
 
 ```text
 portfolio/snapshots.jsonl
@@ -108,72 +121,82 @@ volume-profiles/sha256/<profile_hash>.json
 provider-cache/
 ```
 
-snapshot 和 decision 是 append-only。状态变更写入独立 status event，不覆盖
-旧 rationale。决策状态只允许从 `PENDING` 单向迁移到 `CONFIRMED` 或
-`NOT_EXECUTED`（两者均为终态）；追加未知 `decision_id`、重复状态或回退
-迁移的 status event 会被拒绝。MetricObservation 保留成功的规范化观测；
-CollectionEvent 保留所有采集结果，包括失败和 skipped。
+Snapshots and decisions are append-only. Status changes are written as
+separate status events and never overwrite old rationale. Decision status may
+only move forward from `PENDING` to `CONFIRMED` or `NOT_EXECUTED` (both
+terminal); status events referencing an unknown `decision_id`, duplicating a
+status, or moving backward are rejected. MetricObservation keeps successful
+normalized observations; CollectionEvent keeps every collection outcome,
+including failures and skips.
 
-仓库只支持当前内部运行时契约。破坏性变更后的不兼容生成状态必须手动重新生成，
-不会自动迁移或静默删除用户状态。
+The repository supports only the current internal runtime contract.
+Incompatible generated state after a breaking change must be regenerated
+manually; user state is never auto-migrated or silently deleted.
 
-现金流调整后的 NAV 使用 unitized NAV。一个 snapshot 附着的外部现金流被视为
-发生在该 snapshot valuation 之前。snapshot 使用唯一的
-`cash_flow_resolution_status`：未披露时为 `ASSUMED_NONE`（`0`、`NONE`，NAV
-保持 `FINAL`），也可使用 `CONFIRMED_NONE`、`CONFIRMED_AMOUNT`、
-`UNRESOLVED` 或 `BASELINE_RESET`。明确披露但未解决的流量保持
-`PROVISIONAL`；确认记录追加到 `cash-flow-resolutions.jsonl`，旧 snapshot
-不被重写。
+Cash-flow-adjusted NAV uses unitized NAV. An external cash flow attached to a
+snapshot is treated as occurring immediately before that snapshot's
+valuation. Each snapshot carries a unique `cash_flow_resolution_status`:
+`ASSUMED_NONE` when undisclosed (`0`, `NONE`, NAV stays `FINAL`), or
+`CONFIRMED_NONE`, `CONFIRMED_AMOUNT`, `UNRESOLVED`, or `BASELINE_RESET`.
+Explicitly disclosed but unresolved flows stay `PROVISIONAL`; confirmed
+records are appended to `cash-flow-resolutions.jsonl` and old snapshots are
+never rewritten.
 
-## 6. 指标注册表与采集计划
+## 6. Metric Registry and Collection Plan
 
-`crypto_portfolio/metrics_registry.py` 为每个 metric 定义：
+`crypto_portfolio/metrics_registry.py` defines, for each metric:
 
-- factor、expected type、unit 和 direction；
-- freshness window；
-- asset scope 与 criticality；
-- `SCORING_FACTOR`、`EVENT_RISK`、`POSITIONING_OVERLAY`、`CYCLE_CONTEXT`、
-  `EXECUTION_CONTEXT` 或 `STRUCTURAL_RISK` role。
+- factor, expected type, unit, and direction;
+- freshness window;
+- asset scope and criticality;
+- a role of `SCORING_FACTOR`, `EVENT_RISK`, `POSITIONING_OVERLAY`,
+  `CYCLE_CONTEXT`, `EXECUTION_CONTEXT`, or `STRUCTURAL_RISK`.
 
-`engine.metric_plan.build_metric_collection_plan()` 在 Python 中选择 metric。
-它不会让模型发明 key，也不会给 stablecoin/cash 行请求不适用的资产指标。
+`engine.metric_plan.build_metric_collection_plan()` selects metrics in Python.
+It never lets a model invent keys, and never requests inapplicable asset
+metrics for stablecoin/cash rows.
 
-采集顺序：
+Collection order:
 
 ```text
 fresh MetricObservation
     -> provider cache
     -> free structured provider
     -> optional API-key provider
-    -> 明确的 WebFallbackRequest
+    -> explicit WebFallbackRequest
 ```
 
-每个请求必须产生一个结果。缺失、重复、额外结果都会失败。状态含义如下：
+Every request must produce exactly one result; missing, duplicate, or extra
+results fail. Status meanings:
 
-- `SUCCESS`：规范化观测可用于该 metric；
-- `STALE`：旧 observation 存在，但当前刷新不可用或超出 freshness；
-- `FAILED`：应用数据预期存在，但没有可用值；
-- `CONFLICT`：来源冲突；
-- `NOT_APPLICABLE`：语义上不适用；
-- `SKIPPED`：可选或 premium provider 没有配置；provider entitlement、rate
-  limit 和 circuit 状态不会伪造成成功。
+- `SUCCESS`: a normalized observation is available for the metric;
+- `STALE`: an old observation exists, but the current refresh is unavailable
+  or past freshness;
+- `FAILED`: data is expected to exist for an applicable metric, but no usable
+  value was obtained;
+- `CONFLICT`: sources disagree;
+- `NOT_APPLICABLE`: semantically inapplicable;
+- `SKIPPED`: an optional or premium provider is unconfigured; provider
+  entitlement, rate limit, and circuit states are never disguised as success.
 
-`market.flow_state`、BTC-relative returns、ETH/BTC opportunity ratios、ETH
-staking/flow normalization 和 OI/market-cap 等明确依赖图由
-Python 派生。派生输入缺失时不会制造中性值。
+Explicit dependency graphs such as `market.flow_state`, BTC-relative returns,
+ETH/BTC opportunity ratios, ETH staking/flow normalization, and
+OI/market-cap ratios are derived by Python. Missing derived inputs never
+produce fabricated neutral values.
 
-## 7. Provider 与事件边界
+## 7. Provider and Event Boundaries
 
-具体 source、字段、metric key 和限制见
-[`../references/data-providers.md`](../references/data-providers.md)；来源质量和
-方法论见 [`../references/data-sources.md`](../references/data-sources.md)。
+For concrete sources, fields, metric keys, and limits, see
+[`../references/data-providers.md`](../references/data-providers.md); for
+source quality and methodology, see
+[`../references/data-sources.md`](../references/data-sources.md).
 
-Provider 只返回规范化结构化数据。Chain liveness 是特殊的 chain-specific
-structured provider，不会回退到普通 Web 搜索。EventScanner 只使用固定
-allowlist source catalog；页面内容不能添加 URL、改变范围、执行命令或泄露
-secret。
+Providers return only normalized structured data. Chain liveness is a special
+chain-specific structured provider and never falls back to ordinary web
+search. EventScanner uses only the fixed allowlist source catalog; page
+content may not add URLs, change scope, execute commands, or leak secrets.
 
-广义市场估值与协议基本面分开处理：
+Broad market valuation and protocol fundamentals are handled separately:
 
 ```text
 valuation.market_cap / valuation.fdv
@@ -185,9 +208,9 @@ fundamentals.tvl / fees / revenue / fee-revenue multiple
     -> DeFiLlama
 ```
 
-### Provider 可靠性
+### Provider Reliability
 
-Provider 获取过程会保留清晰可见的失败边界：
+Provider fetching keeps failure boundaries clearly visible:
 
 ```text
 request
@@ -200,26 +223,32 @@ request
  -> unresolved evidence
 ```
 
-`--status` 是离线 readiness 检查。显式执行 `--doctor`、`--probe`、
-`--contract` 和 `--smoke` 才会诊断或运行实时获取；这些命令不会改变组合计算。
-传输、HTTP、plan、schema、规范化、缓存和断路器失败都会保留为结构化 Provider
-诊断。fallback 可以提供可用观测值，但不会从 telemetry 中抹掉原始尝试。
+`--status` is an offline readiness check. Only explicit `--doctor`, `--probe`,
+`--contract`, and `--smoke` commands diagnose or run live fetches; these
+commands never change portfolio calculations. Transport, HTTP, plan, schema,
+normalization, cache, and circuit-breaker failures are all preserved as
+structured provider diagnostics. A fallback may supply a usable observation,
+but it never erases the original attempts from telemetry.
 
-报告生成器绝不会用 Web 或模型推断替换成功的结构化观测。历史估值请求只使用
-复盘截止时间及之前的证据。
+The report generator never replaces a successful structured observation with
+web or model inference. Historical valuation requests use only evidence from
+at or before the review cutoff.
 
-事件扫描采用两阶段流程：
+Event scanning uses a two-phase flow:
 
-事件请求的正常运行顺序是：pass 1 生成 EventSourceScanRequest，外部阶段
-为每个请求返回一个 EventSourceScanResponse（不可达时也必须返回
-reachable=false 和有界错误），pass 2 重新运行 acquisition，随后调用
-require_scoring_ready()，最后才进入 scoring。安全事件使用固定的官方
-source catalog，监管仍复用共享 MARKET source；治理提案不再自动扫描。
+The normal operating order of an event request is: pass 1 produces
+EventSourceScanRequests, the external stage returns exactly one
+EventSourceScanResponse per request (returning reachable=false and a bounded
+error when unreachable), pass 2 re-runs acquisition, then
+require_scoring_ready() is called before scoring. Security events use the
+fixed official source catalog; regulation reuses the shared MARKET source;
+governance proposals are no longer scanned automatically.
 
-BTC-relative return 请求会把资产和 BTC 的 market.return_30d/90d/180d
-作为一个依赖 cohort 处理。缓存日期不一致时两侧一起刷新/重建；Python
-只在同一 venue、quote、completed daily candle 和共同 calendar anchor 上
-相减，不接受错位标量。
+BTC-relative return requests treat the asset's and BTC's
+market.return_30d/90d/180d as one dependency cohort. When cached dates
+disagree, both sides are refreshed/rebuilt together; Python subtracts only on
+the same venue, quote, completed daily candle, and common calendar anchor,
+and never accepts misaligned scalars.
 
 ```text
 Python source catalog
@@ -231,37 +260,42 @@ Python source catalog
     -> Python coverage/materiality/status
 ```
 
-`MATERIAL_EVENT_FOUND` 表示扫描到重要 proposal/announcement，不等于 exploit、
-approval 或 execution。完整覆盖无事件使用
-`NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`；部分来源不可达使用
-`INSUFFICIENT_SOURCE_COVERAGE`，不代表绝对安全。
+`MATERIAL_EVENT_FOUND` means a material proposal/announcement was scanned; it
+is not proof of an exploit, approval, or execution. Full coverage with no
+events uses `NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES`; partially
+unreachable sources use `INSUFFICIENT_SOURCE_COVERAGE`, which is not proof of
+safety.
 
-事件调试不经过普通 Provider router，可单独运行：
+Event debugging bypasses the ordinary provider router and can run standalone:
 
 ```bash
 python3 scripts/events.py --plan --asset BTC --asset ETH
 python3 scripts/events.py --smoke --asset BTC --asset ETH
 ```
 
-Transport 只发现 bounded candidates；Ethereum Foundation security、Aave
-security 和 ESMA/MiCA 分别使用 Blog RSS、Aave Risk Discourse JSON
-和 ESMA RSS。GitHub commits 受
-`since`/`until` review window 限制，Discourse 只跟随同源且有界的
-`more_topics_url`；分页被截断时保持 incomplete。没有 classifier、分类失败或覆盖不足时，
-结果保持 `CLASSIFICATION_PENDING`、`FETCH_FAILED` 或
-`INSUFFICIENT_SOURCE_COVERAGE`，绝不默认成 `CLEAR`。监管源在 `MARKET` 只抓取一次，
-再按 `affected_assets` 映射到 BTC/ETH。
+The transport only discovers bounded candidates; Ethereum Foundation
+security, Aave security, and ESMA/MiCA respectively use the Blog RSS, the
+Aave Risk Discourse JSON, and the ESMA RSS. GitHub commits are bounded by the
+`since`/`until` review window, and Discourse follows only same-origin bounded
+`more_topics_url`; truncated pagination stays incomplete. With no classifier,
+a failed classification, or insufficient coverage, results stay
+`CLASSIFICATION_PENDING`, `FETCH_FAILED`, or `INSUFFICIENT_SOURCE_COVERAGE`,
+never a default `CLEAR`. The regulatory source is fetched once under `MARKET`
+and mapped to BTC/ETH via `affected_assets`.
 
-## 8. 确定性决策流程
+## 8. Deterministic Decision Flow
 
-### Facts 与 factors
+### Facts and factors
 
-Python 从 MetricObservation 构建 compact Facts 和 metric history。趋势、flow
-解释、BTC-relative strength 等已有确定性实现；其他需要上下文的 fundamentals、
-valuation、event risk 可由模型在 bounded packet 中判断。
+Python builds compact Facts and metric history from MetricObservations.
+Trend, flow interpretation, BTC-relative strength, and more already have
+deterministic implementations; other context-dependent fundamentals,
+valuation, and event-risk judgments may be performed by the model within
+bounded packets.
 
-当前 policy 的 canonical factor namespace 有八个 key；其中正权重因子由资产
-profile 决定：默认非 BTC profile 有六个正权重因子，BTC profile 有四个。
+The current policy's canonical factor namespace has eight keys; the
+positively weighted factors are profile-dependent: the default non-BTC
+profile has six positive-weight factors, the BTC profile has four.
 
 ```text
 trend
@@ -274,111 +308,126 @@ btc_valuation
 macro_liquidity
 ```
 
-默认非 BTC profile 将 `btc_valuation` 和 `macro_liquidity` 设为零权重；BTC
-profile 使用 `trend`、`btc_valuation`、`capital_flows` 和 `macro_liquidity`
-的正权重。完整的策略解释见[投资策略](../references/investment-strategy.md)，
-权重和评分语义见[评分模型](../references/scoring-model.md)。
+The default non-BTC profile sets `btc_valuation` and `macro_liquidity` to
+zero weight; the BTC profile uses positive weights for `trend`,
+`btc_valuation`, `capital_flows`, and `macro_liquidity`. For the full
+strategy explanation see
+[Investment Strategy](../references/investment-strategy.md); for weights and
+scoring semantics see [Scoring Model](../references/scoring-model.md).
 
-event/security risk 使用独立的 typed gate；positioning 和 BTC cycle 是不计分的
-overlay。缺失 factor 保留原权重并通过 reliability 向中性 50 收缩，不能靠
-消失的数据抬高分数。
-关键 current price、trend、portfolio value 或材料安全事件缺失时，高置信新增
-仓位被阻止。
+Event/security risk uses a separate typed gate; positioning and BTC cycle are
+non-scoring overlays. Missing factors keep their configured weight and shrink
+toward neutral 50 via reliability; scores are never raised by vanished data.
+Missing critical current price, trend, portfolio value, or an unresolved
+material security event blocks high-conviction entries.
 
-当前 Policy 对 ETH 额外分组展示 monetary economics、staking security、L2/DA
-settlement、DeFi/stablecoin 和 developer/ecosystem 证据；这些只是语义分组，
-数值仍由 Python 的 MetricObservation 和确定性派生函数拥有。ETH 核心门控与
-70/30 BTC/ETH 核心袖套锚点独立于 base score，不能把 core 分类当作目标保证。
+The current policy additionally groups ETH evidence into monetary economics,
+staking security, L2/DA settlement, DeFi/stablecoin, and
+developer/ecosystem; these are semantic groupings only — the numbers remain
+owned by Python's MetricObservations and deterministic derived functions.
+ETH core gating and the 70/30 BTC/ETH core-sleeve anchor are independent of
+the base score; core classification is never a target guarantee.
 
 ### Regime
 
-Python 结合 BTC trend、volatility、portfolio drawdown、flows、breadth 和
-systemic event risk，输出 `NORMAL`、`DEFENSIVE` 或 `CAPITAL_PRESERVATION`。
-单一 noisy indicator 不应切换 regime；drawdown floor 和严重事件可以形成
-硬性下限。传入上一次决策的 regime 时，结果每次评审最多移动
-`regime_transitions.max_notches_per_review` 档（默认 1）：投票驱动的
-两档跳变（含从 `CAPITAL_PRESERVATION` 直接回到 `NORMAL`）必须先经过一次
-中间档评审；严重事件与 `-0.6D`/`-0.8D` 回撤地板不受该限制。
+Python combines BTC trend, volatility, portfolio drawdown, flows, breadth,
+and systemic event risk to output `NORMAL`, `DEFENSIVE`, or
+`CAPITAL_PRESERVATION`. A single noisy indicator should never switch the
+regime; drawdown floors and severe events can form hard lower bounds. When
+the previous decision's regime is supplied, the result moves at most
+`regime_transitions.max_notches_per_review` notches per review (default 1):
+vote-driven two-notch jumps (including `CAPITAL_PRESERVATION` straight back
+to `NORMAL`) must first pass an intermediate-notch review; severe events and
+the `-0.6D`/`-0.8D` drawdown floors are never delayed by that bound.
 
-### Allocation、risk 与 rebalance
+### Allocation, risk, and rebalance
 
-组合配置顺序为：
+Portfolio allocation follows:
 
 ```text
 regime -> score -> confidence -> risk tier -> volatility/correlation
        -> stable floor -> concentration cap -> target
 ```
 
-Risk gate 检查 target sum、stablecoin floor、core minimum、satellite envelope、
-single-asset cap、chain liveness 和 overlays。Rebalance 使用 post-new-cash
-经济金额，按 2pp/4pp/8pp 阈值决定 HOLD、WATCH 或交易优先级。交易金额必须
-大于零；HOLD/WAIT/NO_TRADE 的金额必须为零。
+The risk gate checks target sum, stablecoin floor, core minimum, satellite
+envelope, single-asset cap, chain liveness, and overlays. Rebalancing uses
+post-new-cash economic amounts and the 2pp/4pp/8pp thresholds to decide HOLD,
+WATCH, or trade priority. Trade amounts must be positive; HOLD/WAIT/NO_TRADE
+amounts must be zero.
 
-## 9. 技术执行
+## 9. Technical Execution
 
-只有 rebalance 先批准 `INCREASE`，才进入技术层。技术层使用带 timestamp 的
-`SpotPrice` 和 completed `1D` OHLCV，优先至少 200 根日线、最好 240 天，
-并检查 freshness、cadence、calendar coverage 和 provenance。日线指标的
-freshness 以 `freshness_reference_at == metadata.completed_through` 的收盘
-边界计算；旧 observation 缺少该字段时必须 refresh/rebuild。
+The technical layer is entered only after rebalancing approves an
+`INCREASE`. It uses timestamped `SpotPrice` and completed `1D` OHLCV,
+preferring at least 200 daily candles (ideally 240), and checks freshness,
+cadence, calendar coverage, and provenance. Daily-indicator freshness is
+computed against the close boundary where
+`freshness_reference_at == metadata.completed_through`; older observations
+missing that field must be refreshed/rebuilt.
 
-技术 snapshot 计算 MA20/50/100/200、execution-specific calendar
-30D/90D/180D return、ATR14、
-realized volatility、relative volume、drawdown 和 confirmed swings。
+The technical snapshot computes MA20/50/100/200, execution-specific calendar
+30D/90D/180D returns, ATR14, realized volatility, relative volume, drawdown,
+and confirmed swings.
 
-Volume Profile 优先使用同一流动 spot venue 的 completed `1H`/`4H` bars，按
-`(high + low + close) / 3` 分配 volume，输出 POC、VAL、VAH、HVN 和 LVN。它
-是历史成交量集中度 proxy，不是 holder cost basis；LVN 只能作背景。
+Volume Profile prefers completed `1H`/`4H` bars from the same liquid spot
+venue, allocates volume by `(high + low + close) / 3`, and outputs POC, VAL,
+VAH, HVN, and LVN. It is a proxy for historical volume concentration, not a
+holder cost basis; LVN is background only.
 
-当前只生成 `PULLBACK`。`BREAKOUT` 返回 `WAIT`，`MIXED` 被拒绝。技术层可以
-stage less 或返回 WAIT，但不能增加 approved USD 或提交订单。
+Only `PULLBACK` is currently generated. `BREAKOUT` returns `WAIT` and `MIXED`
+is rejected. The technical layer may stage less or return WAIT, but it cannot
+increase the approved USD amount or submit orders.
 
-## 10. 数据包与报告
+## 10. Packets and Reporting
 
-主要 handoff packet：
+The main handoff packets:
 
-- `AssetFactorPacket`：单资产 Facts、coverage、previous assessment、Evidence ID 和可选
-  `ManualAssetContext`；
-- `DecisionReviewPacket`：资产摘要、current/target weights、actions、risk flags、
-  missing data、manual contexts 和 overlays；
-- `ReportPacket`：finalized regime、scores、weights、actions、amounts、zones、
-  historical changes、risk flags、data quality、overlay 结果、最终数据抓取失败
-  和脚本执行失败日志。
+- `AssetFactorPacket`: per-asset Facts, coverage, previous assessment,
+  Evidence IDs, and optional `ManualAssetContext`;
+- `DecisionReviewPacket`: asset summaries, current/target weights, actions,
+  risk flags, missing data, manual contexts, and overlays;
+- `ReportPacket`: finalized regime, scores, weights, actions, amounts, zones,
+  historical changes, risk flags, data quality, overlay results, final data
+  fetch failures, and script execution failure logs.
 
-Packet 是 frozen/validated model。报告阶段可以解释 finalized values，但不能
-重新计算或修改 score、weight、amount、zone、Action 或 risk flag。报告中的
-决策依据应按以下顺序表达：
+Packets are frozen validated models. The reporting stage may explain
+finalized values but cannot recompute or modify a score, weight, amount,
+zone, Action, or risk flag. The report's decision basis should be expressed
+in this order:
 
 ```text
 Evidence -> fact meaning -> portfolio constraint -> risk gate
          -> rebalance threshold -> Action
 ```
 
-## 11. 失败与安全模式
+## 11. Failure and Safety Modes
 
-系统向减少行动性方向失败：
+The system fails toward reduced actionability:
 
-- `FAILED`、`STALE`、`CONFLICT` 降低 coverage/confidence；
-- chain liveness transport failure 不等于 HALTED；
-- `NOT_APPLICABLE` 不进入适用 coverage；
-- optional/premium `SKIPPED` 保持可见且不进入适用分母；
-- critical missing data、material conflict 或低 confidence 可阻止新增仓位；
-- risk gate `ERROR` 阻止不安全 target；
-- technical freshness、coverage、setup quality 或 CAPITAL_PRESERVATION 可以
-  返回 `WAIT` 或保留未部署资金；
-- `NO_TRADE` 是合法结果，不是系统错误。
-- Provider traceback 和脚本 `stderr` 只以脱敏、限长的 Debug 报告上下文保留；
-  没有直接日志时保持结构化失败原因，不猜测日志内容。
+- `FAILED`, `STALE`, `CONFLICT` lower coverage/confidence;
+- a chain liveness transport failure does not mean HALTED;
+- `NOT_APPLICABLE` stays out of applicable coverage;
+- optional/premium `SKIPPED` stays visible and out of the applicable
+  denominator;
+- critical missing data, material conflicts, or low confidence can block new
+  positions;
+- a risk gate `ERROR` blocks unsafe targets;
+- technical freshness, coverage, setup quality, or CAPITAL_PRESERVATION can
+  return `WAIT` and keep capital undeployed;
+- `NO_TRADE` is a valid outcome, not a system error.
+- Provider tracebacks and script `stderr` are kept only as sanitized,
+  length-bounded debug-report context; with no direct log, the structured
+  failure reason is kept and log content is never guessed.
 
-核心原则：
+Core principle:
 
 ```text
-不确定性降低行动性，而不是被猜测抹掉。
+Uncertainty reduces actionability; it is never erased by guesswork.
 ```
 
-## 12. 实现索引
+## 12. Implementation Index
 
-| 区域 | 实现 |
+| Area | Implementation |
 |---|---|
 | Policy | `config/policy.json`, `crypto_portfolio/models/policy.py` |
 | Metric registry | `crypto_portfolio/metrics_registry.py` |
@@ -393,17 +442,20 @@ Evidence -> fact meaning -> portfolio constraint -> risk gate
 | Providers | `crypto_portfolio/providers/` |
 | Runtime state | `crypto_portfolio/state/` |
 
-## 信心层级
+## Confidence Hierarchy
 
-确定性路径是 `Data Confidence -> Regime Confidence -> Decision Confidence`。
-每一层都会保留有界分数、等级、原因、上限和证据 ID。缺失数据保持缺失；即使
-regime 标签为正常，也不会因此获得增加风险的权限。
+The deterministic path is
+`Data Confidence -> Regime Confidence -> Decision Confidence`. Each layer
+keeps a bounded score, level, reasons, caps, and evidence IDs. Missing data
+stays missing; even a normal regime label grants no permission to add risk.
 
-Data Confidence 不再使用跨因子信号一致性或全局最弱资产；Decision Confidence
-先构造 action scope，再按当前暴露聚合相关资产证据。watchlist-only 资产不会污染
-HOLD；安全、链活性、现金流和目标资产的 hard gate 仍然 fail-closed。
+Data Confidence no longer uses cross-factor signal agreement or a global
+weakest asset; Decision Confidence first constructs the action scope, then
+aggregates relevant asset evidence by current exposure. Watchlist-only assets
+do not pollute HOLD; hard gates on security, chain liveness, cash flows, and
+target assets remain fail-closed.
 
-运行检查：
+Run the checks:
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -411,20 +463,24 @@ ruff check .
 python3 -m compileall crypto_portfolio scripts
 ```
 
-## 本轮数据获取修复
+## Metric History and Provider Notes
 
-Metric history 由 `crypto_portfolio/metric_history_requirements.py` 显式拥有：
-30D/90D/180D 请求分别使用约 45D/105D/195D，365D 使用约 380D，
-`btc_valuation.mvrv_zscore` 使用 `FULL_AVAILABLE`。240D 只属于执行层
-OHLCV，不会截断货币、tokenomics 或 valuation 历史。
+Metric history is explicitly owned by
+`crypto_portfolio/metric_history_requirements.py`: 30D/90D/180D requests use
+about 45D/105D/195D respectively, 365D uses about 380D, and
+`btc_valuation.mvrv_zscore` uses `FULL_AVAILABLE`. 240D belongs only to the
+execution layer's OHLCV and never truncates monetary, tokenomics, or
+valuation history.
 
-Coin Metrics 在一个 bundle 中按 metric 保留成功值和独立 diagnostics；
-Community 是 no-key 首选，Pro 只是可选 fallback。数值指标使用
-`STRUCTURED_ONLY`，不会被转换成随机 Web fallback。ETH monetary 只保留
-供应、发行和净供应增长等决策输入；Etherscan 只作为可选 current-supply
-cross-check。
+Coin Metrics keeps per-metric successful values and independent diagnostics
+in one bundle; Community is the no-key first choice and Pro is only an
+optional fallback. Numeric metrics use `STRUCTURED_ONLY` and are never
+converted into random web fallbacks. ETH monetary keeps only decision inputs
+such as supply, issuance, and net supply growth; Etherscan serves only as an
+optional current-supply cross-check.
 
-EventScanner 可注入 `StructuredEventTransport`，使用 bounded GitHub、RSS/Atom、
-Discourse JSON 和 allowlisted BNB Governor RPC。Transport 只发现并去重候选，
-Agent 只判断候选 materiality；同 authority 的 URL 以 source group 完成
-覆盖，独立安全域仍分别保留。
+EventScanner accepts an injected `StructuredEventTransport` using bounded
+GitHub, RSS/Atom, Discourse JSON, and the allowlisted BNB Governor RPC. The
+transport only discovers and deduplicates candidates; the Agent judges only
+candidate materiality. URLs of the same authority complete coverage as a
+source group; independent security domains are still kept separate.
