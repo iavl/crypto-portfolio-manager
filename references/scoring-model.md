@@ -141,6 +141,12 @@ Inputs without source confidence use unit source quality.
 Explicit reliability cannot raise the metadata-derived value. Numeric
 factor inputs retain their documented reliability of 1.
 
+When source-quality or redundancy metadata is absent, the factor result keeps
+the current numeric contract but exposes `SOURCE_QUALITY_UNSPECIFIED` or
+`REDUNDANCY_UNSPECIFIED` in its confidence reasons. Missing provenance is not
+silently presented as independent corroboration; adding new numeric penalties
+requires a separate policy decision and offline validation.
+
 The score and coverage are:
 
 ```text

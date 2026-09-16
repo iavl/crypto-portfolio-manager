@@ -751,6 +751,27 @@ def recommend_rebalance(
             normalized_hard_reasons[symbol] = "RISK_BUDGET_BREACH"
     effective_target = {symbol: weight for symbol, weight in target.items() if symbol not in stable_symbols}
     effective_target.update(stable_target)
+    stable_current_amount = sum(effective_current.get(symbol, 0.0) for symbol in stable_symbols)
+    stable_current_weight = stable_current_amount / post_cash_total
+    stable_pool_difference = target_stable_total - stable_current_weight
+    stable_pool_deviation_pp = abs(stable_pool_difference) * 100.0
+    stable_pool_relative_deviation = abs(stable_pool_difference) / max(
+        target_stable_total, float(resolved.rebalance["relative_target_floor"])
+    )
+    stable_pool_below_hold = (
+        stable_pool_deviation_pp < resolved.rebalance["hold_below_pp"]
+        and stable_pool_relative_deviation < resolved.rebalance["relative_watch"]
+    )
+    stable_pool_high_priority = (
+        stable_pool_deviation_pp > resolved.rebalance["high_priority_above_pp"]
+        or stable_pool_relative_deviation > resolved.rebalance["relative_high"]
+    )
+    stable_pool_watch = (
+        not stable_pool_below_hold
+        and not stable_pool_high_priority
+        and stable_pool_deviation_pp <= resolved.rebalance["watch_below_pp"]
+        and stable_pool_relative_deviation <= float(resolved.rebalance["relative_high"])
+    )
     symbols = sorted(
         symbol
         for symbol in set(effective_current) | set(effective_target) | broken
@@ -804,7 +825,32 @@ def recommend_rebalance(
             base_reason = "ALLOCATION_UNDERWEIGHT"
         else:
             base_reason = "REGIME_DERISK" if regime_name != "NORMAL" else "ALLOCATION_OVERWEIGHT"
-        if symbol in broken and current.get(symbol, 0.0) > 0:
+        if symbol in stable_symbols_set:
+            # Stable assets are one economic sleeve. Thresholds and staging
+            # apply once to the sleeve, then the executable sale is allocated
+            # across the currently held stable symbols.
+            if stable_pool_difference < 0 and not stable_pool_below_hold:
+                if stable_pool_watch:
+                    action = "WAIT"
+                    priority = "WATCH"
+                    rationale = (
+                        f"stable sleeve deviation {stable_pool_deviation_pp:.2f}pp "
+                        "is in the watch band"
+                    )
+                else:
+                    action = "REDUCE"
+                    priority = "HIGH" if stable_pool_high_priority else "NORMAL"
+                    rationale = (
+                        f"stable sleeve overweight {stable_pool_deviation_pp:.2f}pp "
+                        "exceeds the active rebalance threshold"
+                    )
+                action_reason = "ALLOCATION_OVERWEIGHT"
+            else:
+                action = "HOLD"
+                action_reason = base_reason
+                priority = "LOW"
+                rationale = "stable sleeve is handled as one pooled funding leg"
+        elif symbol in broken and current.get(symbol, 0.0) > 0:
             action = "EXIT"
             action_reason = "THESIS_BROKEN"
             priority = "HIGH"
@@ -851,6 +897,16 @@ def recommend_rebalance(
             rationale = "overweight exceeds the active rebalance threshold"
         executable = action in {"INCREASE", "REDUCE", "EXIT"}
         staging_active = executable and staging_config["enabled"] and action_reason not in bypass_reasons
+        stable_share = (
+            current_amount / stable_current_amount
+            if symbol in stable_symbols_set and stable_current_amount > 0
+            else 0.0
+        )
+        gap_for_staging = (
+            stable_pool_difference * stable_share
+            if symbol in stable_symbols_set
+            else difference
+        )
         if not executable:
             staged_gap = 0.0
         elif staging_active:
@@ -858,14 +914,19 @@ def recommend_rebalance(
             # max_gap_close_fraction of the remaining gap, capped by an
             # absolute per-review step, so one review never forces a healthy
             # position all the way to its long-run target.
+            max_step = float(staging_config["max_step_pp"]) / 100.0
+            if symbol in stable_symbols_set:
+                # The cap belongs to the pooled sleeve, then follows the
+                # same stable-symbol composition as the sale.
+                max_step *= stable_share
             step = min(
-                abs(difference) * float(staging_config["max_gap_close_fraction"]),
-                float(staging_config["max_step_pp"]) / 100.0,
+                abs(gap_for_staging) * float(staging_config["max_gap_close_fraction"]),
+                max_step,
             )
-            staged_gap = (1.0 if difference > 0 else -1.0) * step
+            staged_gap = (1.0 if gap_for_staging > 0 else -1.0) * step
         else:
-            staged_gap = difference
-        staging_applied = executable and staging_active and abs(staged_gap) < abs(difference) - 1e-12
+            staged_gap = gap_for_staging
+        staging_applied = executable and staging_active and abs(staged_gap) < abs(gap_for_staging) - 1e-12
         # Deployment allowance: a single named factor from the one configured
         # source (decision_confidence and deployment_caps are mutually
         # exclusive), composed under the policy mode. Only new increases are

@@ -25,6 +25,10 @@ The user asking “what should I buy?” does not imply that capital must be dep
 Stablecoins and cash are treated as one portfolio sleeve. Preserve the current
 stable composition when changing the sleeve size; do not generate
 stablecoin-to-stablecoin conversion solely to select one settlement symbol.
+Rebalance thresholds and ordinary staging apply once to the aggregate sleeve,
+then the approved stable funding leg is allocated across held stable symbols
+by their current composition. Splitting the same sleeve across more symbols
+must not change the risk-asset funding amount.
 
 For historical performance, an external cash flow attached to a snapshot is
 applied immediately before that snapshot valuation. The primary benchmark is

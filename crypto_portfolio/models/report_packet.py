@@ -330,6 +330,7 @@ class ReportPacket:
     actions: tuple[Any, ...] = ()
     approved_amounts: Mapping[str, float] = field(default_factory=dict)
     execution_zones: Mapping[str, Any] = field(default_factory=dict)
+    execution_plans: Mapping[str, Any] = field(default_factory=dict)
     historical_changes: Mapping[str, Any] = field(default_factory=dict)
     risk_flags: tuple[str, ...] = ()
     high_impact_review: HighImpactReview | Mapping[str, Any] | None = None
@@ -400,6 +401,18 @@ class ReportPacket:
             if not isinstance(getattr(self, field_name), Mapping):
                 raise ValueError(f"{field_name} must be an object")
             object.__setattr__(self, field_name, freeze_packet_value(getattr(self, field_name), path=field_name))
+        if not isinstance(self.execution_plans, Mapping):
+            raise ValueError("execution_plans must be an object")
+        from .execution import ExecutionPlan
+
+        parsed_plans = {}
+        for raw_symbol, raw_plan in self.execution_plans.items():
+            symbol = _text(raw_symbol, "execution_plans symbol").upper()
+            plan = raw_plan if isinstance(raw_plan, ExecutionPlan) else ExecutionPlan.from_mapping(thaw_packet_value(raw_plan))
+            if plan.symbol != symbol:
+                raise ValueError(f"execution plan symbol {symbol} does not match mapping key")
+            parsed_plans[symbol] = freeze_packet_value(plan.as_dict(), path=f"execution_plans.{symbol}")
+        object.__setattr__(self, "execution_plans", MappingProxyType(parsed_plans))
         object.__setattr__(self, "failed_data_fetches", _failed_data_fetches(self.failed_data_fetches, review_type=review))
         object.__setattr__(self, "optional_data", _sequence(self.optional_data, "optional_data"))
         for field_name in (
@@ -526,6 +539,10 @@ class ReportPacket:
             "actions": thaw_packet_value(self.actions),
             "approved_amounts": dict(self.approved_amounts),
             "execution_zones": thaw_packet_value(self.execution_zones),
+            "execution_plans": {
+                symbol: thaw_packet_value(plan)
+                for symbol, plan in self.execution_plans.items()
+            },
             "historical_changes": thaw_packet_value(self.historical_changes),
             "risk_flags": list(self.risk_flags),
             "high_impact_review": self.high_impact_review.as_dict() if self.high_impact_review else None,

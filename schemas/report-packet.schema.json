@@ -67,6 +67,12 @@
     "execution_zones": {
       "type": "object"
     },
+    "execution_plans": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
     "historical_changes": {
       "type": "object"
     },

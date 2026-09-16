@@ -334,6 +334,7 @@ def build_decision_review_packet(
     factor_packets: Mapping[str, AssetFactorPacket] | None = None,
     actions: Iterable[Any] | Mapping[str, Any] | None = None,
     execution: Any = None,
+    execution_plans: Mapping[str, Any] | None = None,
     risk_flags: Iterable[str] = (),
     critical_missing_data: Iterable[str] = (),
     major_conflicts: Iterable[str] = (),
@@ -376,6 +377,7 @@ def build_decision_review_packet(
     action_by_symbol = _action_map(actions if actions is not None else source.get("actions"))
     overlay = _overlay_summary(overlays)
     execution_summary = _execution_summary(execution if execution is not None else source.get("execution"))
+    execution_plans = execution_plans if execution_plans is not None else source.get("execution_plans", {})
     if not overlay and any(
         execution_summary.get(key) is not None
         for key in ("positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings")
@@ -532,15 +534,32 @@ def build_decision_review_packet(
             execution=execution_summary,
         )
     calculation_context = calculation_context if calculation_context is not None else source.get("calculation_context")
+    if portfolio_value is None and source.get("portfolio_value") is not None:
+        portfolio_value = source.get("portfolio_value")
     if portfolio_value is not None:
         from .review_diagnostics import build_review_diagnostics
         from ..models.policy import policy_from_mapping
         diagnostic_policy = policy_from_mapping(source["resolved_policy"]) if source.get("resolved_policy") else resolve_policy()
+        diagnostic_drawdown = (
+            portfolio_drawdown
+            if portfolio_drawdown is not None
+            else source.get("portfolio_drawdown")
+        )
         review_diagnostics = build_review_diagnostics(
             current_weights=current, target_weights=target, actions=list(action_by_symbol.values()),
             portfolio_value=portfolio_value, new_cash=new_cash,
-            drawdown=portfolio_drawdown, regime=regime, policy=diagnostic_policy,
-            execution_plans=source.get("execution_plans"))
+            drawdown=diagnostic_drawdown, regime=regime, policy=diagnostic_policy,
+            execution_plans=execution_plans)
+    previous_allocation_inputs = (
+        previous_allocation_inputs
+        if previous_allocation_inputs is not None
+        else source.get("previous_allocation_inputs")
+    )
+    current_allocation_inputs = (
+        current_allocation_inputs
+        if current_allocation_inputs is not None
+        else source.get("current_allocation_inputs")
+    )
     if previous_allocation_inputs is not None and current_allocation_inputs is not None:
         from .review_diagnostics import target_change_attribution
         target_attribution = target_change_attribution(previous_allocation_inputs, current_allocation_inputs)
@@ -557,6 +576,7 @@ def build_decision_review_packet(
         previous_target_weights=previous_target,
         assets=assets,
         execution_summary=execution_summary,
+        execution_plans=execution_plans or {},
         critical_missing_data=tuple(critical_missing_data) or tuple(source.get("critical_missing_data", ())),
         major_conflicts=tuple(major_conflicts) or tuple(source.get("major_conflicts", ())),
         major_event_risk=major_event_risk or bool(source.get("major_event_risk", False)),

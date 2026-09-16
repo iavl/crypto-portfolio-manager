@@ -90,7 +90,14 @@ def validate_trend_calculation(factor: Any, evidence: Mapping[str, Evidence],
             "evidence_ids": list(factor.evidence_ids)}
 
 
-def validate_calculation_context(context: Mapping[str, Any], *, require_trend: bool = False) -> dict[str, Any]:
+def validate_calculation_context(
+    context: Mapping[str, Any],
+    *,
+    require_trend: bool = False,
+    expected_policy_hash: str | None = None,
+    expected_as_of: str | None = None,
+    expected_symbols: set[str] | None = None,
+) -> dict[str, Any]:
     """Used by Decision, review packet and report; never trust a validation flag."""
     from ..models.decision import validate_factor_evidence_binding
     from .scoring import score_factors
@@ -100,6 +107,15 @@ def validate_calculation_context(context: Mapping[str, Any], *, require_trend: b
         raise ValueError("calculation_context must contain as_of, resolved_policy, assessments, evidence")
     moment = parse_timestamp(context["as_of"])
     policy = policy_from_mapping(thaw_packet_value(context["resolved_policy"]))
+    if expected_policy_hash is not None and policy_hash(policy) != expected_policy_hash:
+        raise ValueError("CALCULATION_POLICY_MISMATCH")
+    if expected_as_of is not None and moment > parse_timestamp(expected_as_of):
+        raise ValueError("CALCULATION_CONTEXT_IN_FUTURE")
+    context_symbols = {str(symbol).strip().upper() for symbol in context["assessments"]}
+    required_symbols = {str(symbol).strip().upper() for symbol in (expected_symbols or ())}
+    if not required_symbols.issubset(context_symbols):
+        missing = ", ".join(sorted(required_symbols - context_symbols))
+        raise ValueError(f"CALCULATION_ASSESSMENT_MISSING: {missing}")
     records = [Evidence(**thaw_packet_value(item)) for item in context["evidence"]]
     evidence = {item.id: item for item in records}
     if len(evidence) != len(records):
@@ -132,12 +148,28 @@ def validate_calculation_context(context: Mapping[str, Any], *, require_trend: b
     return summaries
 
 
-def validate_packet_calculations(context: Mapping[str, Any] | None, actions: Any,
-                                 scores: Mapping[str, Any]) -> dict[str, Any]:
+def validate_packet_calculations(
+    context: Mapping[str, Any] | None,
+    actions: Any,
+    scores: Mapping[str, Any],
+    *,
+    require_context: bool = False,
+    expected_policy_hash: str | None = None,
+    expected_as_of: str | None = None,
+    expected_symbols: set[str] | None = None,
+) -> dict[str, Any]:
     executable = any((a.get("action") if isinstance(a, Mapping) else a.action) in {"INCREASE", "REDUCE", "EXIT"} for a in actions)
     if context is None:
+        if require_context and executable:
+            raise ValueError("CALCULATION_CONTEXT_REQUIRED_FOR_EXECUTABLE_ACTION")
         return {}
-    summary = validate_calculation_context(context, require_trend=executable)
+    summary = validate_calculation_context(
+        context,
+        require_trend=executable,
+        expected_policy_hash=expected_policy_hash,
+        expected_as_of=expected_as_of,
+        expected_symbols=expected_symbols,
+    )
     for symbol, value in scores.items():
         if isinstance(value, (int, float)):
             if symbol not in summary or not math.isclose(value, summary[symbol]["score"], abs_tol=1e-9, rel_tol=0):

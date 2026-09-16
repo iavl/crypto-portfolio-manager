@@ -330,6 +330,11 @@ For staged buys, use the validated execution plan:
 |---|---:|---|---:|---:|---|
 | ETH | 1 | structural zone | 600U | ~0.157 ETH | MA50 + confirmed swing support |
 
+Use the persisted `execution_plans` records as the source for tranche,
+conditional-reserve, technical-confidence, OHLCV-hash, and invalidation fields.
+An absent plan is an unavailable execution detail; it is not evidence of a
+fill or permission to invent price zones.
+
 When available, add:
 
 ```text

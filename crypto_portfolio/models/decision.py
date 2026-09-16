@@ -274,7 +274,13 @@ class Decision:
                 )
         if self.calculation_context is not None:
             from ..engine.calculation_evidence import validate_calculation_context
-            validate_calculation_context(thaw_packet_value(self.calculation_context), require_trend=True)
+            validate_calculation_context(
+                thaw_packet_value(self.calculation_context),
+                require_trend=any(item.action in {"INCREASE", "REDUCE", "EXIT"} for item in self.actions),
+                expected_policy_hash=self.policy_hash,
+                expected_as_of=self.timestamp,
+                expected_symbols=set(self.factor_scores),
+            )
         for name in ("calculation_context", "review_diagnostics", "target_attribution"):
             value = getattr(self, name)
             if value is not None:

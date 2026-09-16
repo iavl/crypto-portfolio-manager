@@ -150,6 +150,7 @@ def build_report_packet(
         actions=actions,
         approved_amounts=approved,
         execution_zones=zones,
+        execution_plans=packet.execution_plans,
         historical_changes=historical,
         risk_flags=packet.risk_flags,
         high_impact_review=high_impact_review,

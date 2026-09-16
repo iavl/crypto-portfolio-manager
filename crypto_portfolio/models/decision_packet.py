@@ -378,6 +378,7 @@ class DecisionReviewPacket:
     target_weights: Mapping[str, float] = field(default_factory=dict)
     assets: tuple[AssetDecisionSummary, ...] = ()
     execution_summary: Mapping[str, Any] = field(default_factory=dict)
+    execution_plans: Mapping[str, Any] = field(default_factory=dict)
     critical_missing_data: tuple[str, ...] = ()
     major_conflicts: tuple[str, ...] = ()
     major_event_risk: bool = False
@@ -435,6 +436,18 @@ class DecisionReviewPacket:
         if not isinstance(self.execution_summary, Mapping):
             raise ValueError("execution_summary must be an object")
         object.__setattr__(self, "execution_summary", freeze_packet_value(self.execution_summary, path="execution_summary"))
+        if not isinstance(self.execution_plans, Mapping):
+            raise ValueError("execution_plans must be an object")
+        from .execution import ExecutionPlan
+
+        parsed_plans = {}
+        for raw_symbol, raw_plan in self.execution_plans.items():
+            symbol = _text(raw_symbol, "execution_plans symbol").upper()
+            plan = raw_plan if isinstance(raw_plan, ExecutionPlan) else ExecutionPlan.from_mapping(thaw_packet_value(raw_plan))
+            if plan.symbol != symbol:
+                raise ValueError(f"execution plan symbol {symbol} does not match mapping key")
+            parsed_plans[symbol] = freeze_packet_value(plan.as_dict(), path=f"execution_plans.{symbol}")
+        object.__setattr__(self, "execution_plans", MappingProxyType(parsed_plans))
         if not isinstance(self.positioning_summaries, Mapping):
             raise ValueError("positioning_summaries must be an object")
         summaries = {}
@@ -530,6 +543,10 @@ class DecisionReviewPacket:
             "previous_target_weights": dict(self.previous_target_weights),
             "assets": [item.as_dict() for item in self.assets],
             "execution_summary": thaw_packet_value(self.execution_summary),
+            "execution_plans": {
+                symbol: thaw_packet_value(plan)
+                for symbol, plan in self.execution_plans.items()
+            },
             "critical_missing_data": list(self.critical_missing_data),
             "major_conflicts": list(self.major_conflicts),
             "major_event_risk": self.major_event_risk,

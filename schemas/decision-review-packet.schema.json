@@ -73,6 +73,12 @@
     "execution_summary": {
       "type": "object"
     },
+    "execution_plans": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
     "positioning_summaries": {
       "type": "object",
       "additionalProperties": {

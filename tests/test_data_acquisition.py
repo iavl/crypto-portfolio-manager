@@ -1300,10 +1300,15 @@ class DataAcquisitionTests(unittest.TestCase):
             MetricRequest("MARKET", "flows.etf_net_1d"),
         ))
         provider = StructuredProvider(value=100, source="sosovalue")
-        result = AcquisitionManager(
-            ProviderRouter({"sosovalue": provider}, config=config_for("sosovalue")),
-            persist=False,
-        ).run(plan, mode="AUTO", cached_observations=())
+        with TemporaryDirectory() as directory:
+            result = AcquisitionManager(
+                ProviderRouter(
+                    {"sosovalue": provider},
+                    config=config_for("sosovalue"),
+                    cache=ProviderCache(Path(directory) / "cache"),
+                ),
+                persist=False,
+            ).run(plan, mode="AUTO", cached_observations=())
         by_key = {item.metric_key: item for item in result.observations}
         self.assertEqual(by_key["flows.etf_net_1d"].value, 100)
         self.assertEqual(by_key["market.flow_state"].value, "POSITIVE")

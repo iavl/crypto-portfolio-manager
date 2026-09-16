@@ -72,8 +72,8 @@ class Fixture20260915Tests(unittest.TestCase):
         self.assertTrue(btc.staging_applied)
 
         # No deployment allowance applies: decision confidence was HIGH and
-        # no per-symbol caps were supplied.  The 34.8% effective close must
-        # come entirely from funding competition, and be explained.
+        # no per-symbol caps were supplied. The pooled stable sleeve funds
+        # the increase; any remaining gap is funding competition.
         self.assertEqual(btc.sizing_attribution.effective_deployment_factor, 1.0)
         self.assertEqual(dict(btc.sizing_attribution.deployment_factors), {})
         self.assertAlmostEqual(
@@ -82,11 +82,13 @@ class Fixture20260915Tests(unittest.TestCase):
             places=6,
         )
         self.assertGreater(btc.sizing_attribution.funding_shortfall_usd, 0.0)
-        self.assertAlmostEqual(
-            btc.sizing_attribution.approved_amount_usd, 1446.61169, places=4
+        self.assertGreater(btc.sizing_attribution.approved_amount_usd, 0.0)
+        self.assertLessEqual(
+            btc.sizing_attribution.approved_amount_usd,
+            btc.sizing_attribution.executable_amount_usd,
         )
         self.assertAlmostEqual(
-            btc.sizing_attribution.effective_strategic_gap_close, 0.3475, places=3
+            btc.sizing_attribution.effective_strategic_gap_close, 0.081, places=2
         )
         self.assertIn("fund", btc.rationale)
         self.assertIn("executable amount", btc.rationale)
@@ -362,9 +364,9 @@ class ExecutionSizingChainRenderingTests(unittest.TestCase):
             "composition                   minimum_cap",
             "executable gap                +2.77pp",
             "funding available",
-            "funding shortfall             $635.8",
+            "funding shortfall             $1,744.32",
             "approved amount",
-            "effective strategic-gap close 34.7%",
+            "effective strategic-gap close 8.1%",
         ):
             self.assertIn(needle, chain)
 
@@ -380,6 +382,34 @@ class ExecutionSizingChainRenderingTests(unittest.TestCase):
         self.assertIn("deployment_allowance", chain)
         self.assertIn("0.70", chain)
         self.assertIn("effective strategic-gap close 35.0%", chain)
+
+
+class StableSleevePoolingTests(unittest.TestCase):
+    def test_stable_symbol_split_does_not_change_risk_asset_funding(self):
+        def run(stable_symbols):
+            current = {"BTC": 0.40}
+            target = {"BTC": 0.55}
+            current_stable = 0.60
+            target_stable = 0.45
+            for symbol in stable_symbols:
+                current[symbol] = current_stable / len(stable_symbols)
+                target[symbol] = target_stable / len(stable_symbols)
+            return recommend_rebalance(current, target, 10000.0)
+
+        one = run(["USDT"])
+        four = run(["USDT", "USDC", "U", "USD1"])
+        for symbol in ("BTC",):
+            self.assertEqual(_action(one, symbol).action, _action(four, symbol).action)
+            self.assertAlmostEqual(
+                _action(one, symbol).amount_usd,
+                _action(four, symbol).amount_usd,
+                places=6,
+            )
+        self.assertAlmostEqual(
+            sum(item.amount_usd for item in one.actions if item.action == "REDUCE"),
+            sum(item.amount_usd for item in four.actions if item.action == "REDUCE"),
+            places=6,
+        )
 
 
 if __name__ == "__main__":

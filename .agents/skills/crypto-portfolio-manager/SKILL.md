@@ -57,6 +57,11 @@ Final reports must consume Python calculation receipts, score contribution
 breakdowns, target-change attribution, and diagnostic-only fill scenarios.
 Never infer a score change from a single indicator or treat an approved amount
 as a confirmed fill.
+Persisted decisions with executable actions must include a calculation context
+bound to the decision policy, timestamp, assets, and deterministic scores;
+missing context is a blocked persistence error. Persisted execution plans are
+the only source for tranche and invalidation details, and remain proposals
+until later execution evidence confirms fills.
 
 Never collect or research an asset in `policy.universe.excluded`. Exclusion is
 an unmanaged-universe decision, not an automatic sell; an existing excluded
@@ -448,6 +453,9 @@ Benchmark periods and cash-flow treatment must match the portfolio period.
 Stablecoins and cash are one allocation sleeve. Preserve their existing
 composition where possible and do not create stablecoin-to-stablecoin trades
 merely to satisfy a preferred symbol.
+Rebalance thresholds and ordinary staging apply once to the aggregate stable
+sleeve; allocate an approved stable funding leg across held symbols by current
+composition so symbol splitting cannot change risk-asset funding.
 
 Critical missing data—current price, recent trend history, portfolio value, or
 an unresolved material security event—precludes a high-conviction entry.

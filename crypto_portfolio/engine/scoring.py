@@ -479,6 +479,12 @@ def _score_factors(
     for name, values in dimension_values.items():
         if values:
             dimension_scores[name] = sum(value * weight for value, weight in values) / sum(weight for _, weight in values)
+    unspecified_dimensions = {
+        name for name in configured_dimensions if name not in dimension_scores
+    }
+    reason_codes.update(
+        f"{name.upper()}_UNSPECIFIED" for name in unspecified_dimensions
+    )
     included = tuple(name for name in configured_dimensions if name in dimension_scores)
     dimension_weight_total = sum(float(configured_dimensions[name]) for name in included)
     if dimension_weight_total <= 0:

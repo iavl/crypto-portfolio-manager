@@ -47,6 +47,26 @@ def _validated_decision(
         raise ValueError("decision policy_hash does not match resolved policy")
     if any(not isinstance(item, Evidence) for item in model.evidence):
         raise ValueError("persisted decision evidence must contain complete Evidence objects")
+    executable = any(
+        item.action in {"INCREASE", "REDUCE", "EXIT"} and item.amount_usd > 0
+        for item in model.actions
+    )
+    if executable and (
+        model.resolved_policy is not None
+        or model.policy_hash is not None
+        or bool(model.factor_scores)
+    ):
+        from ..engine.calculation_evidence import validate_packet_calculations
+
+        validate_packet_calculations(
+            model.calculation_context,
+            model.actions,
+            {symbol: assessment.weighted_score for symbol, assessment in model.factor_scores.items()},
+            require_context=True,
+            expected_policy_hash=expected_hash,
+            expected_as_of=model.timestamp,
+            expected_symbols=set(model.factor_scores),
+        )
     # Write gate only: history is append-only, so legacy records are parsed
     # permissively while new appends must not carry a scope contradiction.
     from ..engine.confidence import validate_decision_confidence_scope
