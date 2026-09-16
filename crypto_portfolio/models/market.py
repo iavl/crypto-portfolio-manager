@@ -329,6 +329,19 @@ class SwingPoint:
     def as_dict(self) -> dict[str, Any]:
         return {"timestamp": self.timestamp, "price": self.price, "kind": self.kind, "strength": self.strength}
 
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "SwingPoint":
+        if not isinstance(value, Mapping):
+            raise ValueError("swing point must be an object")
+        allowed = {"timestamp", "price", "kind", "strength"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"swing point contains unknown fields: {', '.join(sorted(unknown))}")
+        missing = allowed - set(value)
+        if missing:
+            raise ValueError(f"swing point is missing fields: {', '.join(sorted(missing))}")
+        return cls(**{field: value[field] for field in allowed})
+
 
 def _optional_number(value: Any, field: str) -> float | None:
     return None if value is None else _number(value, field)

@@ -114,6 +114,51 @@ class DecisionContractGateTests(unittest.TestCase):
         report = build_report_packet(packet)
         self.assertEqual(report.execution_plans["ETH"]["approved_amount_usd"], 1000.0)
 
+    def test_trend_replay_from_persisted_snapshot_round_trips_swing_points(self):
+        """The replay contract re-derives trend from the receipt's snapshot dict.
+
+        Real snapshots carry swing points, so the dict path must rebuild every
+        embedded model or persisted decisions with executable actions cannot be
+        validated.
+        """
+        import math as math_module
+        from types import SimpleNamespace
+
+        from crypto_portfolio.engine.calculation_evidence import (
+            trend_calculation_evidence,
+            validate_trend_calculation,
+        )
+        from crypto_portfolio.engine.factors.trend import calculate_trend_factor
+        from crypto_portfolio.engine.technical import build_technical_snapshot
+
+        policy = resolve_policy()
+        start = date(2025, 4, 1)
+        candles = []
+        for index in range(426):
+            phase = index % 10
+            close = 100.0 + phase * 2.0 if phase <= 5 else 110.0 - (phase - 5) * 2.0
+            timestamp = (start + timedelta(days=index)).isoformat() + "T00:00:00Z"
+            candles.append(Candle(timestamp, close - 1.0, close + 2.0, close - 2.0, close, 1000.0))
+        series = OHLCVSeries("ETH", "1D", candles, source="synthetic", fetched_at="2026-06-01T08:00:00Z")
+        spot = SpotPrice("ETH", 100.0, "2026-06-01T08:00:00Z", "synthetic", "2026-06-01T08:00:00Z")
+        snapshot = build_technical_snapshot(series, spot, as_of="2026-06-01T08:00:00Z", policy=policy)
+        self.assertTrue(snapshot.swing_highs)
+        self.assertTrue(snapshot.swing_lows)
+
+        direct = calculate_trend_factor(snapshot, policy=policy)
+        replayed = calculate_trend_factor(snapshot.as_dict(), policy=policy)
+        self.assertTrue(math_module.isclose(direct.score, replayed.score, abs_tol=1e-9))
+
+        receipt = trend_calculation_evidence(snapshot, policy)
+        detail = validate_trend_calculation(
+            SimpleNamespace(evidence_ids=(receipt.id,), score=direct.score, availability="AVAILABLE"),
+            {receipt.id: receipt},
+            symbol="ETH",
+            as_of=snapshot.as_of,
+            policy=policy,
+        )
+        self.assertTrue(math_module.isclose(detail["score"], direct.score, abs_tol=1e-9))
+
 
 if __name__ == "__main__":
     unittest.main()
