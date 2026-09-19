@@ -116,11 +116,18 @@ _REBALANCE_FIELDS = {
     "relative_watch",
     "relative_high",
     "staging",
+    "direction_flip_confirmation",
 }
 _REBALANCE_STAGING_FIELDS = {
     "enabled",
     "max_gap_close_fraction",
     "max_step_pp",
+    "bypass_reasons",
+}
+_REBALANCE_DIRECTION_FLIP_FIELDS = {
+    "enabled",
+    "required_closes",
+    "immediate_overshoot_pp",
     "bypass_reasons",
 }
 _ACTION_REASONS = (
@@ -178,6 +185,7 @@ _TREND_RULE_FIELDS = {
     "momentum",
     "support_points",
     "volume_points",
+    "volume_weakness_confirmation_closes",
     "extension_threshold_atr",
     "extension_penalty",
 }
@@ -1198,7 +1206,7 @@ def _parse_factor_rules(
     if not isinstance(trend, dict):
         raise PolicyError("factor_rules.trend must be an object")
     _unknown_fields(trend, _TREND_RULE_FIELDS, "factor_rules.trend")
-    if set(trend) != _TREND_RULE_FIELDS:
+    if not (_TREND_RULE_FIELDS - {"volume_weakness_confirmation_closes"}) <= set(trend):
         raise PolicyError("factor_rules.trend fields are incomplete")
     base_score = _number(
         trend["base_score"], "factor_rules.trend.base_score", minimum=0.0, maximum=100.0
@@ -1261,6 +1269,12 @@ def _parse_factor_rules(
     volume_points = _number(
         trend["volume_points"], "factor_rules.trend.volume_points", minimum=0.0
     )
+    # Optional since 2026-09: absence reproduces the legacy immediate
+    # deduction, and embedded resolved policies that predate the field keep
+    # their own shape (and hash). The engine reads it with a default of 1.
+    volume_closes = trend.get("volume_weakness_confirmation_closes", 1)
+    if isinstance(volume_closes, bool) or not isinstance(volume_closes, int) or volume_closes < 1:
+        raise PolicyError("factor_rules.trend.volume_weakness_confirmation_closes must be an integer >= 1")
     extension_threshold = _number(
         trend["extension_threshold_atr"],
         "factor_rules.trend.extension_threshold_atr",
@@ -1287,6 +1301,8 @@ def _parse_factor_rules(
         "extension_threshold_atr": extension_threshold,
         "extension_penalty": extension_penalty,
     }
+    if "volume_weakness_confirmation_closes" in trend:
+        parsed_trend["volume_weakness_confirmation_closes"] = volume_closes
 
     relative = value["relative_strength"]
     if not isinstance(relative, dict):
@@ -1957,12 +1973,12 @@ def _parse_policy(
     if not isinstance(rebalance, dict):
         raise PolicyError("rebalance must be an object")
     _unknown_fields(rebalance, _REBALANCE_FIELDS, "rebalance")
-    if set(rebalance) != _REBALANCE_FIELDS:
+    if not (_REBALANCE_FIELDS - {"direction_flip_confirmation"}) <= set(rebalance):
         raise PolicyError("rebalance fields are incomplete")
     parsed_rebalance: dict[str, Any] = {
         key: _number(value, f"rebalance.{key}", minimum=0.0)
         for key, value in rebalance.items()
-        if key != "staging"
+        if key not in {"staging", "direction_flip_confirmation"}
     }
     if not (
         parsed_rebalance["hold_below_pp"] < parsed_rebalance["watch_below_pp"]
@@ -2008,6 +2024,47 @@ def _parse_policy(
         "max_step_pp": max_step_pp,
         "bypass_reasons": tuple(normalized_reasons),
     }
+
+    # Optional since 2026-09: absence means the gate is disabled, which is
+    # exactly how records that predate it were computed; embedded resolved
+    # policies keep their own shape and hash.
+    flip = rebalance.get("direction_flip_confirmation")
+    if flip is not None:
+        if not isinstance(flip, dict):
+            raise PolicyError("rebalance.direction_flip_confirmation must be an object")
+        _unknown_fields(flip, _REBALANCE_DIRECTION_FLIP_FIELDS, "rebalance.direction_flip_confirmation")
+        if set(flip) != _REBALANCE_DIRECTION_FLIP_FIELDS:
+            raise PolicyError("rebalance.direction_flip_confirmation fields are incomplete")
+        if not isinstance(flip["enabled"], bool):
+            raise PolicyError("rebalance.direction_flip_confirmation.enabled must be boolean")
+        required_closes = flip["required_closes"]
+        if isinstance(required_closes, bool) or not isinstance(required_closes, int) or required_closes < 1:
+            raise PolicyError("rebalance.direction_flip_confirmation.required_closes must be an integer >= 1")
+        immediate_overshoot_pp = _number(
+            flip["immediate_overshoot_pp"],
+            "rebalance.direction_flip_confirmation.immediate_overshoot_pp",
+            minimum=0.0,
+        )
+        flip_bypass = flip["bypass_reasons"]
+        if not isinstance(flip_bypass, list) or not flip_bypass:
+            raise PolicyError("rebalance.direction_flip_confirmation.bypass_reasons must be a non-empty list")
+        normalized_flip_bypass = []
+        for item in flip_bypass:
+            reason = str(item).strip().upper()
+            if reason not in _ACTION_REASONS:
+                raise PolicyError(
+                    "rebalance.direction_flip_confirmation.bypass_reasons contains "
+                    f"unknown action reason {reason!r}"
+                )
+            normalized_flip_bypass.append(reason)
+        if len(normalized_flip_bypass) != len(set(normalized_flip_bypass)):
+            raise PolicyError("rebalance.direction_flip_confirmation.bypass_reasons must not contain duplicates")
+        parsed_rebalance["direction_flip_confirmation"] = {
+            "enabled": flip["enabled"],
+            "required_closes": required_closes,
+            "immediate_overshoot_pp": immediate_overshoot_pp,
+            "bypass_reasons": tuple(normalized_flip_bypass),
+        }
 
     parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
     parsed_scoring_families = _parse_scoring_families(data.get("scoring_families"), parsed_profiles)

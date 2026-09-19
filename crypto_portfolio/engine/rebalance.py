@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date as _date
 from typing import Any, Iterable, Mapping
 
 from ..models.decision_packet import NoTradeAttribution
@@ -23,6 +24,7 @@ _ACTION_REASONS = {
     "ALLOCATION_UNDERWEIGHT",
     "CONFIDENCE_LIMIT",
     "RISK_BUDGET_BREACH",
+    "DIRECTION_CONFIRMATION",
 }
 # Reasons a caller may attach to a risk-reducing action that rebalance
 # itself cannot observe (they mark hard exits that bypass staging).
@@ -71,6 +73,130 @@ def _decision_score(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return score if math.isfinite(score) and 0 <= score <= 1 else None
+
+
+_DIRECTION_HISTORY_ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT"}
+
+
+def direction_history_from_decisions(
+    decisions: Iterable[Mapping[str, Any]],
+    symbols: Iterable[str] | None = None,
+) -> dict[str, list[dict[str, str]]]:
+    """Build per-symbol decision-action history for direction confirmation.
+
+    Entries are ``{"date", "action"}`` most-recent-first, keyed by symbol.
+    Only the date is retained: direction confirmation counts distinct daily
+    closes, so same-day re-reviews cannot inflate persistence. Decision
+    base/correction duplicates collapse onto the same date and are harmless.
+    """
+    wanted = None if symbols is None else {str(s).strip().upper() for s in symbols}
+    history: dict[str, list[dict[str, str]]] = {}
+    ordered = sorted(
+        (item for item in decisions if isinstance(item, Mapping)),
+        key=lambda item: str(item.get("timestamp", "")),
+        reverse=True,
+    )
+    for decision in ordered:
+        date = str(decision.get("timestamp", ""))[:10]
+        if len(date) != 10 or date.count("-") != 2:
+            continue
+        for entry in decision.get("actions") or ():
+            if not isinstance(entry, Mapping):
+                continue
+            symbol = str(entry.get("symbol", "")).strip().upper()
+            action = str(entry.get("action", "")).strip().upper()
+            if not symbol or action not in _DIRECTION_HISTORY_ACTIONS:
+                continue
+            if wanted is not None and symbol not in wanted:
+                continue
+            history.setdefault(symbol, []).append({"date": date, "action": action})
+    return history
+
+
+def _validated_direction_history(value: Mapping[str, Any] | None) -> dict[str, tuple[dict[str, str], ...]]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("direction_history must be an object keyed by symbol")
+    validated: dict[str, tuple[dict[str, str], ...]] = {}
+    for raw_symbol, entries in value.items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol:
+            raise ValueError("direction_history contains an empty symbol")
+        if isinstance(entries, Mapping) or not isinstance(entries, (list, tuple)):
+            raise ValueError(f"direction_history.{symbol} must be a sequence of {{date, action}} entries")
+        rows = []
+        for entry in entries:
+            if not isinstance(entry, Mapping) or set(entry) != {"date", "action"}:
+                raise ValueError(f"direction_history.{symbol} entries must contain exactly date and action")
+            date = str(entry["date"]).strip()
+            action = str(entry["action"]).strip().upper()
+            try:
+                parsed_date = _date.fromisoformat(date)
+            except ValueError as exc:
+                raise ValueError(f"direction_history.{symbol} contains an invalid date {date!r}") from exc
+            if action not in _DIRECTION_HISTORY_ACTIONS:
+                raise ValueError(f"direction_history.{symbol} contains an unsupported action {action!r}")
+            rows.append({"date": parsed_date.isoformat(), "action": action})
+        validated[symbol] = tuple(rows)
+    return validated
+
+
+def _direction_flip_outcome(
+    *,
+    action: str,
+    action_reason: str,
+    deviation_pp: float,
+    history: tuple[dict[str, str], ...] | None,
+    flip_config: Mapping[str, Any],
+    watch_below_pp: float,
+) -> str | None:
+    """Return a WAIT rationale when a direction flip lacks confirmation.
+
+    A flip is INCREASE against a standing risk-reducing direction or the
+    reverse. Small overshoots beyond the active threshold must persist across
+    the configured number of distinct daily closes; a large overshoot, any
+    bypass reason, or an already-persistent signal executes immediately.
+    """
+    if not flip_config.get("enabled", False):
+        return None
+    if action not in {"INCREASE", "REDUCE", "EXIT"}:
+        return None
+    if action_reason in set(flip_config.get("bypass_reasons", ())):
+        return None
+    if not history:
+        return None
+    previous_executable = next(
+        (entry["action"] for entry in history if entry["action"] in {"INCREASE", "REDUCE", "EXIT"}),
+        None,
+    )
+    if previous_executable is None:
+        return None
+    # REDUCE -> EXIT stays risk-reducing; only INCREASE against a reducing
+    # direction (or a reducing action against a standing INCREASE) is a flip.
+    is_flip = (previous_executable == "INCREASE") != (action == "INCREASE")
+    if not is_flip:
+        return None
+    required = int(flip_config.get("required_closes", 1) or 1)
+    immediate_pp = float(flip_config.get("immediate_overshoot_pp", 0.0) or 0.0)
+    overshoot_pp = deviation_pp - watch_below_pp
+    if overshoot_pp >= immediate_pp:
+        return None
+    streak_dates: list[str] = []
+    for entry in history:
+        if entry["action"] != action:
+            break
+        if entry["date"] not in streak_dates:
+            streak_dates.append(entry["date"])
+        if len(streak_dates) >= max(0, required - 1):
+            break
+    if len(streak_dates) >= required - 1:
+        return None
+    return (
+        f"direction flip from {previous_executable} to {action} is pending confirmation "
+        f"({1 + len(streak_dates)} of {required} daily closes); deviation overshoot "
+        f"{overshoot_pp:.2f}pp is below the {immediate_pp:.2f}pp immediate threshold"
+    )
 
 
 def build_no_trade_attribution(
@@ -620,6 +746,7 @@ def recommend_rebalance(
     deployment_caps: Mapping[str, float] | None = None,
     hard_action_reasons: Mapping[str, str] | None = None,
     hard_exposure_caps: Mapping[str, float] | None = None,
+    direction_history: Mapping[str, Any] | None = None,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -662,8 +789,10 @@ def recommend_rebalance(
             raise ValueError("deployment_caps values must be numbers")
         factor = float(raw_factor)
         if not math.isfinite(factor) or not 0 <= factor <= 1:
-            raise ValueError("deployment_caps values must be finite and in [0, 1]")
+            raise ValueError("deployment_caps values must be finite in [0, 1]")
         normalized_deployment_caps[symbol] = factor
+
+    validated_direction_history = _validated_direction_history(direction_history)
 
     normalized_hard_reasons: dict[str, str] = {}
     for raw_symbol, raw_reason in (hard_action_reasons or {}).items():
@@ -797,6 +926,7 @@ def recommend_rebalance(
             decision_confidence_factor = confidence_deployment_factor(confidence_score, resolved)
     candidates: list[dict[str, Any]] = []
     staging_config = resolved.rebalance["staging"]
+    flip_config = resolved.rebalance.get("direction_flip_confirmation") or {"enabled": False}
     bypass_reasons = frozenset(staging_config["bypass_reasons"])
     relative_floor = float(resolved.rebalance["relative_target_floor"])
     relative_watch = float(resolved.rebalance["relative_watch"])
@@ -895,6 +1025,24 @@ def recommend_rebalance(
             action_reason = base_reason
             priority = "HIGH" if high_priority else "NORMAL"
             rationale = "overweight exceeds the active rebalance threshold"
+        # Direction-flip confirmation: an ordinary threshold crossing that
+        # would reverse the standing executable direction waits until the new
+        # direction has persisted across distinct daily closes. Hard
+        # risk-reducing reasons and large overshoots execute immediately.
+        if symbol not in stable_symbols_set:
+            flip_rationale = _direction_flip_outcome(
+                action=action,
+                action_reason=action_reason,
+                deviation_pp=deviation_pp,
+                history=validated_direction_history.get(symbol),
+                flip_config=flip_config,
+                watch_below_pp=float(resolved.rebalance["watch_below_pp"]),
+            )
+            if flip_rationale is not None:
+                action = "WAIT"
+                action_reason = "DIRECTION_CONFIRMATION"
+                priority = "WATCH"
+                rationale = flip_rationale
         executable = action in {"INCREASE", "REDUCE", "EXIT"}
         staging_active = executable and staging_config["enabled"] and action_reason not in bypass_reasons
         stable_share = (
@@ -924,6 +1072,12 @@ def recommend_rebalance(
                 max_step,
             )
             staged_gap = (1.0 if gap_for_staging > 0 else -1.0) * step
+            if symbol in stable_symbols_set and abs(staged_gap) > abs(difference) + 1e-12:
+                # A sleeve-proportional leg can exceed its own symbol gap
+                # when the sleeve's step is larger than this symbol's share
+                # of the remaining overweight; no symbol sells past its own
+                # target, so the leg clamps to its own gap.
+                staged_gap = (1.0 if difference > 0 else -1.0) * abs(difference)
         else:
             staged_gap = gap_for_staging
         staging_applied = executable and staging_active and abs(staged_gap) < abs(gap_for_staging) - 1e-12
@@ -1030,6 +1184,41 @@ def recommend_rebalance(
                 f"; executable sales and cash fund {approved:,.2f} USD of the "
                 f"{item['executable_amount']:,.2f} USD executable amount this review"
             )
+
+    # Stable legs are funding legs: the pooled stable sale implements the
+    # buys risk assets draw this review. A staged sleeve step larger than
+    # those buys (for example when direction confirmation holds the buy back)
+    # is deferred with the step, never sold into nothing. Risk-asset sale
+    # proceeds already fund part of the buys and reduce the need.
+    executable_buys_total = sum(
+        item["amount"] for item in candidates if item["action"] == "INCREASE"
+    )
+    risk_sells_total = sum(
+        item["amount"] for item in candidates
+        if item["action"] in {"REDUCE", "EXIT"} and item["symbol"] not in stable_symbols_set
+    )
+    stable_sell_cap = max(0.0, executable_buys_total - risk_sells_total)
+    stable_reduce_items = [
+        item for item in candidates
+        if item["action"] == "REDUCE" and item["symbol"] in stable_symbols_set
+    ]
+    stable_sells_total = sum(item["amount"] for item in stable_reduce_items)
+    if stable_reduce_items and stable_sells_total > stable_sell_cap + 1e-9:
+        scale = stable_sell_cap / stable_sells_total
+        for item in stable_reduce_items:
+            item["amount"] *= scale
+            item["executable_amount"] *= scale
+            item["executable_gap"] *= scale
+            item["rationale"] += (
+                f"; pooled stable sale capped at the {stable_sell_cap:,.2f} USD "
+                "of executable buys this review"
+            )
+            if item["amount"] <= 1e-9:
+                item["action"] = "WAIT"
+                item["priority"] = "WATCH"
+                item["amount"] = 0.0
+                item["executable_amount"] = 0.0
+                item["executable_gap"] = 0.0
 
     # Normalize execution fields against the final (possibly capped or
     # unfunded) amounts so target_weight/remaining_gap always describe what

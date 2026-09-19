@@ -108,6 +108,16 @@ single relative-volume threshold must not be presented as an unexplained score
 change. The receipt binds the normalized technical snapshot, completed-candle
 boundary, dataset hashes, and resolved policy hash.
 
+WEAK volume confirmation is persistence-gated: the `volume_points` deduction
+applies only after the weakness has held across
+`factor_rules.trend.volume_weakness_confirmation_closes` (2) completed daily
+closes (`previous_relative_volumes`, most recent first). A single weak
+reading applies no deduction and states how many closes were confirmed;
+SUPPORTIVE volume and all price components (MA crosses, alignment, momentum,
+extension) stay immediate. This exists because one weak daily volume reading
+combined with a marginal MA20 cross once swung the trend factor 22 points for
+a single review.
+
 ## Availability and reliability
 
 Every factor is explicitly `AVAILABLE`, `MISSING`, or `NOT_APPLICABLE`.

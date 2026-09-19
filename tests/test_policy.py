@@ -318,6 +318,12 @@ class PolicyTests(unittest.TestCase):
                     "max_step_pp": 4.0,
                     "bypass_reasons": ("THESIS_BROKEN", "EVENT_RISK", "HARD_EXIT_SCORE", "RISK_BUDGET_BREACH"),
                 },
+                "direction_flip_confirmation": {
+                    "enabled": True,
+                    "required_closes": 2,
+                    "immediate_overshoot_pp": 2.0,
+                    "bypass_reasons": ("THESIS_BROKEN", "EVENT_RISK", "HARD_EXIT_SCORE", "RISK_BUDGET_BREACH"),
+                },
             },
         )
         self.assertEqual(policy.regime("NORMAL").stablecoin_target, 0.15)

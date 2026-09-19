@@ -484,6 +484,7 @@
             "ALLOCATION_OVERWEIGHT",
             "ALLOCATION_UNDERWEIGHT",
             "CONFIDENCE_LIMIT",
+            "DIRECTION_CONFIRMATION",
             "RISK_BUDGET_BREACH"
           ]
         },

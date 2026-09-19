@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from ...facts.models import TrendFacts
 from ...models.execution import PriceZone
 from ...models.market import OHLCVSeries, SpotPrice, SwingPoint, TechnicalSnapshot
 from ...models.volume_profile import VolumeNode
 from ...models.policy import Policy, resolve_policy
-from ..technical import build_technical_snapshot
+from ..technical import build_technical_snapshot, _volume_state
 
 
 _CONFIDENCE_ORDER = ("LOW", "MEDIUM", "HIGH")
@@ -126,8 +126,15 @@ def calculate_trend_factor(
     as_of: str | None = None,
     policy: Policy | None = None,
     evidence_ids: tuple[str, ...] | list[str] = (),
+    previous_relative_volumes: Sequence[float] | None = None,
 ) -> TrendFactorResult:
-    """Return the same score for the same validated technical snapshot."""
+    """Return the same score for the same validated technical snapshot.
+
+    ``previous_relative_volumes`` carries prior completed daily
+    relative-volume readings, most recent first. A WEAK volume reading only
+    applies its deduction once the weakness has persisted across the
+    configured number of daily closes; price components stay immediate.
+    """
     resolved = policy or resolve_policy()
     snapshot = _snapshot(value, spot=spot, policy=resolved, as_of=as_of)
     rules = _rules(resolved)
@@ -229,9 +236,27 @@ def calculate_trend_factor(
             contributions["volume"] = volume_authority
             reasons.append("volume confirms the move")
         elif snapshot.volume_state == "WEAK":
-            score -= volume_authority
-            contributions["volume"] = -volume_authority
-            reasons.append("volume confirmation is weak")
+            required_closes = int(rules.get("volume_weakness_confirmation_closes", 1) or 1)
+            weak_closes = 1
+            supportive_min = float(
+                resolved.execution.get("breakout", {}).get("minimum_relative_volume", 1.2)
+            )
+            for reading in previous_relative_volumes or ():
+                reading = float(reading)
+                if not math.isfinite(reading) or reading < 0:
+                    raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
+                if _volume_state(reading, supportive_min) != "WEAK":
+                    break
+                weak_closes += 1
+            if weak_closes >= required_closes:
+                score -= volume_authority
+                contributions["volume"] = -volume_authority
+                reasons.append("volume confirmation is weak")
+            else:
+                reasons.append(
+                    f"volume weakness is unconfirmed ({weak_closes} of "
+                    f"{required_closes} required daily closes); no deduction applied"
+                )
 
     # Drawdown belongs to valuation in v2; retain it only as trend context.
 

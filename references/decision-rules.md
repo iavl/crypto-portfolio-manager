@@ -59,7 +59,7 @@ priority from a tiny denominator:
 Every executable action carries a machine-readable `action_reason`
 (`ALLOCATION_OVERWEIGHT` / `ALLOCATION_UNDERWEIGHT` / `REGIME_DERISK` /
 `HARD_EXIT_SCORE` / `THESIS_BROKEN` / `EVENT_RISK` / `CONFIDENCE_LIMIT` /
-`RISK_BUDGET_BREACH`), plus `strategic_target_weight`,
+`RISK_BUDGET_BREACH` / `DIRECTION_CONFIRMATION`), plus `strategic_target_weight`,
 `execution_target_weight`, `staging_applied`, `remaining_gap_after_action`,
 and a `sizing_attribution` object recording the single-pass chain
 (strategic gap -> staged gap -> composed deployment allowance under
@@ -79,6 +79,20 @@ and execute immediately. A hard exposure cap breach (current weight above the
 tier's strategic envelope plus buffer) forces a `RISK_BUDGET_BREACH` REDUCE
 regardless of the ordinary bands, while a strategic overshoot inside the
 buffer stays band-governed.
+
+Direction reversals are confirmation-gated. When an ordinary threshold
+crossing would flip an asset's executable direction against its standing
+direction (INCREASE against a risk-reducing direction or the reverse),
+`rebalance.direction_flip_confirmation` holds the action as a
+`DIRECTION_CONFIRMATION` WAIT until the new direction has persisted across
+`required_closes` (2) distinct daily closes; same-day re-reviews count once.
+The gate applies only while the deviation overshoot beyond the active
+threshold stays under `immediate_overshoot_pp` (2 pp): a decisive crossing
+executes immediately, and the bypass reasons (broken thesis, event risk, hard
+score floor, risk-budget breach) never wait. REDUCE-to-EXIT stays
+risk-reducing and is never gated. Stable funding legs are capped at the
+executable buys they fund, so a held-back buy defers its own funding sale
+instead of selling stables into nothing.
 
 ## Rule 3 — Use new cash before forced selling when sensible
 
