@@ -117,6 +117,36 @@ observation/cache can satisfy a historical request. Perpetual premium, funding,
 and zero are never substitutes. Unsupported, stale, expired, future, or
 malformed contracts remain unavailable.
 
+## Binance read-only account
+
+`binance_account` is separate from the market-data provider above: it is the
+portfolio-input intake, not a scoring metric, so it never registers with the
+metric router. It requires a read-only API key (Enable Reading only — no
+trading, no withdrawals; an IP whitelist is recommended) exported as
+`BINANCE_API_KEY` and `BINANCE_API_SECRET`; the provider is `AUTO`-enabled
+only when both are present, otherwise intake fails closed with
+`CREDENTIAL_MISSING`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v3/account` | spot balances (`free` + `locked`) |
+| `GET /sapi/v1/simple-earn/flexible/position` | flexible Simple Earn positions |
+| `GET /sapi/v1/simple-earn/locked/position` | locked positions incl. redeeming amounts |
+| `GET /sapi/v1/eth-staking/eth/position` | WBETH holding (cross-checked against spot) |
+| `GET /sapi/v1/capital/deposit/hisrec`, `GET /sapi/v1/capital/withdraw/history` | completed external flows since the previous snapshot |
+| `GET /sapi/v1/simple-earn/account` | Simple Earn valuation cross-check (warning only) |
+
+Requests are HMAC-SHA256 signed (`X-MBX-APIKEY` header, `timestamp` +
+`recvWindow` + `signature` query); the server-time offset is synced before
+signing and re-synced once on `-1021`. Signatures and API keys are redacted
+from all diagnostics. USD valuation uses public `<ASSET>USDT` tickers,
+USD-pegged stables at 1.0 with a `USDCUSDT` peg cross-check, and WBETH via the
+official exchange rate (falling back to the `WBETHUSDT` ticker). Completed
+flows are valued at the UTC-day 1d close and produce
+`CONFIRMED_AMOUNT`/`CONFIRMED_NONE` with the `EXCHANGE_DERIVED`
+classification source; in-flight transfers are reported but not counted. The
+intake never places orders and aborts without writing a partial snapshot.
+
 ## Bybit
 
 Bybit is a public market/derivatives fallback and does not require an API key.

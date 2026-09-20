@@ -129,6 +129,38 @@ class SchemaValidationTests(unittest.TestCase):
         self.validate("market.schema.json", spot.as_dict())
         self.validate("market.schema.json", series.as_dict())
 
+    def test_exchange_derived_flow_records_validate_and_pair_correctly(self):
+        base = {
+            "timestamp": "2026-09-19T00:00:00Z",
+            "base_currency": "USD",
+            "positions": [{"symbol": "BTC", "value_usd": 1000}],
+            "cash_flow_classification_source": "EXCHANGE_DERIVED",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshots.jsonl"
+            append_snapshot(
+                {
+                    **base,
+                    "external_cash_flow": 250,
+                    "external_cash_flow_type": "DEPOSIT",
+                    "cash_flow_resolution_status": "CONFIRMED_AMOUNT",
+                },
+                path,
+            )
+            self.validate("portfolio-input.schema.json", {**base, "external_cash_flow": 250, "external_cash_flow_type": "DEPOSIT", "cash_flow_resolution_status": "CONFIRMED_AMOUNT"})
+            self.validate("portfolio-record.schema.json", read_snapshots(path)[0])
+        invalid = {
+            **base,
+            "cash_flow_resolution_status": "UNRESOLVED",
+        }
+        errors = list(
+            Draft202012Validator(
+                json.loads((SCHEMAS / "portfolio-input.schema.json").read_text(encoding="utf-8")),
+                format_checker=FormatChecker(),
+            ).iter_errors(invalid)
+        )
+        self.assertNotEqual([], errors)
+
     def test_rebalance_action_amount_constraints_match_model(self):
         schema = json.loads((SCHEMAS / "decision.schema.json").read_text(encoding="utf-8"))
         validator = Draft202012Validator(schema["$defs"]["rebalanceAction"], format_checker=FormatChecker())

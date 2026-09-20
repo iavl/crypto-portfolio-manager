@@ -91,7 +91,38 @@ switch LLM models, reasoning levels, or LLM fallbacks on behalf of this Skill.
 Python-owned deterministic stages remain Python-owned, and the Agent handles
 only bounded semantic or reporting work.
 
-## Binance screenshot intake
+## Portfolio intake
+
+### Binance read-only API intake (preferred)
+
+When the user's Binance account is connected (read-only API key in
+`BINANCE_API_KEY` / `BINANCE_API_SECRET`, no trade or withdrawal
+permission), fetch holdings deterministically instead of reading
+screenshots:
+
+```bash
+zsh -ic 'python3 scripts/binance_snapshot.py --persist'
+```
+
+The command fetches spot, Simple Earn (flexible and locked), and ETH
+staking (WBETH) balances, values them through public tickers, and
+auto-detects completed deposits/withdrawals since the previous snapshot.
+It marks the flow `CONFIRMED_AMOUNT`/`CONFIRMED_NONE` with the
+`EXCHANGE_DERIVED` classification source and prints a flow summary; an
+exchange-derived confirmation must not be re-labeled by the Agent. Run it
+without `--persist` for a dry-run review first. If a stablecoin peg or
+Simple-Earn cross-check warning appears, surface it in the report. When
+the user explicitly asks to resolve the flow manually, re-run with
+`--flow-manual` (the snapshot becomes `UNRESOLVED` / provisional) and use
+the standard cash-flow resolution workflow.
+
+The API path carries no cost basis by design: position P&L cost checks
+report `INSUFFICIENT_DATA`, and NAV/drawdown/weights are unaffected.
+Assets without a USD price or an unclassifiable WBETH cross-check fail
+closed; the user may explicitly exclude a symbol with `--exclude`, which
+is recorded in the snapshot warnings.
+
+### Binance screenshot intake (fallback)
 
 When the user provides the standard Binance wallet-overview screenshot, do
 these steps before portfolio analysis:
@@ -491,6 +522,12 @@ For a snapshot normalization check, run:
 
 ```bash
 python3 scripts/portfolio_snapshot.py path/to/fake-snapshot.json
+```
+
+For the read-only Binance account intake, run:
+
+```bash
+zsh -ic 'python3 scripts/binance_snapshot.py --persist'
 ```
 
 If no prior history exists, establish the baseline with an initial validated

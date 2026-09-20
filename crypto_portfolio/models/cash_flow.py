@@ -23,7 +23,16 @@ EXPLICIT_CASH_FLOW_RESOLUTION_STATUSES = {
     "UNRESOLVED",
     "BASELINE_RESET",
 }
-CASH_FLOW_CLASSIFICATION_SOURCES = {"DEFAULT_ASSUMPTION", "USER_EXPLICIT", "LEGACY"}
+CASH_FLOW_CLASSIFICATION_SOURCES = {
+    "DEFAULT_ASSUMPTION",
+    "USER_EXPLICIT",
+    "LEGACY",
+    # Set only when a read-only exchange API confirmed the flow state
+    # directly from deposit/withdrawal history (snapshot creation time).
+    "EXCHANGE_DERIVED",
+}
+# Statuses a snapshot may carry when its classification source is EXCHANGE_DERIVED.
+EXCHANGE_DERIVED_CASH_FLOW_STATUSES = {"CONFIRMED_NONE", "CONFIRMED_AMOUNT"}
 
 
 @dataclass(frozen=True)
@@ -108,6 +117,7 @@ class CashFlowResolution:
 __all__ = [
     "CASH_FLOW_CLASSIFICATION_SOURCES",
     "CASH_FLOW_RESOLUTION_STATUSES",
+    "EXCHANGE_DERIVED_CASH_FLOW_STATUSES",
     "EXPLICIT_CASH_FLOW_RESOLUTION_STATUSES",
     "CashFlowResolution",
 ]

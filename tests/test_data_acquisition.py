@@ -1767,15 +1767,15 @@ class DataAcquisitionTests(unittest.TestCase):
         self.assertTrue(by_name["sosovalue"].credential_required)
         self.assertFalse(by_name["sosovalue"].runtime_ready)
 
-        ready = provider_runtime_status(config, adapters=adapters, environ={"SOSOVALUE_API_KEY": "secret"})
+        ready = provider_runtime_status(config, adapters=adapters, environ={"SOSOVALUE_API_KEY": "hunter2-secret-value"})
         self.assertTrue({item.provider: item for item in ready}["sosovalue"].runtime_ready)
-        status = provider_status(config, {"SOSOVALUE_API_KEY": "secret"}, adapters=adapters)
+        status = provider_status(config, {"SOSOVALUE_API_KEY": "hunter2-secret-value"}, adapters=adapters)
         row = {item["provider"]: item for item in status}["sosovalue"]
         self.assertTrue(row["config_enabled"])
         self.assertTrue(row["runtime_ready"])
-        self.assertNotIn("secret", str(status))
+        self.assertNotIn("hunter2-secret-value", str(status))
 
-        unavailable = provider_runtime_status(config, adapters={"binance": object()}, environ={"SOSOVALUE_API_KEY": "secret"})
+        unavailable = provider_runtime_status(config, adapters={"binance": object()}, environ={"SOSOVALUE_API_KEY": "hunter2-secret-value"})
         row = {item.provider: item for item in unavailable}["sosovalue"]
         self.assertTrue(row.config_enabled)
         self.assertFalse(row.adapter_available)

@@ -6,7 +6,11 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .cash_flow import CASH_FLOW_CLASSIFICATION_SOURCES, CASH_FLOW_RESOLUTION_STATUSES
+from .cash_flow import (
+    CASH_FLOW_CLASSIFICATION_SOURCES,
+    CASH_FLOW_RESOLUTION_STATUSES,
+    EXCHANGE_DERIVED_CASH_FLOW_STATUSES,
+)
 from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
 
@@ -165,7 +169,12 @@ class PortfolioSnapshot:
             raise ValueError("cash_flow_classification_source is unsupported")
         if status == "ASSUMED_NONE" and source not in {"DEFAULT_ASSUMPTION", "LEGACY"}:
             raise ValueError("ASSUMED_NONE requires an assumption or legacy source")
-        if status != "ASSUMED_NONE" and source != "USER_EXPLICIT":
+        if source == "EXCHANGE_DERIVED":
+            if status not in EXCHANGE_DERIVED_CASH_FLOW_STATUSES:
+                raise ValueError(
+                    "EXCHANGE_DERIVED source requires a CONFIRMED_NONE or CONFIRMED_AMOUNT status"
+                )
+        elif status != "ASSUMED_NONE" and source != "USER_EXPLICIT":
             raise ValueError("explicit cash-flow status requires USER_EXPLICIT source")
         object.__setattr__(self, "cash_flow_classification_source", source)
         amount = self.external_cash_flow

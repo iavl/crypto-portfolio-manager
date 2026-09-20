@@ -79,7 +79,43 @@ Binance row layout convention:
 Position P&L derived values are computed by Python, never recalculated by
 hand in the Agent.
 
-### 2.2 Using Structured JSON
+### 2.2 Using the Binance Read-Only API (preferred)
+
+Create a Binance API key with **read-only** permission (no trading, no
+withdrawals; an IP whitelist is recommended) and export both values, for
+example in `~/.zshrc`:
+
+```bash
+export BINANCE_API_KEY="..."
+export BINANCE_API_SECRET="..."
+```
+
+Then fetch a snapshot directly from the exchange:
+
+```bash
+zsh -ic 'python3 scripts/binance_snapshot.py'          # dry run, prints the snapshot
+zsh -ic 'python3 scripts/binance_snapshot.py --persist' # append to snapshots.jsonl
+```
+
+What it does:
+
+- merges spot, Simple Earn (flexible + locked, including redeeming
+  amounts), and ETH staking (WBETH) balances into one snapshot;
+- values positions with public `<ASSET>USDT` tickers (USD-pegged stables
+  at 1.0, WBETH via the official exchange rate);
+- detects completed deposits/withdrawals since the previous snapshot and
+  confirms the net flow automatically (`CONFIRMED_AMOUNT` or
+  `CONFIRMED_NONE`, classification source `EXCHANGE_DERIVED`); in-flight
+  transfers are reported but not counted;
+- carries no cost basis (the API has none): position P&L cost checks
+  report `INSUFFICIENT_DATA`, while NAV/drawdown/weights are unaffected.
+
+Useful flags: `--exclude SYMBOL` (explicit dust/unknown handling),
+`--min-value-usd N`, and `--flow-manual` (mark the flow `UNRESOLVED` and
+resolve it later via `scripts/cash_flow_resolutions.py`). Any fetch or
+valuation failure aborts without writing a partial snapshot.
+
+### 2.3 Using Structured JSON
 
 ```json
 {
@@ -103,7 +139,7 @@ decision. Policy overrides must live in the snapshot's top-level `config`;
 invalid values, duplicate assets, overlapping asset groups, or conflicting
 `asset_type` values are rejected.
 
-### 2.3 Dry Run
+### 2.4 Dry Run
 
 To test without writing history:
 

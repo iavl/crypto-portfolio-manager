@@ -192,6 +192,13 @@ Normalize a structured snapshot:
 python3 scripts/portfolio_snapshot.py path/to/snapshot.json
 ```
 
+Fetch a snapshot from the Binance read-only API (requires
+`BINANCE_API_KEY` / `BINANCE_API_SECRET`, read-only key):
+
+```bash
+zsh -ic 'python3 scripts/binance_snapshot.py --persist'
+```
+
 Offline end-to-end replay evaluation (research only; no live market data, no
 parameter auto-tuning):
 

@@ -1,6 +1,11 @@
 {
   "providers": {
     "binance": {"enabled": true},
+    "binance_account": {
+      "enabled": "AUTO",
+      "api_key_env": "BINANCE_API_KEY",
+      "api_secret_env": "BINANCE_API_SECRET"
+    },
     "bybit": {"enabled": true},
     "coingecko": {
       "enabled": "AUTO",

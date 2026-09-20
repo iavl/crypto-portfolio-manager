@@ -384,5 +384,65 @@ class InternalReallocationTests(unittest.TestCase):
             InternalReallocation("USDT", "U", 100.0, "GUESS", 1.0, "USER_EXPLICIT", "x")
 
 
+class ExchangeDerivedClassificationTests(unittest.TestCase):
+    """EXCHANGE_DERIVED snapshots are exchange-confirmed at creation time."""
+
+    def _mapping(self, **flow):
+        base = {
+            "timestamp": "2026-09-19T00:00:00Z",
+            "positions": [{"symbol": "BTC", "value_usd": 1000.0}],
+            "cash_flow_classification_source": "EXCHANGE_DERIVED",
+        }
+        base.update(flow)
+        return base
+
+    def test_exchange_derived_confirmed_amount_is_accepted(self):
+        snapshot, _, _ = snapshot_from_mapping(
+            self._mapping(
+                external_cash_flow=250.0,
+                external_cash_flow_type="DEPOSIT",
+                cash_flow_resolution_status="CONFIRMED_AMOUNT",
+            )
+        )
+        self.assertEqual(snapshot.cash_flow_classification_source, "EXCHANGE_DERIVED")
+        self.assertEqual(snapshot.external_cash_flow, 250.0)
+
+    def test_exchange_derived_confirmed_none_beats_the_default_assumption(self):
+        snapshot, _, _ = snapshot_from_mapping(
+            self._mapping(
+                external_cash_flow=0.0,
+                external_cash_flow_type="NONE",
+                cash_flow_resolution_status="CONFIRMED_NONE",
+            )
+        )
+        self.assertEqual(snapshot.cash_flow_resolution_status, "CONFIRMED_NONE")
+        self.assertEqual(snapshot.cash_flow_classification_source, "EXCHANGE_DERIVED")
+
+    def test_exchange_derived_cannot_back_non_confirmed_statuses(self):
+        for status, flow in (
+            ("ASSUMED_NONE", {}),
+            ("UNRESOLVED", {}),
+            ("BASELINE_RESET", {"snapshot_id": "snap-1"}),
+        ):
+            with self.assertRaises(ValueError, msg=status):
+                snapshot_from_mapping(
+                    self._mapping(
+                        cash_flow_resolution_status=status,
+                        external_cash_flow=0.0,
+                        external_cash_flow_type="NONE",
+                    )
+                )
+
+    def test_exchange_derived_confirmed_amount_still_requires_valid_amount(self):
+        with self.assertRaises(ValueError):
+            snapshot_from_mapping(
+                self._mapping(
+                    external_cash_flow=0.0,
+                    external_cash_flow_type="NONE",
+                    cash_flow_resolution_status="CONFIRMED_AMOUNT",
+                )
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

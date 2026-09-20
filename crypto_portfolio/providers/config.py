@@ -62,6 +62,10 @@ def _validate(config: Mapping[str, Any]) -> dict[str, Any]:
             if not isinstance(settings["api_key_env"], str) or not settings["api_key_env"].strip():
                 raise ValueError(f"provider {raw_name} api_key_env must be a non-empty string")
             settings["api_key_env"] = settings["api_key_env"].strip()
+        if "api_secret_env" in settings:
+            if not isinstance(settings["api_secret_env"], str) or not settings["api_secret_env"].strip():
+                raise ValueError(f"provider {raw_name} api_secret_env must be a non-empty string")
+            settings["api_secret_env"] = settings["api_secret_env"].strip()
         if "project_env" in settings:
             if not isinstance(settings["project_env"], str) or not settings["project_env"].strip():
                 raise ValueError(f"provider {raw_name} project_env must be a non-empty string")
@@ -158,12 +162,22 @@ def provider_enabled(
     if enabled is False:
         return False
     if enabled == "AUTO":
-        required_env = settings.get("api_key_env") or settings.get("project_env")
-        return bool(required_env and environment.get(required_env, "").strip())
+        required_envs = [
+            env for env in (
+                settings.get("api_key_env"),
+                settings.get("project_env"),
+                settings.get("api_secret_env"),
+            ) if env
+        ]
+        return bool(required_envs) and all(environment.get(env, "").strip() for env in required_envs)
     if not enabled:
         return False
-    if settings.get("api_key_env"):
-        return bool(environment.get(settings["api_key_env"], "").strip())
+    if settings.get("api_key_env") or settings.get("api_secret_env"):
+        return all(
+            environment.get(env, "").strip()
+            for env in (settings["api_key_env"], settings.get("api_secret_env"))
+            if env
+        )
     return True
 
 
@@ -171,6 +185,16 @@ def provider_api_key(name: str, config: Mapping[str, Any] | None = None, environ
     environment = environ if environ is not None else os.environ
     settings = provider_settings(name, config)
     env_name = settings.get("api_key_env")
+    if not env_name:
+        return None
+    value = environment.get(env_name, "").strip()
+    return value or None
+
+
+def provider_api_secret(name: str, config: Mapping[str, Any] | None = None, environ: Mapping[str, str] | None = None) -> str | None:
+    environment = environ if environ is not None else os.environ
+    settings = provider_settings(name, config)
+    env_name = settings.get("api_secret_env")
     if not env_name:
         return None
     value = environment.get(env_name, "").strip()
@@ -197,12 +221,16 @@ def provider_runtime_status(
     for name in names:
         settings = dict(configured.get(name, {})) if isinstance(configured.get(name, {}), Mapping) else {}
         key_env = settings.get("api_key_env")
+        secret_env = settings.get("api_secret_env")
+        credential_envs = [env for env in (key_env, secret_env) if env]
         capability = getattr(adapter_map.get(name), "capabilities", None)
         if callable(capability):
             capability = capability()
         capability_requires_key = isinstance(capability, ProviderCapabilities) and capability.requires_api_key
-        credential_required = bool(key_env) or capability_requires_key
-        credential_present = bool(key_env and environment.get(key_env, "").strip())
+        credential_required = bool(credential_envs) or capability_requires_key
+        credential_present = bool(credential_envs) and all(
+            environment.get(env, "").strip() for env in credential_envs
+        )
         is_configured = name in configured
         config_enabled = provider_enabled(name, loaded, environment) if is_configured else False
         adapter_available = name in adapter_map
@@ -243,6 +271,7 @@ def provider_status(
         settings = settings_by_name.get(status.provider, {})
         row = status.as_dict()
         row["api_key_env"] = settings.get("api_key_env") if isinstance(settings, Mapping) else None
+        row["api_secret_env"] = settings.get("api_secret_env") if isinstance(settings, Mapping) else None
         rows.append(row)
     return tuple(rows)
 
@@ -259,6 +288,7 @@ def validate_provider_registry(
 __all__ = [
     "load_provider_config",
     "provider_api_key",
+    "provider_api_secret",
     "provider_enabled",
     "provider_runtime_status",
     "provider_settings",
