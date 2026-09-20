@@ -386,5 +386,128 @@ class FreeProviderTests(unittest.TestCase):
         self.assertFalse(result["validator_registry_scan"])
 
 
+class ChainTvlFlowTests(unittest.TestCase):
+    """BNB capital flows from the free DeFiLlama historicalChainTvl series."""
+
+    def _series(self, days=40, base=5_000_000_000.0, growth=0.0):
+        start = datetime(2026, 8, 10, tzinfo=timezone.utc)
+        return [
+            {"date": int((start + timedelta(days=offset)).timestamp()), "tvl": base * (1 + growth) ** offset}
+            for offset in range(days)
+        ]
+
+    def test_parse_computes_fractional_changes_with_normalized_ratio_metadata(self):
+        from crypto_portfolio.providers.defillama import parse_chain_tvl_flows
+
+        # +0.1%/day compounding: 1d ~ +0.1%, 7d ~ +0.72%, 30d ~ +3.04%.
+        series = self._series(days=40, growth=0.001)
+        observations = parse_chain_tvl_flows(
+            series,
+            asset="BNB",
+            metric_keys=(
+                "flows.bnb_chain_tvl_change_1d",
+                "flows.bnb_chain_tvl_change_7d",
+                "flows.bnb_chain_tvl_change_30d",
+            ),
+            fetched_at="2026-09-18T12:00:00Z",
+            as_of="2026-09-18T12:00:00Z",
+            endpoint="https://api.llama.fi/v2/historicalChainTvl/BSC",
+        )
+        self.assertEqual(len(observations), 3)
+        by_key = {item["metric_key"]: item for item in observations}
+        self.assertAlmostEqual(by_key["flows.bnb_chain_tvl_change_1d"]["value"], 0.001, places=4)
+        self.assertAlmostEqual(by_key["flows.bnb_chain_tvl_change_30d"]["value"], 1.001**30 - 1, places=4)
+        for item in observations:
+            self.assertEqual(item["metadata"]["normalized_flow_ratio"], item["value"])
+            self.assertEqual(item["metadata"]["chain_scope"], "BSC")
+            self.assertEqual(item["asset"], "BNB")
+
+    def test_flow_factor_scores_the_three_horizons_with_full_coverage(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+        from crypto_portfolio.models.metrics_history import MetricObservation
+
+        observations = tuple(
+            MetricObservation(
+                observation_id=f"obs-{days}",
+                asset="BNB",
+                metric_key=f"flows.bnb_chain_tvl_change_{days}",
+                factor="capital_flows",
+                value=ratio,
+                unit="fraction",
+                period=days,
+                freshness="CURRENT",
+                observed_at="2026-09-18T00:00:00Z",
+                fetched_at="2026-09-18T12:00:00Z",
+                source="defillama",
+                confidence="MEDIUM",
+                metadata={"normalized_flow_ratio": ratio},
+            )
+            for days, ratio in (("1d", -0.017), ("7d", -0.0485), ("30d", 0.0472))
+        )
+        result = calculate_flow_factor(observations, symbol="BNB")
+        self.assertEqual(result.coverage, 1.0)
+        self.assertEqual(result.confidence, "HIGH")
+        # Horizon-weighted ratio (0.1*-0.017 + 0.3*-0.0485 + 0.6*0.0472) = +1.21%,
+        # beyond the +1% saturation bound, so the score clips at 100.
+        self.assertAlmostEqual(result.normalized_flow, 0.012070, places=5)
+        self.assertEqual(result.score, 100.0)
+        self.assertEqual(result.state, "POSITIVE")
+
+    def test_short_or_stale_history_fails_closed(self):
+        from crypto_portfolio.providers.defillama import parse_chain_tvl_flows
+
+        keys = ("flows.bnb_chain_tvl_change_7d",)
+        with self.assertRaises(ProviderInsufficientHistory):
+            parse_chain_tvl_flows(
+                self._series(days=10),
+                asset="BNB", metric_keys=keys,
+                fetched_at="2026-09-18T12:00:00Z", as_of=None,
+                endpoint="https://api.llama.fi/v2/historicalChainTvl/BSC",
+            )
+        stale = self._series(days=40)
+        with self.assertRaises(ProviderInsufficientHistory):
+            parse_chain_tvl_flows(
+                stale,
+                asset="BNB", metric_keys=keys,
+                fetched_at="2026-09-25T12:00:00Z", as_of="2026-09-25T12:00:00Z",
+                endpoint="https://api.llama.fi/v2/historicalChainTvl/BSC",
+            )
+
+    def test_registry_routes_the_new_metrics_to_defillama_chain_tvl(self):
+        from crypto_portfolio.providers.routes import dataset_for_metric
+
+        for days in ("1d", "7d", "30d"):
+            key = f"flows.bnb_chain_tvl_change_{days}"
+            self.assertEqual(provider_chain(key, "BNB"), ("defillama",))
+            self.assertEqual(provider_chain(key, "ETH"), ())
+            self.assertEqual(dataset_for_metric(key), "chain_tvl")
+
+    def test_provider_collect_uses_one_request_for_all_horizons(self):
+        class Client:
+            def __init__(self, series):
+                self._series = series
+                self.calls = 0
+
+            def get_json(self, url, *, params=None, headers=None, max_response_bytes=None):
+                self.calls += 1
+                assert url.endswith("/v2/historicalChainTvl/BSC"), url
+                return self._series
+
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        client = Client(self._series(days=40, growth=0.001))
+        provider = DeFiLlamaProvider(client=client)
+        response = provider.collect(ProviderRequest(
+            provider="defillama", dataset="chain_tvl", asset="BNB", parameters={},
+            metric_keys=(
+                "flows.bnb_chain_tvl_change_1d",
+                "flows.bnb_chain_tvl_change_7d",
+                "flows.bnb_chain_tvl_change_30d",
+            ),
+        ))
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(len(response.observations), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

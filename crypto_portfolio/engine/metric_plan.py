@@ -136,6 +136,12 @@ _BTC_CONTEXT_METRICS = (
     "onchain.btc.sopr",
     "onchain.btc.lth_net_position_change",
 )
+# No BNB ETF exists; chain-level DeFi TVL change is the capital-flow signal.
+_BNB_METRICS = (
+    "flows.bnb_chain_tvl_change_1d",
+    "flows.bnb_chain_tvl_change_7d",
+    "flows.bnb_chain_tvl_change_30d",
+)
 # One source of truth for relative-return inputs. The dependency key is
 # deliberately registered rather than reconstructed from a suffix at runtime.
 RELATIVE_RETURN_DEPENDENCIES: Mapping[str, str] = {
@@ -681,6 +687,9 @@ def build_metric_collection_plan(
         if symbol == "ETH":
             for key in _ETH_METRICS:
                 add(symbol, key, "Ethereum monetary, staking, settlement, DA, and structural context")
+        elif symbol == "BNB":
+            for key in _BNB_METRICS:
+                add(symbol, key, "BNB-chain DeFi capital flows")
         for key in _DERIVATIVES_POSITIONING_METRICS:
             add(symbol, key, "derivatives positioning and social context")
         if collect_optional_social:

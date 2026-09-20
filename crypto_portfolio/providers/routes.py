@@ -33,6 +33,7 @@ DEFAULT_TTL_SECONDS = {
     "ratios": 3600,
     "basis": 3600,
     "etf": 86400,
+    "chain_tvl": 21600,
     "sentiment": 43200,
     "protocol": 21600,
     "onchain": 86400,
@@ -115,6 +116,8 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("sosovalue",)
     if key.startswith("flows.eth_active_stake_"):
         return ()
+    if key.startswith("flows.bnb_chain_tvl_change"):
+        return ("defillama",) if symbol in {None, "BNB"} else ()
     if key == "derivatives.futures_basis_annualized":
         return PROVIDER_ROUTES["basis"]
     if key.startswith("derivatives."):
@@ -201,6 +204,8 @@ def dataset_for_metric(metric_key: str) -> str:
         return "basis"
     if key.startswith(("flows.etf_", "flows.btc_etf_", "flows.eth_etf_")):
         return "etf"
+    if key.startswith("flows.bnb_chain_tvl_change"):
+        return "chain_tvl"
     if key.startswith(("onchain.", "btc_valuation.")) or key in {
         "tokenomics.annualized_emissions", "tokenomics.supply_growth",
     }:

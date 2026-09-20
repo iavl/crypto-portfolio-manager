@@ -310,6 +310,21 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         "flows.eth_active_stake_change_to_supply_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
         freshness="2d", asset_scope=_ETH_ASSETS,
     ),
+    # No BNB ETF exists; BNB-chain DeFi TVL change is the ecosystem capital-flow
+    # signal.  Chain-level moves are larger than ETF netflow/AUM ratios, so the
+    # direction (capital entering/leaving the chain) is the scored signal.
+    "flows.bnb_chain_tvl_change_1d": _definition(
+        "flows.bnb_chain_tvl_change_1d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="2d", asset_scope=("BNB",),
+    ),
+    "flows.bnb_chain_tvl_change_7d": _definition(
+        "flows.bnb_chain_tvl_change_7d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="7d", asset_scope=("BNB",),
+    ),
+    "flows.bnb_chain_tvl_change_30d": _definition(
+        "flows.bnb_chain_tvl_change_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="7d", asset_scope=("BNB",),
+    ),
     "fundamentals.tvl": _definition("fundamentals.tvl", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.fees_30d": _definition("fundamentals.fees_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
     "fundamentals.revenue_30d": _definition("fundamentals.revenue_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),

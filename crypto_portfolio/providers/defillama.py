@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import math
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote
@@ -220,6 +220,90 @@ def parse_chain_fees(
     }
 
 
+_CHAIN_TVL_HORIZONS = {"1d": 1, "7d": 7, "30d": 30}
+
+
+def parse_chain_tvl_flows(
+    payload: Any,
+    *,
+    asset: str,
+    metric_keys: Iterable[str],
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str,
+) -> tuple[Mapping[str, Any], ...]:
+    """Turn a historicalChainTvl series into fractional 1d/7d/30d changes.
+
+    Each observation's value is already the normalized flow ratio
+    (delta TVL / base TVL), carried explicitly in metadata so the flow
+    factor consumes it without a denominator lookup.
+    """
+    if not isinstance(payload, list) or len(payload) < 32:
+        raise ProviderInsufficientHistory("DeFiLlama chain TVL history is missing or too short")
+    cutoff = parse_timestamp(as_of) if as_of else datetime.now(timezone.utc)
+    rows: list[tuple[str, float]] = []
+    for item in payload:
+        if not isinstance(item, Mapping) or item.get("tvl") is None:
+            continue
+        timestamp = _timestamp(item.get("date"), "DeFiLlama chain TVL timestamp", fetched_at)
+        if parse_timestamp(timestamp) > cutoff:
+            continue
+        rows.append((timestamp, _number(item["tvl"], "DeFiLlama chain TVL")))
+    if len(rows) < 32:
+        raise ProviderInsufficientHistory("DeFiLlama chain TVL history has too few usable points")
+    anchor_timestamp, anchor_tvl = max(rows, key=lambda item: parse_timestamp(item[0]))
+    anchor = parse_timestamp(anchor_timestamp)
+    if (cutoff - anchor) > timedelta(days=3):
+        raise ProviderInsufficientHistory("DeFiLlama chain TVL history is stale")
+    horizons = {
+        key: _CHAIN_TVL_HORIZONS[key[len("flows.bnb_chain_tvl_change_"):]]
+        for key in dict.fromkeys(metric_keys)
+        if key.startswith("flows.bnb_chain_tvl_change_")
+        and key[len("flows.bnb_chain_tvl_change_"):] in _CHAIN_TVL_HORIZONS
+    }
+    if not horizons:
+        raise ProviderUnsupportedMetric("no supported chain TVL flow horizon was requested")
+    observations: list[Mapping[str, Any]] = []
+    for metric_key, days in horizons.items():
+        target = anchor - timedelta(days=days)
+        base = next(
+            (value for timestamp, value in reversed(rows) if parse_timestamp(timestamp) <= target),
+            None,
+        )
+        if base is None or base <= 0:
+            raise ProviderInsufficientHistory(
+                f"DeFiLlama chain TVL history cannot supply the {days}-day base"
+            )
+        ratio = anchor_tvl / base - 1.0
+        if not math.isfinite(ratio):
+            raise ProviderDataError("DeFiLlama chain TVL flow ratio is invalid")
+        observations.append({
+            "asset": asset.strip().upper(),
+            "metric_key": metric_key,
+            "value": ratio,
+            "unit": "fraction",
+            "period": metric_key.rsplit("_", 1)[-1],
+            "observed_at": anchor_timestamp,
+            "fetched_at": fetched_at,
+            "source": "defillama",
+            "confidence": "MEDIUM",
+            "summary": (
+                f"{CHAIN_NAMES.get(asset.strip().upper(), asset)} chain TVL {metric_key.rsplit('_', 1)[-1]} "
+                f"change {ratio:+.2%} (TVL {base:,.0f} -> {anchor_tvl:,.0f} USD)"
+            ),
+            "metadata": {
+                "source_dataset": "historicalChainTvl",
+                "source_url": endpoint,
+                "methodology": "chain_tvl_fractional_change_vs_days_ago",
+                "chain_scope": CHAIN_NAMES.get(asset.strip().upper()),
+                "normalized_flow_ratio": ratio,
+                "base_tvl_usd": base,
+                "anchor_tvl_usd": anchor_tvl,
+            },
+        })
+    return tuple(observations)
+
+
 def parse_protocol_payload(
     payload: Mapping[str, Any],
     asset: str,
@@ -308,13 +392,43 @@ class DeFiLlamaProvider:
                 "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
                 "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "valuation.fee_revenue_multiple",
                 "onchain.blockspace_fees",
+                "flows.bnb_chain_tvl_change_1d", "flows.bnb_chain_tvl_change_7d",
+                "flows.bnb_chain_tvl_change_30d",
             ),
-            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "onchain.blockspace_fees"),
+            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "onchain.blockspace_fees", "flows.bnb_chain_tvl_change_7d", "flows.bnb_chain_tvl_change_30d"),
             supports_batching=True,
             requires_api_key=False,
         )
 
     def collect(self, request: ProviderRequest) -> ProviderResponse:
+        if any(key.startswith("flows.bnb_chain_tvl_change") for key in request.metric_keys):
+            asset = request.asset.strip().upper()
+            chain = CHAIN_NAMES.get(asset)
+            if chain is None or any(
+                not key.startswith("flows.bnb_chain_tvl_change") for key in request.metric_keys
+            ):
+                raise ProviderUnsupportedMetric(
+                    "DeFiLlama chain TVL flows require only bnb_chain_tvl_change metrics for BNB"
+                )
+            endpoint = BASE_URL + "/v2/historicalChainTvl/" + quote(chain, safe="")
+            fetched_at = _now(self.clock)
+            try:
+                observations = parse_chain_tvl_flows(
+                    self.client.get_json(endpoint),
+                    asset=asset,
+                    metric_keys=tuple(key for key in request.metric_keys if key.startswith("flows.bnb_chain_tvl_change")),
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                    endpoint=endpoint,
+                )
+            except (ProviderDataError, ProviderResponseError, ProviderInsufficientHistory) as exc:
+                diagnostic = getattr(exc, "diagnostic", None)
+                details = dict(diagnostic.as_dict()) if hasattr(diagnostic, "as_dict") else {
+                    "error_code": classify_transport_error(exc),
+                    "detail": redact_secrets(str(exc)),
+                }
+                return ProviderResponse((), diagnostics={"flows.bnb_chain_tvl_change": details}, network_requests=1)
+            return ProviderResponse(observations, network_requests=1)
         if "onchain.blockspace_fees" in request.metric_keys:
             asset = request.asset.strip().upper()
             chain = CHAIN_NAMES.get(asset)

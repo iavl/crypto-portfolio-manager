@@ -199,6 +199,7 @@ explicit identifiers are `ETH → ethereum`, `AAVE → aave`, `SOL → solana`,
 | Method | Endpoint | Metrics |
 |---|---|---|
 | GET | `https://api.llama.fi/v2/chains` | chain TVL for ETH/SOL/BNB |
+| GET | `https://api.llama.fi/v2/historicalChainTvl/BSC` | BNB capital flows (`flows.bnb_chain_tvl_change_{1d,7d,30d}`) |
 | GET | `https://api.llama.fi/tvl/{identifier}` | lightweight Aave TVL |
 | GET | `https://api.llama.fi/summary/fees/{identifier}` | fees and fee context |
 | GET | `https://api.llama.fi/summary/fees/{identifier}?dataType=dailyRevenue` | revenue history |
@@ -215,6 +216,15 @@ global supply uses `/stablecoincharts/all`. The parser reads
 `totalCirculatingUSD.peggedUSD`, filters by `as_of`, and retains the chain or
 global scope. It never reads `stablecoinLiquidity` from
 `api.llama.fi/protocol/{identifier}`.
+
+BNB capital flows: no BNB ETF exists, so BNB's `capital_flows` factor uses the
+free `historicalChainTvl/BSC` series. One request computes the fractional 1d/
+7d/30d chain-TVL changes; each observation carries its ratio explicitly in
+`metadata.normalized_flow_ratio` so the flow factor consumes it without a
+denominator lookup. The parser fails closed on short (<32 points) or stale
+(>3 days) history. Chain-level moves are larger than ETF netflow/AUM ratios,
+so the scored signal is the direction of capital entering or leaving BNB-chain
+DeFi, with the shared flow thresholds saturating more often than ETF data.
 
 ## Alternative.me
 
