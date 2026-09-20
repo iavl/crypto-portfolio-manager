@@ -217,6 +217,7 @@ class AssetDecisionSummary:
     strategic_target_weight: float | None = None
     execution_target_weight: float | None = None
     action_reason: str = ""
+    candidate_action: str | None = None
     staging_applied: bool = False
     deviation_pp: float | None = None
     relative_deviation: float | None = None
@@ -267,6 +268,12 @@ class AssetDecisionSummary:
         if action not in _ACTIONS:
             raise ValueError(f"asset summary action must be one of {sorted(_ACTIONS)}")
         object.__setattr__(self, "action", action)
+        candidate = self.candidate_action
+        if candidate is not None:
+            candidate = _text(candidate, "asset summary candidate_action").upper()
+            if candidate not in _ACTIONS:
+                raise ValueError(f"asset summary candidate_action must be one of {sorted(_ACTIONS)}")
+            object.__setattr__(self, "candidate_action", candidate)
         if isinstance(self.approved_amount_usd, bool) or not isinstance(self.approved_amount_usd, (int, float)):
             raise ValueError("approved_amount_usd must be a number")
         amount = float(self.approved_amount_usd)
@@ -343,6 +350,7 @@ class AssetDecisionSummary:
             "strategic_target_weight": self.strategic_target_weight,
             "execution_target_weight": self.execution_target_weight,
             "action_reason": self.action_reason,
+            "candidate_action": self.candidate_action,
             "staging_applied": self.staging_applied,
             "deviation_pp": self.deviation_pp,
             "relative_deviation": self.relative_deviation,

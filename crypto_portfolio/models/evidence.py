@@ -16,6 +16,7 @@ _FRESHNESS = {"CURRENT", "STALE", "UNKNOWN"}
 AVAILABILITY_STATES = ("AVAILABLE", "MISSING", "NOT_APPLICABLE")
 _EVENT_RISK_STATES = ("NORMAL", "ELEVATED", "HIGH", "SEVERE", "CRITICAL")
 _ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
+_RISK_TIERS = {"normal", "high_beta", "high"}
 _PRIVATE_REASONING_FIELDS = {"chain_of_thought", "scratchpad", "private_reasoning", "hidden_reasoning"}
 _MANUAL_CONTEXT_CATEGORIES = {"GOVERNANCE", "TOKENOMICS", "LEGAL", "PROTOCOL", "OTHER"}
 _MANUAL_CONTEXT_IMPACTS = {"POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL"}
@@ -532,7 +533,10 @@ class AssetAssessment:
             if not math.isfinite(coverage) or not 0 <= coverage <= 1:
                 raise ValueError("score_coverage must be finite and in [0, 1] or null")
             object.__setattr__(self, "score_coverage", coverage)
-        object.__setattr__(self, "risk_tier", _text(self.risk_tier, "risk_tier").lower())
+        risk_tier = _text(self.risk_tier, "risk_tier").lower()
+        if risk_tier not in _RISK_TIERS:
+            raise ValueError(f"risk_tier must be one of {sorted(_RISK_TIERS)}")
+        object.__setattr__(self, "risk_tier", risk_tier)
         if self.risk_tier_source is not None:
             source = _text(self.risk_tier_source, "risk_tier_source").upper()
             if source not in {"POLICY_DEFAULT", "MANUAL_ASSESSMENT", "DETERMINISTIC_ESTIMATE"}:

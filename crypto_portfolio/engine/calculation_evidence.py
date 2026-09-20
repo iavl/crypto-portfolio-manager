@@ -13,6 +13,8 @@ from ..models.policy import Policy, policy_from_mapping, policy_hash
 from ..models.time import parse_timestamp
 
 TREND_SOURCE = "crypto_portfolio.engine.factors.trend"
+FLOW_SOURCE = "crypto_portfolio.engine.factors.flows"
+RELATIVE_STRENGTH_SOURCE = "crypto_portfolio.engine.factors.relative_strength"
 
 
 def calculation_hash(value: Mapping[str, Any]) -> str:
@@ -20,16 +22,35 @@ def calculation_hash(value: Mapping[str, Any]) -> str:
                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
-def trend_calculation_evidence(snapshot: Any, policy: Policy) -> Evidence:
+def trend_calculation_evidence(
+    snapshot: Any,
+    policy: Policy,
+    *,
+    previous_relative_volumes: Any = None,
+) -> Evidence:
     """Bind the actual normalized technical input, not unrelated cached scalars.
 
     This is a calculation receipt, not independent corroboration of a provider.
     Dataset hashes remain provenance; they are never masqueraded as Evidence IDs.
     """
     value = snapshot.as_dict() if hasattr(snapshot, "as_dict") else dict(vars(snapshot))
-    metadata = {"policy_hash": policy_hash(policy), "ohlcv_hash": snapshot.ohlcv_hash,
-                "volume_profile_hash": snapshot.volume_profile_hash,
-                "calculation_input_hash": calculation_hash(value)}
+    metadata = {
+        "policy_hash": policy_hash(policy),
+        "ohlcv_hash": snapshot.ohlcv_hash,
+        "volume_profile_hash": snapshot.volume_profile_hash,
+        "calculation_input_hash": calculation_hash(value),
+    }
+    if previous_relative_volumes is not None:
+        history = list(previous_relative_volumes)
+        if any(
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not math.isfinite(float(item))
+            or float(item) < 0
+            for item in history
+        ):
+            raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
+        metadata["previous_relative_volumes"] = [float(item) for item in history]
     identity = calculation_hash({"input": value, "metadata": metadata})
     return Evidence(identity, snapshot.symbol, "trend", TREND_SOURCE,
                     snapshot.as_of, snapshot.as_of,
@@ -52,7 +73,12 @@ def validate_trend_calculation(factor: Any, evidence: Mapping[str, Evidence],
     snapshot = receipt.value
     if not isinstance(snapshot, Mapping) or snapshot.get("symbol") != symbol:
         raise ValueError("CALCULATION_EVIDENCE_MISMATCH: snapshot")
-    result = calculate_trend_factor(snapshot, policy=policy)
+    previous_relative_volumes = (receipt.metadata or {}).get("previous_relative_volumes")
+    result = calculate_trend_factor(
+        snapshot,
+        policy=policy,
+        previous_relative_volumes=previous_relative_volumes,
+    )
     expected = result.evidence_records[0]
     if expected.as_dict() != receipt.as_dict():
         raise ValueError("CALCULATION_EVIDENCE_MISMATCH: input, policy or hash")
@@ -88,6 +114,174 @@ def validate_trend_calculation(factor: Any, evidence: Mapping[str, Evidence],
             "calculation_input_hash": receipt.metadata["calculation_input_hash"],
             "completed_through": (tail_time + timedelta(days=1)).isoformat(),
             "evidence_ids": list(factor.evidence_ids)}
+
+
+def _calculation_receipt(
+    *,
+    source: str,
+    symbol: str,
+    factor: str,
+    as_of: str,
+    policy: Policy,
+    value: Mapping[str, Any],
+) -> Evidence:
+    metadata = {
+        "policy_hash": policy_hash(policy),
+        "calculation_input_hash": calculation_hash(value),
+    }
+    identity = calculation_hash({"input": value, "metadata": metadata})
+    return Evidence(
+        identity,
+        symbol,
+        factor,
+        source,
+        as_of,
+        as_of,
+        "CURRENT",
+        "HIGH",
+        value=value,
+        metadata=metadata,
+    )
+
+
+def flow_calculation_evidence(
+    value: Mapping[str, Any], *, symbol: str, as_of: str, policy: Policy
+) -> Evidence:
+    """Create a receipt for a normalized deterministic flow calculation."""
+    from .factors.flows import calculate_flow_factor
+
+    if not isinstance(value, Mapping):
+        raise ValueError("flow calculation input must be an object")
+    result = calculate_flow_factor(value, symbol=symbol, policy=policy)
+    receipt = _calculation_receipt(
+        source=FLOW_SOURCE,
+        symbol=symbol,
+        factor="capital_flows",
+        as_of=as_of,
+        policy=policy,
+        value=dict(value),
+    )
+    # Force calculation now so invalid inputs cannot produce a receipt.
+    if result.score is None:
+        raise ValueError("flow calculation receipt requires an available score")
+    return receipt
+
+
+def validate_flow_calculation(
+    factor: Any,
+    evidence: Mapping[str, Evidence],
+    *,
+    symbol: str,
+    as_of: str,
+    policy: Policy,
+) -> dict[str, Any]:
+    from .factors.flows import calculate_flow_factor
+
+    receipts = [
+        evidence[key]
+        for key in factor.evidence_ids
+        if key in evidence and evidence[key].source == FLOW_SOURCE
+    ]
+    if len(receipts) != 1:
+        raise ValueError(f"CALCULATION_EVIDENCE_MISSING: {symbol}.capital_flows requires one receipt")
+    receipt = receipts[0]
+    if receipt.asset != symbol or receipt.factor != "capital_flows":
+        raise ValueError("CALCULATION_EVIDENCE_MISMATCH: flow asset/factor")
+    if not isinstance(receipt.value, Mapping):
+        raise ValueError("CALCULATION_EVIDENCE_MISMATCH: flow input")
+    if (receipt.metadata or {}).get("policy_hash") != policy_hash(policy):
+        raise ValueError("CALCULATION_POLICY_MISMATCH: flow")
+    if (receipt.metadata or {}).get("calculation_input_hash") != calculation_hash(receipt.value):
+        raise ValueError("CALCULATION_HASH_MISMATCH: flow")
+    if parse_timestamp(receipt.observed_at) > parse_timestamp(as_of) or parse_timestamp(receipt.fetched_at) > parse_timestamp(as_of):
+        raise ValueError("CALCULATION_FUTURE_EVIDENCE: flow")
+    result = calculate_flow_factor(receipt.value, symbol=symbol, policy=policy)
+    if result.score is None or not math.isclose(result.score, factor.score, abs_tol=1e-9, rel_tol=0):
+        raise ValueError("CALCULATION_SCORE_MISMATCH: capital_flows")
+    return {
+        "score": result.score,
+        "normalized_flow": result.normalized_flow,
+        "horizon_ratios": dict(result.horizon_ratios or {}),
+        "calculation_input_hash": receipt.metadata["calculation_input_hash"],
+        "evidence_ids": list(factor.evidence_ids),
+    }
+
+
+def relative_strength_calculation_evidence(
+    asset_history: Any,
+    btc_history: Any,
+    *,
+    symbol: str,
+    as_of: str,
+    policy: Policy,
+) -> Evidence:
+    """Create a receipt for a deterministic asset-versus-BTC calculation."""
+    from .factors.relative_strength import calculate_relative_strength
+
+    normalized = {
+        "asset_history": thaw_packet_value(asset_history.as_dict() if hasattr(asset_history, "as_dict") else asset_history),
+        "btc_history": thaw_packet_value(btc_history.as_dict() if hasattr(btc_history, "as_dict") else btc_history),
+    }
+    result = calculate_relative_strength(
+        normalized["asset_history"], normalized["btc_history"],
+        symbol=symbol, policy=policy, as_of=as_of,
+    )
+    if result.score is None:
+        raise ValueError("relative-strength calculation receipt requires an available score")
+    return _calculation_receipt(
+        source=RELATIVE_STRENGTH_SOURCE,
+        symbol=symbol,
+        factor="relative_strength_btc",
+        as_of=as_of,
+        policy=policy,
+        value=normalized,
+    )
+
+
+def validate_relative_strength_calculation(
+    factor: Any,
+    evidence: Mapping[str, Evidence],
+    *,
+    symbol: str,
+    as_of: str,
+    policy: Policy,
+) -> dict[str, Any]:
+    from .factors.relative_strength import calculate_relative_strength
+
+    receipts = [
+        evidence[key]
+        for key in factor.evidence_ids
+        if key in evidence and evidence[key].source == RELATIVE_STRENGTH_SOURCE
+    ]
+    if len(receipts) != 1:
+        raise ValueError(f"CALCULATION_EVIDENCE_MISSING: {symbol}.relative_strength_btc requires one receipt")
+    receipt = receipts[0]
+    if receipt.asset != symbol or receipt.factor != "relative_strength_btc":
+        raise ValueError("CALCULATION_EVIDENCE_MISMATCH: relative-strength asset/factor")
+    if not isinstance(receipt.value, Mapping) or set(receipt.value) != {"asset_history", "btc_history"}:
+        raise ValueError("CALCULATION_EVIDENCE_MISMATCH: relative-strength input")
+    if (receipt.metadata or {}).get("policy_hash") != policy_hash(policy):
+        raise ValueError("CALCULATION_POLICY_MISMATCH: relative_strength_btc")
+    if (receipt.metadata or {}).get("calculation_input_hash") != calculation_hash(receipt.value):
+        raise ValueError("CALCULATION_HASH_MISMATCH: relative_strength_btc")
+    if parse_timestamp(receipt.observed_at) > parse_timestamp(as_of) or parse_timestamp(receipt.fetched_at) > parse_timestamp(as_of):
+        raise ValueError("CALCULATION_FUTURE_EVIDENCE: relative_strength_btc")
+    result = calculate_relative_strength(
+        receipt.value["asset_history"], receipt.value["btc_history"],
+        symbol=symbol, policy=policy, as_of=as_of,
+    )
+    if not math.isclose(result.score, factor.score, abs_tol=1e-9, rel_tol=0):
+        raise ValueError("CALCULATION_SCORE_MISMATCH: relative_strength_btc")
+    return {
+        "score": result.score,
+        "coverage": result.coverage,
+        "state": result.state,
+        "relative_30d": result.relative_30d,
+        "relative_90d": result.relative_90d,
+        "relative_180d": result.relative_180d,
+        "calculation_input_hash": receipt.metadata["calculation_input_hash"],
+        "evidence_ids": list(factor.evidence_ids),
+    }
 
 
 def validate_calculation_context(
@@ -135,6 +329,18 @@ def validate_calculation_context(
             if require_trend or any(evidence[key].source == TREND_SOURCE for key in trend.evidence_ids):
                 detail = validate_trend_calculation(trend, evidence, symbol=symbol,
                                                     as_of=context["as_of"], policy=policy)
+        flow = assessment.factor_scores.get("capital_flows")
+        if flow is not None and flow.availability == "AVAILABLE":
+            if any(evidence[key].source == FLOW_SOURCE for key in flow.evidence_ids if key in evidence):
+                detail["capital_flows"] = validate_flow_calculation(
+                    flow, evidence, symbol=symbol, as_of=context["as_of"], policy=policy
+                )
+        relative = assessment.factor_scores.get("relative_strength_btc")
+        if relative is not None and relative.availability == "AVAILABLE":
+            if any(evidence[key].source == RELATIVE_STRENGTH_SOURCE for key in relative.evidence_ids if key in evidence):
+                detail["relative_strength_btc"] = validate_relative_strength_calculation(
+                    relative, evidence, symbol=symbol, as_of=context["as_of"], policy=policy
+                )
         scored = score_factors(assessment.factor_scores, policy=policy, symbol=symbol,
                               critical_data_complete=assessment.critical_data_complete)
         if assessment.weighted_score is not None and not math.isclose(assessment.weighted_score, scored.score, abs_tol=1e-9, rel_tol=0):

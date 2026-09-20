@@ -151,6 +151,20 @@ class DirectionFlipConfirmationTests(unittest.TestCase):
         self.assertIn("direction flip from REDUCE to INCREASE", aave.rationale)
         self.assertIn("1 of 2 daily closes", aave.rationale)
 
+    def test_wait_preserves_candidate_direction_for_next_daily_close(self):
+        first = self._run({"AAVE": [{"date": "2026-09-16", "action": "REDUCE"}]})
+        pending = next(a for a in first.actions if a.symbol == "AAVE")
+        self.assertEqual(pending.action, "WAIT")
+        self.assertEqual(pending.candidate_action, "INCREASE")
+        history = direction_history_from_decisions([
+            {"timestamp": "2026-09-17T22:00:00Z", "actions": [pending.as_dict()]},
+            {"timestamp": "2026-09-16T22:00:00Z", "actions": [{"symbol": "AAVE", "action": "REDUCE"}]},
+        ])
+        second = self._run(history)
+        aave = next(a for a in second.actions if a.symbol == "AAVE")
+        self.assertEqual(aave.action, "INCREASE")
+        self.assertGreater(aave.amount_usd, 0.0)
+
     def test_confirmed_flip_executes(self):
         result = self._run({"AAVE": [
             {"date": "2026-09-18", "action": "INCREASE"},

@@ -105,6 +105,11 @@ def direction_history_from_decisions(
                 continue
             symbol = str(entry.get("symbol", "")).strip().upper()
             action = str(entry.get("action", "")).strip().upper()
+            # A direction-flip gate can turn an executable candidate into a
+            # WAIT. Keep that candidate direction in the current contract so
+            # a later daily close can complete the confirmation streak.
+            if action == "WAIT" and entry.get("action_reason") == "DIRECTION_CONFIRMATION":
+                action = str(entry.get("candidate_action", "")).strip().upper()
             if not symbol or action not in _DIRECTION_HISTORY_ACTIONS:
                 continue
             if wanted is not None and symbol not in wanted:
@@ -572,6 +577,7 @@ class RebalanceAction:
     strategic_target_weight: float | None = None
     execution_target_weight: float | None = None
     action_reason: str = ""
+    candidate_action: str | None = None
     staging_applied: bool = False
     remaining_gap_after_action: float | None = None
     sizing_attribution: ExecutionSizingAttribution | Mapping[str, Any] | None = None
@@ -614,6 +620,14 @@ class RebalanceAction:
         if reason and reason not in _ACTION_REASONS:
             raise ValueError(f"action_reason must be one of {sorted(_ACTION_REASONS)}")
         object.__setattr__(self, "action_reason", reason)
+        candidate = self.candidate_action
+        if candidate is not None:
+            if not isinstance(candidate, str):
+                raise ValueError("candidate_action must be a string or null")
+            candidate = candidate.strip().upper()
+            if candidate not in _ACTIONS:
+                raise ValueError(f"candidate_action must be one of {sorted(_ACTIONS)}")
+            object.__setattr__(self, "candidate_action", candidate)
         if not isinstance(self.staging_applied, bool):
             raise ValueError("staging_applied must be boolean")
         executable = {"INCREASE", "REDUCE", "EXIT"}
@@ -645,6 +659,7 @@ class RebalanceAction:
             "strategic_target_weight": self.strategic_target_weight,
             "execution_target_weight": self.execution_target_weight,
             "action_reason": self.action_reason,
+            "candidate_action": self.candidate_action,
             "staging_applied": self.staging_applied,
             "remaining_gap_after_action": self.remaining_gap_after_action,
             "sizing_attribution": self.sizing_attribution.as_dict() if self.sizing_attribution else None,
@@ -1025,6 +1040,7 @@ def recommend_rebalance(
             action_reason = base_reason
             priority = "HIGH" if high_priority else "NORMAL"
             rationale = "overweight exceeds the active rebalance threshold"
+        candidate_action = action
         # Direction-flip confirmation: an ordinary threshold crossing that
         # would reverse the standing executable direction waits until the new
         # direction has persisted across distinct daily closes. Hard
@@ -1136,6 +1152,7 @@ def recommend_rebalance(
             "priority": priority,
             "rationale": rationale,
             "action_reason": action_reason,
+            "candidate_action": candidate_action,
             "staging_applied": staging_applied,
             "staging_active": staging_active,
             "staged_gap": staged_gap,
@@ -1277,6 +1294,7 @@ def recommend_rebalance(
             strategic_target_weight=item["target_weight"],
             execution_target_weight=item["execution_target"],
             action_reason=item["action_reason"],
+            candidate_action=item["candidate_action"],
             staging_applied=item["staging_applied"],
             remaining_gap_after_action=item["remaining_gap"],
             sizing_attribution=item["sizing_attribution"],

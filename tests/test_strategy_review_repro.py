@@ -623,6 +623,29 @@ class ReviewRound2Regressions(unittest.TestCase):
             typed_result.deployment_allowances["SOL"]["risk_tier_source"], "POLICY_DEFAULT"
         )
 
+    def test_unknown_risk_tier_is_rejected_instead_of_defaulting_to_normal(self):
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        with self.assertRaisesRegex(ValueError, "risk_tier must be one of"):
+            AssetAssessment(
+                "SOL",
+                {"trend": 80},
+                risk_tier="high_btea",
+            )
+
+    def test_scoring_preserves_risk_tier_source(self):
+        from crypto_portfolio.engine.scoring import score_assessment
+        from crypto_portfolio.models.evidence import AssetAssessment
+
+        assessment = AssetAssessment(
+            "SOL",
+            {"trend": 80},
+            risk_tier="high_beta",
+            risk_tier_source="MANUAL_ASSESSMENT",
+        )
+        scored, _ = score_assessment(assessment)
+        self.assertEqual(scored.risk_tier_source, "MANUAL_ASSESSMENT")
+
     def test_model_rejects_unknown_relative_strength_states(self):
         from crypto_portfolio.models.evidence import AssetAssessment
 

@@ -1,5 +1,6 @@
 import unittest
 from datetime import date, timedelta
+from dataclasses import replace
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
@@ -114,6 +115,15 @@ class DecisionContractGateTests(unittest.TestCase):
         report = build_report_packet(packet)
         self.assertEqual(report.execution_plans["ETH"]["approved_amount_usd"], 1000.0)
 
+    def test_missing_diagnostic_inputs_are_explicitly_unavailable(self):
+        packet = build_decision_review_packet(
+            current_weights={"BTC": 0.5, "USDT": 0.5},
+            target_weights={"BTC": 0.6, "USDT": 0.4},
+            assessments={"BTC": {"weighted_score": 70, "confidence": "HIGH"}},
+        )
+        self.assertEqual(packet.review_diagnostics["availability"], "UNAVAILABLE")
+        self.assertEqual(packet.target_attribution["availability"], "UNAVAILABLE")
+
     def test_trend_replay_from_persisted_snapshot_round_trips_swing_points(self):
         """The replay contract re-derives trend from the receipt's snapshot dict.
 
@@ -148,7 +158,6 @@ class DecisionContractGateTests(unittest.TestCase):
         direct = calculate_trend_factor(snapshot, policy=policy)
         replayed = calculate_trend_factor(snapshot.as_dict(), policy=policy)
         self.assertTrue(math_module.isclose(direct.score, replayed.score, abs_tol=1e-9))
-
         receipt = trend_calculation_evidence(snapshot, policy)
         detail = validate_trend_calculation(
             SimpleNamespace(evidence_ids=(receipt.id,), score=direct.score, availability="AVAILABLE"),
@@ -159,6 +168,118 @@ class DecisionContractGateTests(unittest.TestCase):
         )
         self.assertTrue(math_module.isclose(detail["score"], direct.score, abs_tol=1e-9))
 
+    def test_trend_receipt_binds_prior_volume_history(self):
+        from types import SimpleNamespace
+        from crypto_portfolio.engine.calculation_evidence import validate_trend_calculation
+        from crypto_portfolio.engine.factors.trend import calculate_trend_factor
+
+        policy = resolve_policy()
+        start = date(2025, 4, 1)
+        candles = tuple(
+            Candle(
+                (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
+                99.0,
+                102.0,
+                98.0,
+                100.0,
+                100.0,
+            )
+            for index in range(426)
+        )
+        series = OHLCVSeries("ETH", "1D", candles, source="synthetic", fetched_at="2026-06-01T08:00:00Z")
+        spot = SpotPrice("ETH", 100.0, "2026-06-01T08:00:00Z", "synthetic", "2026-06-01T08:00:00Z")
+        from crypto_portfolio.engine.technical import build_technical_snapshot
+
+        snapshot = replace(
+            build_technical_snapshot(series, spot, as_of="2026-06-01T08:00:00Z", policy=policy),
+            volume_state="WEAK",
+            relative_volume=0.5,
+        )
+        result = calculate_trend_factor(snapshot, policy=policy, previous_relative_volumes=[0.5])
+        receipt = {item.id: item for item in result.evidence_records}
+        detail = validate_trend_calculation(
+            SimpleNamespace(score=result.score, evidence_ids=result.evidence_ids),
+            receipt,
+            symbol="ETH",
+            as_of=snapshot.as_of,
+            policy=policy,
+        )
+        self.assertEqual(detail["score"], result.score)
+        self.assertEqual(receipt[result.evidence_ids[0]].metadata["previous_relative_volumes"], [0.5])
+
+    def test_flow_receipt_rejects_score_changes_without_input_changes(self):
+        import copy
+        from crypto_portfolio.engine.calculation_evidence import flow_calculation_evidence
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+        from crypto_portfolio.engine.scoring import score_factors
+
+        policy = resolve_policy()
+        as_of = "2026-01-01T00:00:00Z"
+        flow_input = {"normalized_flow_ratio": 0.005}
+        flow = calculate_flow_factor(flow_input, symbol="BTC", policy=policy)
+        receipt = flow_calculation_evidence(
+            flow_input, symbol="BTC", as_of=as_of, policy=policy
+        )
+        factors = {
+            "trend": 70,
+            "capital_flows": {
+                "factor": "capital_flows",
+                "score": flow.score,
+                "evidence_ids": [receipt.id],
+            },
+            "btc_valuation": 70,
+            "macro_liquidity": 70,
+        }
+        expected = score_factors(factors, symbol="BTC", policy=policy).score
+        context = {
+            "as_of": as_of,
+            "resolved_policy": policy.as_dict(),
+            "assessments": {
+                "BTC": {
+                    "factor_scores": factors,
+                    "weighted_score": expected,
+                    "confidence": "HIGH",
+                    "asset_type": "core",
+                    "relative_strength_vs_btc": None,
+                    "risk_tier": "normal",
+                }
+            },
+            "evidence": [receipt.as_dict()],
+        }
+        validate_calculation_context(context)
+        tampered = copy.deepcopy(context)
+        tampered["assessments"]["BTC"]["factor_scores"]["capital_flows"]["score"] = 0.0
+        tampered["assessments"]["BTC"]["weighted_score"] = score_factors(
+            tampered["assessments"]["BTC"]["factor_scores"], symbol="BTC", policy=policy
+        ).score
+        with self.assertRaisesRegex(ValueError, "CALCULATION_SCORE_MISMATCH: capital_flows"):
+            validate_calculation_context(tampered)
+
+    def test_relative_strength_receipt_replays_both_price_series(self):
+        from types import SimpleNamespace
+        from crypto_portfolio.engine.calculation_evidence import (
+            relative_strength_calculation_evidence,
+            validate_relative_strength_calculation,
+        )
+        from crypto_portfolio.engine.factors.relative_strength import calculate_relative_strength
+
+        policy = resolve_policy()
+        as_of = "2026-01-01T00:00:00Z"
+        asset = tuple(100.0 + index * 0.1 for index in range(220))
+        btc = tuple(100.0 + index * 0.1 for index in range(220))
+        result = calculate_relative_strength(asset, btc, symbol="SOL", policy=policy, as_of=as_of)
+        receipt = relative_strength_calculation_evidence(
+            asset, btc, symbol="SOL", as_of=as_of, policy=policy
+        )
+        replayed = validate_relative_strength_calculation(
+            SimpleNamespace(score=result.score, evidence_ids=(receipt.id,)),
+            {receipt.id: receipt},
+            symbol="SOL",
+            as_of=as_of,
+            policy=policy,
+        )
+        self.assertEqual(replayed["score"], result.score)
+        self.assertEqual(replayed["coverage"], 1.0)
 
 if __name__ == "__main__":
     unittest.main()

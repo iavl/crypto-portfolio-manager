@@ -201,6 +201,7 @@ def _asset_summary(
         strategic_target_weight=strategic_target,
         execution_target_weight=execution_target,
         action_reason=str(action_dict.get("action_reason", "") or ""),
+        candidate_action=action_dict.get("candidate_action"),
         staging_applied=bool(staging_raw),
         deviation_pp=deviation_pp,
         relative_deviation=relative_deviation,
@@ -563,10 +564,25 @@ def build_decision_review_packet(
     if previous_allocation_inputs is not None and current_allocation_inputs is not None:
         from .review_diagnostics import target_change_attribution
         target_attribution = target_change_attribution(previous_allocation_inputs, current_allocation_inputs)
+    diagnostics_value = review_diagnostics if review_diagnostics is not None else source.get("review_diagnostics")
+    if diagnostics_value is None:
+        diagnostics_value = {
+            "status": "DIAGNOSTIC_ONLY",
+            "availability": "UNAVAILABLE",
+            "reason": "PORTFOLIO_VALUE_REQUIRED",
+        }
+    target_attribution_value = (
+        target_attribution if target_attribution is not None else source.get("target_attribution")
+    )
+    if target_attribution_value is None:
+        target_attribution_value = {
+            "availability": "UNAVAILABLE",
+            "reason": "ALLOCATION_INPUTS_REQUIRED",
+        }
     return DecisionReviewPacket(
         calculation_context=calculation_context,
-        review_diagnostics=review_diagnostics if review_diagnostics is not None else source.get("review_diagnostics"),
-        target_attribution=target_attribution if target_attribution is not None else source.get("target_attribution"),
+        review_diagnostics=diagnostics_value,
+        target_attribution=target_attribution_value,
         review_type=review,
         market_regime=regime,
         portfolio_drawdown=portfolio_drawdown if portfolio_drawdown is not None else source.get("portfolio_drawdown"),

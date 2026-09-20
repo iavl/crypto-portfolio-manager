@@ -70,6 +70,10 @@ independent confirmations; never label it as such. Every number in the report
 comes from the validated packets — scores, dates, confidence, scope, targets,
 and actions are read, never recomputed by hand.
 
+When diagnostics or target attribution lack the required portfolio or
+allocation inputs, render their structured `UNAVAILABLE` status and reason;
+an omitted diagnostic is not evidence that the risk scenario is clear.
+
 ### Debug report
 
 Render the finalized failure categories separately when present:

@@ -280,7 +280,11 @@ def calculate_trend_factor(
     source_ids = tuple(dict.fromkeys(source_values))
     if hasattr(snapshot, "as_of") and hasattr(snapshot, "data_confidence"):
         from ..calculation_evidence import trend_calculation_evidence
-        receipt = trend_calculation_evidence(snapshot, resolved)
+        receipt = trend_calculation_evidence(
+            snapshot,
+            resolved,
+            previous_relative_volumes=previous_relative_volumes,
+        )
         source_ids = (receipt.id,)
     facts = TrendFacts(
         symbol=snapshot.symbol,

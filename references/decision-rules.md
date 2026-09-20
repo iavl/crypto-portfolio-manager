@@ -69,6 +69,11 @@ funding-constrained approved amount). Reports quote
 percentage: when deployment caps or funding competition reduced the move, the
 exact source and shortfall are shown (`format_execution_sizing_chain`).
 
+When direction confirmation changes a candidate into `WAIT`, the action also
+stores `candidate_action`. History uses that structured candidate direction to
+continue confirmation on a later distinct daily close; it never parses the
+free-text rationale.
+
 Ordinary allocation corrections are staged toward the strategic target: one
 review moves at most `rebalance.staging.max_gap_close_fraction` (0.5) of the
 remaining gap, bounded by `max_step_pp` (4 pp). A healthy position can

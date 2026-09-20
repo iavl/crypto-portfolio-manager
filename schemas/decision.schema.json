@@ -911,6 +911,21 @@
             "RISK_BUDGET_BREACH"
           ]
         },
+        "candidate_action": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "INCREASE",
+            "REDUCE",
+            "EXIT",
+            "HOLD",
+            "WAIT",
+            "NO_TRADE",
+            null
+          ]
+        },
         "staging_applied": {
           "type": "boolean"
         },

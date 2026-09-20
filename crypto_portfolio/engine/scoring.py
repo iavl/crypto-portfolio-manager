@@ -635,6 +635,7 @@ def score_assessment(
         thesis_broken=assessment.thesis_broken,
         critical_data_complete=assessment.critical_data_complete,
         risk_tier=assessment.risk_tier,
+        risk_tier_source=assessment.risk_tier_source,
         event_risk=assessment.event_risk,
         scoring_profile_name=result.profile_name,
         score_coverage=result.coverage,
