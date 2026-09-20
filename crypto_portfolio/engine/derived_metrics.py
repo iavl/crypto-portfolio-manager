@@ -426,6 +426,83 @@ def derive_eth_active_stake_change_to_supply(
     )
 
 
+_BNB_NETWORK_FEE_ANNUALIZATION_DAYS = 90
+# The market cap and the fee window only describe the same period when their
+# anchor days are close; a wider gap returns unavailable rather than a scale
+# built from mismatched dates.
+_BNB_NETWORK_FEE_MAX_ALIGNMENT_DAYS = 3
+
+
+def calculate_bnb_market_cap_to_annualized_network_fees(
+    market_cap: float,
+    network_fees_window_usd: float,
+    *,
+    window_days: int = _BNB_NETWORK_FEE_ANNUALIZATION_DAYS,
+) -> float:
+    """Market cap over annualized network fees.
+
+    This is a scale, not a price-to-earnings or holder-revenue multiple.  Zero
+    fees, a non-positive window or a non-finite result raise instead of emitting
+    an infinite or undefined value.
+    """
+    cap = _finite_number(market_cap, "market_cap", minimum=0.0)
+    fees = _finite_number(network_fees_window_usd, "network_fees_window_usd", minimum=0.0)
+    if cap <= 0:
+        raise ValueError("market_cap must be > 0")
+    if fees <= 0:
+        raise ValueError("network_fees_window_usd must be > 0")
+    if isinstance(window_days, bool) or not isinstance(window_days, int) or window_days <= 0:
+        raise ValueError("window_days must be a positive integer")
+    annualized = fees * 365.0 / window_days
+    if not math.isfinite(annualized) or annualized <= 0:
+        raise ValueError("annualized network fees must be finite and > 0")
+    value = cap / annualized
+    if not math.isfinite(value):
+        raise ValueError("market-cap-to-annualized-network-fees must be finite")
+    return value
+
+
+def derive_bnb_market_cap_to_annualized_network_fees(
+    asset: str,
+    market_cap: MetricObservation | Mapping[str, Any] | None,
+    network_fees_window: MetricObservation | Mapping[str, Any] | None,
+    *,
+    fetched_at: str,
+    as_of: str | datetime | None = None,
+) -> Mapping[str, Any] | None:
+    """Derive BNB market cap over its annualized 90-day network fees."""
+    asset = asset.strip().upper()
+    if asset != "BNB":
+        return None
+    cap = _fresh_input(market_cap, asset=asset, metric_key="valuation.market_cap", as_of=as_of)
+    fees = _fresh_input(
+        network_fees_window,
+        asset=asset,
+        metric_key="onchain.bnb_network_fees_90d_usd",
+        as_of=as_of,
+    )
+    if cap is None or fees is None:
+        return None
+    try:
+        if abs((parse_timestamp(cap[1]) - parse_timestamp(fees[1])).total_seconds()) > (
+            _BNB_NETWORK_FEE_MAX_ALIGNMENT_DAYS * 86400
+        ):
+            return None
+        value = calculate_bnb_market_cap_to_annualized_network_fees(cap[0], fees[0])
+    except ValueError:
+        return None
+    return _derived_ratio_observation(
+        asset,
+        "valuation.bnb_market_cap_to_annualized_network_fees_90d",
+        value,
+        (cap, fees),
+        fetched_at=fetched_at,
+        unit="ratio",
+        period="90d",
+        calculation="valuation.market_cap / (onchain.bnb_network_fees_90d_usd * 365 / 90)",
+    )
+
+
 def derive_metric_observations(
     requests: Iterable[MetricRequest],
     reusable: Mapping[tuple[str, str], MetricObservation],
@@ -476,6 +553,7 @@ def derive_metric_observations(
             "flows.eth_active_stake_change_to_supply_30d",
             "flows.eth_etf_net_to_aum_7d",
             "flows.eth_etf_net_to_aum_30d",
+            "valuation.bnb_market_cap_to_annualized_network_fees_90d",
         }:
             continue
         identity = (request.asset, request.metric_key)
@@ -575,6 +653,22 @@ def derive_metric_observations(
                 calculation=f"flows.etf_net_{days} / flows.eth_etf_aum_usd",
             ) if raw_input is not None and aum_input is not None else None
             dependencies = ((f"flows.etf_net_{days}", raw), ("flows.eth_etf_aum_usd", aum))
+        elif request.metric_key == "valuation.bnb_market_cap_to_annualized_network_fees_90d":
+            fees = reusable.get((request.asset, "onchain.bnb_network_fees_90d_usd")) or routed.get(
+                (request.asset, "onchain.bnb_network_fees_90d_usd")
+            )
+            derived = (
+                derive_bnb_market_cap_to_annualized_network_fees(
+                    request.asset,
+                    cap,
+                    fees,
+                    fetched_at=fetched_at,
+                    as_of=as_of,
+                )
+                if cap is not None and fees is not None
+                else None
+            )
+            dependencies = (("valuation.market_cap", cap), ("onchain.bnb_network_fees_90d_usd", fees))
         elif request.metric_key == "derivatives.open_interest_to_market_cap":
             oi_identity = (request.asset, "derivatives.open_interest_usd")
             oi = reusable.get(oi_identity) or routed.get(oi_identity)
@@ -610,11 +704,13 @@ __all__ = [
     "calculate_eth_etf_flow_to_aum",
     "calculate_net_supply_growth",
     "calculate_active_stake_change_to_supply",
+    "calculate_bnb_market_cap_to_annualized_network_fees",
     "derive_metric_observations",
     "derive_btc_price_to_realized_price",
     "derive_eth_price_to_realized_price",
     "derive_eth_active_stake_change_to_supply",
     "derive_active_effective_stake_change",
+    "derive_bnb_market_cap_to_annualized_network_fees",
     "derive_fdv_market_cap_ratio",
     "derive_open_interest_to_market_cap",
 ]

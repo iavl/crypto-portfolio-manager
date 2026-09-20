@@ -217,9 +217,10 @@ to be included, and remains separate from Ethereum L2 statistics.
 BTC/BNB transfer volume remains the catalog-checked Coin Metrics
 `TxTfrValAdjUSD` route where supported; that methodology is not used for ETH.
 
-BNB on-chain demand uses DeFiLlama's chain-fees endpoint with catalog-aware Coin
-Metrics fallback. The current plan does not perform expensive per-block
-transaction-count collection for BNB.
+BNB on-chain demand uses DeFiLlama's `summary/fees/bsc?dataType=dailyFees`
+(network gas fees, not the application-inclusive `overview/fees` aggregate) with
+catalog-aware Coin Metrics fallback. The current plan does not perform expensive
+per-block transaction-count collection for BNB.
 
 30D active-stake change uses the current observation minus the closest cached
 same-source observation at or before the target date, within the configured

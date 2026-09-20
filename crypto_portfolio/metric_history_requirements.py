@@ -97,6 +97,20 @@ _REQUIREMENTS: dict[str, MetricHistoryRequirement] = {
     "eth.blobs.utilization_30d": BOUNDED_45D,
     "sentiment.social_mentions_change_7d": BOUNDED_14D,
     "sentiment.social_attention_percentile": BOUNDED_105D,
+    # The BNB proxy metrics below are *current* observations computed by the
+    # provider from a full daily series: one request returns the whole history
+    # and the parser owns the minimum-history, endpoint, and completeness
+    # checks.  Declaring a bounded window here would split the single
+    # daily-fee / stablecoin-supply request into two cohorts and fetch the same
+    # history twice.
+    "onchain.blockspace_fees": CURRENT,
+    "onchain.bnb_network_fees_30d_usd": CURRENT,
+    "onchain.bnb_network_fees_90d_usd": CURRENT,
+    "onchain.bnb_network_fees_30d_change": CURRENT,
+    "onchain.bnb_network_fees_90d_change": CURRENT,
+    "flows.bnb_stablecoin_supply_change_7d": CURRENT,
+    "flows.bnb_stablecoin_supply_change_30d": CURRENT,
+    "flows.bnb_stablecoin_supply_change_90d": CURRENT,
 }
 
 

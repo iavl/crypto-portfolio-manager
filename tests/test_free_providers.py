@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ from crypto_portfolio.providers.cache import ProviderCache
 from crypto_portfolio.providers.router import ProviderRouter
 from crypto_portfolio.engine.derived_metrics import derive_metric_observations
 from crypto_portfolio.engine.metric_plan import MetricRequest
+from crypto_portfolio.metrics_registry import metric_definition
 from crypto_portfolio.models.metrics_history import MetricObservation, stable_observation_id
 
 
@@ -386,127 +388,643 @@ class FreeProviderTests(unittest.TestCase):
         self.assertFalse(result["validator_registry_scan"])
 
 
-class ChainTvlFlowTests(unittest.TestCase):
-    """BNB capital flows from the free DeFiLlama historicalChainTvl series."""
+_STABLE_START = datetime(2025, 8, 1, tzinfo=timezone.utc)
+_STABLE_DAYS = 420
+_STABLE_KEYS = (
+    "flows.bnb_stablecoin_supply_change_7d",
+    "flows.bnb_stablecoin_supply_change_30d",
+    "flows.bnb_stablecoin_supply_change_90d",
+)
+_STABLE_ENDPOINT = "https://stablecoins.llama.fi/stablecoincharts/BSC"
 
-    def _series(self, days=40, base=5_000_000_000.0, growth=0.0):
-        start = datetime(2026, 8, 10, tzinfo=timezone.utc)
-        return [
-            {"date": int((start + timedelta(days=offset)).timestamp()), "tvl": base * (1 + growth) ** offset}
-            for offset in range(days)
-        ]
 
-    def test_parse_computes_fractional_changes_with_normalized_ratio_metadata(self):
-        from crypto_portfolio.providers.defillama import parse_chain_tvl_flows
+def _stablecoin_payload(
+    *,
+    days: int = _STABLE_DAYS,
+    base: float = 5_000_000_000.0,
+    growth: float = 0.0,
+    price_drift: float = 0.0,
+    drop_day: int | None = None,
+) -> list[dict]:
+    """One BSC stablecoin history; ``totalCirculatingUSD`` tracks a price move."""
+    rows = []
+    supply = base
+    price = 1.0
+    for offset in range(days):
+        supply *= 1.0 + growth
+        price *= 1.0 + price_drift
+        if drop_day is not None and offset == drop_day:
+            continue
+        rows.append({
+            "date": int((_STABLE_START + timedelta(days=offset)).timestamp()),
+            "totalCirculating": {"peggedUSD": supply},
+            "totalCirculatingUSD": {"peggedUSD": supply * price},
+        })
+    return rows
 
-        # +0.1%/day compounding: 1d ~ +0.1%, 7d ~ +0.72%, 30d ~ +3.04%.
-        series = self._series(days=40, growth=0.001)
-        observations = parse_chain_tvl_flows(
-            series,
-            asset="BNB",
-            metric_keys=(
-                "flows.bnb_chain_tvl_change_1d",
-                "flows.bnb_chain_tvl_change_7d",
-                "flows.bnb_chain_tvl_change_30d",
-            ),
-            fetched_at="2026-09-18T12:00:00Z",
-            as_of="2026-09-18T12:00:00Z",
-            endpoint="https://api.llama.fi/v2/historicalChainTvl/BSC",
+
+def _stablecoin_as_of(days: int = _STABLE_DAYS) -> str:
+    return (_STABLE_START + timedelta(days=days)).isoformat().replace("+00:00", "Z")
+
+
+def _stablecoin_observations(observations) -> tuple[MetricObservation, ...]:
+    return tuple(
+        MetricObservation(
+            stable_observation_id("BNB", item["metric_key"], item["observed_at"], item["source"], item["value"], item["period"]),
+            "BNB", item["metric_key"], "capital_flows", item["value"], item["unit"], item["period"],
+            item["observed_at"], item["fetched_at"], item["source"], "CURRENT", item["confidence"],
+            metadata=item["metadata"],
         )
+        for item in observations
+    )
+
+
+def _parse_supply(payload, *, keys=_STABLE_KEYS, as_of: str | None = None):
+    from crypto_portfolio.providers.defillama import parse_stablecoin_supply_changes
+
+    stamp = as_of or _stablecoin_as_of()
+    return parse_stablecoin_supply_changes(
+        payload,
+        asset="BNB",
+        metric_keys=keys,
+        fetched_at=stamp,
+        as_of=stamp,
+        endpoint=_STABLE_ENDPOINT,
+    )
+
+
+class BnbStablecoinSupplyFlowTests(unittest.TestCase):
+    """BNB capital flows from the free BSC USD-pegged stablecoin supply series."""
+
+    def _parse(self, payload=None, *, keys=_STABLE_KEYS, days=_STABLE_DAYS, **kwargs):
+        return _parse_supply(
+            _stablecoin_payload(days=days, **kwargs) if payload is None else payload,
+            keys=keys,
+            as_of=_stablecoin_as_of(days),
+        )
+
+    def test_parse_emits_supply_changes_with_percentile_metadata(self):
+        observations = self._parse(growth=0.002)
         self.assertEqual(len(observations), 3)
         by_key = {item["metric_key"]: item for item in observations}
-        self.assertAlmostEqual(by_key["flows.bnb_chain_tvl_change_1d"]["value"], 0.001, places=4)
-        self.assertAlmostEqual(by_key["flows.bnb_chain_tvl_change_30d"]["value"], 1.001**30 - 1, places=4)
-        for item in observations:
-            self.assertEqual(item["metadata"]["normalized_flow_ratio"], item["value"])
-            self.assertEqual(item["metadata"]["chain_scope"], "BSC")
+        for horizon, window in (("7d", 7), ("30d", 30), ("90d", 90)):
+            item = by_key[f"flows.bnb_stablecoin_supply_change_{horizon}"]
+            metadata = item["metadata"]
+            self.assertAlmostEqual(item["value"], 1.002 ** window - 1, places=6)
+            self.assertEqual(metadata["methodology"], "pegged_usd_supply_change_abs_change_percentile")
+            self.assertEqual(metadata["source_field"], "totalCirculating.peggedUSD")
+            self.assertEqual(metadata["source_dataset"], "stablecoincharts")
+            self.assertEqual(metadata["window_days"], window)
+            self.assertEqual(metadata["sample_window_days"], 365)
+            self.assertEqual(metadata["min_samples_required"], 180)
+            self.assertEqual(metadata["calibration_state"], "CALIBRATED")
+            self.assertGreaterEqual(metadata["sample_count"], 180)
+            self.assertGreaterEqual(metadata["abs_change_percentile"], 0.0)
+            self.assertLessEqual(metadata["abs_change_percentile"], 1.0)
+            self.assertEqual(len(metadata["source_series_hash"]), 64)
+            self.assertEqual(metadata["signal_interpretation"], "usd_pegged_supply_expansion_proxy")
+            anchor = datetime.fromisoformat(metadata["anchor_date"].replace("Z", "+00:00"))
+            base_day = datetime.fromisoformat(metadata["base_date"].replace("Z", "+00:00"))
+            self.assertEqual((anchor - base_day).days, window)
             self.assertEqual(item["asset"], "BNB")
+            self.assertEqual(item["confidence"], "MEDIUM")
 
-    def test_flow_factor_scores_the_three_horizons_with_full_coverage(self):
-        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
-        from crypto_portfolio.models.metrics_history import MetricObservation
-
-        observations = tuple(
-            MetricObservation(
-                observation_id=f"obs-{days}",
-                asset="BNB",
-                metric_key=f"flows.bnb_chain_tvl_change_{days}",
-                factor="capital_flows",
-                value=ratio,
-                unit="fraction",
-                period=days,
-                freshness="CURRENT",
-                observed_at="2026-09-18T00:00:00Z",
-                fetched_at="2026-09-18T12:00:00Z",
-                source="defillama",
-                confidence="MEDIUM",
-                metadata={"normalized_flow_ratio": ratio},
-            )
-            for days, ratio in (("1d", -0.017), ("7d", -0.0485), ("30d", 0.0472))
+    def test_a_price_move_alone_never_enters_the_supply_change(self):
+        flat = self._parse(growth=0.0, price_drift=0.0)
+        priced = self._parse(growth=0.0, price_drift=0.05)
+        self.assertEqual(
+            [item["value"] for item in flat],
+            [item["value"] for item in priced],
         )
+        # A fixed nominal supply stays exactly flat even when the price-adjusted
+        # USD series inflates by 5% per day.
+        for item in priced:
+            self.assertEqual(item["value"], 0.0)
+
+    def test_duplicate_malformed_future_and_zero_base_rows_fail(self):
+        payload = _stablecoin_payload()
+        conflicting = payload + [dict(payload[-1], totalCirculating={"peggedUSD": 1e12})]
+        with self.assertRaises(ProviderDataError):
+            self._parse(conflicting)
+        future = payload + [{
+            "date": int((_STABLE_START + timedelta(days=_STABLE_DAYS + 5)).timestamp()),
+            "totalCirculating": {"peggedUSD": 9e9},
+        }]
+        with self.assertRaises(ProviderDataError):
+            self._parse(future)
+        with self.assertRaises(ProviderResponseError):
+            self._parse({"not": "a list"})
+        zeroed = _stablecoin_payload()
+        zeroed[0] = dict(zeroed[0], totalCirculating={"peggedUSD": 0})
+        # Removing the exact 30-day endpoint is a hard failure too.
+        with self.assertRaises(ProviderInsufficientHistory):
+            self._parse(_stablecoin_payload(drop_day=_STABLE_DAYS - 1 - 30))
+
+    def test_insufficient_history_stays_uncalibrated_and_a_stale_anchor_fails(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+
+        # 120 days of history cannot supply 180 same-horizon samples, so every
+        # horizon is uncallibrated rather than scored.
+        short = self._parse(days=120, growth=0.001)
+        self.assertTrue(all(item["metadata"]["calibration_state"] == "UNCALIBRATED" for item in short))
+        result = calculate_flow_factor(_stablecoin_observations(short), symbol="BNB")
+        self.assertIsNone(result.score)
+        self.assertEqual(result.state, "UNKNOWN")
+
+        # A history whose latest completed day is more than three days old is
+        # stale and fails closed.
+        from crypto_portfolio.providers.defillama import parse_stablecoin_supply_changes
+
+        with self.assertRaises(ProviderInsufficientHistory):
+            parse_stablecoin_supply_changes(
+                _stablecoin_payload(),
+                asset="BNB",
+                metric_keys=_STABLE_KEYS,
+                fetched_at="2026-10-20T12:00:00Z",
+                as_of="2026-10-20T12:00:00Z",
+                endpoint=_STABLE_ENDPOINT,
+            )
+
+    def test_flow_factor_scores_every_horizon_and_keeps_normalized_flow_empty(self):
+        from crypto_portfolio.engine.factors.flows import (
+            METHOD_SUPPLY_CHANGE_PERCENTILE,
+            calculate_flow_factor,
+        )
+
+        observations = _stablecoin_observations(self._parse(growth=0.002))
         result = calculate_flow_factor(observations, symbol="BNB")
+        self.assertEqual(result.method, METHOD_SUPPLY_CHANGE_PERCENTILE)
+        self.assertIsNone(result.normalized_flow)
         self.assertEqual(result.coverage, 1.0)
-        self.assertEqual(result.confidence, "HIGH")
-        # Horizon-weighted ratio (0.1*-0.017 + 0.3*-0.0485 + 0.6*0.0472) = +1.21%,
-        # beyond the +1% saturation bound, so the score clips at 100.
-        self.assertAlmostEqual(result.normalized_flow, 0.012070, places=5)
-        self.assertEqual(result.score, 100.0)
+        self.assertEqual(result.effective_weight, 1.0)
+        self.assertEqual(set(result.horizons), {"7d", "30d", "90d"})
+        self.assertEqual([result.horizons[key]["weight"] for key in ("7d", "30d", "90d")], [0.2, 0.4, 0.4])
+        expected = sum(
+            result.horizons[key]["raw_score"] * result.horizons[key]["weight"]
+            for key in result.horizons
+        )
+        self.assertAlmostEqual(result.score, expected, places=9)
+        self.assertAlmostEqual(
+            sum(result.horizons[key]["contribution"] for key in result.horizons),
+            result.score,
+            places=9,
+        )
+        # Every horizon is rising, so every raw score is above neutral.
+        for row in result.horizons.values():
+            self.assertGreater(row["raw_score"], 50.0)
         self.assertEqual(result.state, "POSITIVE")
+        # A MEDIUM-confidence free source is never reported as HIGH quality.
+        self.assertEqual(result.confidence, "MEDIUM")
+        self.assertEqual(result.source_confidence, "MEDIUM")
 
-    def test_short_or_stale_history_fails_closed(self):
-        from crypto_portfolio.providers.defillama import parse_chain_tvl_flows
+    def test_zero_and_negative_changes_never_exceed_neutral(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
 
-        keys = ("flows.bnb_chain_tvl_change_7d",)
-        with self.assertRaises(ProviderInsufficientHistory):
-            parse_chain_tvl_flows(
-                self._series(days=10),
-                asset="BNB", metric_keys=keys,
-                fetched_at="2026-09-18T12:00:00Z", as_of=None,
-                endpoint="https://api.llama.fi/v2/historicalChainTvl/BSC",
-            )
-        stale = self._series(days=40)
-        with self.assertRaises(ProviderInsufficientHistory):
-            parse_chain_tvl_flows(
-                stale,
-                asset="BNB", metric_keys=keys,
-                fetched_at="2026-09-25T12:00:00Z", as_of="2026-09-25T12:00:00Z",
-                endpoint="https://api.llama.fi/v2/historicalChainTvl/BSC",
-            )
+        flat = calculate_flow_factor(_stablecoin_observations(self._parse(growth=0.0)), symbol="BNB")
+        for row in flat.horizons.values():
+            self.assertEqual(row["raw_score"], 50.0)
+        self.assertEqual(flat.score, 50.0)
+        self.assertEqual(flat.state, "NEUTRAL")
 
-    def test_registry_routes_the_new_metrics_to_defillama_chain_tvl(self):
+        shrinking = calculate_flow_factor(
+            _stablecoin_observations(self._parse(growth=-0.001)), symbol="BNB"
+        )
+        for row in shrinking.horizons.values():
+            self.assertLessEqual(row["raw_score"], 50.0)
+        self.assertLess(shrinking.score, 50.0)
+        self.assertEqual(shrinking.state, "NEGATIVE")
+
+    def test_bigger_positive_change_never_lowers_the_score(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+
+        scores = [
+            calculate_flow_factor(_stablecoin_observations(self._parse(growth=rate)), symbol="BNB").score
+            for rate in (0.0005, 0.001, 0.002, 0.004)
+        ]
+        self.assertEqual(scores, sorted(scores))
+
+    def test_missing_horizon_reduces_completeness_without_double_penalty(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+        from crypto_portfolio.engine.scoring import score_factors
+
+        partial = calculate_flow_factor(
+            _stablecoin_observations(
+                self._parse(keys=("flows.bnb_stablecoin_supply_change_7d",), growth=0.002)
+            ),
+            symbol="BNB",
+        )
+        self.assertAlmostEqual(partial.coverage, 0.2)
+        self.assertEqual(partial.effective_weight, 0.2)
+        self.assertLess(partial.score, 100.0)
+        scored = score_factors({"capital_flows": partial}, {"capital_flows": 1.0})
+        # completeness 0.2 * freshness 1.0 * source quality 0.75
+        self.assertAlmostEqual(scored.factor_reliability["capital_flows"], 0.15)
+
+    def test_uncalibrated_history_stays_unavailable(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+
+        # Fewer than 180 usable same-horizon samples leaves the horizon
+        # uncalibrated rather than awarding it a full score.
+        observations = self._parse(days=200, growth=0.002)
+        uncalibrated = [
+            item for item in observations if item["metadata"]["calibration_state"] == "UNCALIBRATED"
+        ]
+        self.assertEqual(
+            {item["metric_key"] for item in uncalibrated},
+            {"flows.bnb_stablecoin_supply_change_30d", "flows.bnb_stablecoin_supply_change_90d"},
+        )
+        result = calculate_flow_factor(_stablecoin_observations(observations), symbol="BNB")
+        for key in ("30d", "90d"):
+            row = result.horizons[key]
+            self.assertEqual(row["calibration_state"], "UNCALIBRATED")
+            self.assertIsNone(row["raw_score"])
+        self.assertAlmostEqual(result.coverage, 0.2)
+        self.assertIn("uncalibrated", " ".join(result.reasons))
+
+    def test_no_usable_horizon_is_missing_not_a_full_score(self):
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+        from crypto_portfolio.engine.scoring import score_factors
+
+        observations = _stablecoin_observations(self._parse())
+        stripped = tuple(
+            replace(item, metadata={**item.metadata, "abs_change_percentile": None, "calibration_state": "UNCALIBRATED", "calibration_reason": "no history"})
+            for item in observations
+        )
+        result = calculate_flow_factor(stripped, symbol="BNB")
+        self.assertIsNone(result.score)
+        self.assertEqual(result.state, "UNKNOWN")
+        self.assertEqual(result.coverage, 0.0)
+        scored = score_factors({"capital_flows": result}, {"capital_flows": 1.0})
+        self.assertEqual(scored.factor_availability["capital_flows"], "MISSING")
+
+    def test_registry_and_routes_expose_only_the_new_bnb_metrics(self):
         from crypto_portfolio.providers.routes import dataset_for_metric
+        from crypto_portfolio.metrics_registry import METRIC_REGISTRY
 
-        for days in ("1d", "7d", "30d"):
-            key = f"flows.bnb_chain_tvl_change_{days}"
+        for key in _STABLE_KEYS:
             self.assertEqual(provider_chain(key, "BNB"), ("defillama",))
             self.assertEqual(provider_chain(key, "ETH"), ())
-            self.assertEqual(dataset_for_metric(key), "chain_tvl")
+            self.assertEqual(dataset_for_metric(key), "stablecoin")
+        self.assertNotIn("flows.bnb_chain_tvl_change_1d", METRIC_REGISTRY)
+        self.assertNotIn("flows.bnb_chain_tvl_change_7d", METRIC_REGISTRY)
+        self.assertNotIn("flows.bnb_chain_tvl_change_30d", METRIC_REGISTRY)
+        # BNB no longer consumes the "fees divided by revenue" pseudo-multiple.
+        self.assertFalse(METRIC_REGISTRY["valuation.fee_revenue_multiple"].applies_to("BNB"))
+        self.assertFalse(METRIC_REGISTRY["fundamentals.fees_30d"].applies_to("BNB"))
+        self.assertFalse(METRIC_REGISTRY["fundamentals.revenue_30d"].applies_to("BNB"))
 
-    def test_provider_collect_uses_one_request_for_all_horizons(self):
+    def test_provider_collect_uses_one_stablecoin_request_for_all_horizons(self):
         class Client:
-            def __init__(self, series):
-                self._series = series
+            def __init__(self, payload):
+                self._payload = payload
                 self.calls = 0
 
             def get_json(self, url, *, params=None, headers=None, max_response_bytes=None):
                 self.calls += 1
-                assert url.endswith("/v2/historicalChainTvl/BSC"), url
-                return self._series
+                assert url.endswith("/stablecoincharts/BSC"), url
+                return self._payload
 
         from crypto_portfolio.providers.defillama import DeFiLlamaProvider
 
-        client = Client(self._series(days=40, growth=0.001))
+        client = Client(_stablecoin_payload(growth=0.001))
         provider = DeFiLlamaProvider(client=client)
         response = provider.collect(ProviderRequest(
-            provider="defillama", dataset="chain_tvl", asset="BNB", parameters={},
-            metric_keys=(
-                "flows.bnb_chain_tvl_change_1d",
-                "flows.bnb_chain_tvl_change_7d",
-                "flows.bnb_chain_tvl_change_30d",
-            ),
+            provider="defillama", dataset="stablecoin", asset="BNB",
+            parameters={"as_of": _stablecoin_as_of()}, metric_keys=_STABLE_KEYS,
         ))
         self.assertEqual(client.calls, 1)
-        self.assertEqual(len(response.observations), 3)
+        self.assertEqual({item["metric_key"] for item in response.observations}, set(_STABLE_KEYS))
+
+
+class BnbNetworkFeesTests(unittest.TestCase):
+    """BNB network gas fees from the free dailyFees series, not /overview/fees."""
+
+    def _payload(self, *, days=200, value=1_000_000.0, growth=0.0, drop_day=None):
+        rows = []
+        for offset in range(days):
+            if drop_day is not None and offset == drop_day:
+                continue
+            rows.append([
+                (_STABLE_START + timedelta(days=offset)).isoformat().replace("+00:00", "Z"),
+                value * (1.0 + growth) ** offset,
+            ])
+        return {"totalDataChart": rows}
+
+    def _parse(self, payload=None, *, keys=("onchain.blockspace_fees",) + (
+        "onchain.bnb_network_fees_30d_usd",
+        "onchain.bnb_network_fees_90d_usd",
+        "onchain.bnb_network_fees_30d_change",
+        "onchain.bnb_network_fees_90d_change",
+    ), days=200, **kwargs):
+        from crypto_portfolio.providers.defillama import parse_chain_daily_fees
+
+        return parse_chain_daily_fees(
+            self._payload(days=days, **kwargs) if payload is None else payload,
+            asset="BNB",
+            metric_keys=keys,
+            fetched_at=_stablecoin_as_of(days),
+            as_of=_stablecoin_as_of(days),
+            endpoint="https://api.llama.fi/summary/fees/bsc",
+        )
+
+    def test_daily_fees_contract_is_attached_to_every_observation(self):
+        observations, diagnostics = self._parse()
+        self.assertEqual(diagnostics, {})
+        by_key = {item["metric_key"]: item for item in observations}
+        blockspace = by_key["onchain.blockspace_fees"]
+        self.assertEqual(blockspace["value"], 1_000_000.0)
+        self.assertEqual(blockspace["metadata"]["source_dataset"], "summary/fees")
+        self.assertEqual(blockspace["metadata"]["fees_data_type"], "dailyFees")
+        self.assertEqual(blockspace["metadata"]["methodology"], "daily_fees_latest_complete_utc_day")
+        self.assertTrue(blockspace["metadata"]["usd_denominated"])
+        for key, item in by_key.items():
+            if key == "onchain.blockspace_fees":
+                continue
+            self.assertEqual(item["metadata"]["methodology"], "daily_fees_window_over_complete_utc_days")
+            self.assertEqual(item["metadata"]["source_dataset"], "summary/fees")
+            self.assertEqual(item["metadata"]["fees_data_type"], "dailyFees")
+        self.assertEqual(by_key["onchain.bnb_network_fees_90d_usd"]["value"], 90_000_000.0)
+        self.assertEqual(by_key["onchain.bnb_network_fees_30d_usd"]["value"], 30_000_000.0)
+
+    def test_window_change_and_missing_day_behaviour(self):
+        observations, diagnostics = self._parse(growth=0.01)
+        by_key = {item["metric_key"]: item for item in observations}
+        change = by_key["onchain.bnb_network_fees_30d_change"]
+        self.assertGreater(change["value"], 0.0)
+        self.assertEqual(change["metadata"]["window_days"], 30)
+        self.assertEqual(change["metadata"]["complete_utc_days"], 30)
+
+        partial, diagnostics = self._parse(drop_day=200 - 1 - 10)
+        self.assertEqual({item["metric_key"] for item in partial}, {"onchain.blockspace_fees"})
+        self.assertIn("onchain.bnb_network_fees_30d_usd", diagnostics)
+        self.assertIn("onchain.bnb_network_fees_90d_usd", diagnostics)
+
+    def test_legacy_aggregate_cache_is_rejected_for_bnb(self):
+        from crypto_portfolio.providers.defillama import DeFiLlamaProvider
+
+        provider = DeFiLlamaProvider()
+        request = ProviderRequest(
+            "defillama", "onchain", "BNB", {}, ("onchain.blockspace_fees",),
+        )
+        stale = [{
+            "metric_key": "onchain.blockspace_fees",
+            "metadata": {
+                "source_dataset": "overview/fees",
+                "methodology": "totalDataChart_latest_completed_utc_day",
+            },
+        }]
+        self.assertFalse(provider.validate_cached_observations(request, stale))
+        current = [{
+            "metric_key": "onchain.blockspace_fees",
+            "metadata": {
+                "source_dataset": "summary/fees",
+                "fees_data_type": "dailyFees",
+                "methodology": "daily_fees_latest_complete_utc_day",
+            },
+        }]
+        self.assertTrue(provider.validate_cached_observations(request, current))
+        other_asset = ProviderRequest("defillama", "onchain", "ETH", {}, ("onchain.blockspace_fees",))
+        self.assertTrue(provider.validate_cached_observations(other_asset, stale))
+
+    def test_bnb_network_fees_route_to_defillama_only(self):
+        from crypto_portfolio.providers.routes import dataset_for_metric
+
+        for key in (
+            "onchain.bnb_network_fees_30d_usd",
+            "onchain.bnb_network_fees_90d_usd",
+            "onchain.bnb_network_fees_30d_change",
+            "onchain.bnb_network_fees_90d_change",
+        ):
+            self.assertEqual(provider_chain(key, "BNB"), ("defillama",))
+            self.assertEqual(provider_chain(key, "ETH"), ())
+            self.assertEqual(dataset_for_metric(key), "onchain")
+        derived = "valuation.bnb_market_cap_to_annualized_network_fees_90d"
+        self.assertEqual(provider_chain(derived, "BNB"), ())
+        self.assertEqual(dataset_for_metric(derived), "derived")
+
+
+class BnbValuationScaleTests(unittest.TestCase):
+    """Market cap over annualized 90-day network fees — a scale, not a P/E."""
+
+    def _observation(self, metric_key, value, unit, observed_at="2026-09-19T00:00:00Z", asset="BNB"):
+        return MetricObservation(
+            stable_observation_id(asset, metric_key, observed_at, "fixture", value),
+            asset, metric_key, metric_definition(metric_key).factor, value, unit, "current",
+            observed_at, "2026-09-20T00:00:00Z", "fixture", "CURRENT", "HIGH",
+        )
+
+    def test_annualization_is_90_day_based(self):
+        from crypto_portfolio.engine.derived_metrics import (
+            calculate_bnb_market_cap_to_annualized_network_fees,
+        )
+
+        value = calculate_bnb_market_cap_to_annualized_network_fees(90_000_000_000.0, 46_140_000.0)
+        self.assertAlmostEqual(value, 90_000_000_000.0 / (46_140_000.0 * 365 / 90), places=9)
+        for bad_cap, bad_fees in ((0.0, 46_140_000.0), (-1.0, 46_140_000.0), (9e10, 0.0), (9e10, -1.0)):
+            with self.assertRaises(ValueError):
+                calculate_bnb_market_cap_to_annualized_network_fees(bad_cap, bad_fees)
+
+    def test_derivation_needs_aligned_same_asset_inputs(self):
+        from crypto_portfolio.engine.derived_metrics import derive_metric_observations
+
+        request = (MetricRequest("BNB", "valuation.bnb_market_cap_to_annualized_network_fees_90d"),)
+        cap = self._observation("valuation.market_cap", 90_000_000_000.0, "USD")
+        fees = self._observation("onchain.bnb_network_fees_90d_usd", 46_140_000.0, "USD")
+        values, unresolved = derive_metric_observations(
+            request,
+            {("BNB", "valuation.market_cap"): cap, ("BNB", "onchain.bnb_network_fees_90d_usd"): fees},
+            {},
+            fetched_at="2026-09-20T00:00:00Z",
+            as_of="2026-09-20T00:00:00Z",
+        )
+        key = ("BNB", "valuation.bnb_market_cap_to_annualized_network_fees_90d")
+        self.assertEqual(unresolved, {})
+        derived = values[key]
+        self.assertEqual(derived["unit"], "ratio")
+        self.assertEqual(derived["period"], "90d")
+        self.assertEqual(derived["source"], "python-derived")
+        self.assertAlmostEqual(
+            derived["value"], 90_000_000_000.0 / (46_140_000.0 * 365 / 90), places=9
+        )
+
+        # A market cap nine days away from the fee anchor cannot describe the
+        # same period.
+        stale_cap = self._observation("valuation.market_cap", 90_000_000_000.0, "USD", "2026-09-10T00:00:00Z")
+        values, unresolved = derive_metric_observations(
+            request,
+            {("BNB", "valuation.market_cap"): stale_cap, ("BNB", "onchain.bnb_network_fees_90d_usd"): fees},
+            {},
+            fetched_at="2026-09-20T00:00:00Z",
+            as_of="2026-09-20T00:00:00Z",
+        )
+        self.assertEqual(values, {})
+        self.assertIn(key, unresolved)
+
+        # Zero fees never produce an infinite scale.
+        zero_fees = self._observation("onchain.bnb_network_fees_90d_usd", 0.0, "USD")
+        values, unresolved = derive_metric_observations(
+            request,
+            {("BNB", "valuation.market_cap"): cap, ("BNB", "onchain.bnb_network_fees_90d_usd"): zero_fees},
+            {},
+            fetched_at="2026-09-20T00:00:00Z",
+            as_of="2026-09-20T00:00:00Z",
+        )
+        self.assertEqual(values, {})
+        self.assertIn(key, unresolved)
+
+    def test_derivation_is_bnb_only(self):
+        from crypto_portfolio.engine.derived_metrics import (
+            derive_bnb_market_cap_to_annualized_network_fees,
+        )
+
+        self.assertIsNone(
+            derive_bnb_market_cap_to_annualized_network_fees(
+                "ETH",
+                self._observation("valuation.market_cap", 9e10, "USD", asset="ETH"),
+                self._observation("onchain.bnb_network_fees_90d_usd", 4.6e7, "USD", asset="ETH"),
+                fetched_at="2026-09-20T00:00:00Z",
+                as_of="2026-09-20T00:00:00Z",
+            )
+        )
+
+
+class BnbSupplyProxyContractTests(unittest.TestCase):
+    """The persisted supply-proxy inputs are validated, not re-derived."""
+
+    def _metadata(self, *, horizon_days=7, percentile=0.4, state="CALIBRATED", sample_count=200):
+        anchor = _STABLE_START + timedelta(days=_STABLE_DAYS - 1)
+        return {
+            "source_dataset": "stablecoincharts",
+            "source_url": _STABLE_ENDPOINT,
+            "source_field": "totalCirculating.peggedUSD",
+            "methodology": "pegged_usd_supply_change_abs_change_percentile",
+            "chain_scope": "BSC",
+            "signal_interpretation": "usd_pegged_supply_expansion_proxy",
+            "window_days": horizon_days,
+            "sample_window_days": 365,
+            "min_samples_required": 180,
+            "supply_change_ratio": 0.01,
+            "abs_change_percentile": percentile,
+            "sample_count": sample_count,
+            "calibration_state": state,
+            "anchor_date": anchor.isoformat().replace("+00:00", "Z"),
+            "base_date": (anchor - timedelta(days=horizon_days)).isoformat().replace("+00:00", "Z"),
+            "anchor_supply_usd": 1.0e10,
+            "base_supply_usd": 9.9e9,
+            "source_series_hash": "b" * 64,
+            "source_confidence": "MEDIUM",
+            **({"calibration_reason": "no history"} if state == "UNCALIBRATED" else {}),
+        }
+
+    def test_valid_metadata_passes(self):
+        from crypto_portfolio.metrics_registry import validate_metric_observation_metadata
+
+        validate_metric_observation_metadata(
+            "flows.bnb_stablecoin_supply_change_7d", "BNB", 0.01, self._metadata()
+        )
+
+    def test_tampered_metadata_is_rejected(self):
+        from crypto_portfolio.metrics_registry import validate_metric_observation_metadata
+
+        key = "flows.bnb_stablecoin_supply_change_7d"
+        cases = {
+            "percentile above one": {"abs_change_percentile": 1.4},
+            "percentile missing while calibrated": {"abs_change_percentile": None},
+            "wrong methodology": {"methodology": "latest_totalCirculatingUSD.peggedUSD"},
+            "wrong window": {"window_days": 30},
+            "too few samples while calibrated": {"sample_count": 179},
+            "base day not exactly one horizon earlier": {"base_date": "2026-09-10T00:00:00Z"},
+            "anchor not a UTC day boundary": {"anchor_date": "2026-09-19T05:00:00Z"},
+            "bad series hash": {"source_series_hash": "not-a-digest"},
+            "uncalibrated with a percentile": {"calibration_state": "UNCALIBRATED", "abs_change_percentile": 0.5},
+            "uncalibrated without a reason": {"calibration_state": "UNCALIBRATED", "abs_change_percentile": None},
+        }
+        for name, patch in cases.items():
+            with self.subTest(case=name):
+                metadata = {**self._metadata(), **patch}
+                with self.assertRaises(ValueError):
+                    validate_metric_observation_metadata(key, "BNB", 0.01, metadata)
+
+    def test_metadata_value_must_match_the_observation(self):
+        from crypto_portfolio.metrics_registry import validate_metric_observation_metadata
+
+        with self.assertRaises(ValueError):
+            validate_metric_observation_metadata(
+                "flows.bnb_stablecoin_supply_change_7d", "BNB", 0.5, self._metadata()
+            )
+        with self.assertRaises(ValueError):
+            validate_metric_observation_metadata(
+                "flows.bnb_stablecoin_supply_change_7d", "ETH", 0.01, self._metadata()
+            )
+
+    def test_the_percentile_method_cannot_publish_a_normalized_flow(self):
+        from crypto_portfolio.engine.factors.flows import (
+            METHOD_SUPPLY_CHANGE_PERCENTILE,
+            FlowFactorResult,
+        )
+        from crypto_portfolio.facts.models import FlowFacts
+
+        facts = FlowFacts(symbol="BNB", current={}, previous={}, changes={}, trends={}, coverage=1.0, freshness="CURRENT")
+        with self.assertRaises(ValueError):
+            FlowFactorResult(
+                score=60.0, state="POSITIVE", facts=facts, confidence="MEDIUM", coverage=1.0,
+                normalized_flow=0.4, method=METHOD_SUPPLY_CHANGE_PERCENTILE,
+            )
+        with self.assertRaises(ValueError):
+            FlowFactorResult(
+                score=60.0, state="POSITIVE", facts=facts, confidence="MEDIUM", coverage=1.0,
+                method=METHOD_SUPPLY_CHANGE_PERCENTILE, horizons={"365d": {}},
+            )
+
+    def test_receipts_catch_a_tampered_score_and_a_mutated_input(self):
+        from copy import deepcopy
+
+        from crypto_portfolio.engine.calculation_evidence import (
+            flow_calculation_evidence,
+            validate_flow_calculation,
+        )
+        from crypto_portfolio.engine.factors.flows import calculate_flow_factor
+        from crypto_portfolio.models.policy import resolve_policy
+
+        observations = _stablecoin_observations(
+            _parse_supply(_stablecoin_payload(growth=0.002), keys=_STABLE_KEYS)
+        )
+        value = {"asset": "BNB", "observations": [item.as_dict() for item in observations]}
+        as_of = _stablecoin_as_of()
+        policy = resolve_policy()
+        result = calculate_flow_factor(tuple(observations), symbol="BNB")
+        receipt = flow_calculation_evidence(value, symbol="BNB", as_of=as_of, policy=policy)
+
+        class _Factor:
+            evidence_ids = (receipt.id,)
+
+        good = _Factor()
+        good.score = result.score
+        validated = validate_flow_calculation(
+            good, {receipt.id: receipt}, symbol="BNB", as_of=as_of, policy=policy
+        )
+        self.assertEqual(validated["method"], "supply_change_percentile")
+        self.assertIsNone(validated["normalized_flow"])
+        self.assertEqual(set(validated["horizons"]), {"7d", "30d", "90d"})
+
+        tampered = _Factor()
+        tampered.score = result.score + 5.0
+        with self.assertRaisesRegex(ValueError, "CALCULATION_SCORE_MISMATCH"):
+            validate_flow_calculation(
+                tampered, {receipt.id: receipt}, symbol="BNB", as_of=as_of, policy=policy
+            )
+
+        # Editing a rank inside the stored input changes the hash and is
+        # rejected before it can be rescored.
+        mutated_value = deepcopy(value)
+        mutated_value["observations"][0]["metadata"]["abs_change_percentile"] = 0.99
+        from dataclasses import replace as dataclass_replace
+
+        mutated = dataclass_replace(receipt, value=mutated_value)
+        with self.assertRaisesRegex(ValueError, "CALCULATION_HASH_MISMATCH"):
+            validate_flow_calculation(
+                good, {mutated.id: mutated}, symbol="BNB", as_of=as_of, policy=policy
+            )
 
 
 if __name__ == "__main__":

@@ -200,8 +200,10 @@ def validate_flow_calculation(
         raise ValueError("CALCULATION_SCORE_MISMATCH: capital_flows")
     return {
         "score": result.score,
+        "method": result.method,
         "normalized_flow": result.normalized_flow,
         "horizon_ratios": dict(result.horizon_ratios or {}),
+        "horizons": {key: dict(value) for key, value in (result.horizons or {}).items()},
         "calculation_input_hash": receipt.metadata["calculation_input_hash"],
         "evidence_ids": list(factor.evidence_ids),
     }

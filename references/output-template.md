@@ -243,6 +243,13 @@ key evidence statement must come from a matching persisted `Evidence` record
 and identify its evidence ID, source, and observed time; never fill a failed,
 stale, or conflicting metric with an invented value.
 
+For BNB `capital_flows`, the score comes from the supply-change percentile
+method rather than a normalized-flow ratio, so report each horizon's change, its
+historical rank, raw score, weight, effective contribution and any uncalibrated
+or missing reason instead of a single normalized-flow number. When a policy
+change rather than the market moved the score, label the difference as a model
+change.
+
 Show event risk separately as a typed gate state and evidence-backed reasons;
 never add it as a seventh base-score row.
 

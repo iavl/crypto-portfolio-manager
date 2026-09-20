@@ -45,6 +45,10 @@ REMOVED_METRICS = {
     "onchain.btc.nupl",
     "btc_network.hashrate",
     "btc_network.difficulty",
+    # Superseded by the BSC stablecoin supply proxy; no alias is retained.
+    "flows.bnb_chain_tvl_change_1d",
+    "flows.bnb_chain_tvl_change_7d",
+    "flows.bnb_chain_tvl_change_30d",
 }
 
 
@@ -82,17 +86,31 @@ class PlanCleanupTests(unittest.TestCase):
         payload = {"totalDataChart": [["2026-09-08T00:00:00Z", 10], ["2026-09-09T00:00:00Z", 20]]}
         value = parse_chain_fees(
             payload,
-            asset="BNB",
+            asset="ETH",
             metric_key="onchain.blockspace_fees",
             fetched_at="2026-09-10T00:00:00Z",
             as_of="2026-09-10T12:00:00Z",
-            endpoint="https://api.llama.fi/overview/fees/BSC",
+            endpoint="https://api.llama.fi/overview/fees/Ethereum",
         )
         self.assertEqual(value["value"], 20)
-        self.assertEqual(value["metadata"]["chain_scope"], "BSC")
+        self.assertEqual(value["metadata"]["source_dataset"], "overview/fees")
         provider = DeFiLlamaProvider(client=type("Client", (), {"get_json": lambda *_args, **_kwargs: payload})())
         response = provider.collect(ProviderRequest("defillama", "onchain", "ETH", {"as_of": "2026-09-10T12:00:00Z"}, ("onchain.blockspace_fees",)))
         self.assertEqual(response.observations[0]["metric_key"], "onchain.blockspace_fees")
+
+    def test_bnb_network_fees_come_from_the_daily_fees_endpoint(self):
+        """The BSC aggregate mixes application fees, so it is not network gas."""
+        payload = {"totalDataChart": [["2026-09-08T00:00:00Z", 10], ["2026-09-09T00:00:00Z", 20]]}
+        provider = DeFiLlamaProvider(client=type("Client", (), {"get_json": lambda *_args, **_kwargs: payload})())
+        response = provider.collect(ProviderRequest(
+            "defillama", "onchain", "BNB", {"as_of": "2026-09-10T12:00:00Z"},
+            ("onchain.blockspace_fees",),
+        ))
+        observation = response.observations[0]
+        self.assertEqual(observation["value"], 20)
+        self.assertEqual(observation["metadata"]["source_dataset"], "summary/fees")
+        self.assertEqual(observation["metadata"]["fees_data_type"], "dailyFees")
+        self.assertEqual(observation["metadata"]["methodology"], "daily_fees_latest_complete_utc_day")
 
     def test_omitted_cash_flow_is_final_market_performance(self):
         first = {"timestamp": "2026-09-01T00:00:00Z", "positions": [{"symbol": "BTC", "value_usd": 100}]}

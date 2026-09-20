@@ -82,6 +82,7 @@ class MetricDependencyTests(unittest.TestCase):
             "eth_valuation.price_to_realized_price": "ETH",
             "market.breadth_state": "MARKET",
             "market.flow_state": "MARKET",
+            "valuation.bnb_market_cap_to_annualized_network_fees_90d": "BNB",
         }
         for derived, dependencies in DERIVED_METRIC_DEPENDENCIES.items():
             with self.subTest(derived=derived):

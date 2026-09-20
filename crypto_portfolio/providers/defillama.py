@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 import math
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote
 
-from ..metrics_registry import metric_definition
+from ..metrics_registry import (
+    BNB_BLOCKSPACE_FEES_METHODOLOGY,
+    BNB_NETWORK_FEES_DATA_TYPE,
+    BNB_NETWORK_FEES_METHODOLOGY,
+    BNB_NETWORK_FEES_PREFIX,
+    BNB_NETWORK_FEES_SOURCE_DATASET,
+    BNB_NETWORK_FEE_WINDOW_DAYS,
+    BNB_SUPPLY_CHANGE_HORIZON_DAYS,
+    BNB_SUPPLY_CHANGE_METHODOLOGY,
+    BNB_SUPPLY_CHANGE_PREFIX,
+    BNB_SUPPLY_MIN_SAMPLES,
+    BNB_SUPPLY_SAMPLE_WINDOW_DAYS,
+    metric_definition,
+)
 from ..models.time import normalize_timestamp, parse_timestamp
 from .base import (
     ProviderCapabilities,
@@ -24,6 +39,7 @@ from .http import HttpClient, classify_transport_error, redact_secrets
 
 BASE_URL = "https://api.llama.fi"
 CHAIN_FEES_PATH = "/overview/fees"
+CHAIN_DAILY_FEES_PATH = "/summary/fees"
 STABLECOINS_BASE_URL = "https://stablecoins.llama.fi"
 STABLECOIN_CHARTS_PATH = "/stablecoincharts"
 ASSET_IDENTIFIERS = {
@@ -34,6 +50,8 @@ ASSET_IDENTIFIERS = {
     "LINK": "chainlink",
 }
 CHAIN_NAMES = {"ETH": "Ethereum", "SOL": "Solana", "BNB": "BSC"}
+STABLECOIN_SUPPLY_FIELD = "totalCirculating.peggedUSD"
+_STABLE_DAYS = 3
 
 
 def identifier_for_asset(asset: str) -> str:
@@ -60,6 +78,19 @@ def _number(value: Any, field: str) -> float:
     if not math.isfinite(result) or result < 0:
         raise ProviderDataError(f"{field} is invalid")
     return result
+
+
+def _error_details(exc: BaseException) -> dict[str, Any]:
+    diagnostic = getattr(exc, "diagnostic", None)
+    if hasattr(diagnostic, "as_dict"):
+        return dict(diagnostic.as_dict())
+    if isinstance(diagnostic, Mapping):
+        return dict(diagnostic)
+    return {
+        "error_code": classify_transport_error(exc),
+        "exception_class": exc.__class__.__name__,
+        "detail": redact_secrets(str(exc)),
+    }
 
 
 def _timestamp(value: Any, field: str, fallback: str) -> str:
@@ -220,10 +251,83 @@ def parse_chain_fees(
     }
 
 
-_CHAIN_TVL_HORIZONS = {"1d": 1, "7d": 7, "30d": 30}
+def _utc_midnight(value: Any, field: str, fetched_at: str) -> str:
+    """Return an exact UTC-day timestamp or fail closed."""
+    timestamp = parse_timestamp(_timestamp(value, field, fetched_at))
+    if (timestamp.hour, timestamp.minute, timestamp.second, timestamp.microsecond) != (0, 0, 0, 0):
+        raise ProviderDataError(f"{field} must be an exact UTC day boundary")
+    return normalize_timestamp(timestamp.isoformat(), field)
 
 
-def parse_chain_tvl_flows(
+def _series_hash(rows: Iterable[tuple[str, float]]) -> str:
+    payload = [[day, value] for day, value in rows]
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _complete_daily_rows(
+    payload: Any,
+    *,
+    field: str,
+    fetched_at: str,
+    cutoff: datetime | None = None,
+) -> tuple[tuple[str, float], ...]:
+    """Validate, de-duplicate and sort one daily series.
+
+    Conflicting values for the same UTC day are a hard failure; a repeated
+    identical day is collapsed once.  Rows are never forward-filled, and a row
+    dated after ``cutoff`` (an observation from the future) is rejected rather
+    than silently dropped.
+    """
+    if not isinstance(payload, list):
+        raise ProviderResponseError(f"DeFiLlama {field} response must be a list")
+    collected: dict[str, float] = {}
+    for index, row in enumerate(payload):
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            raise ProviderDataError(f"DeFiLlama {field} row {index} is malformed")
+        day = _utc_midnight(row[0], f"DeFiLlama {field} timestamp", fetched_at)
+        if cutoff is not None and parse_timestamp(day) > cutoff:
+            raise ProviderDataError(f"DeFiLlama {field} contains a future observation for {day[:10]}")
+        value = _number(row[1], f"DeFiLlama {field} value")
+        if day in collected:
+            if not math.isclose(collected[day], value, rel_tol=1e-12, abs_tol=1e-9):
+                raise ProviderDataError(f"DeFiLlama {field} has conflicting values for {day}")
+            continue
+        collected[day] = value
+    if not collected:
+        raise ProviderInsufficientHistory(f"DeFiLlama {field} history has no usable day")
+    return tuple(sorted(collected.items()))
+
+
+def _anchor_day(rows: tuple[tuple[str, float], ...], cutoff: datetime, field: str) -> str:
+    """Return the latest fully completed UTC day, rejecting stale history."""
+    completed = [day for day, _ in rows if parse_timestamp(day) + timedelta(days=1) <= cutoff]
+    if not completed:
+        raise ProviderInsufficientHistory(f"DeFiLlama {field} history has no completed UTC day")
+    anchor = max(completed, key=parse_timestamp)
+    if cutoff - parse_timestamp(anchor) > timedelta(days=_STABLE_DAYS):
+        raise ProviderInsufficientHistory(f"DeFiLlama {field} history is stale")
+    return anchor
+
+
+def _percentile(current: float, samples: tuple[float, ...]) -> float:
+    """Fraction of the historical magnitudes strictly below ``current``.
+
+    Exact ties count half.  The current value never enters its own sample.
+    """
+    target = abs(current)
+    below = 0
+    equal = 0
+    for sample in samples:
+        magnitude = abs(sample)
+        if math.isclose(magnitude, target, rel_tol=1e-12, abs_tol=0.0):
+            equal += 1
+        elif magnitude < target:
+            below += 1
+    return (below + 0.5 * equal) / len(samples)
+
+
+def parse_stablecoin_supply_changes(
     payload: Any,
     *,
     asset: str,
@@ -232,76 +336,320 @@ def parse_chain_tvl_flows(
     as_of: str | None = None,
     endpoint: str,
 ) -> tuple[Mapping[str, Any], ...]:
-    """Turn a historicalChainTvl series into fractional 1d/7d/30d changes.
+    """Turn one chain stablecoin history into 7d/30d/90d supply changes.
 
-    Each observation's value is already the normalized flow ratio
-    (delta TVL / base TVL), carried explicitly in metadata so the flow
-    factor consumes it without a denominator lookup.
+    The scored input is the *nominal USD-pegged supply* (``totalCirculating.peggedUSD``),
+    never the price-adjusted ``totalCirculatingUSD``.  Each horizon carries its
+    own change, the percentile of its absolute magnitude inside the preceding
+    365 days, and the sample count, so the flow factor never has to re-derive a
+    distribution it cannot verify.
     """
-    if not isinstance(payload, list) or len(payload) < 32:
-        raise ProviderInsufficientHistory("DeFiLlama chain TVL history is missing or too short")
     cutoff = parse_timestamp(as_of) if as_of else datetime.now(timezone.utc)
-    rows: list[tuple[str, float]] = []
-    for item in payload:
-        if not isinstance(item, Mapping) or item.get("tvl") is None:
-            continue
-        timestamp = _timestamp(item.get("date"), "DeFiLlama chain TVL timestamp", fetched_at)
-        if parse_timestamp(timestamp) > cutoff:
-            continue
-        rows.append((timestamp, _number(item["tvl"], "DeFiLlama chain TVL")))
-    if len(rows) < 32:
-        raise ProviderInsufficientHistory("DeFiLlama chain TVL history has too few usable points")
-    anchor_timestamp, anchor_tvl = max(rows, key=lambda item: parse_timestamp(item[0]))
-    anchor = parse_timestamp(anchor_timestamp)
-    if (cutoff - anchor) > timedelta(days=3):
-        raise ProviderInsufficientHistory("DeFiLlama chain TVL history is stale")
+    symbol = asset.strip().upper()
+    rows = _stablecoin_supply_rows(payload, fetched_at=fetched_at, cutoff=cutoff)
+    anchor = _anchor_day(rows, cutoff, "stablecoin supply")
+    supplies = dict(rows)
     horizons = {
-        key: _CHAIN_TVL_HORIZONS[key[len("flows.bnb_chain_tvl_change_"):]]
+        key: BNB_SUPPLY_CHANGE_HORIZON_DAYS[key[len(BNB_SUPPLY_CHANGE_PREFIX):]]
         for key in dict.fromkeys(metric_keys)
-        if key.startswith("flows.bnb_chain_tvl_change_")
-        and key[len("flows.bnb_chain_tvl_change_"):] in _CHAIN_TVL_HORIZONS
+        if key.startswith(BNB_SUPPLY_CHANGE_PREFIX)
+        and key[len(BNB_SUPPLY_CHANGE_PREFIX):] in BNB_SUPPLY_CHANGE_HORIZON_DAYS
     }
     if not horizons:
-        raise ProviderUnsupportedMetric("no supported chain TVL flow horizon was requested")
+        raise ProviderUnsupportedMetric("no supported stablecoin supply-change horizon was requested")
+    anchor_value = supplies[anchor]
+    anchor_day = parse_timestamp(anchor)
+    days = sorted(supplies)
     observations: list[Mapping[str, Any]] = []
-    for metric_key, days in horizons.items():
-        target = anchor - timedelta(days=days)
-        base = next(
-            (value for timestamp, value in reversed(rows) if parse_timestamp(timestamp) <= target),
-            None,
-        )
-        if base is None or base <= 0:
+    for metric_key, window_days in sorted(horizons.items(), key=lambda item: item[1]):
+        base_day = normalize_timestamp((anchor_day - timedelta(days=window_days)).isoformat(), "base_date")
+        if base_day not in supplies:
             raise ProviderInsufficientHistory(
-                f"DeFiLlama chain TVL history cannot supply the {days}-day base"
+                f"DeFiLlama stablecoin supply history has no exact {window_days}-day endpoint"
             )
-        ratio = anchor_tvl / base - 1.0
-        if not math.isfinite(ratio):
-            raise ProviderDataError("DeFiLlama chain TVL flow ratio is invalid")
+        base_value = supplies[base_day]
+        if base_value <= 0:
+            raise ProviderDataError("DeFiLlama stablecoin supply base value must be > 0")
+        change = anchor_value / base_value - 1.0
+        if not math.isfinite(change):
+            raise ProviderDataError("DeFiLlama stablecoin supply change is invalid")
+        samples, calibration_reason = _supply_change_samples(
+            supplies, days, anchor_day=anchor_day, anchor_index=days.index(anchor), window_days=window_days,
+        )
+        if samples and change != 0.0 and all(sample == 0.0 for sample in samples):
+            # A non-zero change against a history where every magnitude is zero
+            # has no rank; it is uncalibrated rather than awarded full strength.
+            samples = ()
+            calibration_reason = "every historical absolute change is zero"
+        calibration_state = "CALIBRATED" if samples else "UNCALIBRATED"
+        percentile = _percentile(change, samples) if samples else None
+        metadata = {
+            "source_dataset": "stablecoincharts",
+            "source_url": endpoint,
+            "source_field": STABLECOIN_SUPPLY_FIELD,
+            "methodology": BNB_SUPPLY_CHANGE_METHODOLOGY,
+            "chain_scope": CHAIN_NAMES.get(symbol),
+            "signal_interpretation": "usd_pegged_supply_expansion_proxy",
+            "window_days": window_days,
+            "sample_window_days": BNB_SUPPLY_SAMPLE_WINDOW_DAYS,
+            "min_samples_required": BNB_SUPPLY_MIN_SAMPLES,
+            "supply_change_ratio": change,
+            "abs_change_percentile": percentile,
+            "sample_count": len(samples),
+            "calibration_state": calibration_state,
+            "anchor_date": anchor,
+            "base_date": base_day,
+            "anchor_supply_usd": anchor_value,
+            "base_supply_usd": base_value,
+            "source_series_hash": _series_hash(rows),
+            "source_confidence": "MEDIUM",
+        }
+        if calibration_state == "UNCALIBRATED":
+            metadata["calibration_reason"] = calibration_reason
         observations.append({
-            "asset": asset.strip().upper(),
+            "asset": symbol,
             "metric_key": metric_key,
-            "value": ratio,
+            "value": change,
             "unit": "fraction",
-            "period": metric_key.rsplit("_", 1)[-1],
-            "observed_at": anchor_timestamp,
+            "period": f"{window_days}d",
+            "observed_at": anchor,
             "fetched_at": fetched_at,
             "source": "defillama",
             "confidence": "MEDIUM",
             "summary": (
-                f"{CHAIN_NAMES.get(asset.strip().upper(), asset)} chain TVL {metric_key.rsplit('_', 1)[-1]} "
-                f"change {ratio:+.2%} (TVL {base:,.0f} -> {anchor_tvl:,.0f} USD)"
+                f"{CHAIN_NAMES.get(symbol, symbol)} USD-pegged stablecoin supply {window_days}d change "
+                f"{change:+.2%} (expansion/contraction proxy; historical magnitude percentile "
+                f"{percentile:.0%}, n={len(samples)})" if percentile is not None else
+                f"{CHAIN_NAMES.get(symbol, symbol)} USD-pegged stablecoin supply {window_days}d change "
+                f"{change:+.2%} (uncalibrated: {calibration_reason})"
             ),
-            "metadata": {
-                "source_dataset": "historicalChainTvl",
-                "source_url": endpoint,
-                "methodology": "chain_tvl_fractional_change_vs_days_ago",
-                "chain_scope": CHAIN_NAMES.get(asset.strip().upper()),
-                "normalized_flow_ratio": ratio,
-                "base_tvl_usd": base,
-                "anchor_tvl_usd": anchor_tvl,
-            },
+            "metadata": metadata,
         })
     return tuple(observations)
+
+
+def _supply_change_samples(
+    supplies: Mapping[str, float],
+    days: list[str],
+    *,
+    anchor_day: datetime,
+    anchor_index: int,
+    window_days: int,
+) -> tuple[tuple[float, ...], str]:
+    """Collect the same-horizon changes of the 365 days before the anchor.
+
+    Returns the sample magnitudes and, when the horizon cannot be calibrated, a
+    reason.  Fewer than the required number of exact endpoints leaves the
+    horizon uncallibrated rather than awarding it a full score.
+    """
+    earliest = anchor_day - timedelta(days=BNB_SUPPLY_SAMPLE_WINDOW_DAYS)
+    samples: list[float] = []
+    for index in range(anchor_index):
+        day = days[index]
+        day_time = parse_timestamp(day)
+        if day_time < earliest:
+            continue
+        base_day = normalize_timestamp((day_time - timedelta(days=window_days)).isoformat(), "sample_base")
+        base_value = supplies.get(base_day)
+        current_value = supplies[day]
+        if base_value is None or base_value <= 0 or not math.isfinite(current_value):
+            continue
+        change = current_value / base_value - 1.0
+        if math.isfinite(change):
+            samples.append(change)
+    if len(samples) < BNB_SUPPLY_MIN_SAMPLES:
+        return (), (
+            f"only {len(samples)} of {BNB_SUPPLY_MIN_SAMPLES} required {window_days}-day samples "
+            f"in the preceding {BNB_SUPPLY_SAMPLE_WINDOW_DAYS} days"
+        )
+    return tuple(samples), ""
+
+
+def _stablecoin_supply_rows(payload: Any, *, fetched_at: str, cutoff: datetime) -> tuple[tuple[str, float], ...]:
+    """Extract the nominal USD-pegged supply series.
+
+    ``totalCirculating.peggedUSD`` is the dollar-anchored nominal supply, so a
+    pure price move in ``totalCirculatingUSD`` cannot masquerade as an inflow.
+    ``totalMintedUSD``/``totalBridgedToUSD`` are not added back on top of an
+    already-aggregated total.
+    """
+    if not isinstance(payload, list):
+        raise ProviderResponseError("DeFiLlama stablecoin chart response must be a list")
+    rows: list[list[Any]] = []
+    for index, row in enumerate(payload):
+        if not isinstance(row, Mapping):
+            raise ProviderDataError(f"DeFiLlama stablecoin row {index} is malformed")
+        day = _utc_midnight(row.get("date"), "DeFiLlama stablecoin date", fetched_at)
+        circulating = row.get("totalCirculating")
+        if not isinstance(circulating, Mapping) or circulating.get("peggedUSD") is None:
+            raise ProviderDataError("DeFiLlama stablecoin row has no totalCirculating.peggedUSD supply")
+        rows.append([day, _number(circulating["peggedUSD"], "DeFiLlama stablecoin supply")])
+    return _complete_daily_rows(
+        rows, field="stablecoin supply", fetched_at=fetched_at, cutoff=cutoff
+    )
+
+
+def parse_chain_daily_fees(
+    payload: Any,
+    *,
+    asset: str,
+    metric_keys: Iterable[str],
+    fetched_at: str,
+    as_of: str | None = None,
+    endpoint: str,
+) -> tuple[tuple[Mapping[str, Any], ...], Mapping[str, Mapping[str, Any]]]:
+    """Turn one dailyFees series into BNB network-fee observations.
+
+    ``onchain.blockspace_fees`` is the latest complete UTC day; the 30/90-day
+    metrics are the complete-window totals and their window-over-window change.
+    A missing day inside either window fails that horizon explicitly.
+    """
+    cutoff = parse_timestamp(as_of) if as_of else datetime.now(timezone.utc)
+    symbol = asset.strip().upper()
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("totalDataChart"), list):
+        raise ProviderResponseError("DeFiLlama chain daily-fees response has no totalDataChart")
+    rows = _complete_daily_rows(
+        payload["totalDataChart"],
+        field="chain daily fees",
+        fetched_at=fetched_at,
+        cutoff=cutoff,
+    )
+    anchor = _anchor_day(rows, cutoff, "chain daily fees")
+    fees = dict(rows)
+    anchor_value = fees[anchor]
+    anchor_day = parse_timestamp(anchor)
+    series_digest = _series_hash(rows)
+    chain_scope = CHAIN_NAMES.get(symbol)
+    common = {
+        "source_dataset": BNB_NETWORK_FEES_SOURCE_DATASET,
+        "source_url": endpoint,
+        "fees_data_type": BNB_NETWORK_FEES_DATA_TYPE,
+        "methodology": BNB_NETWORK_FEES_METHODOLOGY,
+        "chain_scope": chain_scope,
+        "anchor_date": anchor,
+        "source_series_hash": series_digest,
+    }
+    observations: list[Mapping[str, Any]] = []
+    diagnostics: dict[str, Mapping[str, Any]] = {}
+    if "onchain.blockspace_fees" in set(metric_keys):
+        observations.append({
+            "asset": symbol,
+            "metric_key": "onchain.blockspace_fees",
+            "value": anchor_value,
+            "unit": "USD",
+            "period": "1d",
+            "observed_at": anchor,
+            "fetched_at": fetched_at,
+            "source": "defillama",
+            "confidence": "MEDIUM",
+            "summary": f"{chain_scope} network fees paid by users on {anchor[:10]}: {anchor_value:,.0f} USD",
+            "metadata": {
+                **common,
+                "methodology": BNB_BLOCKSPACE_FEES_METHODOLOGY,
+                "window": "latest_complete_utc_day",
+                "usd_denominated": True,
+                "price_effects": "USD fees move with both gas usage and the BNB price",
+            },
+        })
+    for key in dict.fromkeys(metric_keys):
+        if key == "onchain.blockspace_fees":
+            continue
+        suffix = key[len(BNB_NETWORK_FEES_PREFIX):] if key.startswith(BNB_NETWORK_FEES_PREFIX) else ""
+        horizon = suffix.split("_", 1)[0]
+        window_days = BNB_NETWORK_FEE_WINDOW_DAYS.get(horizon)
+        if window_days is None:
+            raise ProviderUnsupportedMetric(f"DeFiLlama daily fees cannot supply {key}")
+        try:
+            detail = _fee_window(
+                fees,
+                anchor_day=anchor_day,
+                window_days=window_days,
+                chain_scope=chain_scope,
+            )
+        except (ProviderDataError, ProviderInsufficientHistory) as exc:
+            diagnostic = getattr(exc, "diagnostic", None)
+            diagnostics[key] = dict(diagnostic.as_dict()) if hasattr(diagnostic, "as_dict") else {
+                "error_code": classify_transport_error(exc),
+                "detail": redact_secrets(str(exc)),
+            }
+            continue
+        metadata = {
+            **common,
+            "window_days": window_days,
+            "complete_utc_days": detail["complete_utc_days"],
+            "window_start_date": detail["window_start_date"],
+            "window_total_usd": detail["window_total_usd"],
+            "previous_window_total_usd": detail["previous_window_total_usd"],
+            "window_change_ratio": detail["window_change_ratio"],
+            "usd_denominated": True,
+            "price_effects": "USD fees move with both gas usage and the BNB price",
+        }
+        if key.endswith("_change"):
+            value = detail["window_change_ratio"]
+            summary = (
+                f"{chain_scope} network fees last {window_days} complete days "
+                f"{detail['window_total_usd']:,.0f} USD vs prior window {detail['window_change_ratio']:+.2%}"
+            )
+            period = f"{window_days}d_change"
+        else:
+            value = detail["window_total_usd"]
+            summary = (
+                f"{chain_scope} network fees over the last {window_days} complete days: "
+                f"{detail['window_total_usd']:,.0f} USD"
+            )
+            period = f"{window_days}d"
+        observations.append({
+            "asset": symbol,
+            "metric_key": key,
+            "value": value,
+            "unit": "fraction" if key.endswith("_change") else "USD",
+            "period": period,
+            "observed_at": anchor,
+            "fetched_at": fetched_at,
+            "source": "defillama",
+            "confidence": "MEDIUM",
+            "summary": summary,
+            "metadata": metadata,
+        })
+    return tuple(observations), diagnostics
+
+
+def _fee_window(
+    fees: Mapping[str, float],
+    *,
+    anchor_day: datetime,
+    window_days: int,
+    chain_scope: str | None,
+) -> dict[str, Any]:
+    """Sum two adjacent complete windows of ``window_days`` and their change."""
+    def window(end: datetime) -> tuple[float, str]:
+        days = [
+            normalize_timestamp((end - timedelta(days=offset)).isoformat(), "window day")
+            for offset in range(window_days)
+        ]
+        missing = [day for day in days if day not in fees]
+        if missing:
+            raise ProviderInsufficientHistory(
+                f"{chain_scope} daily fees are missing {len(missing)} of {window_days} days "
+                f"ending {days[0][:10]}"
+            )
+        return sum(fees[day] for day in days), days[-1]
+
+    total, start = window(anchor_day)
+    previous_total, previous_start = window(anchor_day - timedelta(days=window_days))
+    if previous_total <= 0:
+        raise ProviderDataError(f"{chain_scope} prior {window_days}-day fee window must be > 0")
+    change = total / previous_total - 1.0
+    if not math.isfinite(change):
+        raise ProviderDataError(f"{chain_scope} {window_days}-day fee change is invalid")
+    return {
+        "window_total_usd": total,
+        "previous_window_total_usd": previous_total,
+        "window_change_ratio": change,
+        "complete_utc_days": window_days,
+        "window_start_date": start,
+        "previous_window_start_date": previous_start,
+    }
 
 
 def parse_protocol_payload(
@@ -392,48 +740,95 @@ class DeFiLlamaProvider:
                 "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
                 "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "valuation.fee_revenue_multiple",
                 "onchain.blockspace_fees",
-                "flows.bnb_chain_tvl_change_1d", "flows.bnb_chain_tvl_change_7d",
-                "flows.bnb_chain_tvl_change_30d",
+                "onchain.bnb_network_fees_30d_usd", "onchain.bnb_network_fees_90d_usd",
+                "onchain.bnb_network_fees_30d_change", "onchain.bnb_network_fees_90d_change",
+                "flows.bnb_stablecoin_supply_change_7d", "flows.bnb_stablecoin_supply_change_30d",
+                "flows.bnb_stablecoin_supply_change_90d",
             ),
-            historical_series=("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "onchain.blockspace_fees", "flows.bnb_chain_tvl_change_7d", "flows.bnb_chain_tvl_change_30d"),
+            historical_series=(
+                "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
+                "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "onchain.blockspace_fees",
+                "onchain.bnb_network_fees_30d_usd", "onchain.bnb_network_fees_90d_usd",
+                "onchain.bnb_network_fees_30d_change", "onchain.bnb_network_fees_90d_change",
+                "flows.bnb_stablecoin_supply_change_7d", "flows.bnb_stablecoin_supply_change_30d",
+                "flows.bnb_stablecoin_supply_change_90d",
+            ),
             supports_batching=True,
             requires_api_key=False,
         )
 
+    def validate_cached_observations(self, request: ProviderRequest, values: Any) -> bool:
+        """Reject cached observations produced by a superseded source contract.
+
+        The BNB network-fee source moved from the application-inclusive
+        ``/overview/fees`` aggregate to ``/summary/fees?dataType=dailyFees``.
+        A cache entry written by the old method must never be scored as network
+        gas demand, so the source, scope and methodology are re-checked before
+        any cached value is reused.  Nothing is deleted or migrated.
+        """
+        if request.asset.strip().upper() != "BNB":
+            return True
+        for value in values:
+            if not isinstance(value, Mapping):
+                return False
+            key = str(value.get("metric_key", "")).strip().lower()
+            metadata = value.get("metadata")
+            metadata = metadata if isinstance(metadata, Mapping) else {}
+            if key == "onchain.blockspace_fees":
+                if metadata.get("source_dataset") != BNB_NETWORK_FEES_SOURCE_DATASET:
+                    return False
+                if metadata.get("fees_data_type") != BNB_NETWORK_FEES_DATA_TYPE:
+                    return False
+                if metadata.get("methodology") != BNB_BLOCKSPACE_FEES_METHODOLOGY:
+                    return False
+            elif key.startswith(BNB_NETWORK_FEES_PREFIX) or key.startswith(BNB_SUPPLY_CHANGE_PREFIX):
+                if metadata.get("methodology") not in {BNB_NETWORK_FEES_METHODOLOGY, BNB_SUPPLY_CHANGE_METHODOLOGY}:
+                    return False
+        return True
+
+    def _bnb_network_fees(self, request: ProviderRequest) -> ProviderResponse:
+        asset = request.asset.strip().upper()
+        chain = CHAIN_NAMES.get(asset)
+        if chain is None:
+            raise ProviderUnsupportedMetric("DeFiLlama chain daily fees require a BNB chain scope")
+        keys = tuple(request.metric_keys)
+        if any(key != "onchain.blockspace_fees" and not key.startswith(BNB_NETWORK_FEES_PREFIX) for key in keys):
+            raise ProviderUnsupportedMetric(
+                "DeFiLlama chain daily fees serve only BNB network-fee metrics in one request"
+            )
+        endpoint = BASE_URL + CHAIN_DAILY_FEES_PATH + "/" + quote(chain.lower(), safe="")
+        fetched_at = _now(self.clock)
+        try:
+            observations, diagnostics = parse_chain_daily_fees(
+                self.client.get_json(endpoint, params={"dataType": BNB_NETWORK_FEES_DATA_TYPE}),
+                asset=asset,
+                metric_keys=keys,
+                fetched_at=fetched_at,
+                as_of=request.parameters.get("as_of"),
+                endpoint=endpoint,
+            )
+        except (ProviderDataError, ProviderResponseError, ProviderInsufficientHistory) as exc:
+            return ProviderResponse((), diagnostics={
+                key: _error_details(exc) for key in keys
+            }, network_requests=1)
+        if not observations and not diagnostics:
+            raise ProviderUnsupportedMetric("DeFiLlama chain daily fees did not supply a requested metric")
+        return ProviderResponse(observations, diagnostics=diagnostics or None, network_requests=1)
+
     def collect(self, request: ProviderRequest) -> ProviderResponse:
-        if any(key.startswith("flows.bnb_chain_tvl_change") for key in request.metric_keys):
-            asset = request.asset.strip().upper()
+        asset = request.asset.strip().upper()
+        keys = tuple(request.metric_keys)
+        if asset == "BNB" and any(
+            key == "onchain.blockspace_fees" or key.startswith(BNB_NETWORK_FEES_PREFIX) for key in keys
+        ):
+            return self._bnb_network_fees(request)
+        if "onchain.blockspace_fees" in keys:
+            # The legacy aggregate stays as the ETH fallback only: it mixes
+            # application protocol fees into what would otherwise be read as
+            # network gas demand.
             chain = CHAIN_NAMES.get(asset)
-            if chain is None or any(
-                not key.startswith("flows.bnb_chain_tvl_change") for key in request.metric_keys
-            ):
-                raise ProviderUnsupportedMetric(
-                    "DeFiLlama chain TVL flows require only bnb_chain_tvl_change metrics for BNB"
-                )
-            endpoint = BASE_URL + "/v2/historicalChainTvl/" + quote(chain, safe="")
-            fetched_at = _now(self.clock)
-            try:
-                observations = parse_chain_tvl_flows(
-                    self.client.get_json(endpoint),
-                    asset=asset,
-                    metric_keys=tuple(key for key in request.metric_keys if key.startswith("flows.bnb_chain_tvl_change")),
-                    fetched_at=fetched_at,
-                    as_of=request.parameters.get("as_of"),
-                    endpoint=endpoint,
-                )
-            except (ProviderDataError, ProviderResponseError, ProviderInsufficientHistory) as exc:
-                diagnostic = getattr(exc, "diagnostic", None)
-                details = dict(diagnostic.as_dict()) if hasattr(diagnostic, "as_dict") else {
-                    "error_code": classify_transport_error(exc),
-                    "detail": redact_secrets(str(exc)),
-                }
-                return ProviderResponse((), diagnostics={"flows.bnb_chain_tvl_change": details}, network_requests=1)
-            return ProviderResponse(observations, network_requests=1)
-        if "onchain.blockspace_fees" in request.metric_keys:
-            asset = request.asset.strip().upper()
-            chain = CHAIN_NAMES.get(asset)
-            if chain is None or any(key != "onchain.blockspace_fees" for key in request.metric_keys):
-                raise ProviderUnsupportedMetric("DeFiLlama chain fees require one ETH or BNB blockspace metric")
+            if chain is None or any(key != "onchain.blockspace_fees" for key in keys):
+                raise ProviderUnsupportedMetric("DeFiLlama chain fees require one ETH blockspace metric")
             endpoint = BASE_URL + CHAIN_FEES_PATH + "/" + quote(chain, safe="")
             fetched_at = _now(self.clock)
             try:
@@ -446,33 +841,57 @@ class DeFiLlamaProvider:
                     endpoint=endpoint,
                 )
             except (ProviderDataError, ProviderResponseError, ProviderInsufficientHistory) as exc:
-                diagnostic = getattr(exc, "diagnostic", None)
-                details = dict(diagnostic.as_dict()) if hasattr(diagnostic, "as_dict") else {
-                    "error_code": classify_transport_error(exc),
-                    "detail": redact_secrets(str(exc)),
-                }
-                return ProviderResponse((), diagnostics={"onchain.blockspace_fees": details}, network_requests=1)
+                return ProviderResponse((), diagnostics={"onchain.blockspace_fees": _error_details(exc)}, network_requests=1)
             return ProviderResponse((observation,), network_requests=1)
         if request.dataset == "stablecoin":
-            key = next((item for item in request.metric_keys if item in {"market.stablecoin_supply", "fundamentals.stablecoin_liquidity"}), None)
-            if key is None:
-                raise ProviderUnsupportedMetric("DeFiLlama stablecoin API does not support the requested metrics")
             asset = request.asset.strip().upper()
+            keys = tuple(request.metric_keys)
+            change_keys = tuple(key for key in keys if key.startswith(BNB_SUPPLY_CHANGE_PREFIX))
+            value_keys = tuple(key for key in keys if key in {"market.stablecoin_supply", "fundamentals.stablecoin_liquidity"})
+            if len(change_keys) + len(value_keys) != len(keys):
+                raise ProviderUnsupportedMetric("DeFiLlama stablecoin API does not support the requested metrics")
+            if change_keys and asset != "BNB":
+                raise ProviderUnsupportedMetric("stablecoin supply changes are defined only for the BNB chain scope")
             if asset == "MARKET":
+                if change_keys:
+                    raise ProviderNotApplicable("stablecoin supply changes require a chain scope")
                 scope = "all"
             else:
                 scope = CHAIN_NAMES.get(asset)
                 if scope is None:
                     raise ProviderNotApplicable("stablecoin supply is defined only for global or chain scope")
             endpoint = STABLECOINS_BASE_URL + STABLECOIN_CHARTS_PATH + "/" + scope
-            return ProviderResponse((parse_stablecoin_chart(
-                self.client.get_json(endpoint),
-                asset=asset,
-                metric_key=key,
-                fetched_at=_now(self.clock),
-                as_of=request.parameters.get("as_of"),
-                endpoint=endpoint,
-            ),))
+            fetched_at = _now(self.clock)
+            payload = self.client.get_json(endpoint)
+            observations: list[Mapping[str, Any]] = []
+            # One request returns the whole daily history; it serves the scale
+            # observation and every supply-change horizon together.
+            for key in value_keys:
+                observations.append(parse_stablecoin_chart(
+                    payload,
+                    asset=asset,
+                    metric_key=key,
+                    fetched_at=fetched_at,
+                    as_of=request.parameters.get("as_of"),
+                    endpoint=endpoint,
+                ))
+            if change_keys:
+                try:
+                    observations.extend(parse_stablecoin_supply_changes(
+                        payload,
+                        asset=asset,
+                        metric_keys=change_keys,
+                        fetched_at=fetched_at,
+                        as_of=request.parameters.get("as_of"),
+                        endpoint=endpoint,
+                    ))
+                except (ProviderDataError, ProviderResponseError, ProviderInsufficientHistory) as exc:
+                    return ProviderResponse(
+                        tuple(observations),
+                        diagnostics={key: _error_details(exc) for key in change_keys},
+                        network_requests=1,
+                    )
+            return ProviderResponse(tuple(observations), network_requests=1)
         identifier = identifier_for_asset(request.asset)
         url = BASE_URL + "/protocol/" + quote(identifier, safe="")
         fetched = _now(self.clock)
@@ -554,10 +973,14 @@ __all__ = [
     "BASE_URL",
     "STABLECOINS_BASE_URL",
     "STABLECOIN_CHARTS_PATH",
+    "STABLECOIN_SUPPLY_FIELD",
     "DeFiLlamaProvider",
+    "CHAIN_DAILY_FEES_PATH",
     "CHAIN_FEES_PATH",
     "identifier_for_asset",
+    "parse_chain_daily_fees",
     "parse_chain_fees",
     "parse_stablecoin_chart",
+    "parse_stablecoin_supply_changes",
     "parse_protocol_payload",
 ]

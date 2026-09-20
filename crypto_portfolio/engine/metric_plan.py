@@ -136,11 +136,19 @@ _BTC_CONTEXT_METRICS = (
     "onchain.btc.sopr",
     "onchain.btc.lth_net_position_change",
 )
-# No BNB ETF exists; chain-level DeFi TVL change is the capital-flow signal.
+# No BNB ETF exists; the free BSC USD-pegged stablecoin supply series is the
+# capital-flow proxy, ranked against its own 365-day history.  BNB network fees
+# and their market-cap scale are collected alongside it from the same
+# DeFiLlama dailyFees history.
 _BNB_METRICS = (
-    "flows.bnb_chain_tvl_change_1d",
-    "flows.bnb_chain_tvl_change_7d",
-    "flows.bnb_chain_tvl_change_30d",
+    "flows.bnb_stablecoin_supply_change_7d",
+    "flows.bnb_stablecoin_supply_change_30d",
+    "flows.bnb_stablecoin_supply_change_90d",
+    "onchain.bnb_network_fees_30d_usd",
+    "onchain.bnb_network_fees_90d_usd",
+    "onchain.bnb_network_fees_30d_change",
+    "onchain.bnb_network_fees_90d_change",
+    "valuation.bnb_market_cap_to_annualized_network_fees_90d",
 )
 # One source of truth for relative-return inputs. The dependency key is
 # deliberately registered rather than reconstructed from a suffix at runtime.
@@ -162,6 +170,9 @@ DERIVED_METRIC_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "flows.eth_active_stake_change_to_supply_30d": ("eth.staking.active_effective_stake_change_30d", "eth.monetary.current_supply_eth"),
     "flows.eth_etf_net_to_aum_7d": ("flows.etf_net_7d", "flows.eth_etf_aum_usd"),
     "flows.eth_etf_net_to_aum_30d": ("flows.etf_net_30d", "flows.eth_etf_aum_usd"),
+    "valuation.bnb_market_cap_to_annualized_network_fees_90d": (
+        "valuation.market_cap", "onchain.bnb_network_fees_90d_usd",
+    ),
     "market.flow_state": ("flows.etf_net_1d",),
     **{
         metric: (dependency,)

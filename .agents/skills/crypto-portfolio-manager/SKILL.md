@@ -562,7 +562,11 @@ valid empty scan; same-authority URLs share a source group, and Discourse may
 complete once an ordered `created_at` page crosses the requested lookback.
 LunarCrush is an optional API v4 social-context provider and is not requested
 by the normal metric plan unless enabled explicitly. BNB on-chain demand uses
-blockspace fees; expensive per-block transaction counting is not requested.
+network gas fees from DeFiLlama's `dailyFees` series plus 30/90-day window
+totals; expensive per-block transaction counting is not requested. BNB capital
+flows use the BSC USD-pegged stablecoin supply as an expansion/contraction proxy
+ranked against its own trailing history; it is never described as a proven
+external net inflow.
 
 ## Confidence workflow
 

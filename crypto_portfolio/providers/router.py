@@ -157,6 +157,26 @@ def _with_source_mode(value: Mapping[str, Any], mode: str) -> dict[str, Any]:
     return result
 
 
+def _cached_payload_matches_source_contract(provider: Any, request: ProviderRequest, cached: Any) -> bool:
+    """Let a provider refuse a cache entry written by a superseded method.
+
+    A provider that changed its source, scope, or methodology must not let an
+    old cached value be scored.  Providers without the hook keep the previous
+    behaviour.
+    """
+    validator = getattr(provider, "validate_cached_observations", None)
+    if not callable(validator):
+        return True
+    try:
+        values = _mapping_observations(cached)
+    except (ProviderError, TypeError, ValueError):
+        return False
+    try:
+        return bool(validator(request, values))
+    except (TypeError, ValueError):
+        return False
+
+
 class ProviderRouter:
     """Route bundles through configured providers without model participation."""
 
@@ -672,6 +692,9 @@ class ProviderRouter:
                     raise
                 self.cache.quarantine(request)
                 cached = None
+            if cached is not None and not _cached_payload_matches_source_contract(provider, request, cached):
+                # Never reuse a payload whose source contract has been retired.
+                cached = None
             if cached is not None:
                 if isinstance(cached, Mapping) and isinstance(cached.get("diagnostics"), Mapping):
                     self._last_metric_diagnostics = {
@@ -731,6 +754,8 @@ class ProviderRouter:
                     fetched_at=now,
                 )
                 values = _mapping_observations(parsed)
+                if values and not _cached_payload_matches_source_contract(provider, request, values):
+                    values = ()
                 if values:
                     return values, "CACHE_PROVIDER", True, 0
         if mode == FetchMode.CACHE_ONLY:

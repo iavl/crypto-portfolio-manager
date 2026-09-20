@@ -203,7 +203,12 @@
     },
     "flows": {
       "neutral_abs_max": 0.001,
-      "strong_abs": 0.01
+      "strong_abs": 0.01,
+      "supply_change_horizon_weights": {
+        "7d": 0.2,
+        "30d": 0.4,
+        "90d": 0.4
+      }
     }
   },
   "scoring_families": {},

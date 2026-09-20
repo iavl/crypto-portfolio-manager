@@ -33,7 +33,6 @@ DEFAULT_TTL_SECONDS = {
     "ratios": 3600,
     "basis": 3600,
     "etf": 86400,
-    "chain_tvl": 21600,
     "sentiment": 43200,
     "protocol": 21600,
     "onchain": 86400,
@@ -116,7 +115,12 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ("sosovalue",)
     if key.startswith("flows.eth_active_stake_"):
         return ()
-    if key.startswith("flows.bnb_chain_tvl_change"):
+    if key.startswith("flows.bnb_stablecoin_supply_change"):
+        return ("defillama",) if symbol in {None, "BNB"} else ()
+    if key == "valuation.bnb_market_cap_to_annualized_network_fees_90d":
+        # Python-derived from BNB market cap and the 90-day network-fee window.
+        return ()
+    if key.startswith("onchain.bnb_network_fees"):
         return ("defillama",) if symbol in {None, "BNB"} else ()
     if key == "derivatives.futures_basis_annualized":
         return PROVIDER_ROUTES["basis"]
@@ -163,6 +167,9 @@ def dataset_for_metric(metric_key: str) -> str:
         return "derived"
     if key == "market.stablecoin_supply" or key == "fundamentals.stablecoin_liquidity":
         return "stablecoin"
+    if key.startswith("flows.bnb_stablecoin_supply_change"):
+        # One chain stablecoin history request serves every supply-change horizon.
+        return "stablecoin"
     if key == "market.spot_price":
         return "spot"
     if key == "risk.chain_liveness_status":
@@ -196,6 +203,8 @@ def dataset_for_metric(metric_key: str) -> str:
         return "ethereum_staking"
     if key == "valuation.fee_revenue_multiple":
         return "protocol"
+    if key == "valuation.bnb_market_cap_to_annualized_network_fees_90d":
+        return "derived"
     if key.startswith("derivatives.open_interest"):
         return "open_interest"
     if key.startswith(("derivatives.long_short", "derivatives.top_trader")):
@@ -204,8 +213,6 @@ def dataset_for_metric(metric_key: str) -> str:
         return "basis"
     if key.startswith(("flows.etf_", "flows.btc_etf_", "flows.eth_etf_")):
         return "etf"
-    if key.startswith("flows.bnb_chain_tvl_change"):
-        return "chain_tvl"
     if key.startswith(("onchain.", "btc_valuation.")) or key in {
         "tokenomics.annualized_emissions", "tokenomics.supply_growth",
     }:

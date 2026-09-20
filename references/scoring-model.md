@@ -248,15 +248,8 @@ cannot contribute positive valuation evidence.
 
 ## Capital flows
 
-Flow scoring prefers normalized ratios such as ETF net flow / ETF AUM or
-exchange net flow / circulating market cap. If the denominator is unavailable,
-the normalized flow is missing; an absolute USD value is not substituted.
-
-The initial dead zone is `abs(normalized_flow) <= 0.001` and saturation is
-`0.01`. The dead zone scores neutral at 50; values between the dead zone and
-saturation map continuously and monotonically to 0–100, then clamp. 7D/30D
-evidence receives more authority than 1D noise. The state remains
-`POSITIVE`, `NEUTRAL`, `NEGATIVE`, or `UNKNOWN`.
+Two explicitly separate methods share one flow result contract, and the result
+always records which one produced it.
 
 Intraday OHLCV is sampled at common 24-hour intervals for the daily-return
 volatility calculation. Flow observation objects and serialized observations
@@ -265,6 +258,41 @@ must be resolved upstream; input order must not select the scoring source.
 Flow observations retain their weakest source confidence. Relative-strength
 OHLCV freshness is evaluated against persisted fetch timestamps, never the
 current wall clock; absent fetch timestamps give UNKNOWN freshness.
+
+**Normalized-flow threshold (BTC, ETH, and every other asset).** Flow scoring
+prefers normalized ratios such as ETF net flow / ETF AUM or exchange net flow /
+circulating market cap. If the denominator is unavailable, the normalized flow
+is missing; an absolute USD value is not substituted. The dead zone is
+`abs(normalized_flow) <= 0.001` and saturation is `0.01`. The dead zone scores
+neutral at 50; values between the dead zone and saturation map continuously and
+monotonically to 0–100, then clamp. 7D/30D evidence receives more authority than
+1D noise. The state remains `POSITIVE`, `NEUTRAL`, `NEGATIVE`, or `UNKNOWN`.
+This method and its thresholds are unchanged for BTC/ETH.
+
+**BNB supply-change percentile (BNB only).** No BNB ETF exists, so BNB scores
+the BSC USD-pegged stablecoin supply as an expansion/contraction proxy. The
+scored input is the *absolute magnitude* of each horizon's change ranked inside
+its own trailing history:
+
+```text
+t   = latest complete UTC day at or before as_of (never older than 3 days)
+g_h = S_t / S_(t-h) - 1                    for h in {7d, 30d, 90d}
+p_h = (below + 0.5 * equal) / n            n >= 180 samples from the 365 days
+s_h = 50 + 50 * sign(g_h) * p_h            before t; t itself is excluded
+score = sum(s_h * w_h) / sum(w_h)          w = {7d: 0.2, 30d: 0.4, 90d: 0.4}
+```
+
+A zero change is exactly 50 and no negative change can exceed 50. A horizon whose
+history is shorter than 180 samples, or whose current non-zero change faces an
+all-zero history, is uncalibrated and contributes nothing. The weights live in
+the canonical policy (`factor_rules.flows.supply_change_horizon_weights`) as a
+stated design default, not as a return-optimised parameter. The available raw
+scores are renormalised over their own weights while the factor completeness
+stays at the effective weight sum `C`, so a missing horizon is penalised exactly
+once by the reliability shrink and never re-labelled as full coverage. The
+horizon weights, the per-horizon change, rank, sample count, calibration state
+and contribution are all reported, and a historical rank is never published as a
+`normalized_flow` ratio.
 
 Daily-candle freshness uses one definition everywhere:
 `lag_days = expected_latest_completed_date - actual_latest_completed_date`,
@@ -354,8 +382,11 @@ population_std(CapMrktCurUSD)` derivation inputs. ETH 365D monetary values are
 long-structure context and do not block a 3–6 month decision when history is
 unavailable. ETH staking retains only exact `active_effective_stake_eth` and
 30D change/normalized-flow evidence when available. BNB on-chain demand is
-represented by blockspace fees; no user-count or per-block transaction proxy is
-requested.
+represented by network gas fees from the `dailyFees` series plus 30/90-day window
+totals and changes; no user-count or per-block transaction proxy is requested.
+BNB valuation uses the market-cap-to-annualized-network-fees scale and never the
+fee/revenue ratio, and BNB fundamentals do not count the same fee series and its
+10% revenue derivative as two independent growth inputs.
 
 ### Data Confidence
 

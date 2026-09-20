@@ -1,6 +1,8 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from crypto_portfolio.models.decision import Decision
 from crypto_portfolio.state.context import (
@@ -17,6 +19,16 @@ from crypto_portfolio.models.cash_flow import CashFlowResolution
 
 
 class StateContextTests(unittest.TestCase):
+    def setUp(self):
+        # Never read the developer's real runtime store from a test.
+        self._data_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._data_dir.cleanup)
+        patcher = mock.patch.dict(
+            os.environ, {"CRYPTO_PORTFOLIO_DATA_DIR": self._data_dir.name}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_history_is_loaded_before_new_review_and_full_review_is_due(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot_path = Path(directory) / "snapshots.jsonl"

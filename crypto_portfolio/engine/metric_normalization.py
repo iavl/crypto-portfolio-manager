@@ -10,7 +10,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..metrics_registry import MetricDefinition, metric_definition, validate_metric_value
+from ..metrics_registry import (
+    MetricDefinition,
+    metric_definition,
+    validate_metric_observation_metadata,
+    validate_metric_value,
+)
 from .metric_plan import MetricCollectionPlan
 from ..models.metrics_history import (
     CollectionEvent,
@@ -190,6 +195,7 @@ def normalize_metric_observation(
     if observation_value is None:
         raise ValueError("successful metric observations require a value")
     validate_metric_value(definition.key, observation_value)
+    validate_metric_observation_metadata(definition.key, asset, observation_value, metadata)
     if as_of is not None and parse_timestamp(observed_at) > parse_timestamp(_timestamp(as_of, "as_of")):
         raise ValueError("observed_at must not be after as_of")
     if as_of is not None and freshness_reference_at is not None and parse_timestamp(freshness_reference_at) > parse_timestamp(_timestamp(as_of, "as_of")):

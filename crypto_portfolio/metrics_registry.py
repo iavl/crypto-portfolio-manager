@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import math
 import re
 from typing import Any, Mapping
@@ -29,6 +30,12 @@ _ACTIVE_ADDRESS_ASSETS = ("BTC", "ETH", "SOL")
 _TRANSFER_VOLUME_ASSETS = ("BTC", "ETH", "SOL")
 _PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
 _APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
+# DeFiLlama defines an application's dailyRevenue as a fixed share of its
+# dailyFees.  Scoring both as independent fundamentals growth evidence counts
+# one source twice, so BNB uses only its dedicated market-cap-to-network-fees
+# valuation scale, its own on-chain fee windows, and TVL/stablecoin scale.
+_FEE_REVENUE_EVIDENCE_ASSETS = tuple(asset for asset in _APPLICATION_ASSETS if asset != "BNB")
+_BNB_ASSETS = ("BNB",)
 _ETH_ASSETS = ("ETH",)
 _FDV_ASSETS = tuple(asset for asset in _PROTOCOL_ASSETS if asset != "ETH")
 _FDV_RATIO_ASSETS = tuple(asset for asset in _PROTOCOL_ASSETS if asset != "ETH")
@@ -310,34 +317,63 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         "flows.eth_active_stake_change_to_supply_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
         freshness="2d", asset_scope=_ETH_ASSETS,
     ),
-    # No BNB ETF exists; BNB-chain DeFi TVL change is the ecosystem capital-flow
-    # signal.  Chain-level moves are larger than ETF netflow/AUM ratios, so the
-    # direction (capital entering/leaving the chain) is the scored signal.
-    "flows.bnb_chain_tvl_change_1d": _definition(
-        "flows.bnb_chain_tvl_change_1d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
-        freshness="2d", asset_scope=("BNB",),
+    # No BNB ETF exists, so BNB's capital_flows factor uses the free BSC
+    # USD-pegged stablecoin supply series as an expansion/contraction proxy.
+    # The scored signal is the *absolute* supply change ranked against its own
+    # 365-day history (see the BNB supply-proxy policy), not a ratio against a
+    # denominator, so these metrics carry the raw fractional change only.
+    "flows.bnb_stablecoin_supply_change_7d": _definition(
+        "flows.bnb_stablecoin_supply_change_7d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
     ),
-    "flows.bnb_chain_tvl_change_7d": _definition(
-        "flows.bnb_chain_tvl_change_7d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
-        freshness="7d", asset_scope=("BNB",),
+    "flows.bnb_stablecoin_supply_change_30d": _definition(
+        "flows.bnb_stablecoin_supply_change_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
     ),
-    "flows.bnb_chain_tvl_change_30d": _definition(
-        "flows.bnb_chain_tvl_change_30d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
-        freshness="7d", asset_scope=("BNB",),
+    "flows.bnb_stablecoin_supply_change_90d": _definition(
+        "flows.bnb_stablecoin_supply_change_90d", "capital_flows", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
     ),
     "fundamentals.tvl": _definition("fundamentals.tvl", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
-    "fundamentals.fees_30d": _definition("fundamentals.fees_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
-    "fundamentals.revenue_30d": _definition("fundamentals.revenue_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_APPLICATION_ASSETS),
+    "fundamentals.fees_30d": _definition("fundamentals.fees_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_FEE_REVENUE_EVIDENCE_ASSETS),
+    "fundamentals.revenue_30d": _definition("fundamentals.revenue_30d", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_FEE_REVENUE_EVIDENCE_ASSETS),
     "fundamentals.stablecoin_liquidity": _definition("fundamentals.stablecoin_liquidity", "fundamentals", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=("ETH", "SOL", "BNB")),
     "fundamentals.developer_activity": _definition("fundamentals.developer_activity", "fundamentals", "number", "count", "HIGHER_IS_BETTER", freshness="30d", asset_scope=_DEVELOPER_ACTIVITY_ASSETS),
     "onchain.active_addresses": _definition("onchain.active_addresses", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_ACTIVE_ADDRESS_ASSETS),
     "onchain.transfer_volume": _definition("onchain.transfer_volume", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_TRANSFER_VOLUME_ASSETS),
     "onchain.blockspace_fees": _definition("onchain.blockspace_fees", "onchain", "number", "USD", "HIGHER_IS_BETTER", freshness="7d", asset_scope=_CHAIN_NATIVE_ASSETS),
+    # BNB network fees come from DeFiLlama's dailyFees series for BSC only:
+    # `/overview/fees/BSC` also sums on-chain application protocol fees and is
+    # therefore not network gas demand.  Window totals and window-over-window
+    # changes share the one daily-fee history request with blockspace fees.
+    "onchain.bnb_network_fees_30d_usd": _definition(
+        "onchain.bnb_network_fees_30d_usd", "onchain", "number", "USD", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
+    ),
+    "onchain.bnb_network_fees_90d_usd": _definition(
+        "onchain.bnb_network_fees_90d_usd", "onchain", "number", "USD", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
+    ),
+    "onchain.bnb_network_fees_30d_change": _definition(
+        "onchain.bnb_network_fees_30d_change", "onchain", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
+    ),
+    "onchain.bnb_network_fees_90d_change": _definition(
+        "onchain.bnb_network_fees_90d_change", "onchain", "number", "fraction", "HIGHER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
+    ),
     "onchain.transaction_count": _definition("onchain.transaction_count", "onchain", "number", "count", "HIGHER_IS_BETTER", freshness="3d", asset_scope=_TRANSACTION_COUNT_ASSETS),
     "valuation.market_cap": _definition("valuation.market_cap", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_FDV_ASSETS),
     "valuation.fdv_market_cap_ratio": _definition("valuation.fdv_market_cap_ratio", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="7d", asset_scope=_FDV_RATIO_ASSETS),
-    "valuation.fee_revenue_multiple": _definition("valuation.fee_revenue_multiple", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="14d", asset_scope=_APPLICATION_ASSETS),
+    "valuation.fee_revenue_multiple": _definition("valuation.fee_revenue_multiple", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="14d", asset_scope=_FEE_REVENUE_EVIDENCE_ASSETS),
+    # Market capitalisation divided by annualized network fees (a scale, not a
+    # price-to-earnings, cash-yield, or holder-revenue multiple).  Population is
+    # Python-owned; zero fees or a mismatched window return unavailable.
+    "valuation.bnb_market_cap_to_annualized_network_fees_90d": _definition(
+        "valuation.bnb_market_cap_to_annualized_network_fees_90d", "valuation", "number", "ratio", "LOWER_IS_BETTER",
+        freshness="3d", asset_scope=_BNB_ASSETS,
+    ),
     "btc_valuation.mvrv": _definition(
         "btc_valuation.mvrv", "btc_valuation", "number", "ratio", "LOWER_IS_BETTER",
         freshness="7d", asset_scope=("BTC",),
@@ -596,6 +632,7 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         or definition.key == "sentiment.social_mentions_change_7d"
         or definition.key.startswith(("eth.monetary.net_supply_growth", "eth.staking.active_effective_stake_change"))
         or definition.key.startswith("flows.eth_")
+        or definition.key.startswith("onchain.bnb_network_fees_") and definition.key.endswith("_change")
         or definition.key in {
             "onchain.btc.mvrv_zscore", "onchain.btc.lth_net_position_change",
             "btc_valuation.mvrv_zscore", "macro.fed_funds_change_90d", "macro.real_yield_change_90d",
@@ -618,6 +655,8 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         raise ValueError(f"metric {definition.key} value must be > 0")
     if definition.key.startswith(("market.return_", "relative.return_vs_btc_")) and number < -1:
         raise ValueError(f"metric {definition.key} return must be >= -1")
+    if definition.key.startswith("flows.bnb_stablecoin_supply_change_") and number < -1:
+        raise ValueError(f"metric {definition.key} supply change must be >= -1")
     if definition.key == "market.drawdown" and number > 0:
         raise ValueError("metric market.drawdown value must be <= 0")
     if definition.key in {"market.btc_dominance", "market.breadth"} and number > 1:
@@ -643,6 +682,7 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
         "onchain.btc.sopr",
         "eth_valuation.mvrv",
         "eth_valuation.price_to_realized_price",
+        "valuation.bnb_market_cap_to_annualized_network_fees_90d",
     } and number <= 0:
         raise ValueError(f"metric {definition.key} ratio must be > 0")
     if definition.key.startswith(("derivatives.open_interest_change_", "sentiment.social_mentions_change_")) or definition.key in {
@@ -653,6 +693,214 @@ def validate_metric_value(metric_key: str, value: Any) -> Any:
     if definition.key.startswith("eth.monetary.net_supply_growth") and number < -1:
         raise ValueError(f"metric {definition.key} change must be >= -1")
     return value
+
+
+# ---------------------------------------------------------------------------
+# Observation metadata contracts
+#
+# Some BNB observations carry the deterministic inputs of a scored
+# calculation (a supply change and its historical percentile, a fee window and
+# its completeness).  Those inputs are produced by Python inside the provider
+# and must survive unchanged to the factor.  The contract below is enforced at
+# the persistence/build boundary so a hand-edited, truncated, or
+# stale-methodology observation is rejected rather than scored.
+# ---------------------------------------------------------------------------
+
+BNB_SUPPLY_CHANGE_PREFIX = "flows.bnb_stablecoin_supply_change_"
+BNB_SUPPLY_CHANGE_METHODOLOGY = "pegged_usd_supply_change_abs_change_percentile"
+BNB_SUPPLY_SAMPLE_WINDOW_DAYS = 365
+BNB_SUPPLY_MIN_SAMPLES = 180
+BNB_SUPPLY_CHANGE_HORIZON_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+
+BNB_NETWORK_FEES_PREFIX = "onchain.bnb_network_fees_"
+BNB_NETWORK_FEES_SOURCE_DATASET = "summary/fees"
+BNB_NETWORK_FEES_DATA_TYPE = "dailyFees"
+BNB_NETWORK_FEES_METHODOLOGY = "daily_fees_window_over_complete_utc_days"
+BNB_BLOCKSPACE_FEES_METHODOLOGY = "daily_fees_latest_complete_utc_day"
+BNB_NETWORK_FEE_WINDOW_DAYS = {"30d": 30, "90d": 90}
+
+_CALIBRATION_STATES = ("CALIBRATED", "UNCALIBRATED")
+_OBSERVATION_SOURCE_CONFIDENCE = ("MEDIUM", "LOW")
+
+
+def _utc_datetime(value: str) -> datetime:
+    text = str(value).strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError("timestamp must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include a UTC offset")
+    return parsed.astimezone(timezone.utc)
+
+
+def _metadata_number(metadata: Mapping[str, Any], field: str, key: str) -> float:
+    raw = metadata.get(field)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
+        raise ValueError(f"metric {key} metadata.{field} must be finite numeric")
+    return float(raw)
+
+
+def _metadata_integer(metadata: Mapping[str, Any], field: str, key: str) -> int:
+    raw = metadata.get(field)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(f"metric {key} metadata.{field} must be an integer")
+    return raw
+
+
+def _metadata_choice(metadata: Mapping[str, Any], field: str, key: str, allowed: tuple[str, ...]) -> str:
+    raw = metadata.get(field)
+    if not isinstance(raw, str) or raw.strip().upper() not in allowed:
+        raise ValueError(f"metric {key} metadata.{field} is unsupported")
+    return raw.strip().upper()
+
+
+def _metadata_text(metadata: Mapping[str, Any], field: str, key: str, allowed: tuple[str, ...]) -> str:
+    raw = metadata.get(field)
+    if not isinstance(raw, str) or raw.strip().upper() not in tuple(item.upper() for item in allowed):
+        raise ValueError(f"metric {key} metadata.{field} is unsupported")
+    return raw.strip()
+
+
+def _metadata_hash(metadata: Mapping[str, Any], field: str, key: str) -> str:
+    raw = metadata.get(field)
+    if not isinstance(raw, str):
+        raise ValueError(f"metric {key} metadata.{field} must be a SHA-256 hex digest")
+    digest = raw.strip().lower()
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise ValueError(f"metric {key} metadata.{field} must be a SHA-256 hex digest")
+    return digest
+
+
+def _metadata_utc_day(metadata: Mapping[str, Any], field: str, key: str) -> datetime:
+    raw = metadata.get(field)
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"metric {key} metadata.{field} must be a timestamp")
+    try:
+        return _utc_datetime(raw)
+    except ValueError as exc:
+        raise ValueError(f"metric {key} metadata.{field} must be a timestamp") from exc
+
+
+def _check_bnb_supply_change_metadata(key: str, value: Any, metadata: Mapping[str, Any]) -> None:
+    horizon = key[len(BNB_SUPPLY_CHANGE_PREFIX):]
+    expected_days = BNB_SUPPLY_CHANGE_HORIZON_DAYS[horizon]
+    _metadata_text(metadata, "methodology", key, (BNB_SUPPLY_CHANGE_METHODOLOGY,))
+    if _metadata_integer(metadata, "window_days", key) != expected_days:
+        raise ValueError(f"metric {key} metadata.window_days must be {expected_days}")
+    if _metadata_integer(metadata, "sample_window_days", key) != BNB_SUPPLY_SAMPLE_WINDOW_DAYS:
+        raise ValueError(f"metric {key} metadata.sample_window_days must be {BNB_SUPPLY_SAMPLE_WINDOW_DAYS}")
+    if _metadata_integer(metadata, "min_samples_required", key) != BNB_SUPPLY_MIN_SAMPLES:
+        raise ValueError(f"metric {key} metadata.min_samples_required must be {BNB_SUPPLY_MIN_SAMPLES}")
+    ratio = _metadata_number(metadata, "supply_change_ratio", key)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isclose(float(value), ratio, rel_tol=1e-12, abs_tol=1e-12)
+    ):
+        raise ValueError(f"metric {key} metadata.supply_change_ratio must match the observation value")
+    _metadata_hash(metadata, "source_series_hash", key)
+    _metadata_choice(metadata, "source_confidence", key, _OBSERVATION_SOURCE_CONFIDENCE)
+    anchor = _metadata_utc_day(metadata, "anchor_date", key)
+    base = _metadata_utc_day(metadata, "base_date", key)
+    if (anchor.hour, anchor.minute, anchor.second, anchor.microsecond) != (0, 0, 0, 0):
+        raise ValueError(f"metric {key} metadata.anchor_date must be a UTC day boundary")
+    if base != anchor - timedelta(days=expected_days):
+        raise ValueError(f"metric {key} metadata.base_date must be exactly {expected_days} days before anchor_date")
+    state = _metadata_choice(metadata, "calibration_state", key, _CALIBRATION_STATES)
+    percentile = metadata.get("abs_change_percentile")
+    sample_count = _metadata_integer(metadata, "sample_count", key)
+    if sample_count < 0:
+        raise ValueError(f"metric {key} metadata.sample_count must be non-negative")
+    if state == "CALIBRATED":
+        if (
+            percentile is None
+            or isinstance(percentile, bool)
+            or not isinstance(percentile, (int, float))
+            or not math.isfinite(float(percentile))
+        ):
+            raise ValueError(f"metric {key} metadata.abs_change_percentile must be finite when calibrated")
+        if not 0.0 <= float(percentile) <= 1.0:
+            raise ValueError(f"metric {key} metadata.abs_change_percentile must be in [0, 1]")
+        if sample_count < BNB_SUPPLY_MIN_SAMPLES:
+            raise ValueError(f"metric {key} metadata.sample_count must be >= {BNB_SUPPLY_MIN_SAMPLES} when calibrated")
+    else:
+        if percentile is not None:
+            raise ValueError(f"metric {key} metadata.abs_change_percentile must be null when uncalibrated")
+        reason = metadata.get("calibration_reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"metric {key} metadata.calibration_reason is required when uncalibrated")
+
+
+def _check_bnb_network_fees_metadata(key: str, value: Any, metadata: Mapping[str, Any]) -> None:
+    _metadata_text(metadata, "methodology", key, (BNB_NETWORK_FEES_METHODOLOGY,))
+    _metadata_text(metadata, "source_dataset", key, (BNB_NETWORK_FEES_SOURCE_DATASET,))
+    _metadata_text(metadata, "fees_data_type", key, (BNB_NETWORK_FEES_DATA_TYPE,))
+    horizon = key[len(BNB_NETWORK_FEES_PREFIX):].split("_", 1)[0]
+    expected_days = BNB_NETWORK_FEE_WINDOW_DAYS[horizon]
+    if _metadata_integer(metadata, "window_days", key) != expected_days:
+        raise ValueError(f"metric {key} metadata.window_days must be {expected_days}")
+    if _metadata_integer(metadata, "complete_utc_days", key) != expected_days:
+        raise ValueError(f"metric {key} metadata.complete_utc_days must equal the window length")
+    _metadata_utc_day(metadata, "anchor_date", key)
+    _metadata_hash(metadata, "source_series_hash", key)
+    total = _metadata_number(metadata, "window_total_usd", key)
+    if total < 0:
+        raise ValueError(f"metric {key} metadata.window_total_usd must be non-negative")
+    expected = _metadata_number(metadata, "window_change_ratio", key) if key.endswith("_change") else total
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isclose(float(value), expected, rel_tol=1e-12, abs_tol=1e-12)
+    ):
+        field = "window_change_ratio" if key.endswith("_change") else "window_total_usd"
+        raise ValueError(f"metric {key} metadata.{field} must match the observation value")
+
+
+def _check_bnb_blockspace_fees_metadata(key: str, metadata: Mapping[str, Any]) -> None:
+    _metadata_text(metadata, "source_dataset", key, (BNB_NETWORK_FEES_SOURCE_DATASET,))
+    _metadata_text(metadata, "fees_data_type", key, (BNB_NETWORK_FEES_DATA_TYPE,))
+    _metadata_text(metadata, "methodology", key, (BNB_BLOCKSPACE_FEES_METHODOLOGY,))
+    _metadata_utc_day(metadata, "anchor_date", key)
+    _metadata_hash(metadata, "source_series_hash", key)
+
+
+def validate_metric_observation_metadata(
+    metric_key: str,
+    asset: str,
+    value: Any,
+    metadata: Mapping[str, Any] | None,
+) -> None:
+    """Enforce the observation metadata contract for BNB-scored metrics.
+
+    Only metrics whose factor input is a Python-derived deterministic value
+    carry a mandatory contract; every other metric keeps free-form metadata.
+    """
+    key = normalize_metric_key(metric_key)
+    metric_definition(key)
+    symbol = str(asset).strip().upper()
+    if key.startswith(BNB_SUPPLY_CHANGE_PREFIX):
+        if symbol != "BNB":
+            raise ValueError(f"metric {key} is defined only for BNB")
+        if not isinstance(metadata, Mapping):
+            raise ValueError(f"metric {key} requires observation metadata")
+        _check_bnb_supply_change_metadata(key, value, metadata)
+        return
+    if key.startswith(BNB_NETWORK_FEES_PREFIX):
+        if symbol != "BNB":
+            raise ValueError(f"metric {key} is defined only for BNB")
+        if not isinstance(metadata, Mapping):
+            raise ValueError(f"metric {key} requires observation metadata")
+        _check_bnb_network_fees_metadata(key, value, metadata)
+        return
+    # A BNB blockspace-fee observation must carry the dailyFees contract so a
+    # legacy /overview/fees value can never be scored as network gas demand.
+    if key == "onchain.blockspace_fees" and symbol == "BNB":
+        if not isinstance(metadata, Mapping):
+            raise ValueError(f"metric {key} requires observation metadata for BNB")
+        _check_bnb_blockspace_fees_metadata(key, metadata)
 
 
 def known_metric_keys() -> tuple[str, ...]:
@@ -718,6 +966,17 @@ def validate_metric_ownership(
 
 
 __all__ = [
+    "BNB_BLOCKSPACE_FEES_METHODOLOGY",
+    "BNB_NETWORK_FEES_DATA_TYPE",
+    "BNB_NETWORK_FEES_METHODOLOGY",
+    "BNB_NETWORK_FEES_PREFIX",
+    "BNB_NETWORK_FEES_SOURCE_DATASET",
+    "BNB_NETWORK_FEE_WINDOW_DAYS",
+    "BNB_SUPPLY_CHANGE_HORIZON_DAYS",
+    "BNB_SUPPLY_CHANGE_METHODOLOGY",
+    "BNB_SUPPLY_CHANGE_PREFIX",
+    "BNB_SUPPLY_MIN_SAMPLES",
+    "BNB_SUPPLY_SAMPLE_WINDOW_DAYS",
     "CHAIN_NATIVE_ASSETS",
     "DECISION_CONSUMERS",
     "METRIC_REGISTRY",
@@ -729,6 +988,7 @@ __all__ = [
     "metrics_for_role",
     "metric_definition",
     "normalize_metric_key",
+    "validate_metric_observation_metadata",
     "validate_metric_ownership",
     "validate_metric_value",
 ]

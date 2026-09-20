@@ -202,7 +202,8 @@ _RELATIVE_RULE_FIELDS = {
     "risk_adjusted_neutral_band",
     "risk_adjusted_saturation",
 }
-_FLOW_RULE_FIELDS = {"neutral_abs_max", "strong_abs"}
+_FLOW_RULE_FIELDS = {"neutral_abs_max", "strong_abs", "supply_change_horizon_weights"}
+_FLOW_SUPPLY_HORIZONS = ("7d", "30d", "90d")
 _EXECUTION_FIELDS = {
     "timeframe",
     "preferred_history_days",
@@ -1349,7 +1350,19 @@ def _parse_factor_rules(
     strong_abs = _number(flows["strong_abs"], "factor_rules.flows.strong_abs", minimum=neutral_abs_max)
     if strong_abs <= neutral_abs_max:
         raise PolicyError("factor_rules.flows.strong_abs must exceed neutral_abs_max")
-    parsed_flows = {"neutral_abs_max": neutral_abs_max, "strong_abs": strong_abs}
+    supply_weights = _weighted_map(
+        flows["supply_change_horizon_weights"],
+        "factor_rules.flows.supply_change_horizon_weights",
+    )
+    if set(supply_weights) != set(_FLOW_SUPPLY_HORIZONS):
+        raise PolicyError(
+            "factor_rules.flows.supply_change_horizon_weights must contain 7d, 30d, and 90d"
+        )
+    parsed_flows = {
+        "neutral_abs_max": neutral_abs_max,
+        "strong_abs": strong_abs,
+        "supply_change_horizon_weights": {horizon: supply_weights[horizon] for horizon in _FLOW_SUPPLY_HORIZONS},
+    }
     return {
         "trend": parsed_trend,
         "relative_strength": parsed_relative,

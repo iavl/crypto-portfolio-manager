@@ -116,6 +116,15 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             self.assertTrue(event_path.exists())
 
     def test_persist_marks_same_point_provider_revision_explicitly(self):
+        # BNB network gas fees must carry the dailyFees contract; a bare value
+        # would be indistinguishable from the application-inclusive aggregate.
+        contract = {
+            "source_dataset": "summary/fees",
+            "fees_data_type": "dailyFees",
+            "methodology": "daily_fees_latest_complete_utc_day",
+            "anchor_date": "2026-09-09T00:00:00Z",
+            "source_series_hash": "a" * 64,
+        }
         with tempfile.TemporaryDirectory() as directory:
             result_path = Path(directory) / "observations.jsonl"
             event_path = Path(directory) / "events.jsonl"
@@ -130,6 +139,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
                     "fetched_at": "2026-09-10T06:00:00Z",
                     "source": "defillama",
                     "confidence": "HIGH",
+                    "metadata": dict(contract),
                 }
             )
             persist_metric_result(first, observation_path=result_path, event_path=event_path)
@@ -144,6 +154,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
                     "fetched_at": "2026-09-11T08:00:00Z",
                     "source": "defillama",
                     "confidence": "HIGH",
+                    "metadata": dict(contract),
                 }
             )
             persist_metric_result(revised, observation_path=result_path, event_path=event_path)
@@ -155,6 +166,20 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             # A repeated identical point stays a single record.
             persist_metric_result(revised, observation_path=result_path, event_path=event_path)
             self.assertEqual(len(read_metric_observations(result_path)), 2)
+        with self.assertRaises(ValueError):
+            normalize_metric_result(
+                {
+                    "asset": "BNB",
+                    "metric_key": "onchain.blockspace_fees",
+                    "value": 3138593.24,
+                    "unit": "USD",
+                    "period": "1d",
+                    "observed_at": "2026-09-10T00:00:00Z",
+                    "fetched_at": "2026-09-10T06:00:00Z",
+                    "source": "defillama",
+                    "confidence": "HIGH",
+                }
+            )
         facts = build_factor_facts(
             [_observation(100, "2026-09-01T00:00:00Z"), _observation(110, "2026-09-02T00:00:00Z")],
             symbol="ETH",

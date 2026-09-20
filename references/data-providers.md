@@ -18,7 +18,7 @@ those contracts; it is not a second schema or routing implementation.
 | Bybit | market and derivatives fallback | None | spot candles, funding, OI, account ratio | second market/derivatives route; no delivery basis |
 | CoinGecko | broad market valuation | `COINGECKO_API_KEY` | market cap, FDV, historical market cap/FDV | primary valuation; credential-gated |
 | BGeometrics | latest BTC MVRV Z-score | None | `btc_valuation.mvrv_zscore` from `/v1/mvrv-zscore/last` | free/no-token; cache at least 24h; low quota |
-| DeFiLlama | protocol and chain fundamentals | None | TVL, fees, revenue, fee/revenue multiple, ETH/BNB blockspace fees | structured route; registered |
+| DeFiLlama | protocol and chain fundamentals | None | TVL, fees, revenue, fee/revenue multiple (non-BNB), BNB network gas fees and daily-fee windows | structured route; registered |
 | Alternative.me | market sentiment context | None | Fear & Greed | market-context route; registered |
 | Chain liveness | current canonical chain progress | None | BTC/ETH/BNB/SOL progress and finality | structured chain route; registered |
 | Coin Metrics Community | catalog-aware network and valuation fallback | None | network metrics, cycle inputs, `CapMrktEstUSD`, attribution | fallback after CoinGecko where supported |
@@ -56,7 +56,8 @@ remain final diagnostics rather than being converted to success.
 Provider priority is deterministic: Binance then Bybit for spot/OHLCV and
 derivatives; Binance only for delivery basis; CoinGecko then catalog-aware Coin
 Metrics for market cap and BTC-native valuation; FRED for macro/liquidity;
-DeFiLlama for protocol fundamentals and ETH/BNB blockspace fees; SoSoValue for
+DeFiLlama for protocol fundamentals, BNB network gas fees and daily-fee windows,
+and the ETH blockspace fallback; SoSoValue for
 ETF flows; Blockchair for ETH rolling transfer volume; Coin Metrics for
 catalog-supported network and BTC cycle data; and the fixed EventScanner catalog
 for events. BGeometrics is the no-key BTC MVRV Z route; ETH monetary/realized
@@ -199,32 +200,60 @@ explicit identifiers are `ETH → ethereum`, `AAVE → aave`, `SOL → solana`,
 | Method | Endpoint | Metrics |
 |---|---|---|
 | GET | `https://api.llama.fi/v2/chains` | chain TVL for ETH/SOL/BNB |
-| GET | `https://api.llama.fi/v2/historicalChainTvl/BSC` | BNB capital flows (`flows.bnb_chain_tvl_change_{1d,7d,30d}`) |
 | GET | `https://api.llama.fi/tvl/{identifier}` | lightweight Aave TVL |
 | GET | `https://api.llama.fi/summary/fees/{identifier}` | fees and fee context |
 | GET | `https://api.llama.fi/summary/fees/{identifier}?dataType=dailyRevenue` | revenue history |
+| GET | `https://api.llama.fi/summary/fees/bsc?dataType=dailyFees` | BNB network gas fees, 30/90-day windows, `onchain.blockspace_fees` |
 | GET | `https://api.llama.fi/protocol/{identifier}` | protocol payload where implemented |
 
 Outputs include `fundamentals.tvl`, `fundamentals.fees_30d`,
-`fundamentals.revenue_30d`, and `valuation.fee_revenue_multiple` where the response supplies the required
-inputs. DeFiLlama is not the canonical broad market-cap/FDV provider; TVL or
-price is never used to fabricate those values.
+`fundamentals.revenue_30d`, and `valuation.fee_revenue_multiple` where the
+response supplies the required inputs. BNB is deliberately excluded from the fee
+and revenue family: DeFiLlama defines an application's `dailyRevenue` as a fixed
+share of its `dailyFees`, so scoring both as independent BNB growth evidence
+would count one source twice, and "fees divided by revenue" is not a price
+valuation multiple. BNB instead uses its own market-cap-to-annualized-network-fees
+scale, its on-chain fee windows, and TVL/stablecoin scale. DeFiLlama is not the
+canonical broad market-cap/FDV provider; TVL or price is never used to fabricate
+those values.
 
 Chain stablecoin supply is a separate route:
 `GET https://stablecoins.llama.fi/stablecoincharts/{Ethereum|Solana|BSC}`;
-global supply uses `/stablecoincharts/all`. The parser reads
+global supply uses `/stablecoincharts/all`. The scale parser reads
 `totalCirculatingUSD.peggedUSD`, filters by `as_of`, and retains the chain or
-global scope. It never reads `stablecoinLiquidity` from
-`api.llama.fi/protocol/{identifier}`.
+global scope. The BNB supply-proxy parser reads the nominal
+`totalCirculating.peggedUSD` instead (see below), and neither parser reads
+`stablecoinLiquidity` from `api.llama.fi/protocol/{identifier}`.
 
 BNB capital flows: no BNB ETF exists, so BNB's `capital_flows` factor uses the
-free `historicalChainTvl/BSC` series. One request computes the fractional 1d/
-7d/30d chain-TVL changes; each observation carries its ratio explicitly in
-`metadata.normalized_flow_ratio` so the flow factor consumes it without a
-denominator lookup. The parser fails closed on short (<32 points) or stale
-(>3 days) history. Chain-level moves are larger than ETF netflow/AUM ratios,
-so the scored signal is the direction of capital entering or leaving BNB-chain
-DeFi, with the shared flow thresholds saturating more often than ETF data.
+free BSC USD-pegged stablecoin supply series
+(`stablecoincharts/BSC`, field `totalCirculating.peggedUSD`). This is a
+**stablecoin supply expansion/contraction proxy** — not a proven external net
+inflow and not equivalent to BNB buying. One request yields the 7d/30d/90d
+fractional changes; the scored signal is the *absolute magnitude* of each change
+ranked against the same horizon's changes over the preceding 365 days (at least
+180 samples, current value excluded from its own sample). Each observation
+carries its own change, percentile, sample count, calibration state, anchor/base
+day and a source-series hash so the factor never re-derives a distribution it
+cannot verify. The nominal `peggedUSD` supply is used so a pure price move in
+`totalCirculatingUSD` cannot masquerade as an inflow; `totalMintedUSD` and
+`totalBridgedToUSD` are not added back on top of an already-aggregated total.
+Every horizon keeps its own failure: a dated conflict, a future row, a missing
+exact endpoint, a non-positive base, or an anchor older than three days fails
+closed, and one horizon's failure never removes the others. Fewer than 180
+usable samples leaves that horizon uncallibrated rather than awarding it full
+strength, and a non-zero change against an all-zero history is uncalibrated
+rather than scored at the maximum rank.
+
+BNB network gas fees: `onchain.blockspace_fees` for BNB comes from
+`summary/fees/bsc?dataType=dailyFees`, whose `totalDataChart` is user-paid gas
+fees. The application-inclusive `overview/fees/BSC` aggregate is **not** used,
+and a cached observation produced by that older method is rejected before reuse
+rather than migrated. One daily-fee history yields `onchain.blockspace_fees`
+(latest complete UTC day) plus the 30/90-day window totals and their
+window-over-window changes (`onchain.bnb_network_fees_*`); a missing day inside
+a window fails that horizon only. These values are USD-denominated and move with
+both gas usage and the BNB price; no precise native-token fee series is claimed.
 
 ## Alternative.me
 
@@ -265,9 +294,9 @@ data; no authenticated Coin Metrics tier is part of the current contract.
 
 Current approved asset IDs include `btc`, `eth`, `bnb`, and `aave`. Catalog
 support, not this document, decides whether a particular asset/metric is usable.
-BNB on-chain demand uses blockspace fees through DeFiLlama with catalog-aware
-Coin Metrics fallback; the current plan does not request block-by-block
-transaction counts, active addresses, or transfer volume for BNB.
+BNB on-chain demand uses network gas fees through DeFiLlama's `dailyFees` series
+with catalog-aware Coin Metrics fallback; the current plan does not request
+block-by-block transaction counts, active addresses, or transfer volume for BNB.
 
 | Data group | Implemented inputs |
 |---|---|
