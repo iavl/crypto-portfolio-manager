@@ -31,6 +31,10 @@ from .base import (
 from .http import HttpClient
 
 
+# The dedicated eth-staking sapi family (eth/position, wbeth/exchange-rate)
+# was retired by Binance (verified live 2026-09: -1000 deprecated / 404).
+# Staked ETH now surfaces either as WBETH in the spot wallet (valued via the
+# WBETHUSDT ticker) or as Simple Earn positions covered by the earn endpoints.
 DEFAULT_BASE_URL = "https://api.binance.com"
 RECV_WINDOW_MS = 5000
 _PAGE_SIZE = 1000
@@ -39,9 +43,6 @@ _COMPLETED_FLOW_STATUS = 6
 # Binance API error codes that mean the key/secret or its permissions are wrong.
 _AUTH_ERROR_CODES = (-2014, -2015)
 _TIMESTAMP_ERROR_CODE = -1021
-# WBETH position payloads have carried different field names across sapi
-# revisions; unknown shapes fail closed instead of being guessed.
-_WBETH_AMOUNT_FIELDS = ("holding", "wbethAmount", "amount", "wbeth")
 
 
 def _decimal_string(value: Any, field: str, *, minimum: float = 0.0) -> float:
@@ -302,43 +303,6 @@ class BinanceAccountClient:
         if not isinstance(payload, Mapping):
             raise ProviderDataError("binance simple earn account response is invalid")
         return payload
-
-    def eth_staking_wbeth(self) -> WalletBalance | None:
-        """WBETH holding from the ETH staking position endpoint.
-
-        WBETH usually also appears in the spot wallet; the importer treats
-        spot as authoritative and uses this only for cross-checking.
-        """
-        payload = self._signed_get("/sapi/v1/eth-staking/eth/position", {})
-        if not isinstance(payload, Mapping):
-            raise ProviderDataError("binance eth staking position response is invalid")
-        raw = None
-        for field in _WBETH_AMOUNT_FIELDS:
-            if field in payload and payload[field] is not None:
-                raw = payload[field]
-                break
-        if raw is None:
-            raise ProviderDataError(
-                "binance eth staking position payload shape is unrecognized; "
-                "update _WBETH_AMOUNT_FIELDS for the current sapi contract"
-            )
-        quantity = _decimal_string(raw, "eth staking WBETH quantity")
-        if quantity <= 0:
-            return None
-        return WalletBalance(asset="WBETH", quantity=quantity, wallet="eth_staking")
-
-    def wbeth_exchange_rate(self) -> float | None:
-        """WBETH-to-ETH exchange rate; None when sapi does not expose it."""
-        try:
-            payload = self._public_get("/sapi/v1/eth-staking/wbeth/exchange-rate", {})
-        except (ProviderResponseError, ProviderDataError):
-            return None
-        if not isinstance(payload, Mapping):
-            return None
-        raw = payload.get("exchangeRate")
-        if raw is None:
-            return None
-        return _decimal_string(raw, "WBETH exchange rate")
 
     def deposit_history(self, since_ms: int, until_ms: int) -> tuple[FlowEvent, ...]:
         return self._flow_history(

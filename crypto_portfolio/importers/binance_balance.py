@@ -24,10 +24,15 @@ from ..providers.binance_account import FlowEvent, WalletBalance
 
 BINANCE_API_ACCOUNT_SOURCE = "binance_api_account"
 # USD-pegged assets valued at 1.0 when no explicit price is supplied.
-STABLE_USD_SYMBOLS = {"USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP"}
-# Spot and the eth-staking endpoint can both report WBETH; beyond this
-# relative gap the endpoints disagree about the holding itself.
-_WBETH_CROSS_CHECK_TOLERANCE = 0.05
+# Keep in sync with the policy's stablecoin group.
+STABLE_USD_SYMBOLS = {"USDT", "USDC", "FDUSD", "TUSD", "DAI", "BUSD", "USDP", "USD1", "U"}
+
+
+def _earn_quantities(fetch: "BinanceAccountFetch") -> dict[str, float]:
+    quantities: dict[str, float] = {}
+    for wallet in (*fetch.flexible, *fetch.locked):
+        quantities[wallet.asset] = quantities.get(wallet.asset, 0.0) + wallet.quantity
+    return quantities
 
 
 def _price_for(symbol: str, prices: Mapping[str, float]) -> float:
@@ -77,7 +82,6 @@ class BinanceAccountFetch:
     spot: tuple[WalletBalance, ...] = ()
     flexible: tuple[WalletBalance, ...] = ()
     locked: tuple[WalletBalance, ...] = ()
-    wbeth_staking: WalletBalance | None = None
     prices: Mapping[str, float] = field(default_factory=dict)
     flow_events: tuple[FlowEvent, ...] = ()
     # (asset, event) -> USD price for a completed non-stable flow event.
@@ -95,8 +99,6 @@ class BinanceAccountFetch:
         if any(not isinstance(item, FlowEvent) for item in flow_events):
             raise ValueError("Binance account fetch flow_events must contain FlowEvent objects")
         object.__setattr__(self, "flow_events", flow_events)
-        if self.wbeth_staking is not None and not isinstance(self.wbeth_staking, WalletBalance):
-            raise ValueError("Binance account fetch wbeth_staking must be a WalletBalance or null")
         if not isinstance(self.prices, Mapping):
             raise ValueError("Binance account fetch prices must be a mapping")
 
@@ -106,6 +108,8 @@ class BinanceAccountImport:
     """Conversion output: canonical snapshot mapping plus diagnostics."""
 
     snapshot_mapping: dict[str, Any]
+    # Conversion-stage warnings only (wallet merges, exclusions, flows);
+    # model warnings come from snapshot_from_mapping separately.
     warnings: tuple[str, ...]
     flow_summary: dict[str, Any]
 
@@ -123,43 +127,48 @@ def _merge_positions(
     *,
     exclude_symbols: Iterable[str],
     min_value_usd: float,
-) -> tuple[dict[str, float], dict[str, float], list[str]]:
-    """Merge wallet balances per asset and value them; fail closed on gaps."""
+) -> tuple[dict[str, float], dict[str, float], dict[str, float], list[str]]:
+    """Merge wallet balances per asset and value them; fail closed on gaps.
+
+    Binance mirrors Simple Earn subscriptions as ``LD``-prefixed entries in
+    the spot wallet.  The sapi earn positions are live and authoritative,
+    so a mirrored ``LD<SYM>`` entry is skipped when the earn view already
+    counts ``SYM`` (counting both would double the exposure) and folded
+    into ``SYM`` when no earn counterpart exists.
+    """
     exclusions = {str(symbol).strip().upper() for symbol in exclude_symbols}
-    quantities: dict[str, float] = {}
-    for wallet in (*fetch.spot, *fetch.flexible, *fetch.locked):
-        quantities[wallet.asset] = quantities.get(wallet.asset, 0.0) + wallet.quantity
+    earn = _earn_quantities(fetch)
     warnings: list[str] = []
-    if fetch.wbeth_staking is not None:
-        staking_quantity = fetch.wbeth_staking.quantity
-        spot_quantity = quantities.get("WBETH")
-        if spot_quantity is None:
-            quantities["WBETH"] = staking_quantity
-        else:
-            # Spot is authoritative; the staking endpoint is a cross-check.
-            gap = abs(spot_quantity - staking_quantity) / max(spot_quantity, staking_quantity, 1e-12)
-            if gap > _WBETH_CROSS_CHECK_TOLERANCE:
-                raise ValueError(
-                    f"WBETH cross-check failed: spot {spot_quantity} vs eth-staking "
-                    f"{staking_quantity} (relative gap {gap:.2%}); refusing to pick one"
-                )
-            if gap > 1e-6:
+    quantities: dict[str, float] = {}
+    for wallet in fetch.spot:
+        asset, quantity = wallet.asset, wallet.quantity
+        if asset.startswith("LD") and len(asset) > 2:
+            base = asset[2:]
+            if earn.get(base, 0.0) > 0:
                 warnings.append(
-                    f"WBETH spot {spot_quantity} and eth-staking {staking_quantity} differ "
-                    f"by {gap:.4%}; using the spot quantity"
+                    f"{asset} is the spot mirror of the Simple Earn {base} position "
+                    f"(mirror {quantity} vs live {earn[base]}); earn position counted once"
                 )
+                continue
+            warnings.append(
+                f"{asset} has no Simple Earn counterpart; counted as {base}"
+            )
+            asset = base
+        quantities[asset] = quantities.get(asset, 0.0) + quantity
+    for asset, quantity in earn.items():
+        quantities[asset] = quantities.get(asset, 0.0) + quantity
     positions: dict[str, float] = {}
     prices_used: dict[str, float] = {}
     for symbol, quantity in sorted(quantities.items()):
         if quantity <= 0:
             continue
-        price = _price_for(symbol, fetch.prices)
-        value = quantity * price
         if symbol in exclusions:
             warnings.append(
-                f"{symbol} excluded by explicit request (quantity {quantity}, value ${value:,.2f})"
+                f"{symbol} excluded by explicit request (quantity {quantity})"
             )
             continue
+        price = _price_for(symbol, fetch.prices)
+        value = quantity * price
         if value < min_value_usd:
             warnings.append(
                 f"{symbol} excluded by dust threshold (value ${value:,.2f} < ${min_value_usd:,.2f})"
@@ -169,7 +178,7 @@ def _merge_positions(
         prices_used[symbol] = price
     if not positions:
         raise ValueError("Binance account fetch produced no valued positions")
-    return positions, prices_used, warnings
+    return positions, prices_used, earn, warnings
 
 
 def _derive_flow(
@@ -263,16 +272,13 @@ def snapshot_from_binance_account(
         or min_value_usd < 0
     ):
         raise ValueError("min_value_usd must be a non-negative number")
-    positions, prices, warnings = _merge_positions(
+    positions, prices, earn, warnings = _merge_positions(
         fetch, exclude_symbols=exclude_symbols, min_value_usd=min_value_usd
     )
     flow_fields, flow_summary = _derive_flow(fetch, manual_flow=manual_flow, warnings=warnings)
-    earn_quantities: dict[str, float] = {}
-    for wallet in (*fetch.flexible, *fetch.locked):
-        earn_quantities[wallet.asset] = earn_quantities.get(wallet.asset, 0.0) + wallet.quantity
     flow_summary["earn_value_usd"] = sum(
         quantity * _price_for(symbol, fetch.prices)
-        for symbol, quantity in earn_quantities.items()
+        for symbol, quantity in earn.items()
     )
     position_mappings = [
         {
@@ -293,13 +299,12 @@ def snapshot_from_binance_account(
         **flow_fields,
     }
     snapshot, resolved_policy, model_warnings = snapshot_from_mapping(mapping, policy=policy)
-    warnings = model_warnings + warnings
     imported = BinanceAccountImport(
         snapshot_mapping=mapping,
         warnings=tuple(warnings),
         flow_summary=flow_summary,
     )
-    return snapshot, resolved_policy, warnings, imported
+    return snapshot, resolved_policy, model_warnings + warnings, imported
 
 
 __all__ = [

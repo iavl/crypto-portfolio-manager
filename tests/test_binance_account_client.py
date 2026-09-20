@@ -194,29 +194,6 @@ class AccountEndpointParsingTests(unittest.TestCase):
         self.assertEqual(positions[0], WalletBalance("ETH", 1.25, "earn_locked"))
         self.assertEqual(positions[-1], WalletBalance("USDT", 50.0, "earn_locked"))
 
-    def test_wbeth_position_accepts_known_fields_and_fails_closed_on_new_shapes(self):
-        for field in ("holding", "wbethAmount"):
-            transport = FakeTransport(
-                {
-                    "/api/v3/time": [{"serverTime": 0}],
-                    "/sapi/v1/eth-staking/eth/position": [{field: "3.5"}],
-                }
-            )
-            self.assertEqual(
-                _client(transport).eth_staking_wbeth(),
-                WalletBalance("WBETH", 3.5, "eth_staking"),
-            )
-        transport = FakeTransport(
-            {
-                "/api/v3/time": [{"serverTime": 0}],
-                "/sapi/v1/eth-staking/eth/position": [{"somethingNew": "3.5"}],
-            }
-        )
-        with self.assertRaises(Exception) as raised:
-            _client(transport).eth_staking_wbeth()
-        self.assertIn("unrecognized", str(raised.exception))
-
-
 class FlowHistoryTests(unittest.TestCase):
     def test_completed_deposit_and_withdrawal_records_normalize(self):
         transport = FakeTransport(

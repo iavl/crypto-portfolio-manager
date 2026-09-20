@@ -129,23 +129,30 @@ only when both are present, otherwise intake fails closed with
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/v3/account` | spot balances (`free` + `locked`) |
+| `GET /api/v3/account` | spot balances (`free` + `locked`); `LD<SYM>` entries mirror Simple Earn positions and are counted once |
 | `GET /sapi/v1/simple-earn/flexible/position` | flexible Simple Earn positions |
 | `GET /sapi/v1/simple-earn/locked/position` | locked positions incl. redeeming amounts |
-| `GET /sapi/v1/eth-staking/eth/position` | WBETH holding (cross-checked against spot) |
 | `GET /sapi/v1/capital/deposit/hisrec`, `GET /sapi/v1/capital/withdraw/history` | completed external flows since the previous snapshot |
 | `GET /sapi/v1/simple-earn/account` | Simple Earn valuation cross-check (warning only) |
+
+The dedicated eth-staking sapi family (`eth-staking/eth/position`,
+`wbeth/exchange-rate`) was retired by Binance (verified live 2026-09:
+`-1000` deprecated / 404). Staked ETH therefore surfaces either as
+Simple Earn positions (covered above) or as WBETH in the spot wallet,
+valued via the public `WBETHUSDT` ticker.
 
 Requests are HMAC-SHA256 signed (`X-MBX-APIKEY` header, `timestamp` +
 `recvWindow` + `signature` query); the server-time offset is synced before
 signing and re-synced once on `-1021`. Signatures and API keys are redacted
 from all diagnostics. USD valuation uses public `<ASSET>USDT` tickers,
-USD-pegged stables at 1.0 with a `USDCUSDT` peg cross-check, and WBETH via the
-official exchange rate (falling back to the `WBETHUSDT` ticker). Completed
+USD-pegged stables at 1.0 (set kept in sync with the policy stablecoin
+group, incl. `USD1` and `U`) with a `USDCUSDT` peg cross-check. Completed
 flows are valued at the UTC-day 1d close and produce
 `CONFIRMED_AMOUNT`/`CONFIRMED_NONE` with the `EXCHANGE_DERIVED`
-classification source; in-flight transfers are reported but not counted. The
-intake never places orders and aborts without writing a partial snapshot.
+classification source; in-flight transfers are reported but not counted.
+Unpriceable airdropped dust can be excluded persistently via the
+user-local provider config `exclude_symbols` list. The intake never
+places orders and aborts without writing a partial snapshot.
 
 ## Bybit
 

@@ -83,7 +83,7 @@ hand in the Agent.
 
 Create a Binance API key with **read-only** permission (no trading, no
 withdrawals; an IP whitelist is recommended) and export both values, for
-example in `~/.zshrc`:
+example in `~/.zshenv` (sourced by every shell, so plain `python3` works):
 
 ```bash
 export BINANCE_API_KEY="..."
@@ -93,16 +93,20 @@ export BINANCE_API_SECRET="..."
 Then fetch a snapshot directly from the exchange:
 
 ```bash
-zsh -ic 'python3 scripts/binance_snapshot.py'          # dry run, prints the snapshot
-zsh -ic 'python3 scripts/binance_snapshot.py --persist' # append to snapshots.jsonl
+python3 scripts/binance_snapshot.py           # dry run, prints the snapshot
+python3 scripts/binance_snapshot.py --persist # append to snapshots.jsonl
 ```
 
 What it does:
 
 - merges spot, Simple Earn (flexible + locked, including redeeming
-  amounts), and ETH staking (WBETH) balances into one snapshot;
+  amounts), and staked ETH into one snapshot; Binance mirrors Simple Earn
+  subscriptions as `LD<SYM>` entries in the spot wallet — the live sapi
+  amounts win and each earn position is counted exactly once (mirrors are
+  reported as warnings); WBETH (the retired eth-staking service's wrapped
+  asset) appears as a normal spot asset valued via the `WBETHUSDT` ticker;
 - values positions with public `<ASSET>USDT` tickers (USD-pegged stables
-  at 1.0, WBETH via the official exchange rate);
+  at 1.0 with a `USDCUSDT` peg cross-check);
 - detects completed deposits/withdrawals since the previous snapshot and
   confirms the net flow automatically (`CONFIRMED_AMOUNT` or
   `CONFIRMED_NONE`, classification source `EXCHANGE_DERIVED`); in-flight
@@ -110,10 +114,17 @@ What it does:
 - carries no cost basis (the API has none): position P&L cost checks
   report `INSUFFICIENT_DATA`, while NAV/drawdown/weights are unaffected.
 
-Useful flags: `--exclude SYMBOL` (explicit dust/unknown handling),
+Useful flags: `--exclude SYMBOL` (one-off dust/unknown handling),
 `--min-value-usd N`, and `--flow-manual` (mark the flow `UNRESOLVED` and
-resolve it later via `scripts/cash_flow_resolutions.py`). Any fetch or
-valuation failure aborts without writing a partial snapshot.
+resolve it later via `scripts/cash_flow_resolutions.py`). Airdropped dust
+without a USDT pair can be excluded permanently via the user-local
+`~/.config/crypto-portfolio-manager/data-providers.json`:
+
+```json
+{"providers": {"binance_account": {"exclude_symbols": ["EON"]}}}
+```
+
+Any fetch or valuation failure aborts without writing a partial snapshot.
 
 ### 2.3 Using Structured JSON
 

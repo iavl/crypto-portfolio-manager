@@ -101,16 +101,17 @@ permission), fetch holdings deterministically instead of reading
 screenshots:
 
 ```bash
-zsh -ic 'python3 scripts/binance_snapshot.py --persist'
+python3 scripts/binance_snapshot.py --persist
 ```
 
-The command fetches spot, Simple Earn (flexible and locked), and ETH
-staking (WBETH) balances, values them through public tickers, and
-auto-detects completed deposits/withdrawals since the previous snapshot.
-It marks the flow `CONFIRMED_AMOUNT`/`CONFIRMED_NONE` with the
-`EXCHANGE_DERIVED` classification source and prints a flow summary; an
-exchange-derived confirmation must not be re-labeled by the Agent. Run it
-without `--persist` for a dry-run review first. If a stablecoin peg or
+The command fetches spot, Simple Earn (flexible and locked), and staked
+ETH balances, values them through public tickers, and auto-detects
+completed deposits/withdrawals since the previous snapshot. `LD<SYM>`
+spot mirrors of Simple Earn positions are counted exactly once (live
+amounts win). It marks the flow `CONFIRMED_AMOUNT`/`CONFIRMED_NONE` with
+the `EXCHANGE_DERIVED` classification source and prints a flow summary;
+an exchange-derived confirmation must not be re-labeled by the Agent. Run
+it without `--persist` for a dry-run review first. If a stablecoin peg or
 Simple-Earn cross-check warning appears, surface it in the report. When
 the user explicitly asks to resolve the flow manually, re-run with
 `--flow-manual` (the snapshot becomes `UNRESOLVED` / provisional) and use
@@ -527,7 +528,7 @@ python3 scripts/portfolio_snapshot.py path/to/fake-snapshot.json
 For the read-only Binance account intake, run:
 
 ```bash
-zsh -ic 'python3 scripts/binance_snapshot.py --persist'
+python3 scripts/binance_snapshot.py --persist
 ```
 
 If no prior history exists, establish the baseline with an initial validated

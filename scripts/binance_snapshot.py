@@ -29,7 +29,6 @@ from crypto_portfolio.importers.binance_balance import (
     BinanceAccountFetch,
     snapshot_from_binance_account,
 )
-from crypto_portfolio.models.portfolio import normalize_snapshot
 from crypto_portfolio.models.time import parse_timestamp
 from crypto_portfolio.providers.binance_account import BinanceAccountClient
 from crypto_portfolio.providers.config import (
@@ -37,6 +36,7 @@ from crypto_portfolio.providers.config import (
     provider_api_key,
     provider_api_secret,
     provider_enabled,
+    provider_settings,
 )
 from crypto_portfolio.providers.http import HttpClient
 from crypto_portfolio.state.snapshots import append_snapshot, default_snapshot_path, read_snapshots
@@ -71,22 +71,11 @@ def _market_prices(
 ) -> dict[str, float]:
     """USD price per symbol: stables 1.0, others the <SYM>USDT ticker."""
     prices: dict[str, float] = {}
-    eth_price = None
     for symbol in sorted(symbols):
         if symbol in STABLE_USD_SYMBOLS:
             prices[symbol] = 1.0
             continue
-        if symbol == "WBETH":
-            continue
         prices[symbol] = client.ticker_price(f"{symbol}USDT")
-        if symbol == "ETH":
-            eth_price = prices[symbol]
-    if "WBETH" in symbols:
-        rate = client.wbeth_exchange_rate()
-        if rate is not None and eth_price is not None:
-            prices["WBETH"] = rate * eth_price
-        else:
-            prices["WBETH"] = client.ticker_price("WBETHUSDT")
     if "USDT" in symbols or "USDC" in symbols:
         usdc_price = client.ticker_price("USDCUSDT")
         if abs(usdc_price - 1.0) > _STABLE_PEG_WARNING:
@@ -124,6 +113,16 @@ def _default_client(config: dict[str, Any]) -> BinanceAccountClient | None:
     )
 
 
+def _configured_excludes(config: dict[str, Any]) -> list[str]:
+    """Persistent exclude list for unpriceable dust from the user-local config."""
+    raw = provider_settings(PROVIDER_NAME, config).get("exclude_symbols", [])
+    if not isinstance(raw, list) or any(
+        not isinstance(symbol, str) or not symbol.strip() for symbol in raw
+    ):
+        raise ValueError("binance_account exclude_symbols must be a list of non-empty symbols")
+    return [symbol.strip().upper() for symbol in raw]
+
+
 def acquire(
     snapshot_path: Path,
     *,
@@ -134,9 +133,9 @@ def acquire(
     now: Any = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return the canonical snapshot mapping and its normalized report."""
-    exclude_symbols = list(exclude_symbols or [])
     now = now or datetime.now(timezone.utc)
     config = load_provider_config()
+    exclude_symbols = _configured_excludes(config) + list(exclude_symbols or [])
     if not provider_enabled(PROVIDER_NAME, config):
         _fail(
             f"{PROVIDER_NAME} is not enabled; set BINANCE_API_KEY and BINANCE_API_SECRET "
@@ -150,11 +149,17 @@ def acquire(
     spot = client.spot_balances()
     flexible = client.flexible_earn_positions()
     locked = client.locked_earn_positions()
-    wbeth_staking = client.eth_staking_wbeth()
 
-    symbols = {balance.asset for balance in (*spot, *flexible, *locked)}
-    if wbeth_staking is not None:
-        symbols.add(wbeth_staking.asset)
+    # Price the base symbol for everything: LD<SYM> spot mirrors fold into
+    # <SYM> during conversion, and excluded symbols need no price at all.
+    exclusions = {str(symbol).strip().upper() for symbol in exclude_symbols}
+    symbols = set()
+    for balance in (*spot, *flexible, *locked):
+        asset = balance.asset
+        if asset.startswith("LD") and len(asset) > 2:
+            asset = asset[2:]
+        if asset not in exclusions:
+            symbols.add(asset)
     warnings: list[str] = []
     prices = _market_prices(client, symbols, warnings)
 
@@ -171,7 +176,6 @@ def acquire(
         spot=spot,
         flexible=flexible,
         locked=locked,
-        wbeth_staking=wbeth_staking,
         prices=prices,
         flow_events=flow_events,
         flow_price=lambda asset, event: client.daily_close(
@@ -185,7 +189,7 @@ def acquire(
         min_value_usd=min_value_usd,
     )
     _earn_cross_check(client, imported.flow_summary.get("earn_value_usd", 0.0), warnings)
-    normalized = normalize_snapshot(imported.snapshot_mapping)
+    normalized = imported.normalize()
     normalized["warnings"].extend(warnings)
     normalized["flow_summary"] = imported.flow_summary
     return imported.snapshot_mapping, normalized

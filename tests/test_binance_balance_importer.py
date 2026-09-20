@@ -76,28 +76,57 @@ class MergeAndValuationTests(unittest.TestCase):
         self.assertTrue(any("excluded by explicit request" in warning for warning in warnings))
         self.assertTrue(any("DUST" in warning for warning in warnings))
 
-    def test_wbeth_spot_is_authoritative_with_cross_check(self):
-        spot_only = _fetch(
-            spot=(WalletBalance("WBETH", 2.0, "spot"), WalletBalance("USDT", 10000.0, "spot")),
-            prices={"WBETH": 3200.0},
+    def test_ld_spot_mirrors_are_counted_exactly_once(self):
+        # LD<SYM> spot entries mirror Simple Earn positions; the live sapi
+        # amounts are authoritative and must not be double-counted.
+        fetch = _fetch(
+            spot=(
+                WalletBalance("BTC", 0.0, "spot"),
+                WalletBalance("LDBTC", 0.42, "spot"),
+                WalletBalance("LDUSDT", 700.0, "spot"),
+            ),
+            flexible=(
+                WalletBalance("BTC", 0.43, "earn_flexible"),
+                WalletBalance("USDT", 800.0, "earn_flexible"),
+            ),
+            prices={"BTC": 60000.0},
         )
-        snapshot, _, warnings, _ = snapshot_from_binance_account(
-            _replace(spot_only, wbeth_staking=WalletBalance("WBETH", 2.0, "eth_staking"))
-        )
+        snapshot, _, warnings, _ = snapshot_from_binance_account(fetch)
         by_symbol = {position.symbol: position for position in snapshot.positions}
-        self.assertEqual(by_symbol["WBETH"].quantity, 2.0)
-        self.assertEqual(warnings, [])
+        self.assertAlmostEqual(by_symbol["BTC"].quantity, 0.43)
+        self.assertAlmostEqual(by_symbol["USDT"].quantity, 800.0)
+        self.assertNotIn("LDBTC", by_symbol)
+        self.assertNotIn("LDUSDT", by_symbol)
+        self.assertTrue(any("spot mirror" in warning for warning in warnings))
 
-        mismatched = _replace(spot_only, wbeth_staking=WalletBalance("WBETH", 2.5, "eth_staking"))
-        with self.assertRaises(ValueError) as raised:
-            snapshot_from_binance_account(mismatched)
-        self.assertIn("WBETH cross-check failed", str(raised.exception))
+    def test_ld_entry_without_earn_counterpart_folds_into_base(self):
+        fetch = _fetch(spot=(WalletBalance("LDETH", 1.5, "spot"),), prices={"ETH": 3000.0})
+        snapshot, _, warnings, _ = snapshot_from_binance_account(fetch)
+        by_symbol = {position.symbol: position for position in snapshot.positions}
+        self.assertAlmostEqual(by_symbol["ETH"].quantity, 1.5)
+        self.assertNotIn("LDETH", by_symbol)
+        self.assertTrue(any("counted as ETH" in warning for warning in warnings))
 
-    def test_wbeth_from_staking_endpoint_alone_is_included(self):
-        fetch = _fetch(wbeth_staking=WalletBalance("WBETH", 1.25, "eth_staking"))
-        fetch = _replace(fetch, prices={**fetch.prices, "WBETH": 3100.0})
+    def test_conversion_warnings_survive_the_normalized_report(self):
+        fetch = _fetch(
+            spot=(
+                WalletBalance("USDT", 1000.0, "spot"),
+                WalletBalance("LDUSDT", 50.0, "spot"),
+            ),
+            flexible=(WalletBalance("USDT", 900.0, "earn_flexible"),),
+        )
+        _, _, _, imported = snapshot_from_binance_account(fetch)
+        normalized = imported.normalize()
+        self.assertTrue(any("spot mirror" in warning for warning in normalized["warnings"]))
+
+    def test_user_stables_value_at_one_without_a_pair(self):
+        fetch = _fetch(
+            spot=(WalletBalance("U", 100.0, "spot"), WalletBalance("USD1", 200.0, "spot")),
+        )
         snapshot, _, _, _ = snapshot_from_binance_account(fetch)
-        self.assertIn("WBETH", {position.symbol for position in snapshot.positions})
+        by_symbol = {position.symbol: position for position in snapshot.positions}
+        self.assertEqual(by_symbol["U"].value_usd, 100.0)
+        self.assertEqual(by_symbol["USD1"].value_usd, 200.0)
 
     def test_empty_valued_portfolio_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -178,21 +207,6 @@ class PersistenceRoundTripTests(unittest.TestCase):
             self.assertEqual(records[0]["cash_flow_resolution_status"], "CONFIRMED_NONE")
 
 
-def _replace(fetch: BinanceAccountFetch, **changes) -> BinanceAccountFetch:
-    fields = {
-        "captured_at": fetch.captured_at,
-        "spot": fetch.spot,
-        "flexible": fetch.flexible,
-        "locked": fetch.locked,
-        "wbeth_staking": fetch.wbeth_staking,
-        "prices": fetch.prices,
-        "flow_events": fetch.flow_events,
-        "flow_price": fetch.flow_price,
-    }
-    fields.update(changes)
-    return BinanceAccountFetch(**fields)
-
-
 class CommandIntegrationTests(unittest.TestCase):
     """scripts/binance_snapshot.py acquire() against a fake account client."""
 
@@ -214,14 +228,8 @@ class CommandIntegrationTests(unittest.TestCase):
             def locked_earn_positions(self):
                 return ()
 
-            def eth_staking_wbeth(self):
-                return None
-
             def simple_earn_totals(self):
                 return {}
-
-            def wbeth_exchange_rate(self):
-                return None
 
             def ticker_price(self, symbol):
                 return {"BTCUSDT": 60000.0, "USDCUSDT": 1.0001}[symbol]
