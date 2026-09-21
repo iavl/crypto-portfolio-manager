@@ -285,6 +285,8 @@ class ExecutionPlan:
     btc_cycle_summary: Mapping[str, Any] | None = None
     effective_deployment_factor: float | None = None
     overlay_warnings: tuple[str, ...] = ()
+    gate_details: Mapping[str, Any] | None = None
+    planning_context: Mapping[str, Any] | None = None
 
     @property
     def reserve_fraction(self) -> float:
@@ -458,6 +460,14 @@ class ExecutionPlan:
         if len(warnings) != len(set(warnings)):
             raise ValueError("overlay_warnings must contain unique values")
         object.__setattr__(self, "overlay_warnings", warnings)
+        if self.planning_context is not None:
+            if not isinstance(self.planning_context, Mapping):
+                raise ValueError("planning_context must be an object")
+            object.__setattr__(self, "planning_context", freeze_packet_value(self.planning_context))
+        if self.gate_details is not None:
+            if not isinstance(self.gate_details, Mapping):
+                raise ValueError("gate_details must be an object")
+            object.__setattr__(self, "gate_details", freeze_packet_value(self.gate_details))
         if self.technical_summary is None:
             raise ValueError("execution plan requires technical_summary")
         if self.technical_summary is not None:
@@ -593,6 +603,8 @@ class ExecutionPlan:
             "tranches": [item.as_dict() for item in self.tranches],
             "invalidation": self.invalidation,
             "rationale": self.rationale,
+            "gate_details": thaw_packet_value(self.gate_details),
+            "planning_context": thaw_packet_value(self.planning_context),
             "ohlcv_hash": self.ohlcv_hash,
             "volume_profile_hash": self.volume_profile_hash,
         }
@@ -623,7 +635,7 @@ class ExecutionPlan:
             "planned_amount_usd", "reserve_amount_usd", "reserve_policy", "current_price", "entry_mode",
             "technical_confidence", "tranches", "invalidation", "rationale", "ohlcv_hash",
             "volume_profile_hash", "volume_profile_metadata", "ohlcv_metadata", "technical_summary",
-            "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings",
+            "positioning_summary", "btc_cycle_summary", "effective_deployment_factor", "overlay_warnings", "gate_details", "planning_context",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -660,6 +672,8 @@ class ExecutionPlan:
             btc_cycle_summary=value.get("btc_cycle_summary"),
             effective_deployment_factor=value.get("effective_deployment_factor"),
             overlay_warnings=tuple(value.get("overlay_warnings", ())),
+            gate_details=value.get("gate_details"),
+            planning_context=value.get("planning_context"),
         )
 
 

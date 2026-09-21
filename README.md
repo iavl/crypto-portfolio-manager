@@ -162,6 +162,13 @@ Profile results live under `volume-profiles/sha256/<profile_hash>.json`.
 Volume Profile is a proxy for historical volume concentration, not an exact
 holder cost basis.
 
+Each persisted execution plan must be reproducible from those stored inputs;
+the plan hash alone is insufficient. The final report distinguishes strategic
+targets, approved budgets, conditional proposals, reserved budgets, and later
+confirmed fills. Read-only account snapshots also keep NAV ownership separate
+from immediately available funding: only verified spot-free value is available,
+while locked/Earn/redeeming value is restricted and missing facts stay unknown.
+
 Provider responses and recording manifests are cached under
 `provider-cache/`; for schemas and cleanup see
 [Data Providers](references/data-providers.md). Position P&L is the

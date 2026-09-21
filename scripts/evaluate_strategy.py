@@ -32,6 +32,7 @@ from crypto_portfolio.engine.strategy_replay import (  # noqa: E402
     load_replay_reviews,
     replay_benchmarks,
     replay_strategy,
+    research_readiness,
 )
 from crypto_portfolio.models.policy import load_policy  # noqa: E402
 
@@ -97,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
             research_variant=args.research_variant
         )
         result["benchmarks"] = replay_benchmarks(reviews)
+    if isinstance(result, dict):
+        result.setdefault("research_readiness", research_readiness(reviews))
     payload = json.dumps(result, indent=2, ensure_ascii=False, default=str)
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")

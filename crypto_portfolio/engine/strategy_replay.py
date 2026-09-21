@@ -121,6 +121,7 @@ class ReplayReview:
     next_returns: Mapping[str, float] = field(default_factory=dict)
     technical_inputs: Mapping[str, Any] = field(default_factory=dict)
     execution_plans: Mapping[str, Any] = field(default_factory=dict)
+    execution_bars: Mapping[str, tuple[Mapping[str, Any], ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _parse_as_of(self.as_of)
@@ -152,6 +153,15 @@ class ReplayReview:
                     raise ValueError(f"execution_plans.{symbol}.{name} must be finite and >= 0")
             normalized_plans[symbol] = dict(raw_plan)
         object.__setattr__(self, "execution_plans", normalized_plans)
+        if not isinstance(self.execution_bars, Mapping):
+            raise ValueError("execution_bars must be an object")
+        normalized_bars = {}
+        for raw_symbol, raw_bars in self.execution_bars.items():
+            symbol = str(raw_symbol).strip().upper()
+            if not symbol or isinstance(raw_bars, (str, bytes)) or not isinstance(raw_bars, (list, tuple)):
+                raise ValueError("execution_bars must map symbols to bar sequences")
+            normalized_bars[symbol] = tuple(dict(item) for item in raw_bars)
+        object.__setattr__(self, "execution_bars", normalized_bars)
         if isinstance(self.thesis_broken, str):
             raise ValueError("thesis_broken must be a sequence of symbols")
         broken = tuple(str(item).strip().upper() for item in self.thesis_broken if str(item).strip())
@@ -188,6 +198,7 @@ class ReplayReview:
             "regime_inputs", "new_cash", "thesis_broken", "hard_action_reasons",
             "next_returns", "technical_inputs",
             "execution_plans",
+            "execution_bars",
         }
         unknown = sorted(set(value) - known)
         if unknown:
@@ -207,6 +218,7 @@ class ReplayReview:
             next_returns=value.get("next_returns", {}),
             technical_inputs=value.get("technical_inputs", {}),
             execution_plans=value.get("execution_plans", {}),
+            execution_bars=value.get("execution_bars", {}),
         )
 
 
@@ -217,6 +229,36 @@ def _max_drawdown(navs: Sequence[float]) -> float:
         peak = max(peak, nav)
         worst = min(worst, nav / peak - 1.0)
     return worst
+
+
+def research_readiness(reviews: Sequence[ReplayReview]) -> dict[str, Any]:
+    """State whether the frozen sample can support a strategy policy choice."""
+
+    days = {review.moment.date() for review in reviews}
+    regimes = {
+        str(review.regime_inputs.get("regime", review.regime_inputs.get("state", "UNKNOWN"))).upper()
+        for review in reviews
+    }
+    planned = sum(bool(review.execution_plans) for review in reviews)
+    fill_capable = sum(bool(review.execution_bars) for review in reviews)
+    reasons = []
+    if len(days) < 90:
+        reasons.append("FEWER_THAN_90_DISTINCT_REVIEW_DAYS")
+    if len(regimes - {"UNKNOWN"}) < 2:
+        reasons.append("INSUFFICIENT_REGIME_DIVERSITY")
+    if planned < 30:
+        reasons.append("FEWER_THAN_30_FROZEN_EXECUTION_PLANS")
+    if fill_capable < 30:
+        reasons.append("FEWER_THAN_30_FILL_CAPABLE_REVIEWS")
+    return {
+        "status": "INSUFFICIENT_EVIDENCE" if reasons else "READY_FOR_PREREGISTERED_COMPARISON",
+        "distinct_review_days": len(days),
+        "observed_regime_labels": sorted(regimes),
+        "reviews_with_execution_plans": planned,
+        "reviews_with_execution_bars": fill_capable,
+        "reasons": reasons,
+        "decision_effect": "NO_POLICY_CHANGE" if reasons else "RESEARCH_ONLY",
+    }
 
 
 def replay_strategy(
@@ -308,8 +350,11 @@ def replay_strategy(
         executable = [a for a in signals.confirmed(view, rebalance.actions)
                       if a.action in {"INCREASE", "REDUCE", "EXIT"} and a.symbol not in stables]
         entry_waits: list[dict[str, Any]] = []
+        entry_outcomes: list[dict[str, Any]] = []
         if review.execution_plans:
             from dataclasses import replace as replace_action
+            from .execution_replay import simulate_execution_plan
+            from ..models.policy import policy_hash
 
             gated: list[Any] = []
             for action in executable:
@@ -319,6 +364,9 @@ def replay_strategy(
                     continue
                 plan_action = str(raw_plan.get("action", "")).strip().upper()
                 planned = float(raw_plan.get("planned_amount_usd", 0.0) or 0.0)
+                planning_context = raw_plan.get("planning_context")
+                if planning_context and planning_context.get("policy_hash") != policy_hash(resolved):
+                    raise ValueError("replay execution plan policy does not match the candidate policy")
                 if plan_action == "WAIT" or planned <= 0:
                     entry_waits.append({
                         "symbol": action.symbol,
@@ -327,7 +375,27 @@ def replay_strategy(
                         "reason": raw_plan.get("rationale", "entry plan returned WAIT"),
                     })
                     continue
-                gated.append(replace_action(action, amount_usd=min(action.amount_usd, planned)))
+                bars = review.execution_bars.get(action.symbol)
+                if bars is None:
+                    entry_waits.append({
+                        "symbol": action.symbol,
+                        "approved_amount_usd": action.amount_usd,
+                        "planned_amount_usd": planned,
+                        "reason": "EXECUTION_BARS_REQUIRED_FOR_FILL_SIMULATION",
+                    })
+                    continue
+                outcome = simulate_execution_plan(raw_plan, bars, decision_as_of=review.as_of)
+                entry_outcomes.append({"symbol": action.symbol, **outcome})
+                filled = min(action.amount_usd, outcome["filled_amount_usd"])
+                if filled <= 1e-9:
+                    entry_waits.append({
+                        "symbol": action.symbol,
+                        "approved_amount_usd": action.amount_usd,
+                        "planned_amount_usd": planned,
+                        "reason": outcome["status"],
+                    })
+                    continue
+                gated.append(replace_action(action, amount_usd=filled))
             executable = gated
         candidate_projection = None
         if research_variant == "confirm_2" or review.execution_plans:
@@ -394,6 +462,7 @@ def replay_strategy(
             "decision": rebalance.decision,
             "executable_actions": len(executable),
             "entry_plan_waits": entry_waits,
+            "entry_outcomes": entry_outcomes,
             "execution_plans_used": bool(review.execution_plans),
             "staged_actions": sum(1 for a in executable if a.staging_applied),
             "actions": [a.as_dict() for a in executable],
@@ -416,6 +485,7 @@ def replay_strategy(
     sharpe_like = (annualized / volatility) if volatility > 0 else None
     return {
         "research_variant": research_variant,
+        "research_readiness": research_readiness(reviews),
         "reviews": count,
         "final_nav": final_nav,
         "total_return": total_return,
@@ -427,7 +497,10 @@ def replay_strategy(
             "risk_free_rate": 0.0,
             "annualization": "365.25-day year scaled by mean review cadence",
             "entry_execution": (
-                "frozen execution_plans applied; WAIT plans remain in stable sleeve"
+                "future bars confirm at most one tranche per bar; wick-only touches do not fill; "
+                "explicit fill_fraction controls partial liquidity"
+                if any(review.execution_bars for review in reviews)
+                else "frozen WAIT plans are honored; non-WAIT plans require future execution bars"
                 if any(review.execution_plans for review in reviews)
                 else "configuration-level approved actions; no frozen execution plans supplied"
             ),
@@ -515,4 +588,5 @@ __all__ = [
     "load_replay_reviews",
     "replay_benchmarks",
     "replay_strategy",
+    "research_readiness",
 ]

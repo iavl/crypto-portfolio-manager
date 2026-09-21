@@ -141,12 +141,22 @@ held-portfolio decision. Bands apply exactly once: `HIGH` deploys fully,
 `MEDIUM` allows increases scaled by the configured deployment factor, `LOW`
 blocks new increases without force-selling otherwise valid holdings.
 
+The confidence record is reproducible: its action scope, normalized exposure
+weights, component inputs, component weights, caps, penalties, raw score, final
+score, and policy hash are validated together. For `INCREASE`, asset evidence
+is scoped to the assets actually approved for new exposure. Existing BTC or
+ETH confidence cannot dilute weak evidence for a new satellite position.
+
 Data Confidence measures coverage, freshness, source quality, and same-metric
 redundancy. Mixed factor directions are market information and are represented
 once as Signal Agreement. Factor evidence is judged by policy-configured
 minimum primary/total evidence, so supporting or optional provider outages do
 not automatically force `LOW`. Security, chain liveness, unresolved required
 cash flow, and confirmed severe events remain conservative gates.
+
+Confidence never overrides entry timing. A `HIGH` strategic approval can still
+produce a `GATE_HOLD` and zero current proposal when the technical plan rejects
+chasing price.
 
 ## 7. BTC-Specific Strategy
 

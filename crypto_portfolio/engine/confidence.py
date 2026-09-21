@@ -94,6 +94,13 @@ class DecisionScope:
                 raise ValueError("decision scope exposure_weights contains an empty asset")
             weight = _bounded(raw_weight, f"decision scope exposure_weights.{asset}")
             weights[asset] = weight
+        if set(weights) - set(assets):
+            raise ValueError("decision scope weights contain unrelated assets")
+        total = sum(weights.values())
+        if weights and total <= 0:
+            raise ValueError("decision scope exposure must be positive")
+        if total:
+            weights = {asset: value / total for asset, value in weights.items()}
         object.__setattr__(self, "action", action)
         object.__setattr__(self, "relevant_assets", assets)
         object.__setattr__(self, "exposure_weights", weights)
@@ -261,11 +268,35 @@ def action_derived_scope(
     return None
 
 
+def canonical_decision_scope(actions, current_weights, target_weights, *, stable_symbols=()):
+    stables = set(stable_symbols)
+    records = [a.as_dict() if hasattr(a, "as_dict") else dict(a) for a in actions]
+    risky = [a for a in records if a["symbol"] not in stables]
+    increases = [a for a in risky if a["action"] == "INCREASE"]
+    decreases = [a for a in risky if a["action"] in {"REDUCE", "EXIT"}]
+    if increases:
+        action, selected, basis = "INCREASE", increases, target_weights
+    elif decreases:
+        action = "REDUCE" if any(a["action"] == "REDUCE" for a in decreases) else "EXIT"
+        selected, basis = decreases, current_weights
+    else:
+        action = "NO_TRADE" if any(a["action"] == "NO_TRADE" for a in records) else "HOLD"
+        selected = [a for a in risky if current_weights.get(a["symbol"], a.get("current_weight", 0)) > 0]
+        basis = current_weights
+    assets = tuple(a["symbol"] for a in selected)
+    weights = {a["symbol"]: basis.get(a["symbol"], a.get("target_weight" if increases else "current_weight", 0)) for a in selected}
+    if weights and not sum(weights.values()):
+        weights = {}
+    return DecisionScope(action, assets, weights)
+
+
 def validate_decision_confidence_scope(
     actions: Iterable[Any],
     decision_confidence: DecisionConfidence | Mapping[str, Any] | None,
     *,
     stable_symbols: Iterable[str] = (),
+    current_weights: Mapping[str, float] | None = None,
+    target_weights: Mapping[str, float] | None = None,
 ) -> None:
     """Reject an executable decision whose confidence scope contradicts its actions.
 
@@ -275,6 +306,7 @@ def validate_decision_confidence_scope(
     scope cannot exclude portfolio-level constraints. Stable settlement legs
     are ignored on both sides, matching the packet-level scope builder.
     """
+    actions = tuple(actions)
     derived = action_derived_scope(actions, stable_symbols=stable_symbols)
     if derived is None:
         return
@@ -300,6 +332,15 @@ def validate_decision_confidence_scope(
         raise ValueError(
             "decision confidence scope omits executable asset(s): " + ", ".join(sorted(missing))
         )
+
+    if current_weights is not None and target_weights is not None:
+        expected = canonical_decision_scope(actions, current_weights, target_weights, stable_symbols=stable_symbols)
+        supplied = DecisionScope(**scope)
+        if (supplied.action != expected.action or set(supplied.relevant_assets) != set(expected.relevant_assets)
+            or set(supplied.exposure_weights) != set(expected.exposure_weights)
+            or any(not math.isclose(supplied.exposure_weights[s], w, abs_tol=1e-9) for s, w in expected.exposure_weights.items())):
+            raise ValueError("decision confidence scope does not match canonical action exposure")
+
 
 
 def _as_record(value: Any) -> Mapping[str, Any]:
@@ -887,7 +928,7 @@ def _component_score(
         return aggregate_asset_evidence_confidence(assets, weights, policy=policy), str(value.get("explanation", ""))
     if isinstance(value, ConfidenceResult):
         return value.score, f"{name} confidence"
-    return _scalar_component_score(value, name), ""
+    return _scalar_component_score(value, name), (str(value.get("explanation", "")) if isinstance(value, Mapping) else "")
 
 
 def calculate_decision_confidence(
@@ -947,7 +988,21 @@ def calculate_decision_confidence(
     )
     if parsed_penalties:
         explanation += "; soft evidence penalties are applied once"
+    from ..models.factor_packet import thaw_packet_value
+    from ..models.policy import policy_hash, resolve_policy
+    input_components = {}
+    for name, value in components.items():
+        if isinstance(value, ConfidenceResult):
+            value = {"score": value.score, "evidence_ids": list(value.evidence_ids), "source": name,
+                     "explanation": f"{name} confidence"}
+        elif isinstance(value, Mapping) and "raw_score" in value:
+            value = {k: value[k] for k in ("score", "evidence_ids", "explanation") if k in value} | {"source": name}
+        input_components[name] = thaw_packet_value(value)
+    unspecified = [name for name, value in input_components.items()
+                   if not isinstance(value, Mapping) or not (value.get("evidence_ids") or value.get("assets") or value.get("source"))]
+    reasons.update(f"COMPONENT_PROVENANCE_UNSPECIFIED:{name}" for name in unspecified)
     return DecisionConfidence(
+        calculation_inputs={"components": input_components, "policy_hash": policy_hash(policy or resolve_policy())},
         raw_score=raw,
         score=score,
         band=_band_for_policy(score, policy),
@@ -955,7 +1010,7 @@ def calculate_decision_confidence(
         caps=parsed_caps,
         reasons=tuple(sorted(reasons)),
         evidence_ids=tuple(sorted({str(item) for item in evidence_ids})),
-        status="BLOCKED" if any(cap.ceiling < medium for cap in parsed_caps) else "PROVISIONAL" if parsed_caps or parsed_penalties else "AVAILABLE",
+        status="BLOCKED" if any(cap.ceiling < medium for cap in parsed_caps) else "PROVISIONAL" if parsed_caps or parsed_penalties or unspecified else "AVAILABLE",
         components=details,
         critical_blockers=blockers,
         allowed_actions=allowed,
@@ -989,5 +1044,54 @@ __all__ = [
     "signal_consistency_score",
     "source_quality_score",
     "top_confidence_drags",
+    "canonical_decision_scope",
+    "validate_confidence_calculation",
     "validate_decision_confidence_scope",
 ]
+
+
+def validate_confidence_calculation(value, *, policy, actions, current_weights, target_weights, assessments=None):
+    """Validate the frozen numerical receipt and bind asset inputs to assessments."""
+    if value is None:
+        return
+    from ..models.factor_packet import thaw_packet_value
+    from ..models.policy import policy_hash
+    result = value if isinstance(value, DecisionConfidence) else DecisionConfidence.from_mapping(value)
+    validate_decision_confidence_scope(actions, result, stable_symbols=policy.stable_symbols,
+                                       current_weights=current_weights, target_weights=target_weights)
+    inputs = thaw_packet_value(result.calculation_inputs)
+    if not inputs or inputs.get("policy_hash") != policy_hash(policy):
+        raise ValueError("CONFIDENCE_INPUTS_REQUIRED: confidence must bind canonical policy inputs")
+    components = inputs.get("components", {})
+    expected = calculate_decision_confidence(components, caps=result.caps,
+        blocked_actions=result.blocked_actions, evidence_ids=result.evidence_ids,
+        scope=result.scope, soft_penalties=result.soft_penalties, policy=policy)
+    for name in (
+        "raw_score",
+        "score",
+        "band",
+        "allowed_actions",
+        "blocked_actions",
+        "critical_blockers",
+        "reasons",
+        "status",
+    ):
+        if getattr(expected, name) != getattr(result, name):
+            raise ValueError(f"confidence calculation mismatch: {name}")
+    for name, component in expected.components.items():
+        actual = result.components.get(name, {})
+        if any(not math.isclose(actual.get(k, -1), component[k], abs_tol=1e-9) for k in ("score", "weight")):
+            raise ValueError(f"confidence component mismatch: {name}")
+    if assessments and result.scope:
+        scoped = result.scope["relevant_assets"]
+        expected_assets = {}
+        for symbol in scoped:
+            assessment = assessments.get(symbol)
+            if assessment is None:
+                raise ValueError("confidence asset assessment is missing")
+            a = assessment.as_dict() if hasattr(assessment, "as_dict") else assessment
+            score = a.get("confidence_score")
+            expected_assets[symbol] = score if score is not None else {"HIGH":.9,"MEDIUM":.7,"LOW":.3}[a["confidence"]]
+        expected_score = aggregate_asset_evidence_confidence(expected_assets, result.scope['exposure_weights'], policy=policy)
+        if not math.isclose(expected_score, result.components['asset_evidence']['score'], abs_tol=1e-9):
+            raise ValueError("confidence asset evidence does not match action-scoped assessments")

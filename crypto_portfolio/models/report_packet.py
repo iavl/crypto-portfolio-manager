@@ -361,6 +361,7 @@ class ReportPacket:
     calculation_context: Mapping[str, Any] | None = None
     review_diagnostics: Mapping[str, Any] | None = None
     target_attribution: Mapping[str, Any] | None = None
+    operation: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         review = _text(self.review_type, "review_type").upper()
@@ -516,6 +517,22 @@ class ReportPacket:
                 self, "post_action_projection", freeze_packet_value(self.post_action_projection, path="post_action_projection")
             )
 
+        from ..engine.operation import build_final_operation
+        from .policy import policy_from_mapping, resolve_policy
+        policy_value = (self.calculation_context or {}).get("resolved_policy")
+        operation_policy = policy_from_mapping(policy_value) if policy_value else resolve_policy()
+        action_values = [a.as_dict() if hasattr(a, "as_dict") else a for a in self.actions]
+        required_plans = {a["symbol"] for a in action_values if a["action"] == "INCREASE"
+                          and a["symbol"] not in operation_policy.stable_symbols
+                          and a.get("amount_usd", a.get("approved_amount_usd", 0)) > 0}
+        operation = None
+        if required_plans <= set(self.execution_plans or {}):
+            operation = build_final_operation(self.actions, self.execution_plans or {},
+                                              stable_symbols=operation_policy.stable_symbols).as_dict()
+        if self.operation is not None and thaw_packet_value(self.operation) != operation:
+            raise ValueError("operation does not match approved actions and execution plans")
+        object.__setattr__(self, "operation", freeze_packet_value(operation))
+
         if self.review_diagnostics is None:
             object.__setattr__(
                 self,
@@ -547,6 +564,7 @@ class ReportPacket:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "operation": thaw_packet_value(self.operation),
             "calculation_context": thaw_packet_value(self.calculation_context),
             "review_diagnostics": thaw_packet_value(self.review_diagnostics),
             "target_attribution": thaw_packet_value(self.target_attribution),

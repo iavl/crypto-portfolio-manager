@@ -37,12 +37,40 @@ fixed strings as follows. Headings not listed here keep their English text
 
 ## 1. Conclusion
 
-Start with the actual decision in 2–5 concise bullets, for example:
+Start with `FinalOperation`, the actual current proposal, in 2–5 concise
+bullets. Do not headline a strategic `REBALANCE` when the final operation is
+`WAIT`:
 
+- Current operation: `WAIT` / `PROPOSED` / `NO_TRADE`
+- Conditional buy proposals and matched funding: `<amount>`
+- Gate-held approved reserve: `<amount>`; no order exists for this amount
+- Confirmation status: `NOT_CONFIRMED`
 - Current regime: `DEFENSIVE (MEDIUM confidence)`
-- This round's recommendation: `NO TRADE` / deploy only part of available cash / rebalance specific assets
 - Top-priority action
 - Stablecoin target after actions
+
+Then show the strategic target and approved rebalance in a separate table. Use
+these terms consistently:
+
+| Layer | Meaning |
+|---|---|
+| Strategic target | Desired portfolio exposure under the allocation policy |
+| Approved amount | Maximum budget passed from rebalance to entry planning |
+| Proposed amount | Conditional limit proposal after entry gates |
+| Reserve | Approved budget still held in the stable sleeve |
+| Confirmed fill | Later append-only execution evidence; never inferred from a plan |
+
+Ordinary stable funding must equal final proposed risk buys net of independent
+risk-asset sales. A gated or reserved buy cannot create an immediate stable
+sale. Independent risk reductions remain visible even when every buy waits.
+
+### Funding readiness
+
+When provided, show verified immediately available value, restricted value,
+unknown value, observation time, and source. Total economic holdings remain in
+NAV. `RELEASE_RESTRICTIONS_OR_REFRESH_REQUIRED` and `CONVERSION_REQUIRED` are
+conditions, not actions performed by the system. Unknown fees, slippage, and
+redemption delay remain `--`/`UNAVAILABLE`, never zero.
 
 ### Decision basis
 
@@ -73,6 +101,11 @@ and actions are read, never recomputed by hand.
 When diagnostics or target attribution lack the required portfolio or
 allocation inputs, render their structured `UNAVAILABLE` status and reason;
 an omitted diagnostic is not evidence that the risk scenario is clear.
+When diagnostics are available, show `CURRENT`, `PLANNED_PROPOSALS`,
+`APPROVED_FULL`, and `STRATEGIC_TARGET` stress results separately. State that
+the fixed stress scenario is diagnostic rather than a forecast or a guaranteed
+loss limit. Passing allocation constraints or historical drawdown floors does
+not mean the forward stress loss is below the configured risk budget.
 
 ### Debug report
 

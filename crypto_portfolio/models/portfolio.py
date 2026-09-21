@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from .cash_flow import (
@@ -13,6 +13,7 @@ from .cash_flow import (
 )
 from .policy import Policy, policy_from_mapping, policy_hash, resolve_policy
 from .time import normalize_timestamp
+from .funding import FundingAvailability
 
 
 ASSET_TYPES = {"core", "satellite", "stablecoin", "cash", "other"}
@@ -51,6 +52,7 @@ class Position:
     current_price_usd: float | None = None
     average_cost_price_usd: float | None = None
     exchange_unrealized_pnl_usd: float | None = None
+    funding_availability: FundingAvailability | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or not self.symbol.strip():
@@ -106,6 +108,13 @@ class Position:
             "resolved_asset_type",
             _asset_type(self.resolved_asset_type, f"position {self.symbol}.resolved_asset_type"),
         )
+        if self.funding_availability is not None:
+            funding = self.funding_availability
+            if not isinstance(funding, FundingAvailability):
+                funding = FundingAvailability.from_mapping(funding)
+            if not math.isclose(funding.total_value_usd, self.value_usd, rel_tol=1e-9, abs_tol=1e-7):
+                raise ValueError("funding values must reconcile the economic position")
+            object.__setattr__(self, "funding_availability", funding)
         if self.asset_type_hint is not None:
             object.__setattr__(
                 self,
@@ -116,6 +125,7 @@ class Position:
     def as_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
+            "funding_availability": self.funding_availability.as_dict() if self.funding_availability else None,
             "quantity": self.quantity,
             "value_usd": self.value_usd,
             "cost_basis_usd": self.cost_basis_usd,
@@ -153,6 +163,24 @@ class PortfolioSnapshot:
         if len(symbols) != len(set(symbols)):
             duplicates = sorted({symbol for symbol in symbols if symbols.count(symbol) > 1})
             raise ValueError(f"duplicate position symbol(s): {', '.join(duplicates)}")
+        positions = tuple(
+            position
+            if position.funding_availability is not None
+            else replace(
+                position,
+                funding_availability=FundingAvailability(
+                    0,
+                    0,
+                    position.value_usd,
+                    self.timestamp,
+                    self.source or "UNSPECIFIED_INPUT",
+                ),
+            )
+            for position in positions
+        )
+        for position in positions:
+            if position.funding_availability and position.funding_availability.observed_at != self.timestamp:
+                raise ValueError("funding availability must use the same snapshot timestamp")
         object.__setattr__(self, "positions", positions)
         if not isinstance(self.base_currency, str) or not self.base_currency.strip():
             raise ValueError("base_currency must be a non-empty string")
@@ -266,7 +294,7 @@ def _position_from_mapping(raw: Mapping[str, Any], policy: Policy, index: int) -
         "current_price_usd", "average_cost_price_usd", "exchange_unrealized_pnl_usd", "displayed_weight",
         "unrealized_pnl_usd", "unrealized_return", "pnl_status", "validation_status",
         "validation_notes", "portfolio_weight", "displayed_current_price_usd",
-        "displayed_average_cost_price_usd", "performance",
+        "displayed_average_cost_price_usd", "performance", "funding_availability",
     }
     unknown = set(raw) - allowed
     if unknown:
@@ -301,6 +329,7 @@ def _position_from_mapping(raw: Mapping[str, Any], policy: Policy, index: int) -
         current_price_usd=raw.get("current_price_usd"),
         average_cost_price_usd=raw.get("average_cost_price_usd"),
         exchange_unrealized_pnl_usd=raw.get("exchange_unrealized_pnl_usd"),
+        funding_availability=raw.get("funding_availability"),
     )
 
 

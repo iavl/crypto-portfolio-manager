@@ -188,19 +188,31 @@ class ExecutionEngineTests(unittest.TestCase):
     def test_decision_persists_optional_execution_plans(self):
         plan = build_entry_plan("ETH", 2000, self.snapshot, "NORMAL", "HIGH")
         action = RebalanceAction("ETH", "INCREASE", 0.0, 0.5, 2000, "NORMAL")
+        funding = RebalanceAction(
+            "USDT",
+            "REDUCE",
+            0.5,
+            0.0,
+            2000,
+            "NORMAL",
+            action_reason="ALLOCATION_OVERWEIGHT",
+        )
         evidence = build_execution_evidence(self.snapshot, plan)
         decision = Decision(
             "2026-01-01T00:00:00Z",
             "NORMAL",
-            {"BTC": 1.0},
-            {"BTC": 0.9, "USDT": 0.1},
-            actions=(action,),
+            {"BTC": 0.5, "USDT": 0.5},
+            {"BTC": 0.5, "ETH": 0.5},
+            actions=(action, funding),
             evidence=(evidence,),
             execution_plans={"ETH": plan},
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "decisions.jsonl"
-            append_decision(decision, path)
+            from crypto_portfolio.state.execution_artifacts import cache_execution_inputs
+            from crypto_portfolio.models.policy import resolve_policy
+            cache_execution_inputs(series(), SpotPrice("ETH", 282, "2026-01-01T08:00:00Z", "synthetic", "2026-01-01T08:00:00Z"), policy=resolve_policy(), root=directory)
+            append_decision(decision, path, artifact_root=directory)
             persisted = read_decisions(path)[0]
         self.assertEqual(Decision.from_mapping(persisted).execution_plans["ETH"], plan)
         self.assertEqual(persisted["execution_plans"]["ETH"]["symbol"], "ETH")
@@ -231,8 +243,15 @@ class ExecutionEngineTests(unittest.TestCase):
             )
         plan = wait_plan("ETH", 1000)
         accepted = Decision(
-            "2026-01-01T00:00:00Z", "NORMAL", {"BTC": 1.0}, {"BTC": 1.0},
-            actions=(RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),),
+            "2026-01-01T00:00:00Z", "NORMAL",
+            {"BTC": 0.5, "USDT": 0.5}, {"BTC": 0.5, "ETH": 0.5},
+            actions=(
+                RebalanceAction("ETH", "INCREASE", 0, 0.5, 1000, "NORMAL"),
+                RebalanceAction(
+                    "USDT", "REDUCE", 0.5, 0.0, 1000, "NORMAL",
+                    action_reason="ALLOCATION_OVERWEIGHT",
+                ),
+            ),
             execution_plans={"ETH": plan},
             evidence=(build_execution_evidence(self.snapshot, plan),),
         )

@@ -289,6 +289,21 @@ def snapshot_from_binance_account(
         }
         for symbol, quantity in positions.items()
     ]
+    for item in position_mappings:
+        symbol, price = item["symbol"], item["current_price_usd"]
+        # LD mirror quantities never prove spendability of the underlying.
+        wallets = [w for w in fetch.spot if w.asset == symbol and not w.asset.startswith("LD")]
+        available = sum(w.available_quantity or 0.0 for w in wallets) * price
+        unknown = sum(w.quantity for w in wallets if w.available_quantity is None) * price
+        if available + unknown > item["value_usd"] + 1e-7:
+            raise ValueError("funding facts exceed merged economic holdings")
+        item["funding_availability"] = {
+            "available_value_usd": available,
+            "restricted_value_usd": max(0.0, item["value_usd"] - available - unknown),
+            "unknown_value_usd": unknown,
+            "observed_at": fetch.captured_at,
+            "source": BINANCE_API_ACCOUNT_SOURCE,
+        }
     total = sum(item["value_usd"] for item in position_mappings)
     mapping: dict[str, Any] = {
         "timestamp": fetch.captured_at,

@@ -221,7 +221,7 @@ class ConfidenceResult:
         if cls.__name__ == "DecisionConfidence":
             allowed |= {
                 "components", "critical_blockers", "allowed_actions", "blocked_actions",
-                "explanation", "scope", "soft_penalties",
+                "explanation", "scope", "soft_penalties", "calculation_inputs",
             }
         unknown = set(data) - allowed
         if unknown:
@@ -274,9 +274,14 @@ class DecisionConfidence(ConfidenceResult):
     explanation: str = ""
     scope: Mapping[str, Any] | None = None
     soft_penalties: tuple[Mapping[str, Any], ...] = ()
+    calculation_inputs: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        from .factor_packet import freeze_packet_value
+        if not isinstance(self.calculation_inputs, Mapping):
+            raise ValueError("confidence calculation_inputs must be an object")
+        object.__setattr__(self, "calculation_inputs", freeze_packet_value(self.calculation_inputs))
         if not isinstance(self.components, Mapping):
             raise ValueError("decision confidence components must be an object")
         _reject_private(self.components, "decision confidence components")
@@ -311,10 +316,22 @@ class DecisionConfidence(ConfidenceResult):
             _reject_private(value, "decision confidence soft penalties")
             penalties.append(value)
         object.__setattr__(self, "soft_penalties", tuple(penalties))
+        if components:
+            total_weight = sum(item["weight"] for item in components.values())
+            raw = sum(item["score"] * item["weight"] for item in components.values())
+            final = max(0.0, min([raw, *(cap.ceiling for cap in self.caps)])
+                        - sum(item["penalty"] for item in penalties))
+            if not math.isclose(total_weight, 1.0, abs_tol=1e-9):
+                raise ValueError("decision confidence component weights must sum to 1")
+            if not math.isclose(raw, self.raw_score, abs_tol=1e-9) or not math.isclose(final, self.score, abs_tol=1e-9):
+                raise ValueError("decision confidence score does not match components and caps")
+
 
     def as_dict(self) -> dict[str, Any]:
+        from .factor_packet import thaw_packet_value
         result = super().as_dict()
         result.update({
+            "calculation_inputs": thaw_packet_value(self.calculation_inputs),
             "components": {key: dict(value) for key, value in self.components.items()},
             "critical_blockers": list(self.critical_blockers),
             "allowed_actions": list(self.allowed_actions),

@@ -124,6 +124,22 @@ def build_review_diagnostics(*, current_weights: Mapping[str, float], portfolio_
                 "reason": "MISSING_EXECUTION_PLANS", "missing_assets": sorted(missing_plans)},
             "SALES_ONLY": project("SALES_ONLY", sales),
             "APPROVED_FULL": project("APPROVED_FULL", full)}
+    planned = dict(sales)
+    for a in risky:
+        if a.action == "INCREASE" and a.symbol in plans:
+            planned[a.symbol] = plans[a.symbol].planned_amount_usd
+    rows["PLANNED_PROPOSALS"] = project("PLANNED_PROPOSALS", planned) if not missing_plans else {
+        "name": "PLANNED_PROPOSALS", "availability": "UNAVAILABLE", "reason": "MISSING_EXECUTION_PLANS"}
+    rows["STRATEGIC_TARGET"] = {
+        "name": "STRATEGIC_TARGET",
+        "feasible": True,
+        "violations": [],
+        "portfolio_value_usd": value + cash,
+        "weights": dict(target),
+        "fills_usd": None,
+        "stress": portfolio_stress(target, policy=policy, drawdown=drawdown),
+        "basis": "allocation target only; not a proposed or confirmed fill",
+    }
     original = rows["CURRENT"]["stress"]["scenario_return"]
     for row in rows.values():
         stress = row.get("stress")

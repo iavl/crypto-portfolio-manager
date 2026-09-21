@@ -115,6 +115,25 @@ What it does:
   transfers are reported but not counted;
 - carries no cost basis (the API has none): position P&L cost checks
   report `INSUFFICIENT_DATA`, while NAV/drawdown/weights are unaffected.
+- records funding readiness separately from economic ownership: same-snapshot
+  spot `free` is verified available, while spot `locked`, Simple Earn, and
+  redeeming value remain in NAV but are restricted. Missing availability stays
+  unknown. The review may state release, refresh, or conversion conditions but
+  never performs them.
+
+Final report generation uses a frozen bundle and the deterministic publication
+boundary:
+
+```bash
+python3 scripts/finalize_review.py frozen-review.json \
+  --artifact-root "$CRYPTO_PORTFOLIO_DATA_DIR" \
+  --output final-review-inputs.json
+```
+
+The output starts with `operation`: the conditional proposals that exist now.
+Strategic targets and approved amounts remain separate. `WAIT` means zero
+current buy and matched funding proposals even when an approved budget remains
+reserved.
 
 Useful flags: `--exclude SYMBOL` (one-off dust/unknown handling),
 `--min-value-usd N`, and `--flow-manual` (mark the flow `UNRESOLVED` and

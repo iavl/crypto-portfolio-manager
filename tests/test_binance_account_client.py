@@ -169,9 +169,9 @@ class AccountEndpointParsingTests(unittest.TestCase):
         self.assertEqual(
             balances,
             (
-                WalletBalance("BTC", 2.0, "spot"),
-                WalletBalance("USDT", 100.25, "spot"),
-                WalletBalance("ETH", 2.0, "spot"),
+                WalletBalance("BTC", 2.0, "spot", available_quantity=1.5),
+                WalletBalance("USDT", 100.25, "spot", available_quantity=100.25),
+                WalletBalance("ETH", 2.0, "spot", available_quantity=0.0),
             ),
         )
 

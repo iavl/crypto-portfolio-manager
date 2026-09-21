@@ -10,7 +10,7 @@ from ..models.confidence import ConfidenceCap, DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.factor_packet import AssetFactorPacket, FactorJudgment, freeze_packet_value
 from ..models.market_overlays import MarketOverlays
-from ..models.policy import Policy, resolve_policy
+from ..models.policy import Policy, policy_from_mapping, resolve_policy
 from .confidence import (
     DecisionScope,
     calculate_decision_confidence,
@@ -296,29 +296,8 @@ def _decision_scope(
     *,
     excluded_assets: Iterable[str] = (),
 ) -> DecisionScope:
-    excluded = {str(item).strip().upper() for item in excluded_assets}
-    actionable = [item for item in assets if item.symbol not in excluded and item.action in {"INCREASE", "REDUCE", "EXIT"}]
-    if any(item.action == "INCREASE" for item in actionable):
-        action = "INCREASE"
-        relevant = [item for item in actionable if item.action == action]
-        weights = {item.symbol: item.target_weight for item in relevant}
-    elif any(item.action in {"REDUCE", "EXIT"} for item in actionable):
-        action = "REDUCE" if any(item.action == "REDUCE" for item in actionable) else "EXIT"
-        relevant = [item for item in actionable if item.action in {"REDUCE", "EXIT"}]
-        weights = {item.symbol: item.current_weight for item in relevant}
-    else:
-        action = "NO_TRADE" if any(item.action == "NO_TRADE" for item in assets) else "HOLD"
-        relevant = [
-            item for item in assets
-            if item.symbol not in excluded and current_weights.get(item.symbol, item.current_weight) > 0
-        ]
-        if not relevant:
-            relevant = [
-                item for item in assets
-                if item.symbol not in excluded and target_weights.get(item.symbol, item.target_weight) > 0
-            ]
-        weights = {item.symbol: current_weights.get(item.symbol, item.current_weight) for item in relevant}
-    return DecisionScope(action, tuple(item.symbol for item in relevant), weights)
+    from .confidence import canonical_decision_scope
+    return canonical_decision_scope(assets, current_weights, target_weights, stable_symbols=excluded_assets)
 
 
 def build_decision_review_packet(
@@ -359,9 +338,13 @@ def build_decision_review_packet(
     new_cash: float = 0.0,
     previous_allocation_inputs: Mapping[str, Any] | None = None,
     current_allocation_inputs: Mapping[str, Any] | None = None,
+    policy: Policy | None = None,
 ) -> DecisionReviewPacket:
     source = _as_dict(decision) if decision is not None and not isinstance(decision, Mapping) else dict(decision or {})
     freeze_packet_value(source, path="decision")
+    from ..models.policy import policy_from_mapping
+    stored_policy = source.get("resolved_policy") or (calculation_context or source.get("calculation_context") or {}).get("resolved_policy")
+    resolved_policy = policy or (policy_from_mapping(stored_policy) if stored_policy else resolve_policy())
     if overlays is None and source.get("market_overlays") is not None:
         overlays = source["market_overlays"]
     review = review_type or source.get("review_type", "SNAPSHOT_REVIEW")
@@ -423,6 +406,7 @@ def build_decision_review_packet(
             current_weights=current,
             target_weights=target,
             previous_assessment=raw_previous.get(symbol),
+            policy=resolved_policy,
             factor_packet=_factor_packet(next(
                 (
                     value
@@ -448,7 +432,6 @@ def build_decision_review_packet(
     decision_confidence_value = decision_confidence if decision_confidence is not None else source.get("decision_confidence")
     nav_value = nav_performance if nav_performance is not None else source.get("nav_performance")
     if decision_confidence_value is None:
-        resolved_policy = resolve_policy()
         scope = _decision_scope(assets, current, target, excluded_assets=resolved_policy.stable_symbols)
         scoped_assets = {
             item.symbol: _asset_confidence(item)
@@ -498,15 +481,24 @@ def build_decision_review_packet(
         supplied_signal_agreement = source.get("signal_agreement", 0.0 if major_conflicts else 1.0)
         decision_confidence_value = calculate_decision_confidence(
             {
-                "portfolio_data": portfolio_data,
+                "portfolio_data": {
+                    "score": portfolio_data,
+                    "source": "validated current portfolio weights",
+                },
                 "regime_confidence": regime_confidence_value,
                 "asset_evidence": {
                     "assets": scoped_assets,
                     "weights": scope.exposure_weights,
                     "explanation": f"action scope: {scope.action}",
                 },
-                "portfolio_accounting": accounting,
-                "signal_agreement": supplied_signal_agreement,
+                "portfolio_accounting": {
+                    "score": accounting,
+                    "source": "cash-flow-aware NAV status",
+                },
+                "signal_agreement": {
+                    "score": supplied_signal_agreement,
+                    "source": "material conflict gate",
+                },
             },
             caps=caps,
             scope=scope,
@@ -519,14 +511,15 @@ def build_decision_review_packet(
     validate_decision_confidence_scope(
         (item.as_dict() for item in assets),
         decision_confidence_value,
-        stable_symbols=resolve_policy().stable_symbols,
+        stable_symbols=resolved_policy.stable_symbols,
+        current_weights=current, target_weights=target,
     )
     if attribution is None:
         attribution = build_no_trade_attribution(
             current,
             target,
             action_by_symbol.values(),
-            policy=resolve_policy(),
+            policy=resolved_policy,
             regime=regime,
             assessments=raw_assessments,
             decision_confidence=decision_confidence_value,
@@ -540,7 +533,7 @@ def build_decision_review_packet(
     if portfolio_value is not None:
         from .review_diagnostics import build_review_diagnostics
         from ..models.policy import policy_from_mapping
-        diagnostic_policy = policy_from_mapping(source["resolved_policy"]) if source.get("resolved_policy") else resolve_policy()
+        diagnostic_policy = resolved_policy
         diagnostic_drawdown = (
             portfolio_drawdown
             if portfolio_drawdown is not None
@@ -759,10 +752,26 @@ def should_run_high_impact_review(
 
 def validate_decision_review_packet(value: DecisionReviewPacket | Mapping[str, Any]) -> bool:
     packet = value if isinstance(value, DecisionReviewPacket) else DecisionReviewPacket.from_mapping(value)
+    resolved = (
+        policy_from_mapping(packet.calculation_context["resolved_policy"])
+        if packet.calculation_context
+        else resolve_policy()
+    )
     validate_decision_confidence_scope(
         (item.as_dict() for item in packet.assets),
         packet.decision_confidence,
-        stable_symbols=resolve_policy().stable_symbols,
+        stable_symbols=resolved.stable_symbols,
+        current_weights=packet.current_weights, target_weights=packet.target_weights,
+    )
+    from .confidence import validate_confidence_calculation
+
+    validate_confidence_calculation(
+        packet.decision_confidence,
+        policy=resolved,
+        actions=(item.as_dict() for item in packet.assets),
+        current_weights=packet.current_weights,
+        target_weights=packet.target_weights,
+        assessments={item.symbol: item.as_dict() for item in packet.assets},
     )
     return True
 

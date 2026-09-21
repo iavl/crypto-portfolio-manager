@@ -78,6 +78,18 @@
           "asset_type": {
             "type": "string",
             "enum": ["core", "satellite", "stablecoin", "cash", "other"]
+          },
+          "funding_availability": {
+            "type": ["object", "null"],
+            "required": ["available_value_usd", "restricted_value_usd", "unknown_value_usd", "observed_at", "source"],
+            "properties": {
+              "available_value_usd": {"type": "number", "minimum": 0},
+              "restricted_value_usd": {"type": "number", "minimum": 0},
+              "unknown_value_usd": {"type": "number", "minimum": 0},
+              "observed_at": {"type": "string", "format": "date-time"},
+              "source": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false

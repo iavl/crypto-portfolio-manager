@@ -17,7 +17,9 @@
     "evidence_ids",
     "factor_scores",
     "status",
-    "review_type"
+    "review_type",
+    "operation",
+    "funding_readiness"
   ],
   "properties": {
     "decision_id": {
@@ -495,7 +497,9 @@
         "object",
         "null"
       ]
-    }
+    },
+    "operation": {"type": ["object", "null"]},
+    "funding_readiness": {"type": ["object", "null"]}
   },
   "additionalProperties": false,
   "$defs": {
@@ -1137,6 +1141,8 @@
             "minLength": 1
           }
         },
+        "gate_details": {"type": ["object", "null"]},
+        "planning_context": {"type": ["object", "null"]},
         "reserve_policy": {
           "enum": [
             "NONE",

@@ -14,82 +14,9 @@ from ..models.report_packet import ReportPacket
 REPORT_PROMPT_RULE = "DO NOT recompute or alter numeric conclusions. Use the supplied structured outputs as authoritative."
 
 
-def build_execution_summary(
-    actions: Iterable[Mapping[str, Any]],
-    execution_plans: Mapping[str, Any],
-    *,
-    stable_symbols: Iterable[str] = (),
-) -> dict[str, Any]:
-    """Separate strategic approvals from the currently executable proposal."""
-    stable = {str(symbol).strip().upper() for symbol in stable_symbols}
-    plans = {
-        str(symbol).strip().upper(): (
-            plan.as_dict() if hasattr(plan, "as_dict") else dict(plan)
-        )
-        for symbol, plan in (execution_plans or {}).items()
-    }
-    rows: list[dict[str, Any]] = []
-    gated_buys: set[str] = set()
-    planned_buys = 0.0
-    immediate = 0.0
-    for raw_action in actions:
-        action = raw_action.as_dict() if hasattr(raw_action, "as_dict") else dict(raw_action)
-        symbol = str(action.get("symbol", "")).strip().upper()
-        strategic_action = str(action.get("action", "")).strip().upper()
-        amount = float(action.get("amount_usd", 0.0) or 0.0)
-        plan = plans.get(symbol)
-        if strategic_action == "INCREASE" and amount > 0:
-            if plan is None:
-                raise ValueError(f"execution plan is required for approved increase {symbol}")
-            planned = float(plan.get("planned_amount_usd", 0.0) or 0.0)
-            planned_buys += planned
-            if str(plan.get("action", "")).upper() == "WAIT" or planned <= 0:
-                gated_buys.add(symbol)
-                status = "GATE_HOLD"
-                executable = 0.0
-            else:
-                status = "PROPOSED_NOT_CONFIRMED"
-                executable = planned
-            immediate += executable
-        elif plan is not None and str(plan.get("action", "")).upper() == "WAIT":
-            status = "GATE_HOLD"
-            executable = 0.0
-        else:
-            status = (
-                "PROPOSED_NOT_CONFIRMED"
-                if strategic_action in {"REDUCE", "EXIT"} and amount > 0
-                else "NO_EXECUTABLE_CHANGE"
-            )
-            executable = amount if status == "PROPOSED_NOT_CONFIRMED" else 0.0
-            immediate += executable
-        rows.append({
-            "symbol": symbol,
-            "strategic_action": strategic_action,
-            "approved_amount_usd": amount,
-            "execution_status": status,
-            "executable_amount_usd": executable,
-            "planned_amount_usd": float(plan.get("planned_amount_usd", 0.0) or 0.0) if plan else 0.0,
-            "reserve_amount_usd": float(plan.get("reserve_amount_usd", 0.0) or 0.0) if plan else 0.0,
-            "reserve_policy": plan.get("reserve_policy") if plan else None,
-        })
-    if gated_buys and planned_buys <= 1e-9:
-        for row in rows:
-            if (
-                row["symbol"] in stable
-                and row["strategic_action"] == "REDUCE"
-                and row["execution_status"] == "PROPOSED_NOT_CONFIRMED"
-            ):
-                row["execution_status"] = "FUNDING_DEFERRED"
-                immediate -= row["executable_amount_usd"]
-                row["executable_amount_usd"] = 0.0
-    return {
-        "status": "FINAL_OPERATION_VIEW",
-        "strategic_approvals_preserved": True,
-        "execution_actions": rows,
-        "immediate_executable_amount_usd": max(0.0, immediate),
-        "gated_buy_symbols": sorted(gated_buys),
-        "funding_deferred": bool(gated_buys and planned_buys <= 1e-9),
-    }
+def build_execution_summary(actions, execution_plans, *, stable_symbols=()):
+    from .operation import build_final_operation
+    return build_final_operation(actions, execution_plans, stable_symbols=stable_symbols).as_dict()
 
 
 def _require_acquisition_finalized(acquisition: Any) -> None:
@@ -264,13 +191,35 @@ def build_report_packet(
 
 def validate_report_packet(value: ReportPacket | Mapping[str, Any]) -> bool:
     packet = value if isinstance(value, ReportPacket) else ReportPacket.from_mapping(value)
-    from ..models.policy import resolve_policy
+    from ..models.policy import policy_from_mapping, resolve_policy
     from .confidence import validate_decision_confidence_scope
 
+    policy = (
+        policy_from_mapping(packet.calculation_context["resolved_policy"])
+        if packet.calculation_context
+        else resolve_policy()
+    )
     validate_decision_confidence_scope(
         packet.actions,
         packet.decision_confidence,
-        stable_symbols=resolve_policy().stable_symbols,
+        stable_symbols=policy.stable_symbols,
+        current_weights=packet.current_weights,
+        target_weights=packet.target_weights,
+    )
+    from .confidence import validate_confidence_calculation
+
+    assessments = (
+        packet.calculation_context.get("assessments", {})
+        if packet.calculation_context
+        else None
+    )
+    validate_confidence_calculation(
+        packet.decision_confidence,
+        policy=policy,
+        actions=packet.actions,
+        current_weights=packet.current_weights,
+        target_weights=packet.target_weights,
+        assessments=assessments,
     )
     return True
 
@@ -282,7 +231,7 @@ def build_final_review_output(
     snapshot: Any | None = None,
 ) -> dict[str, Any]:
     """Assemble and validate the immutable output before a caller persists it."""
-    from ..models.policy import resolve_policy
+    from ..models.policy import policy_from_mapping, resolve_policy
 
     packet = report_packet if isinstance(report_packet, ReportPacket) else ReportPacket.from_mapping(report_packet)
     validate_report_packet(packet)
@@ -333,9 +282,10 @@ def build_final_review_output(
     execution_summary = build_execution_summary(
         packet.actions,
         packet.execution_plans,
-        stable_symbols=resolve_policy().stable_symbols,
+        stable_symbols=(policy_from_mapping(packet.calculation_context["resolved_policy"]) if packet.calculation_context else resolve_policy()).stable_symbols,
     )
     result = {
+        "operation": execution_summary,
         "calculations": calculations,
         "review_diagnostics": packet_value["review_diagnostics"],
         "target_attribution": packet_value["target_attribution"],

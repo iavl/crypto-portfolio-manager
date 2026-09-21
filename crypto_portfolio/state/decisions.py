@@ -21,7 +21,7 @@ def default_decision_path() -> Path:
 
 
 def _validated_decision(
-    decision: Decision | Mapping[str, Any], policy: Policy | None = None
+    decision: Decision | Mapping[str, Any], policy: Policy | None = None, *, artifact_root: str | Path | None = None
 ) -> tuple[dict[str, Any], Policy]:
     if isinstance(decision, Mapping):
         if policy is not None:
@@ -85,8 +85,14 @@ def _validated_decision(
     from ..engine.confidence import validate_decision_confidence_scope
 
     validate_decision_confidence_scope(
-        model.actions, model.decision_confidence, stable_symbols=resolved.stable_symbols
+        model.actions, model.decision_confidence, stable_symbols=resolved.stable_symbols,
+        current_weights=model.current_weights, target_weights=model.target_weights
     )
+    from ..engine.confidence import validate_confidence_calculation
+    validate_confidence_calculation(model.decision_confidence, policy=resolved, actions=model.actions,
+        current_weights=model.current_weights, target_weights=model.target_weights, assessments=model.factor_scores)
+    from .execution_artifacts import validate_execution_artifacts
+    validate_execution_artifacts(model.execution_plans or {}, policy=resolved, root=artifact_root)
     record = model.as_dict()
     record["policy_hash"] = expected_hash
     record["resolved_policy"] = resolved.as_dict()
@@ -98,8 +104,9 @@ def append_decision(
     path: str | Path | None = None,
     *,
     policy: Policy | None = None,
+    artifact_root: str | Path | None = None,
 ) -> Path:
-    record, _ = _validated_decision(decision, policy)
+    record, _ = _validated_decision(decision, policy, artifact_root=artifact_root)
     destination = Path(path or default_decision_path())
     existing = read_records(destination)
     if record.get("decision_id") and any(item.get("decision_id") == record["decision_id"] for item in existing):

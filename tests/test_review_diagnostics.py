@@ -30,3 +30,18 @@ class ReviewDiagnosticsTests(unittest.TestCase):
         missing = portfolio_stress({"BTC": 0.8, "LUNC": 0.1, "USDT": 0.1}, policy=policy)
         self.assertEqual(missing["availability"], "UNAVAILABLE")
         self.assertEqual(missing["missing_assets"], ["LUNC"])
+
+    def test_diagnostics_label_planned_and_strategic_scenarios_separately(self):
+        from crypto_portfolio.engine.review_diagnostics import build_review_diagnostics
+
+        result = build_review_diagnostics(
+            current_weights={"BTC": 0.5, "USDT": 0.5},
+            target_weights={"BTC": 0.6, "USDT": 0.4},
+            portfolio_value=1000,
+            actions=(),
+            policy=resolve_policy(),
+        )
+        self.assertEqual(result["scenarios"]["PLANNED_PROPOSALS"]["name"], "PLANNED_PROPOSALS")
+        strategic = result["scenarios"]["STRATEGIC_TARGET"]
+        self.assertEqual(strategic["weights"], {"BTC": 0.6, "USDT": 0.4})
+        self.assertIn("not a proposed", strategic["basis"])

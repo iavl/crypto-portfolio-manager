@@ -72,6 +72,8 @@ class Decision:
     calculation_context: Mapping[str, Any] | None = None
     review_diagnostics: Mapping[str, Any] | None = None
     target_attribution: Mapping[str, Any] | None = None
+    operation: Mapping[str, Any] | None = None
+    funding_readiness: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", normalize_timestamp(self.timestamp))
@@ -294,6 +296,22 @@ class Decision:
                 expected_symbols=set(self.factor_scores),
                 expected_assessments=self.factor_scores,
             )
+        from ..engine.operation import build_final_operation
+        from .policy import policy_from_mapping, resolve_policy
+        policy_value = self.resolved_policy
+        operation_policy = policy_from_mapping(policy_value) if policy_value else resolve_policy()
+        action_values = [a.as_dict() if hasattr(a, "as_dict") else a for a in self.actions]
+        required_plans = {a["symbol"] for a in action_values if a["action"] == "INCREASE"
+                          and a["symbol"] not in operation_policy.stable_symbols
+                          and a.get("amount_usd", a.get("approved_amount_usd", 0)) > 0}
+        operation = None
+        if required_plans <= set(self.execution_plans or {}):
+            operation = build_final_operation(self.actions, self.execution_plans or {},
+                                              stable_symbols=operation_policy.stable_symbols).as_dict()
+        if self.operation is not None and thaw_packet_value(self.operation) != operation:
+            raise ValueError("operation does not match approved actions and execution plans")
+        object.__setattr__(self, "operation", freeze_packet_value(operation))
+
         if self.review_diagnostics is None:
             object.__setattr__(
                 self,
@@ -313,7 +331,7 @@ class Decision:
                     "reason": "ALLOCATION_INPUTS_REQUIRED",
                 },
             )
-        for name in ("calculation_context", "review_diagnostics", "target_attribution"):
+        for name in ("calculation_context", "review_diagnostics", "target_attribution", "funding_readiness"):
             value = getattr(self, name)
             if value is not None:
                 if not isinstance(value, Mapping):
@@ -329,7 +347,7 @@ class Decision:
             "timestamp", "market_regime", "current_weights", "target_weights", "actions",
             "risk_checks", "evidence", "evidence_ids", "factor_scores", "status", "constraints_applied",
             "config", "policy_hash", "resolved_policy", "review_type", "decision_id",
-            "based_on_snapshot_id", "execution_plans", "market_overlays",
+            "based_on_snapshot_id", "execution_plans", "market_overlays", "operation", "funding_readiness",
             "regime_confidence", "decision_confidence", "nav_performance",
             "benchmark_performance", "event_scan_summary",
             "manual_asset_contexts",
@@ -371,6 +389,8 @@ class Decision:
             decision_id=data.get("decision_id"),
             based_on_snapshot_id=data.get("based_on_snapshot_id"),
             execution_plans=data.get("execution_plans"),
+            operation=data.get("operation"),
+            funding_readiness=data.get("funding_readiness"),
             market_overlays=data.get("market_overlays"),
             regime_confidence=data.get("regime_confidence"),
             decision_confidence=data.get("decision_confidence"),
@@ -388,6 +408,8 @@ class Decision:
     def as_dict(self) -> dict[str, Any]:
         evidence = [item.as_dict() for item in self.evidence]
         result = {
+            "operation": thaw_packet_value(self.operation),
+            "funding_readiness": thaw_packet_value(self.funding_readiness),
             "calculation_context": thaw_packet_value(self.calculation_context),
             "review_diagnostics": thaw_packet_value(self.review_diagnostics),
             "target_attribution": thaw_packet_value(self.target_attribution),

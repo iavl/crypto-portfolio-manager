@@ -71,6 +71,7 @@ class WalletBalance:
     asset: str
     quantity: float
     wallet: str
+    available_quantity: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.asset, str) or not self.asset.strip():
@@ -79,6 +80,11 @@ class WalletBalance:
         object.__setattr__(
             self, "quantity", _decimal_string(self.quantity, f"{self.asset}.quantity")
         )
+        if self.available_quantity is not None:
+            available = _decimal_string(self.available_quantity, "available quantity")
+            if available > self.quantity:
+                raise ProviderDataError("available quantity exceeds economic quantity")
+            object.__setattr__(self, "available_quantity", available)
         if not isinstance(self.wallet, str) or not self.wallet.strip():
             raise ProviderDataError("wallet balance wallet must be a non-empty string")
 
@@ -258,7 +264,8 @@ class BinanceAccountClient:
             if quantity <= 0:
                 continue
             balances.append(
-                WalletBalance(asset=entry["asset"], quantity=quantity, wallet="spot")
+                WalletBalance(asset=entry["asset"], quantity=quantity, wallet="spot",
+                              available_quantity=_decimal_string(entry.get("free"), "spot free"))
             )
         return tuple(balances)
 

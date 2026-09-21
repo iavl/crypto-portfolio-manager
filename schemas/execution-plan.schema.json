@@ -140,6 +140,8 @@
         "minLength": 1
       }
     },
+    "gate_details": {"type": ["object", "null"]},
+    "planning_context": {"type": ["object", "null"]},
     "reserve_policy": {
       "enum": [
         "NONE",

@@ -136,6 +136,15 @@ only when both are present, otherwise intake fails closed with
 | `GET /sapi/v1/capital/deposit/hisrec`, `GET /sapi/v1/capital/withdraw/history` | completed external flows since the previous snapshot |
 | `GET /sapi/v1/simple-earn/account` | Simple Earn valuation cross-check (warning only) |
 
+The normalized snapshot separates economic ownership from funding readiness.
+All valid spot, Earn, and redeeming balances remain in portfolio value and NAV.
+Only `free` from the same `/api/v3/account` observation is `available`; spot
+`locked`, flexible/locked Earn, and redeeming amounts are `restricted`.
+Provider inputs without an explicit availability field are `unknown`. A
+restricted or unknown value may produce a release/refresh condition, and a
+non-settlement stable may produce a conversion condition. The integration
+never redeems, converts, submits, or confirms an order.
+
 The dedicated eth-staking sapi family (`eth-staking/eth/position`,
 `wbeth/exchange-rate`) was retired by Binance (verified live 2026-09:
 `-1000` deprecated / 404). Staked ETH therefore surfaces either as

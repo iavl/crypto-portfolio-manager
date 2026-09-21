@@ -251,7 +251,11 @@ display data, so the engine uses value ÷ quantity and records a note.
     with `validate_execution_plan`.
 21. Bind the plan to exactly one matching approved `RebalanceAction`, create
     `execution_technical` evidence, and cache normalized OHLCV and Volume
-    Profile artifacts by hash before persistence.
+    Profile artifacts and every profile's normalized OHLCV parent by hash
+    before persistence. Reload those artifacts and reproduce the technical
+    snapshot and execution plan before a new decision may be persisted. A hash
+    string without its loadable content-addressed artifact is a blocking
+    persistence error.
 22. Build a finalized immutable ReportPacket only when the current
     `AcquisitionResult` is finalized and has zero pending external
     resolutions; do not discard final failed metric events or provider
@@ -294,6 +298,21 @@ display data, so the engine uses value ÷ quantity and records a note.
     produced the Action; and give the concrete condition that would change it.
     Keep this as concise decision rationale, never private reasoning or a
     hidden scratchpad.
+    Render `FinalOperation` before the strategic rebalance table. It is the
+    only answer to “what can be proposed now”: show conditional buy proposals,
+    gate-held reserves, matched funding legs, independent risk reductions, and
+    `confirmation_status=NOT_CONFIRMED`. An approved allocation amount is not
+    an order. If every approved buy is `GATE_HOLD`, say `WAIT`, show zero
+    proposed buy and funding dollars, and retain the strategic approval only as
+    a conditional budget. For mixed or partial plans, shrink ordinary stable
+    funding to the final planned buys while preserving independent risk exits.
+    `planned_amount_usd` means conditional limit proposals, not a market order
+    or confirmed fill.
+    When the snapshot has `funding_availability`, show the separate funding
+    readiness result. Only same-snapshot verified spot-free value is immediately
+    available; locked, Earn, redeeming, or otherwise restricted value remains
+    in NAV but requires a release condition. Missing availability is UNKNOWN.
+    Never redeem, convert, submit, or confirm a trade automatically.
     For `NO_TRADE`/`WAIT`, include the finalized `NoTradeAttribution` gate
     states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
@@ -549,6 +568,11 @@ or pass a run-level mode, with the run-level choice taking precedence.
 The report writer uses only finalized packet values. It must not recalculate
 scores, weights, amounts, zones, or missing evidence, and it must not persist
 private model reasoning.
+
+Use `scripts/finalize_review.py` as the publication boundary for a frozen
+bundle. It binds the referenced snapshot value into diagnostics, validates
+confidence and execution artifacts, produces the same `FinalOperation` for the
+decision record and report, and optionally appends only after every gate passes.
 
 ## Current acquisition contracts
 

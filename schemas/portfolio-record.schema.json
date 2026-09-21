@@ -24,7 +24,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["symbol", "quantity", "value_usd", "cost_basis_usd", "asset_type"],
+        "required": ["symbol", "quantity", "value_usd", "cost_basis_usd", "asset_type", "funding_availability"],
         "properties": {
           "symbol": {"type": "string", "minLength": 1},
           "quantity": {"type": ["number", "null"], "minimum": 0},
@@ -67,6 +67,18 @@
             "additionalProperties": false
           },
           "asset_type": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]},
+          "funding_availability": {
+            "type": "object",
+            "required": ["available_value_usd", "restricted_value_usd", "unknown_value_usd", "observed_at", "source"],
+            "properties": {
+              "available_value_usd": {"type": "number", "minimum": 0},
+              "restricted_value_usd": {"type": "number", "minimum": 0},
+              "unknown_value_usd": {"type": "number", "minimum": 0},
+              "observed_at": {"type": "string", "format": "date-time"},
+              "source": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          },
           "asset_type_hint": {"type": "string", "enum": ["core", "satellite", "stablecoin", "cash", "other"]}
         },
         "additionalProperties": false

@@ -65,7 +65,7 @@ class ReportFailureTests(unittest.TestCase):
         summary = build_execution_summary(
             (
                 {"symbol": "BNB", "action": "INCREASE", "amount_usd": 100.0},
-                {"symbol": "USDT", "action": "REDUCE", "amount_usd": 100.0},
+                {"symbol": "USDT", "action": "REDUCE", "amount_usd": 100.0, "action_reason": "ALLOCATION_OVERWEIGHT"},
             ),
             {
                 "BNB": {
@@ -80,7 +80,7 @@ class ReportFailureTests(unittest.TestCase):
         rows = {item["symbol"]: item for item in summary["execution_actions"]}
         self.assertEqual(rows["BNB"]["execution_status"], "GATE_HOLD")
         self.assertEqual(rows["USDT"]["execution_status"], "FUNDING_DEFERRED")
-        self.assertEqual(summary["immediate_executable_amount_usd"], 0.0)
+        self.assertEqual(summary["planned_buy_amount_usd"], 0.0)
 
     def test_single_provider_failure_keeps_final_metric_and_safe_attempt(self):
         failed = result(

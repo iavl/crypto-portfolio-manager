@@ -108,6 +108,7 @@ def _wait_plan(
     btc_cycle: BTCCycleContext | Mapping[str, Any] | None = None,
     effective_factor: float | None = None,
     overlay_warnings: Iterable[str] = (),
+    gate_details: Mapping[str, Any] | None = None,
 ) -> ExecutionPlan:
     return ExecutionPlan(
         symbol=symbol,
@@ -122,6 +123,7 @@ def _wait_plan(
         entry_mode="WAIT",
         technical_confidence=snapshot.data_confidence,
         rationale=reason,
+        gate_details=gate_details or {"code": "ENTRY_WAIT", "reason": reason, "review_required": True},
         ohlcv_hash=snapshot.ohlcv_hash or None,
         volume_profile_hash=snapshot.volume_profile_hash,
         volume_profile_metadata=snapshot.volume_profile_metadata,
@@ -257,7 +259,7 @@ def _fractions(
     return normalized, deployed_fraction
 
 
-def build_entry_plan(
+def _build_entry_plan(
     symbol: str,
     approved_amount_usd: float,
     technical_snapshot: TechnicalSnapshot,
@@ -343,7 +345,16 @@ def build_entry_plan(
     nearest = selected[0][0]
     extension = (technical_snapshot.current_spot_price - nearest.midpoint) / (technical_snapshot.atr14 or 1.0)
     if extension > config["breakout"]["max_atr_extension"]:
-        return _wait_plan(normalized_symbol, approved, technical_snapshot, f"spot is {extension:.2f} ATR above nearest support")
+        return _wait_plan(normalized_symbol, approved, technical_snapshot,
+            f"spot is {extension:.2f} ATR above nearest qualified support",
+            gate_details={"code": "EXTENSION_ABOVE_QUALIFIED_SUPPORT", "review_required": True,
+                "extension_atr": extension, "maximum_extension_atr": config["breakout"]["max_atr_extension"],
+                "minimum_quality": config["zone_quality"]["minimum_for_entry"],
+                "qualified_support": nearest.as_dict(),
+                "candidates": [{"zone": zone.as_dict(), "quality": quality,
+                    "selected": zone in [item[0] for item in selected],
+                    "reason": "QUALITY_BELOW_THRESHOLD" if quality < config["zone_quality"]["minimum_for_entry"] else "QUALIFIED_STRUCTURE"}
+                    for zone, quality, _ in ranked]})
     if overlay_wait_required(
         positioning,
         extension,
@@ -490,6 +501,39 @@ def build_entry_plan(
         effective_deployment_factor=deployment_factor,
         overlay_warnings=overlay_warnings,
     )
+
+
+def build_entry_plan(
+    symbol: str,
+    approved_amount_usd: float,
+    technical_snapshot: TechnicalSnapshot,
+    regime: str,
+    portfolio_confidence: str,
+    action: str = "INCREASE",
+    *,
+    policy: Policy | None = None,
+    entry_mode: str | None = None,
+    breakout_confirmed: bool = False,
+    thesis_broken: bool = False,
+    relative_strength_confirmed: bool = False,
+    positioning: PositioningFacts | Mapping[str, Any] | None = None,
+    btc_cycle: BTCCycleContext | Mapping[str, Any] | None = None,
+    overlays: MarketOverlays | Mapping[str, Any] | None = None,
+) -> ExecutionPlan:
+    """Bind every planning option so publication can reproduce the proposal."""
+    from dataclasses import replace
+    from ..models.policy import policy_hash
+    resolved = policy or resolve_policy()
+    options = dict(entry_mode=entry_mode, breakout_confirmed=breakout_confirmed,
+                   thesis_broken=thesis_broken, relative_strength_confirmed=relative_strength_confirmed,
+                   positioning=positioning, btc_cycle=btc_cycle, overlays=overlays)
+    plan = _build_entry_plan(symbol, approved_amount_usd, technical_snapshot, regime,
+                             portfolio_confidence, action, policy=resolved, **options)
+    return replace(plan, planning_context={
+        "policy_hash": policy_hash(resolved), "regime": regime,
+        "portfolio_confidence": portfolio_confidence, "action": action,
+        "options": {key: value.as_dict() if hasattr(value, "as_dict") else value for key, value in options.items()},
+    })
 
 
 def build_execution_evidence(

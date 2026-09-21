@@ -18,7 +18,8 @@
     "data_quality",
     "failed_data_fetches",
     "optional_data",
-    "script_failures"
+    "script_failures",
+    "operation"
   ],
   "properties": {
     "review_type": {
@@ -506,7 +507,8 @@
         "object",
         "null"
       ]
-    }
+    },
+    "operation": {"type": ["object", "null"]}
   },
   "additionalProperties": false,
   "$defs": {

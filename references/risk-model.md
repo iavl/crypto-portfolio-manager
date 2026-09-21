@@ -21,6 +21,19 @@ It is a risk budget / drawdown objective, not a guarantee. Crypto can gap, corre
 
 Portfolio-level risk always overrides single-asset conviction.
 
+The implementation reports three separate facts:
+
+1. allocation and concentration constraints under the configured envelope;
+2. historical cash-flow-aware drawdown and its mandatory regime floor;
+3. forward fixed-scenario diagnostics for the current, proposed, fully approved,
+   and strategic portfolios.
+
+Passing the first two does not imply the third is within 15%. A stress result
+above the risk budget remains `DIAGNOSTIC_ONLY` until a separately approved
+policy defines whether it is a soft deployment cap or a hard action gate.
+Missing volatility, correlation, or risk-contribution estimates cannot be
+described as completed dynamic portfolio risk control.
+
 ## Market regimes
 
 ### NORMAL
