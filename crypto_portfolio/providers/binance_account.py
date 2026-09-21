@@ -39,7 +39,14 @@ DEFAULT_BASE_URL = "https://api.binance.com"
 RECV_WINDOW_MS = 5000
 _PAGE_SIZE = 1000
 _EARN_PAGE_SIZE = 100
-_COMPLETED_FLOW_STATUS = 6
+# Binance deposit status codes: 0 pending, 6 credited but cannot withdraw,
+# 1 success. Both 6 and 1 mean the funds are already credited to the balance,
+# so both complete an external flow; only 0 is still in flight. Some networks
+# (e.g. PLASMA) settle straight to 1 without ever showing 6.
+_COMPLETED_DEPOSIT_STATUSES = frozenset({1, 6})
+# Withdrawal history status codes are a separate enum whose completion
+# mapping is not verified here; keep the previous single-code behavior.
+_COMPLETED_WITHDRAWAL_STATUSES = frozenset({6})
 # Binance API error codes that mean the key/secret or its permissions are wrong.
 _AUTH_ERROR_CODES = (-2014, -2015)
 _TIMESTAMP_ERROR_CODE = -1021
@@ -312,6 +319,7 @@ class BinanceAccountClient:
             until_ms,
             time_field="insertTime",
             timestamp_is_ms=True,
+            completed_statuses=_COMPLETED_DEPOSIT_STATUSES,
         )
 
     def withdrawal_history(self, since_ms: int, until_ms: int) -> tuple[FlowEvent, ...]:
@@ -322,6 +330,7 @@ class BinanceAccountClient:
             until_ms,
             time_field="applyTime",
             timestamp_is_ms=False,
+            completed_statuses=_COMPLETED_WITHDRAWAL_STATUSES,
         )
 
     def _flow_history(
@@ -333,6 +342,7 @@ class BinanceAccountClient:
         *,
         time_field: str,
         timestamp_is_ms: bool,
+        completed_statuses: frozenset[int],
     ) -> tuple[FlowEvent, ...]:
         events: list[FlowEvent] = []
         cursor = since_ms
@@ -370,7 +380,7 @@ class BinanceAccountClient:
                         asset=asset,
                         amount=_decimal_string(entry.get("amount"), f"{asset}.{direction}.amount"),
                         timestamp_ms=timestamp_ms,
-                        completed=status == _COMPLETED_FLOW_STATUS,
+                        completed=status in completed_statuses,
                         raw_status=status,
                     )
                 )

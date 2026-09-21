@@ -203,6 +203,7 @@ class FlowHistoryTests(unittest.TestCase):
                     [
                         {"asset": "USDT", "amount": "500", "insertTime": 1000, "status": 6},
                         {"asset": "ETH", "amount": "1", "insertTime": 2000, "status": 0},
+                        {"asset": "USDT", "amount": "21", "insertTime": 3000, "status": 1},
                     ]
                 ],
                 "/sapi/v1/capital/withdraw/history": [
@@ -225,6 +226,10 @@ class FlowHistoryTests(unittest.TestCase):
             (
                 FlowEvent("DEPOSIT", "USDT", 500.0, 1000, True, 6),
                 FlowEvent("DEPOSIT", "ETH", 1.0, 2000, False, 0),
+                # Status 1 ("success") settles without passing through 6 on
+                # some networks (e.g. PLASMA) and still credits the balance,
+                # so it must count as a completed deposit.
+                FlowEvent("DEPOSIT", "USDT", 21.0, 3000, True, 1),
             ),
         )
         self.assertEqual(len(withdrawals), 1)
