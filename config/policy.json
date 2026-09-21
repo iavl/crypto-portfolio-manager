@@ -11,7 +11,6 @@
     "satellites": [
       "SOL",
       "BNB",
-      "LINK",
       "AAVE"
     ],
     "stable": [
@@ -26,12 +25,14 @@
       "USD1"
     ],
     "excluded": [
-      "LUNC"
+      "LUNC",
+      "LINK"
     ]
   },
   "stress_scenario": {
     "BTC": -0.2,
     "ETH": -0.3,
+    "SOL": -0.4,
     "AAVE": -0.4,
     "BNB": -0.35
   },

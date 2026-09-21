@@ -13,6 +13,15 @@ from .evidence import AssetAssessment, ManualAssetContext
 
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _TRENDS = {"IMPROVING", "STABLE", "DETERIORATING", "MIXED", "UNKNOWN", "NEUTRAL"}
+# A semantic judgment declares its own evidence confidence.  The canonical
+# source-quality mapping (HIGH=1.00, MEDIUM=0.75, LOW=0.50) turns that
+# declaration into the reliability multiplier every other factor already
+# carries, so a low-confidence judgment is shrunk toward neutral instead of
+# scoring exactly like a corroborated one.
+JUDGMENT_SOURCE_QUALITY = {"HIGH": 1.0, "MEDIUM": 0.75, "LOW": 0.5}
+# Fields that identify a mapping as the semantic-judgment contract rather
+# than a provider or factor *result* payload.
+JUDGMENT_CONTRACT_FIELDS = ("supporting_evidence_ids", "contrary_evidence_ids")
 _FORBIDDEN_KEYS = {
     "raw",
     "raw_ohlcv",
@@ -168,6 +177,17 @@ class FactorJudgment:
         object.__setattr__(self, "trend", trend)
         object.__setattr__(self, "summary", self.summary.strip())
 
+    @property
+    def reliability(self) -> float:
+        """Reliability multiplier implied by the declared judgment confidence.
+
+        ``scoring._extract`` reads this attribute for factor values that are
+        not deterministic results, so a semantic judgment is shrunk toward
+        neutral by exactly the same reliability arithmetic a provider-sourced
+        factor goes through instead of always counting as fully reliable.
+        """
+        return JUDGMENT_SOURCE_QUALITY[self.confidence]
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "FactorJudgment":
         if not isinstance(value, Mapping):
@@ -307,6 +327,8 @@ class AssetFactorPacket:
 __all__ = [
     "AssetFactorPacket",
     "FactorJudgment",
+    "JUDGMENT_CONTRACT_FIELDS",
+    "JUDGMENT_SOURCE_QUALITY",
     "freeze_packet_value",
     "thaw_packet_value",
 ]

@@ -181,7 +181,7 @@ identity, history, and diagnostics.
 | GET | `https://api.coingecko.com/api/v3/coins/{id}/history` | historical market cap and explicitly supplied historical FDV |
 
 The exact allowlisted IDs are `bitcoin`, `ethereum`, `solana`, `binancecoin`,
-`chainlink`, and `aave`. ETH is outside the supported FDV methodology scope.
+and `aave`. ETH is outside the supported FDV methodology scope.
 For other assets, reported FDV is preferred; when it is null, Python derives
 `current_price * max_supply` only from valid fields in the same response.
 Missing or unprovable inputs are `UNAVAILABLE_BY_METHODOLOGY`, not a provider
@@ -194,8 +194,8 @@ non-future, valid inputs.
 ## DeFiLlama
 
 DeFiLlama is the protocol-fundamentals provider and requires no API key. Current
-explicit identifiers are `ETH → ethereum`, `AAVE → aave`, `SOL → solana`,
-`BNB → bsc`, and `LINK → chainlink`.
+explicit identifiers are `ETH → ethereum`, `AAVE → aave`, `SOL → solana`, and
+`BNB → bsc`.
 
 | Method | Endpoint | Metrics |
 |---|---|---|
@@ -264,8 +264,8 @@ This is market-wide context, not per-asset sentiment or a trading signal.
 
 ## Chain liveness
 
-The structured provider applies only to `BTC`, `ETH`, `BNB`, and `SOL`. AAVE and
-LINK are protocol/token assets and are not treated as independent chains.
+The structured provider applies only to `BTC`, `ETH`, `BNB`, and `SOL`. AAVE is
+a protocol/token asset and is not treated as an independent chain.
 
 | Asset | Structured sources | Operational input |
 |---|---|---|
@@ -456,7 +456,7 @@ download the full history during a normal review.
 The active adapter uses API v4 at `https://lunarcrush.com/api4` with
 `LUNARCRUSH_API_KEY` in `Authorization: Bearer <key>`. It requests
 `GET /public/coins/:coin/time-series/v2` with `bucket=day`, `start`, and `end`.
-Only `BTC`, `ETH`, `SOL`, `BNB`, `LINK`, and `AAVE` are allowlisted. The
+Only `BTC`, `ETH`, `SOL`, `BNB`, and `AAVE` are allowlisted. The
 normalized metrics are:
 
 | Local metric | LunarCrush source and deterministic method |

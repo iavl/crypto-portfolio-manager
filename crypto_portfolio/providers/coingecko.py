@@ -30,7 +30,6 @@ COINGECKO_IDS = {
     "ETH": "ethereum",
     "SOL": "solana",
     "BNB": "binancecoin",
-    "LINK": "chainlink",
     "AAVE": "aave",
 }
 VALUATION_METRICS = ("valuation.market_cap", "valuation.fdv")

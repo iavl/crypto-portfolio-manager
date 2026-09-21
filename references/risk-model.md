@@ -254,8 +254,8 @@ classifies structured progress as:
   high-conviction increase.
 
 RPC/DNS/TLS/timeouts, rate limits, and provider outages are collection
-failures, not `HALTED`. They remain hard-critical missing evidence. AAVE and
-LINK do not get separate chain-liveness assessments.
+failures, not `HALTED`. They remain hard-critical missing evidence. AAVE does
+not get a separate chain-liveness assessment.
 
 ## Review-specific event criticality
 

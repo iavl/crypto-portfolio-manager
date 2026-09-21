@@ -1965,6 +1965,16 @@ def _parse_policy(
     parsed_scenario = {k: _number(v, f"stress_scenario.{k}", minimum=-1.0, maximum=0.0) for k, v in scenario.items()}
     if any(k in stable and v != 0 for k, v in parsed_scenario.items()):
         raise PolicyError("stable stress assumption must be zero in this diagnostic")
+    # A managed risky asset with no scenario return makes the whole stress
+    # diagnostic unavailable, so the universe and the scenario are one
+    # contract: adding a satellite without its scenario return is a policy
+    # error rather than a silently skipped exposure.
+    missing_scenario = sorted((set(core) | set(satellites)) - set(parsed_scenario))
+    if missing_scenario:
+        raise PolicyError(
+            "stress_scenario must cover every core and satellite asset: "
+            + ", ".join(missing_scenario)
+        )
 
     risk = data["risk"]
     if not isinstance(risk, dict):

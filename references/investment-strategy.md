@@ -54,9 +54,9 @@ The current/default universe is:
 | Sleeve | Assets | Meaning |
 |---|---|---|
 | Core | `BTC`, `ETH` | Default core risk assets with greater sizing tolerance, not guaranteed holdings or targets. |
-| Satellites | `SOL`, `BNB`, `LINK`, `AAVE` | Optional large-cap exposures that must earn their extra risk budget. |
+| Satellites | `SOL`, `BNB`, `AAVE` | Optional large-cap exposures that must earn their extra risk budget. |
 | Stablecoin/cash | `USDT`, `USDC`, `DAI`, `FDUSD`, `TUSD`, `USD`, `CASH`, `U`, `USD1` | Intentional risk-budget capacity and optionality, not merely leftover money. |
-| Excluded | `LUNC` | Unmanaged by default; not researched, scored, allocated, or rebalanced. |
+| Excluded | `LUNC`, `LINK` | Unmanaged by default; not researched, scored, allocated, or rebalanced. |
 
 The exact universe is policy-driven. Core classification is not an allocation
 entitlement, the satellite list is not a buy list, and stablecoins are not

@@ -735,11 +735,11 @@ class DataAcquisitionTests(unittest.TestCase):
 
         response = DeFiLlamaProvider(client=ChainClient()).collect(ProviderRequest(
             "defillama", "protocol", "ETH", {},
-            ("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple"),
+            ("fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d"),
         ))
         self.assertEqual({x["metric_key"]: x["value"] for x in response.observations}, {
             "fundamentals.tvl": 1000, "fundamentals.fees_30d": 100,
-            "fundamentals.revenue_30d": 20, "valuation.fee_revenue_multiple": 5,
+            "fundamentals.revenue_30d": 20,
         })
         self.assertEqual(response.diagnostics, {})
 

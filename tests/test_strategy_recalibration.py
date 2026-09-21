@@ -68,7 +68,10 @@ class StrategyRecalibrationTests(unittest.TestCase):
         self.assertGreater(full.coverage, missing_180d.coverage)
 
     def test_trend_alignment_and_continuous_momentum(self):
-        bullish = snapshot(ma20=110, ma50=100, ma100=90, ma200=130)
+        # Spot strictly above MA20 > MA50 > MA100 > MA200: the bullish
+        # alignment the assertion is about.  A fixture resting on an exact
+        # price/MA tie would read as no trend information at all.
+        bullish = snapshot(ma20=95, ma50=90, ma100=85, ma200=80)
         self.assertEqual(_trend_state([100], {"MA20": 110, "MA50": 100, "MA100": 90, "MA200": 130}, 120), "STRONG_UPTREND")
         self.assertGreater(calculate_trend_factor(bullish).score, 50)
         small = calculate_trend_factor(snapshot(return_90d=0.06))

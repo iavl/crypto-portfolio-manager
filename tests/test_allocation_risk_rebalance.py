@@ -20,7 +20,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         self.assertEqual(dict(first.target_weights), dict(second.target_weights))
         self.assertAlmostEqual(sum(first.target_weights.values()), 1.0)
         self.assertGreaterEqual(first.target_weights["USDT"], 0.15)
-        satellite_weight = sum(first.target_weights.get(symbol, 0) for symbol in ("SOL", "AAVE", "BNB", "LINK"))
+        satellite_weight = sum(first.target_weights.get(symbol, 0) for symbol in ("SOL", "AAVE", "BNB"))
         self.assertLessEqual(satellite_weight, 0.25)
 
     def test_low_confidence_satellite_has_no_immediate_deployment(self):

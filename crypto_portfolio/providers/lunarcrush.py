@@ -23,7 +23,7 @@ from .http import HttpClient, redact_secrets
 
 
 BASE_URL = "https://lunarcrush.com/api4"
-SUPPORTED_ASSETS = frozenset({"BTC", "ETH", "SOL", "BNB", "LINK", "AAVE"})
+SUPPORTED_ASSETS = frozenset({"BTC", "ETH", "SOL", "BNB", "AAVE"})
 SUPPORTED_METRICS = (
     "sentiment.social_bullish_share",
     "sentiment.social_mentions_change_7d",

@@ -107,8 +107,6 @@ def provider_chain(metric_key: str, asset: str | None = None) -> tuple[str, ...]
         return ()
     if key.startswith("btc_valuation."):
         return ("bgeometrics", "coinmetrics_community") if symbol in {None, "BTC"} else ()
-    if key == "valuation.fee_revenue_multiple":
-        return ("defillama",)
     if key.startswith(("flows.etf_", "flows.btc_etf_")):
         return ("sosovalue",)
     if key.startswith("flows.eth_etf_"):
@@ -201,8 +199,6 @@ def dataset_for_metric(metric_key: str) -> str:
         return "ethereum_monetary"
     if key.startswith("eth.staking."):
         return "ethereum_staking"
-    if key == "valuation.fee_revenue_multiple":
-        return "protocol"
     if key == "valuation.bnb_market_cap_to_annualized_network_fees_90d":
         return "derived"
     if key.startswith("derivatives.open_interest"):

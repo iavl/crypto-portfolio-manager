@@ -20,6 +20,7 @@ venv/
 .crypto-portfolio-manager/
 .data/provider-recordings/
 .zcode/
+.workbuddy/
 
 data/portfolio/*
 data/decisions/*

@@ -14,7 +14,7 @@ from .http import HttpClient
 
 BASE_URL = "https://api.bybit.com"
 _INTERVALS = {"1H": "60", "4H": "240", "1D": "D"}
-BYBIT_SYMBOLS = {symbol: f"{symbol}USDT" for symbol in ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")}
+BYBIT_SYMBOLS = {symbol: f"{symbol}USDT" for symbol in ("BTC", "ETH", "SOL", "BNB", "AAVE")}
 
 
 def _timestamp(value: Any, field: str) -> str:

@@ -15,6 +15,7 @@ from ..models.confidence import (
     confidence_band,
 )
 from ..models.evidence import AVAILABILITY_STATES, AssetAssessment, FactorScore
+from ..models.factor_packet import JUDGMENT_CONTRACT_FIELDS, JUDGMENT_SOURCE_QUALITY
 from ..models.policy import Policy, SCORING_FACTORS, resolve_policy
 
 
@@ -37,12 +38,31 @@ def calculate_factor_reliability(
     )
     if freshness_quality is None:
         raise ValueError("freshness must be CURRENT, STALE, or UNKNOWN")
-    source_quality = {"HIGH": 1.0, "MEDIUM": 0.75, "LOW": 0.5}.get(
+    source_quality = JUDGMENT_SOURCE_QUALITY.get(
         str(source_confidence).strip().upper()
     )
     if source_quality is None:
         raise ValueError("source_confidence must be HIGH, MEDIUM, or LOW")
     return completeness * freshness_quality * source_quality
+
+
+def _declared_source_quality(record: Mapping[str, Any]) -> float | None:
+    """Source quality a semantic judgment declares about its own evidence.
+
+    Only mappings carrying the judgment contract fields are read this way.  A
+    provider or factor *result* payload also exposes a ``confidence`` field,
+    but that one describes the data behind a calculation rather than the
+    strength of a judgment, so it keeps unit source quality here.
+    """
+    if not any(field in record for field in JUDGMENT_CONTRACT_FIELDS):
+        return None
+    raw = record.get("confidence")
+    if raw is None:
+        return None
+    result = JUDGMENT_SOURCE_QUALITY.get(str(raw).strip().upper())
+    if result is None:
+        raise ValueError("judgment confidence must be HIGH, MEDIUM, or LOW")
+    return result
 
 
 def ensure_acquisition_ready(acquisition: Any) -> None:
@@ -173,7 +193,7 @@ def _source_quality(value: Mapping[str, Any]) -> float | None:
         return _quality_score(raw, "source_quality")
     raw = value.get("source_confidence")
     if raw is not None:
-        result = {"HIGH": 1.0, "MEDIUM": 0.75, "LOW": 0.5}.get(str(raw).strip().upper())
+        result = JUDGMENT_SOURCE_QUALITY.get(str(raw).strip().upper())
         if result is None:
             raise ValueError("source_confidence must be HIGH, MEDIUM, or LOW")
         return result
@@ -262,12 +282,18 @@ def _metadata_reliability(value: Any, factor: str, metadata: _FactorMetadata) ->
     record = _factor_mapping_for_metadata(value)
     if record is None or "facts" in record or "reliability" in record:
         return None
-    if metadata.freshness is None and metadata.source_quality is None:
+    source_quality = metadata.source_quality
+    if source_quality is None:
+        # A semantic judgment states its own evidence quality through
+        # ``confidence``; that declaration is the source-quality multiplier
+        # in the same reliability formula, never a free pass.
+        source_quality = _declared_source_quality(record)
+    if metadata.freshness is None and source_quality is None:
         return None
     completeness = record.get("coverage", 1.0)
     completeness = _reliability(completeness, f"factor {factor}.coverage")
     return completeness * (metadata.freshness if metadata.freshness is not None else 1.0) * (
-        metadata.source_quality if metadata.source_quality is not None else 1.0
+        source_quality if source_quality is not None else 1.0
     )
 
 

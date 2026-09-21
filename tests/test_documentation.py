@@ -356,6 +356,7 @@ class DocumentationTests(unittest.TestCase):
             "BTC",
             "ETH",
             "LUNC",
+            "LINK",
             "U",
             "USD1",
             "67",

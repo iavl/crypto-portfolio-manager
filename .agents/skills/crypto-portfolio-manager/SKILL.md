@@ -421,8 +421,8 @@ reusable fresh cache hits.
 Chain liveness is a current operational check of canonical block/slot progress
 and, where available, finality. It is collected from structured RPC or block
 APIs by Python. RPC/DNS/TLS/rate-limit/provider failures produce unavailable
-critical evidence; they are never evidence that a chain halted. AAVE and LINK
-are protocol/token assets here, not independent chains. Routine Web search is
+critical evidence; they are never evidence that a chain halted. AAVE is a
+protocol/token asset here, not an independent chain. Routine Web search is
 not a liveness source.
 
 Event scans are current at `scan_as_of`, not at the timestamp of the latest

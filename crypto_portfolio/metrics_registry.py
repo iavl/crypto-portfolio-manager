@@ -28,8 +28,8 @@ _CHAIN_NATIVE_ASSETS = ("BTC", "ETH", "SOL", "BNB")
 CHAIN_NATIVE_ASSETS = _CHAIN_NATIVE_ASSETS
 _ACTIVE_ADDRESS_ASSETS = ("BTC", "ETH", "SOL")
 _TRANSFER_VOLUME_ASSETS = ("BTC", "ETH", "SOL")
-_PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "LINK", "AAVE")
-_APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "LINK", "AAVE")
+_PROTOCOL_ASSETS = ("BTC", "ETH", "SOL", "BNB", "AAVE")
+_APPLICATION_ASSETS = ("ETH", "SOL", "BNB", "AAVE")
 # DeFiLlama defines an application's dailyRevenue as a fixed share of its
 # dailyFees.  Scoring both as independent fundamentals growth evidence counts
 # one source twice, so BNB uses only its dedicated market-cap-to-network-fees
@@ -366,7 +366,6 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
     "valuation.market_cap": _definition("valuation.market_cap", "valuation", "number", "USD", "CONTEXTUAL", freshness="2d", asset_scope=_PROTOCOL_ASSETS),
     "valuation.fdv": _definition("valuation.fdv", "valuation", "number", "USD", "CONTEXTUAL", freshness="7d", asset_scope=_FDV_ASSETS),
     "valuation.fdv_market_cap_ratio": _definition("valuation.fdv_market_cap_ratio", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="7d", asset_scope=_FDV_RATIO_ASSETS),
-    "valuation.fee_revenue_multiple": _definition("valuation.fee_revenue_multiple", "valuation", "number", "ratio", "LOWER_IS_BETTER", freshness="14d", asset_scope=_FEE_REVENUE_EVIDENCE_ASSETS),
     # Market capitalisation divided by annualized network fees (a scale, not a
     # price-to-earnings, cash-yield, or holder-revenue multiple).  Population is
     # Python-owned; zero fees or a mismatched window return unavailable.

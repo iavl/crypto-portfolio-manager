@@ -153,14 +153,23 @@ def calculate_trend_factor(
         if moving_average is None:
             continue
         available_authority += authority
-        if snapshot.current_spot_price >= moving_average:
+        # Directional authority must be centred: a price exactly on the
+        # moving average carries no trend information, so it applies no
+        # points in either direction. Treating equality as bullish shifted
+        # the factor's no-information reading off its 50 base (a flat series
+        # scored 50 + 22 = 72 before this rule).
+        if snapshot.current_spot_price > moving_average:
             score += authority
             contributions[name] = authority
             reasons.append(f"price is above {name.upper()}")
-        else:
+        elif snapshot.current_spot_price < moving_average:
             score -= authority
             contributions[name] = -authority
             reasons.append(f"price is below {name.upper()}")
+        else:
+            reasons.append(
+                f"price is exactly at {name.upper()}; no directional authority applied"
+            )
 
     alignment_authority = rules["alignment_points"]
     total_authority += alignment_authority

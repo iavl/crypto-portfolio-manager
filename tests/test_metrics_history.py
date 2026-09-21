@@ -95,7 +95,6 @@ class MetricHistoryTests(unittest.TestCase):
             scoped_observation("AAVE", "market.drawdown", -0.28),
             scoped_observation("AAVE", "valuation.fdv", 2.0e9),
             scoped_observation("AAVE", "valuation.fdv_market_cap_ratio", 1.04),
-            scoped_observation("AAVE", "valuation.fee_revenue_multiple", 7.25),
             scoped_observation("AAVE", "valuation.market_cap", 1.96e9),
             scoped_observation("MARKET", "market.breadth", 0.61),
             scoped_observation("MARKET", "market.btc_dominance", 0.58),

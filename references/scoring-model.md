@@ -358,11 +358,14 @@ risk envelope as a fraction of the active satellite envelope (normal 1.0,
 high_beta/high 0.5): the strategic target is the score curve evaluated inside
 that envelope, so a full score reaches exactly the envelope and every lower
 score stays strictly below it. The tier is an assessment input rather than a
-continuous volatility/beta estimate. Allocation diagnostics label its default
-provenance as `MANUAL_ASSESSMENT` and expose `risk_envelope_weight` and
-`hard_exposure_cap` (envelope plus the configured `hard_cap_buffer_pp`, a
-genuine risk ceiling the rebalance layer enforces via
-`RISK_BUDGET_BREACH` reductions); empirical calibration is a separate task.
+continuous volatility/beta estimate. Allocation diagnostics record its
+provenance, labelling the policy's own `normal` default `POLICY_DEFAULT` and an
+explicit non-default tier `MANUAL_ASSESSMENT`; they also expose
+`risk_envelope_weight` and `hard_exposure_cap` (envelope plus the configured
+`hard_cap_buffer_pp`, a genuine risk ceiling the rebalance layer enforces via
+`RISK_BUDGET_BREACH` reductions). A deterministic volatility/beta estimate and
+its empirical calibration are a separate task
+(`docs/PENDING_POLICY_DECISIONS.md` 8G).
 
 Materially negative BTC-relative evidence overrides the hold band.
 `event_risk.state` is the sole event-risk input; SEVERE and CRITICAL block new risk.

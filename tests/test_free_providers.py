@@ -668,8 +668,10 @@ class BnbStablecoinSupplyFlowTests(unittest.TestCase):
         self.assertNotIn("flows.bnb_chain_tvl_change_1d", METRIC_REGISTRY)
         self.assertNotIn("flows.bnb_chain_tvl_change_7d", METRIC_REGISTRY)
         self.assertNotIn("flows.bnb_chain_tvl_change_30d", METRIC_REGISTRY)
-        # BNB no longer consumes the "fees divided by revenue" pseudo-multiple.
-        self.assertFalse(METRIC_REGISTRY["valuation.fee_revenue_multiple"].applies_to("BNB"))
+        # BNB no longer consumes the "fees divided by revenue" pseudo-multiple,
+        # and no other asset does either: it has no price denominator and it
+        # re-scored the same series `fundamentals` already owns.
+        self.assertNotIn("valuation.fee_revenue_multiple", METRIC_REGISTRY)
         self.assertFalse(METRIC_REGISTRY["fundamentals.fees_30d"].applies_to("BNB"))
         self.assertFalse(METRIC_REGISTRY["fundamentals.revenue_30d"].applies_to("BNB"))
 

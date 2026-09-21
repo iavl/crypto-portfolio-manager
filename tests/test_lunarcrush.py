@@ -75,7 +75,7 @@ class LunarCrushTests(unittest.TestCase):
     def test_capabilities_match_retained_social_metrics(self):
         self.assertEqual(LunarCrushProvider(api_key="key").capabilities.metric_keys, SUPPORTED_METRICS)
         self.assertEqual(set(SUPPORTED_METRICS), {"sentiment.social_bullish_share", "sentiment.social_mentions_change_7d", "sentiment.social_attention_percentile"})
-        self.assertEqual(set(SUPPORTED_ASSETS), {"BTC", "ETH", "SOL", "BNB", "LINK", "AAVE"})
+        self.assertEqual(set(SUPPORTED_ASSETS), {"BTC", "ETH", "SOL", "BNB", "AAVE"})
 
     def test_provider_config_and_probe(self):
         config = load_provider_config()

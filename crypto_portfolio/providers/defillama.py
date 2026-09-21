@@ -47,7 +47,6 @@ ASSET_IDENTIFIERS = {
     "ETH": "ethereum",
     "SOL": "solana",
     "BNB": "bsc",
-    "LINK": "chainlink",
 }
 CHAIN_NAMES = {"ETH": "Ethereum", "SOL": "Solana", "BNB": "BSC"}
 STABLECOIN_SUPPLY_FIELD = "totalCirculating.peggedUSD"
@@ -703,8 +702,6 @@ def parse_protocol_payload(
                     break
             if metric in values:
                 break
-    if "valuation.fee_revenue_multiple" in keys and "fundamentals.fees_30d" in values and "fundamentals.revenue_30d" in values and values["fundamentals.revenue_30d"][0] > 0:
-        values["valuation.fee_revenue_multiple"] = (values["fundamentals.fees_30d"][0] / values["fundamentals.revenue_30d"][0], fetched_at)
     result = []
     for key in keys:
         if key not in values:
@@ -738,7 +735,7 @@ class DeFiLlamaProvider:
             provider=self.name,
             metric_keys=(
                 "fundamentals.tvl", "fundamentals.fees_30d", "fundamentals.revenue_30d",
-                "fundamentals.stablecoin_liquidity", "market.stablecoin_supply", "valuation.fee_revenue_multiple",
+                "fundamentals.stablecoin_liquidity", "market.stablecoin_supply",
                 "onchain.blockspace_fees",
                 "onchain.bnb_network_fees_30d_usd", "onchain.bnb_network_fees_90d_usd",
                 "onchain.bnb_network_fees_30d_change", "onchain.bnb_network_fees_90d_change",
@@ -895,7 +892,7 @@ class DeFiLlamaProvider:
         identifier = identifier_for_asset(request.asset)
         url = BASE_URL + "/protocol/" + quote(identifier, safe="")
         fetched = _now(self.clock)
-        fee_keys = {"fundamentals.fees_30d", "fundamentals.revenue_30d", "valuation.fee_revenue_multiple"}
+        fee_keys = {"fundamentals.fees_30d", "fundamentals.revenue_30d"}
         payload: Mapping[str, Any] = {}
         payload_error: Exception | None = None
         try:
@@ -916,7 +913,7 @@ class DeFiLlamaProvider:
             payload_error = exc
         fees_payload = None
         fees_error: Exception | None = None
-        if any(key in request.metric_keys for key in ("fundamentals.fees_30d", "valuation.fee_revenue_multiple")):
+        if "fundamentals.fees_30d" in request.metric_keys:
             try:
                 fees_payload = self.client.get_json(BASE_URL + "/summary/fees/" + quote(identifier, safe=""))
             except Exception as exc:
@@ -924,7 +921,7 @@ class DeFiLlamaProvider:
                 fees_payload, fees_error = None, exc
         revenue_payload = None
         revenue_error: Exception | None = None
-        if any(key in request.metric_keys for key in ("fundamentals.revenue_30d", "valuation.fee_revenue_multiple")):
+        if "fundamentals.revenue_30d" in request.metric_keys:
             try:
                 revenue_payload = self.client.get_json(
                     BASE_URL + "/summary/fees/" + quote(identifier, safe=""),
@@ -950,7 +947,6 @@ class DeFiLlamaProvider:
                 source_error = (
                     fees_error if key == "fundamentals.fees_30d" else
                     revenue_error if key == "fundamentals.revenue_30d" else
-                    fees_error or revenue_error if key == "valuation.fee_revenue_multiple" else
                     payload_error
                 ) or exc
                 diagnostic = getattr(source_error, "diagnostic", None)

@@ -43,7 +43,6 @@ _SUPPORTING_METRICS = {
     "market.drawdown",
     "valuation.market_cap",
     "valuation.fdv_market_cap_ratio",
-    "valuation.fee_revenue_multiple",
     "valuation.bnb_market_cap_to_annualized_network_fees_90d",
     "onchain.bnb_network_fees_30d_usd",
     "onchain.bnb_network_fees_90d_usd",
@@ -75,7 +74,6 @@ _ASSET_PROFILES = {
     "SOL": "L1_SMART_CONTRACT",
     "BNB": "L1_SMART_CONTRACT",
     "AAVE": "DEFI_PROTOCOL",
-    "LINK": "MIDDLEWARE",
 }
 
 

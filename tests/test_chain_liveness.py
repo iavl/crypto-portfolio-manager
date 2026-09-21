@@ -125,7 +125,7 @@ class ChainLivenessProviderTests(unittest.TestCase):
         self.assertEqual(definition.asset_scope, ("BTC", "ETH", "SOL", "BNB"))
         for asset in ("BTC", "ETH", "SOL", "BNB"):
             self.assertTrue(definition.applies_to(asset))
-        for asset in ("AAVE", "LINK"):
+        for asset in ("AAVE",):
             self.assertFalse(definition.applies_to(asset))
         config = load_provider_config()
         self.assertTrue(config["providers"]["chain_liveness"]["enabled"])

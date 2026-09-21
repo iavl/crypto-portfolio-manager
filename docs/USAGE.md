@@ -423,7 +423,7 @@ An explicit run-level choice takes precedence over the environment variable.
 ### 7.2 Chain Liveness
 
 Chain-native assets such as BTC, ETH, BNB, and SOL use structured operational
-status evidence. Token/protocol assets such as AAVE and LINK are not checked
+status evidence. Token/protocol assets such as AAVE are not checked
 as independent chains.
 
 Typical results:

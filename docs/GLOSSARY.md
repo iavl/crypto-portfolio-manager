@@ -43,7 +43,7 @@ configuration, and source. `--`, missing data, and failure statuses mean
 | **asset** | Asset | An identifiable symbol such as BTC, ETH, SOL, and its unified classification. | Classification comes from the canonical policy; conflicting asset hints are rejected. |
 | **spot-only** | Spot only | Only directly held spot assets are studied. | No leverage, margin, futures, perpetuals, or liquidation logic. |
 | **core** | Core asset | The default long-term core sleeve, currently BTC and ETH. | Core classification is not an unconditional buy or a target-allocation guarantee. |
-| **satellite** | Satellite asset | Selected large-cap assets outside the core with limited size, currently SOL, BNB, LINK, AAVE. | Requires a higher evidence bar and is bounded by satellite caps, confidence, and risk tier. |
+| **satellite** | Satellite asset | Selected large-cap assets outside the core with limited size, currently SOL, BNB, AAVE. | Requires a higher evidence bar and is bounded by satellite caps, confidence, and risk tier. |
 | **stablecoin / cash sleeve** | Stablecoin/cash sleeve | Stablecoins and cash are treated as one low-risk money basket. | Must keep at least the global minimum and the higher share the current regime requires. |
 | **allocation** | Allocation | Deciding what fraction of the portfolio each asset should hold. | A deterministic portfolio-level result, not decided by any single score. |
 | **weight** | Weight | An asset's value divided by total portfolio value. | The gap between current and target weight decides whether rebalancing is worthwhile. |

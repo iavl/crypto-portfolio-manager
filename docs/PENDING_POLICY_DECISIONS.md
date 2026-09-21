@@ -1,11 +1,14 @@
 # Pending investment-policy decisions (phase 8)
 
-Status: 2026-09-15. Items 8A-8E were decided by the 2026-09-15 structural
+Status: 2026-09-21. Items 8A-8E were decided by the 2026-09-15 structural
 refactor plan (portfolio strategy/scoring/allocation refactor) and
 implemented on the `strategy-structural-refactor` branch; each entry below
-records the decision and where it landed. New pending items would follow the
-same convention: current behavior, candidate direction, and the synthetic
-evidence required before approval.
+records the decision and where it landed. Items 8F and 8G were opened by the
+2026-09-21 scoring-layer review and remain PENDING: they record the current
+behavior, the candidate direction, and the evidence required before approval.
+New pending items follow the same convention. Nothing in the PENDING entries
+has been applied — the thresholds, multipliers, and tier logic they describe
+are unchanged in `config/policy.json`.
 
 | ID | Decision | Status |
 |---|---|---|
@@ -14,6 +17,8 @@ evidence required before approval.
 | 8C | Risk budget, BTC eligibility, AAVE risk multiplier | DECIDED: risk tier becomes an exposure cap, not a multiplier (phase 2); BTC eligibility and the reactive drawdown budget stay unchanged |
 | 8D | Regime debounce / idempotence | DECIDED: weighted severity regime model + existing one-notch cap (phase 8); dwell-time requirements not adopted |
 | 8E | Sub-threshold risk-repair trades and friction | DECIDED: no repair trades; staged execution (phase 4/5) replaces one-review corrections, unresolved constraints stay explicit |
+| 8F | Score-threshold recalibration after the trend neutral-point fix | PENDING: thresholds left unchanged; requires a frozen point-in-time score panel |
+| 8G | Deterministic `risk_tier` estimate from volatility/beta | PENDING: tier stays an assessment input; requires out-of-sample calibration evidence |
 
 ## 8A — Satellite hysteresis across the entry boundary
 
@@ -95,12 +100,100 @@ become production inputs. Until approved, unresolved constraints stay
 explicit and risk-increasing actions remain blocked while a hard floor is
 unmet.
 
+## 8F — Score-threshold recalibration after the trend neutral-point fix
+
+Current behavior: the trend factor has a structural base of 50, but its
+moving-average comparison counted `spot >= ma` as bullish, so a fully
+undetermined trend (price exactly on each MA, no alignment, no momentum)
+scored 81 instead of neutral. Trend carries the largest profile weight (0.30
+`default`, 0.35 `btc`), so every base score for an asset in a flat or
+indeterminate trend state was inflated. The 2026-09-21 correction makes MA
+authority strictly directional — above adds, below subtracts, an exact tie
+contributes nothing — so a no-information trend now reads 50
+(`tests/test_trend_neutral_calibration.py`). The score thresholds were
+calibrated against the old, higher distribution and were deliberately left
+unchanged:
+
+- satellite curve: `satellite_entry_score` 67, `satellite_exit_score` 62,
+  `satellite_soft_exit_score` 57, `satellite_full_score` 85;
+- relative-strength gate: `increase_min_score` 50, `hard_block_below_score` 30;
+- ETH core gate: `increase_min_score` 55, `hold_min_score` 45,
+  `relative_increase_min_score` 45, `relative_reduce_below_score` 30.
+
+Candidate direction: re-derive those breakpoints from the corrected score
+distribution — percentile-anchored on a frozen historical panel, or otherwise
+calibrated rather than inherited — instead of adjusting the legacy integers by
+inspection. The directional trend weight (0.30/0.35) is NOT part of this
+decision: the review concluded the weight is not too low, so it stays.
+
+Required evidence: a frozen point-in-time panel of scored snapshots (per
+asset, per review date) produced by the corrected deterministic trend factor,
+covering enough regime variety to place the entry/exit breakpoints at
+meaningful percentiles; the before/after score distributions; and a check that
+recalibrated thresholds neither admit chase entries nor push turnover beyond
+the existing bands. Until then thresholds stay unchanged and only the
+diagnostic distributions are reported.
+
+## 8G — Deterministic `risk_tier` estimate
+
+Current behavior: `risk_tier` (`normal` / `high_beta` / `high`) is an
+assessment input. The contract already reserves `POLICY_DEFAULT`,
+`MANUAL_ASSESSMENT`, and `DETERMINISTIC_ESTIMATE` as provenance values, but
+nothing in the repository ever emits `DETERMINISTIC_ESTIMATE`: the tier is
+either the policy default `normal` or a semantic/manual declaration
+(`crypto_portfolio/engine/allocation.py`). `allocation.risk_tier_caps` then
+caps the satellite envelope (normal 1.0, high_beta/high 0.5). Horizon-matched
+realized volatility and beta-to-BTC data are already collected for other
+factors, so the tier is the one remaining purely semantic risk input.
+
+Candidate direction: derive the tier deterministically in Python from
+horizon-matched realized volatility and/or beta to BTC (e.g. fixed percentile
+bands over a rolling window), keep the semantic route available as an explicit
+override, and label each producer. The tier must remain a structural envelope
+cap and never a return-enhancing scalar.
+
+Required evidence: a frozen point-in-time volatility/beta panel showing stable
+tier assignment across the universe; confirmation that the deterministic tier
+reproduces or safely dominates the current assignments (AAVE `high_beta`,
+others `normal`) without boundary flapping between tiers; and an out-of-sample
+check that reclassification does not silently change the portfolio drawdown
+budget. Until approved, `risk_tier` stays an assessment input and empirical
+calibration remains a separate task.
+
+## Post-review corrections (2026-09-21)
+
+The 2026-09-21 scoring-layer review produced four changes that are
+implemented, not pending:
+
+- LINK is removed from the universe entirely (no longer monitored or scored):
+  `config/policy.json` satellites are now `SOL`, `BNB`, `AAVE`; LINK is gone
+  from the metric registry, metric plan, availability profiles, provider
+  symbol/identifier maps (Binance, Bybit, CoinGecko, DeFiLlama, LunarCrush),
+  and routes. A repository-wide grep for the asset returns nothing.
+- The duplicate fee/revenue ratio metric (`valuation.fee_revenue_multiple`) is
+  removed for every asset, not only BNB: it double-counted the same DeFiLlama
+  fee series already used by `fundamentals.fees_30d`/`revenue_30d`.
+- A semantic `FactorJudgment.confidence` (HIGH 1.0 / MEDIUM 0.75 / LOW 0.5)
+  now enters reliability instead of being ignored, so a low-confidence
+  semantic factor shrinks toward neutral and lowers coverage
+  (`tests/test_semantic_judgment_reliability.py`).
+- `stress_scenario` now covers every core and satellite asset
+  (BTC/ETH/SOL/AAVE/BNB) and is validated as such in
+  `crypto_portfolio/models/policy.py`, so `portfolio_stress` no longer returns
+  UNAVAILABLE for an uncovered satellite.
+
 ## Verification boundaries
 
 - Phases 0-6 fixes are covered by the regression suite (668 -> 688 tests).
+- The 2026-09-21 scoring-layer corrections bring the suite to 920 tests
+  (`python -m unittest discover -s tests`), with dedicated regression files for
+  the trend neutral point (`tests/test_trend_neutral_calibration.py`) and the
+  semantic-judgment reliability path
+  (`tests/test_semantic_judgment_reliability.py`).
 - Phase 7 delivered tooling validated on synthetic fixtures only; no claim of
   historical strategy validation is made, and none is possible until frozen
-  point-in-time evidence exists outside the repository.
+  point-in-time evidence exists outside the repository. This is precisely why
+  8F and 8G stay PENDING.
 - The repository Skill (`crypto-portfolio-manager`) was not read or modified
   per the execution contract; if its orchestration text references the old
   confidence-label or relative-strength-number semantics, syncing it is a

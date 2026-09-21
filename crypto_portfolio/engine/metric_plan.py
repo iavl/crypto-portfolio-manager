@@ -53,7 +53,6 @@ _ASSET_METRICS = (
     "valuation.market_cap",
     "valuation.fdv",
     "valuation.fdv_market_cap_ratio",
-    "valuation.fee_revenue_multiple",
     "tokenomics.next_unlock_pct",
     "tokenomics.annualized_emissions",
     "tokenomics.supply_growth",

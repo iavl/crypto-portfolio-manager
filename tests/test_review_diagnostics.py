@@ -15,6 +15,18 @@ class ReviewDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["availability"], "AVAILABLE")
         self.assertTrue(result["budget_breach"])
 
-        missing = portfolio_stress({"BTC": 0.8, "SOL": 0.1, "USDT": 0.1}, policy=policy)
+        # Every managed risky asset now has an explicit scenario return, so
+        # the diagnostic can run instead of silently turning itself off.
+        for symbol in policy.satellite_symbols:
+            held = {"BTC": 0.6, symbol: 0.2, "USDT": 0.2}
+            with self.subTest(symbol=symbol):
+                self.assertNotEqual(
+                    portfolio_stress(held, policy=policy, drawdown=-0.01)["availability"],
+                    "UNAVAILABLE",
+                )
+
+        # An unmanaged holding has no scenario return; the diagnostic fails
+        # closed and names the asset rather than assuming a zero shock.
+        missing = portfolio_stress({"BTC": 0.8, "LUNC": 0.1, "USDT": 0.1}, policy=policy)
         self.assertEqual(missing["availability"], "UNAVAILABLE")
-        self.assertEqual(missing["missing_assets"], ["SOL"])
+        self.assertEqual(missing["missing_assets"], ["LUNC"])

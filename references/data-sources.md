@@ -173,7 +173,7 @@ but abnormal age/finality, and `HALTED` requires severe stale chain state from
 the configured independent source groups. Provider reachability, DNS/TLS,
 timeouts, HTTP errors, or rate limits are unavailable evidence, not proof of a
 halt. RPC endpoints are observation transports, not authorities on security,
-governance, or regulation. AAVE and LINK are not independent chains.
+governance, or regulation. AAVE is not an independent chain.
 
 ### ETF / institutional flows
 

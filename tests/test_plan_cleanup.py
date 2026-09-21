@@ -49,6 +49,10 @@ REMOVED_METRICS = {
     "flows.bnb_chain_tvl_change_1d",
     "flows.bnb_chain_tvl_change_7d",
     "flows.bnb_chain_tvl_change_30d",
+    # "fees divided by revenue" is a margin ratio with no price denominator
+    # and it re-scored the exact series `fundamentals` already owns, so it is
+    # no longer any asset's valuation evidence.
+    "valuation.fee_revenue_multiple",
 }
 
 

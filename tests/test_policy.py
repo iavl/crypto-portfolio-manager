@@ -10,8 +10,10 @@ class PolicyTests(unittest.TestCase):
     def test_canonical_policy_loads_and_normalizes(self):
         policy = load_policy()
         self.assertEqual(policy.core_symbols, ("BTC", "ETH"))
-        self.assertEqual(policy.excluded_symbols, ("LUNC",))
+        self.assertEqual(policy.excluded_symbols, ("LUNC", "LINK"))
         self.assertTrue(policy.is_excluded(" lunc "))
+        self.assertTrue(policy.is_excluded("link"))
+        self.assertNotIn("LINK", policy.core_symbols + policy.satellite_symbols + policy.stable_symbols)
         self.assertNotIn("LUNC", policy.core_symbols + policy.satellite_symbols + policy.stable_symbols)
         self.assertIn("U", policy.stable_symbols)
         self.assertIn("USD1", policy.stable_symbols)

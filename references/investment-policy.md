@@ -28,7 +28,6 @@ Default examples:
 
 - SOL
 - BNB
-- LINK
 - AAVE
 
 The user may replace the satellite asset list in the snapshot `config`.
@@ -38,6 +37,8 @@ This is not an automatic buy list. Any eligible asset may have 0% target weight.
 ### Excluded
 
 - `LUNC` is excluded by default in `config/policy.json`.
+- `LINK` is excluded by explicit user request; it is no longer researched,
+  scored, allocated, or monitored.
 - small-cap altcoins;
 - illiquid tokens;
 - meme/speculative tokens without durable analyzable fundamentals;
