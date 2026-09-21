@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>策略与评分模型 · 一页看懂</title>
+<style>
+  :root{
+    --bg:#0d1017; --panel:#151a23; --panel2:#1b212c; --line:#28313f; --line2:#333d4d;
+    --fg:#e8ecf3; --muted:#9aa6b8; --dim:#71809a;
+    --blue:#4c8dff; --teal:#2dd4bf; --amber:#f5b23e; --rose:#f2637a; --violet:#a78bfa;
+    --sky:#38bdf8; --pink:#f472b6; --yellow:#facc15; --slate:#94a3b8;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  code,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:40px;max-width:1400px;margin:0 auto;padding:0 32px 96px}
+  /* ---------- TOC ---------- */
+  nav.toc{position:sticky;top:0;align-self:start;max-height:100vh;overflow-y:auto;padding:34px 0 40px;font-size:13px}
+  nav.toc .t{color:var(--dim);letter-spacing:.14em;text-transform:uppercase;font-size:11px;margin:0 0 12px}
+  nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:4px 0 4px 12px;border-left:2px solid transparent}
+  nav.toc a:hover{color:var(--fg);border-left-color:var(--blue);background:linear-gradient(90deg,rgba(76,141,255,.08),transparent)}
+  /* ---------- layout ---------- */
+  main{min-width:0;padding-top:34px}
+  header.hero{border:1px solid var(--line);border-radius:16px;padding:30px 32px;background:
+    radial-gradient(1100px 340px at 8% -30%, rgba(76,141,255,.16), transparent 60%),
+    radial-gradient(700px 300px at 95% 0%, rgba(45,212,191,.10), transparent 60%), var(--panel);}
+  header.hero h1{margin:0 0 6px;font-size:29px;letter-spacing:-.01em}
+  header.hero .sub{color:var(--muted);margin:0 0 20px;font-size:14.5px}
+  header.hero .sub code{color:var(--sky);font-size:13px}
+  h2{font-size:21px;margin:56px 0 6px;padding-top:14px;border-top:1px solid var(--line);letter-spacing:-.01em}
+  h2 .num{color:var(--blue);font-family:ui-monospace,monospace;font-size:15px;margin-right:9px;opacity:.85}
+  h3{font-size:16.5px;margin:30px 0 8px;color:#f2f5fa}
+  h4{font-size:14px;margin:20px 0 6px;color:var(--muted);letter-spacing:.02em;text-transform:none}
+  p{margin:9px 0}
+  ul,ol{margin:9px 0;padding-left:22px}
+  li{margin:5px 0}
+  li::marker{color:var(--dim)}
+  a{color:var(--blue)}
+  hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+  /* ---------- cards ---------- */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:20px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{color:var(--dim);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase}
+  .card .v{font-size:22px;font-weight:650;margin-top:4px;letter-spacing:-.01em}
+  .card .n{color:var(--muted);font-size:12.5px;margin-top:2px;line-height:1.5}
+  .card.b{border-color:#2c4568} .card.b .v{color:var(--blue)}
+  .card.t{border-color:#21504d} .card.t .v{color:var(--teal)}
+  .card.a{border-color:#5b4a22} .card.a .v{color:var(--amber)}
+  .card.r{border-color:#5c2b35} .card.r .v{color:var(--rose)}
+  /* ---------- figure ---------- */
+  figure{margin:22px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 10px 0;overflow:hidden}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{color:var(--muted);font-size:12.5px;padding:10px 12px 14px;border-top:1px solid var(--line);margin-top:6px;line-height:1.65}
+  figcaption b{color:var(--fg);font-weight:600}
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--line2)}
+  tbody tr:hover{background:rgba(255,255,255,.016)}
+  td.n,th.n{text-align:right;font-family:ui-monospace,monospace;white-space:nowrap}
+  code{background:#0b0e14;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12.5px;color:#cfe0ff}
+  pre{background:#0b0e14;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.65;color:#cfe0ff}
+  /* ---------- callouts ---------- */
+  .note{border-left:3px solid var(--blue);background:rgba(76,141,255,.07);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:13.8px}
+  .warn{border-left:3px solid var(--rose);background:rgba(242,99,122,.08);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:13.8px}
+  .ok{border-left:3px solid var(--teal);background:rgba(45,212,191,.07);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:13.8px}
+  .note b,.warn b,.ok b{color:#fff}
+  .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;font-weight:600;border:1px solid;line-height:1.6;white-space:nowrap}
+  .pill.b{color:var(--blue);border-color:#2c4568;background:rgba(76,141,255,.1)}
+  .pill.t{color:var(--teal);border-color:#21504d;background:rgba(45,212,191,.1)}
+  .pill.a{color:var(--amber);border-color:#5b4a22;background:rgba(245,178,62,.1)}
+  .pill.r{color:var(--rose);border-color:#5c2b35;background:rgba(242,99,122,.1)}
+  .pill.s{color:var(--slate);border-color:#39424f;background:rgba(148,163,184,.1)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:960px){.wrap{grid-template-columns:1fr;gap:0;padding:0 20px 72px}nav.toc{display:none}.two{grid-template-columns:1fr}}
+  footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <p class="t">目录</p>
+  <a href="#tldr">0 · 一屏速览</a>
+  <a href="#s1">1 · 这是什么策略</a>
+  <a href="#s2">2 · 投资宇宙</a>
+  <a href="#s3">3 · 决策流水线</a>
+  <a href="#s4">4 · 评分模型</a>
+  <a href="#s4-1">　4.1 三套权重 profile</a>
+  <a href="#s4-2">　4.2 因子内部（趋势）</a>
+  <a href="#s4-3">　4.3 可靠性收缩与覆盖率</a>
+  <a href="#s4-4">　4.4 相对强度 vs BTC</a>
+  <a href="#s4-5">　4.5 资金流两种口径</a>
+  <a href="#s5">5 · 从分数到目标权重</a>
+  <a href="#s5-1">　5.1 卫星目标曲线</a>
+  <a href="#s5-2">　5.2 风险档与硬上限</a>
+  <a href="#s6">6 · 组合风险</a>
+  <a href="#s6-1">　6.1 市场状态 Regime</a>
+  <a href="#s6-2">　6.2 回撤阶梯</a>
+  <a href="#s6-3">　6.3 事件与链活跃度</a>
+  <a href="#s7">7 · 再平衡与执行</a>
+  <a href="#s8">8 · 置信度链</a>
+  <a href="#s9">9 · 不可动摇的边界</a>
+  <a href="#s10">10 · 常见误读</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>策略与评分模型 · 一页看懂</h1>
+  <p class="sub">
+    对 <code>crypto-portfolio-manager</code> 代码库的策略与评分的整体梳理。所有数字取自
+    <code>config/policy.json</code>（唯一机器可读权威）与 <code>references/*.md</code>；
+    实施细节核对过 <code>crypto_portfolio/engine/</code> 下的评分、配置、风险、再平衡实现。
+    整理日期：2026-09-21。
+  </p>
+  <div class="cards">
+    <div class="card b"><div class="k">时间尺度</div><div class="v">3–6 个月</div><div class="n">中周期主动配置，仅现货，非日内</div></div>
+    <div class="card t"><div class="k">基准</div><div class="v">100% BTC</div><div class="n">次基准 70/30 BTC/ETH 买入持有</div></div>
+    <div class="card a"><div class="k">回撤预算</div><div class="v">15%</div><div class="n">组合层面，不是单资产止损</div></div>
+    <div class="card r"><div class="k">稳定币下限</div><div class="v">15%</div><div class="n">无上限，regime 可要求更高</div></div>
+  </div>
+</header>
+
+<!-- ============ 0 ============ -->
+<h2 id="tldr"><span class="num">0</span>一屏速览</h2>
+<p>如果只记一件事：<b>这个系统把「资产好不好」和「现在该不该买、买多少」彻底拆成了两层。</b>
+分数只回答前者；后者由置信度、市场状态、事件闸门、BTC 机会成本、组合上限、再平衡阈值、执行分批逐层决定。
+任何一层都可以把结论变成 <code>HOLD</code> / <code>WAIT</code> / <code>NO_TRADE</code>，而 <code>NO_TRADE</code> 是<b>成功结论</b>，不是系统故障。</p>
+
+<div class="cards">
+  <div class="card"><div class="k">分数语义</div><div class="v">0–100</div><div class="n">证据强度排序，<b>不是</b>上涨概率，<b>不是</b>目标权重</div></div>
+  <div class="card"><div class="k">卫星入场线</div><div class="v">67</div><div class="n">57 软退出 / 62 退出 / 85 满分</div></div>
+  <div class="card"><div class="k">相对强度闸门</div><div class="v">50 / 30</div><div class="n">≥50 可增持；30–50 只持有或减；&lt;30 硬拦截</div></div>
+  <div class="card"><div class="k">再平衡带</div><div class="v">2 / 4 / 8 pp</div><div class="n">绝对偏离 pp，同时看相对偏离 %</div></div>
+</div>
+
+<h3>关键数字速查</h3>
+<table>
+  <thead><tr><th>项</th><th class="n">当前默认值</th><th>说明 / 出处</th></tr></thead>
+  <tbody>
+    <tr><td>投资目标（按优先级）</td><td class="n">① 跑赢 BTC ② 正绝对收益 ③ 避免大回撤</td><td>三者冲突时资本保全优先</td></tr>
+    <tr><td>基准<br><span style="color:var(--dim);font-size:12px;font-weight:400">对标尺，不是目标</span></td><td class="n">主：100% BTC<br>次：70/30 BTC·ETH</td><td>两条都是<b>买入持有</b>。超额收益<b>只对主基准</b>计算；外部入金在事件点按各自权重分摊，<b>不做日度再平衡</b>。详见第 8 节。</td></tr>
+    <tr><td>组合回撤预算 <code>max_portfolio_drawdown</code></td><td class="n">0.15</td><td>是风险预算/目标，不是保证</td></tr>
+    <tr><td>稳定币下限 <code>min_stablecoin_weight</code></td><td class="n">0.15</td><td>无固定上限</td></tr>
+    <tr><td>卫星分数阈值</td><td class="n">57 / 62 / 67 / 85</td><td>软退出 / 退出 / 入场 / 满分</td></tr>
+    <tr><td>相对强度阈值</td><td class="n">50 / 30</td><td>增持下限 / 硬拦截</td></tr>
+    <tr><td>ETH 核心闸门</td><td class="n">55 / 45 / 45 / 30</td><td>增持 / 持有 / 相对增持 / 相对减配</td></tr>
+    <tr><td>核心袖锚 <code>core_allocation.anchor</code></td><td class="n">BTC 0.70 / ETH 0.30</td><td>先验，不是固定目标，也不是权利</td></tr>
+    <tr><td>再平衡带</td><td class="n">2 pp / 4 pp / 8 pp</td><td>HOLD / 可主动再平衡 / 高优先级</td></tr>
+    <tr><td>单次最多修复缺口</td><td class="n">50% 剩余缺口，≤4 pp</td><td>硬退出原因可绕过分批</td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 1 ============ -->
+<h2 id="s1"><span class="num">1</span>这是什么策略</h2>
+<p>一句话：<b>以 BTC 为基准、带风险预算、多因子的 Core–Satellite（核心—卫星）中周期现货配置策略。</b>
+它只在证据足以支撑该资产特有的风险时才去追求超额收益；证据不够或时机不好时，资金可以留在稳定币/现金袖里。</p>
+
+<div class="two">
+  <div>
+    <h4>它是什么</h4>
+    <ul>
+      <li>按 3–6 个月视野做主动配置</li>
+      <li>组合层面管理风险，不按单资产各自管</li>
+      <li>分数 → 置信度 → 状态 → 闸门 → 上限 → 再平衡 → 分批，逐层收敛</li>
+      <li>确定性计算全部由 Python 拥有；语言模型只能做有边界的语义判断</li>
+    </ul>
+  </div>
+  <div>
+    <h4>它明确不是什么</h4>
+    <ul>
+      <li>不是日内/高频交易，不是纯动量趋势跟踪</li>
+      <li>不是无脑定投抄底，也不是市值加权固定配置</li>
+      <li>不用高质押年化去为弱资产背书</li>
+      <li>不碰合约、永续、杠杆、保证金、杠杆代币</li>
+      <li><b>不接交易密钥，不自动下单</b></li>
+    </ul>
+  </div>
+</div>
+
+<div class="note">
+  <b>BTC 的双重身份。</b>它既是对标基准，也是风险资本的默认「机会成本资产」。
+  所以任何 ETH 或卫星的加仓都必须回答一个问题：<b>「为什么是加它，而不是加 BTC？」</b>
+  正绝对收益不够，如果同样的钱放在 BTC 上有更好的风险调整回报，那就不该加。
+  另一方面，BTC 没有自动分数加成，也不是不能减配——它有自己的一套趋势、估值、流量、宏观、事件与链健康风险。
+</div>
+
+<h3>战略目标 vs 部署额度（最容易混淆的一对概念）</h3>
+<table>
+  <thead><tr><th>概念</th><th>回答的问题</th><th>由谁决定</th></tr></thead>
+  <tbody>
+    <tr><td><b>战略目标</b> Strategic Target</td><td>长期看应该持有多少？</td><td>分数曲线 + regime + 结构性风险档<br><span style="color:var(--amber);font-size:12.5px">↑ 卫星口径；核心把置信度与事件乘数烘进目标，见下表</span></td></tr>
+    <tr><td><b>部署额度</b> Deployment Allowance</td><td>这一次最多能新增多少风险？</td><td>资产置信度 + 事件风险 + 决策置信度 + 执行叠加层<br><span style="color:var(--amber);font-size:12.5px">↑ 目前<b>只有卫星</b>有这一层</span></td></tr>
+  </tbody>
+</table>
+<p>事件状态从 <code>ELEVATED</code> 升到 <code>HIGH</code>（新风险倍数 0.75 → 0.50）会压缩部署额度。
+但<b>「压缩到哪一层」对卫星和核心并不一样</b>，这是全篇最容易踩的一个例外：</p>
+<table>
+  <thead><tr><th>资产</th><th>战略目标（想要多少）</th><th>部署额度（这次能动多少）</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="pill t">卫星</span></td>
+      <td>风险信封 × 分数曲线。<b>不含</b>事件与置信度乘数，所以目标<b>不</b>随事件状态变化。</td>
+      <td>战略目标 × 资产置信度 × <b>事件风险</b> × 决策置信度 × 执行叠加（取 min）。这才是事件风险的作用点。</td>
+    </tr>
+    <tr>
+      <td><span class="pill b">核心</span><br>BTC / ETH</td>
+      <td>锚 × 分数质量 × <b>置信度乘数</b> × <b>事件风险乘数</b>（见 <code>_allocate_core</code>）。乘数<b>直接烘进目标</b>，核心<b>没有</b>独立的部署层。</td>
+      <td>没有单独的第二层可拦。事件或置信度一变，目标本身就跟着变小，越过再平衡带就可能直接产生减仓。</td>
+    </tr>
+  </tbody>
+</table>
+<div class="warn">
+  <b>「临时部署限制不能单独生成 REDUCE」这句话只对卫星成立。</b>
+  核心资产遇到 <code>ELEVATED → HIGH</code> 时，战略目标是<b>会</b>变小的——因为事件乘数和置信度乘数就写在核心目标的算式里
+  （<code>raw = anchor × 分数质量 × confidence_multiplier × event_multiplier</code>）。
+  这是<b>已登记且已决定保留</b>的行为，不是待修 bug：见
+  <code>docs/PENDING_POLICY_DECISIONS.md</code> 8B 的 F3 描述与「multipliers stay in core raw proportions」的裁定。
+  要改动它需要单独决策，不能靠观察顺手调整。
+</div>
+<div class="note">
+  换句话记：<b>卫星是两层结构（目标 / 允许），核心是一层结构（乘数都烘进目标）。</b>
+  所以「一个临时的数据或事件波动最多只能拦住新增，不能逼你卖」这条保护，
+  目前<b>只覆盖卫星</b>。
+</div>
+
+<!-- ============ 2 ============ -->
+<h2 id="s2"><span class="num">2</span>投资宇宙</h2>
+<table>
+  <thead><tr><th>性质</th><th>资产</th><th>含义</th></tr></thead>
+  <tbody>
+    <tr><td><span class="pill b">Core</span></td><td><code>BTC</code> <code>ETH</code></td><td>默认核心风险资产，有更大的仓位容忍度。<b>不是</b>保证持仓，<b>不是</b>目标权重，<b>没有</b>分数保底。</td></tr>
+    <tr><td><span class="pill t">Satellite</span></td><td><code>SOL</code> <code>BNB</code> <code>AAVE</code></td><td>可选大盘暴露，必须<b>自己挣到</b>那份额外风险预算。</td></tr>
+    <tr><td><span class="pill s">稳定币/现金</span></td><td><code>USDT</code> <code>USDC</code> <code>DAI</code> <code>FDUSD</code> <code>TUSD</code> <code>USD</code> <code>CASH</code> <code>U</code> <code>USD1</code></td><td>一个整体的风险预算容量与选择权，不是「剩下的钱」。稳定币≠无风险（发行方/脱锚/托管/平台/合约风险仍在）。</td></tr>
+    <tr><td><span class="pill r">Excluded</span></td><td><code>LUNC</code> <code>LINK</code></td><td>移出管理宇宙：不研究、不采集、不评分、不配置、不再平衡。</td></tr>
+  </tbody>
+</table>
+
+<div class="warn">
+  <b>「被排除」不等于「强制卖出」。</b>如果快照里还有被排除的持仓，它会以
+  <code>EXCLUDED / UNMANAGED</code> 形式留在记账与可见性里（保证 NAV 和 P&amp;L 正确），
+  但系统不会去动它。LINK 是用户明确要求永久移出，不要以任何理由加回宇宙、provider 或指标注册表。
+</div>
+
+<p>宇宙是策略驱动的：core 分类不是配置权利，卫星清单不是买入清单，
+任何合格资产的目标权重都可以是 0%。</p>
+
+<!-- ============ 3 ============ -->
+<h2 id="s3"><span class="num">3</span>决策流水线：分数只是第三层</h2>
+<p>整条链路自上而下逐层收敛，每往下一层都只能「收紧」不能「放宽」。左侧是层的名字，右侧写清楚了这一层能把什么拦住。</p>
+
+<figure>
+<svg viewBox="0 0 1000 748" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="ar1" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3d4a5e"/>
+    </marker>
+  </defs>
+  <!-- rows -->
+  <g>
+    <!-- helper: repeated structure -->
+    <rect x="32" y="24" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="50" r="14" fill="#0d1017" stroke="#4c8dff" stroke-width="1.5"/>
+    <text x="64" y="55" fill="#4c8dff" font-size="13" font-weight="700" text-anchor="middle">1</text>
+    <text x="92" y="47" fill="#e8ecf3" font-size="15" font-weight="600">市场 / 组合证据</text>
+    <text x="92" y="65" fill="#71809a" font-size="11.5">截图或结构化快照 + 抓取到的指标观察</text>
+    <text x="596" y="45" fill="#9aa6b8" font-size="12.5">输入层：这里没有结论，只有事实与「缺什么」</text>
+    <text x="596" y="63" fill="#71809a" font-size="12">缺数据在这里就标记为 MISSING，不会被补成中值</text>
+
+    <rect x="32" y="94" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="120" r="14" fill="#0d1017" stroke="#4c8dff" stroke-width="1.5"/>
+    <text x="64" y="125" fill="#4c8dff" font-size="13" font-weight="700" text-anchor="middle">2</text>
+    <text x="92" y="117" fill="#e8ecf3" font-size="15" font-weight="600">资产吸引力分数 0–100</text>
+    <text x="92" y="135" fill="#71809a" font-size="11.5">按 profile 加权的多因子分，含可靠性收缩</text>
+    <text x="596" y="115" fill="#9aa6b8" font-size="12.5"><tspan fill="#f5b23e" font-weight="600">这里不是交易信号</tspan>：只是「这个资产有多好」</text>
+    <text x="596" y="133" fill="#71809a" font-size="12">分数本身不产生 BUY/SELL，也不等于目标权重</text>
+
+    <rect x="32" y="164" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="190" r="14" fill="#0d1017" stroke="#4c8dff" stroke-width="1.5"/>
+    <text x="64" y="195" fill="#4c8dff" font-size="13" font-weight="700" text-anchor="middle">3</text>
+    <text x="92" y="187" fill="#e8ecf3" font-size="15" font-weight="600">数据置信度 / 覆盖率</text>
+    <text x="92" y="205" fill="#71809a" font-size="11.5">覆盖 · 新鲜度 · 来源质量 · 同指标多源冗余</text>
+    <text x="596" y="185" fill="#9aa6b8" font-size="12.5">覆盖率 &lt;60% 直接不可投资；硬性关键数据缺失强制 LOW</text>
+    <text x="596" y="203" fill="#71809a" font-size="12">决定「这份证据能支撑多大的动作」</text>
+
+    <rect x="32" y="234" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="260" r="14" fill="#0d1017" stroke="#4c8dff" stroke-width="1.5"/>
+    <text x="64" y="265" fill="#4c8dff" font-size="13" font-weight="700" text-anchor="middle">4</text>
+    <text x="92" y="257" fill="#e8ecf3" font-size="15" font-weight="600">市场状态 Regime</text>
+    <text x="92" y="275" fill="#71809a" font-size="11.5">NORMAL / DEFENSIVE / CAPITAL_PRESERVATION</text>
+    <text x="596" y="255" fill="#9aa6b8" font-size="12.5">决定本期可用的风险预算：稳定币目标、卫星上限、核心下限</text>
+    <text x="596" y="273" fill="#71809a" font-size="12">单一噪声指标不能切换状态；回撤地板可强制降档</text>
+
+    <rect x="32" y="304" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="330" r="14" fill="#0d1017" stroke="#f2637a" stroke-width="1.5"/>
+    <text x="64" y="335" fill="#f2637a" font-size="13" font-weight="700" text-anchor="middle">5</text>
+    <text x="92" y="327" fill="#e8ecf3" font-size="15" font-weight="600">事件风险 + 链活跃度 闸门</text>
+    <text x="92" y="345" fill="#71809a" font-size="11.5">安全/监管事件、链是否停摆</text>
+    <text x="596" y="325" fill="#9aa6b8" font-size="12.5"><tspan fill="#f2637a" font-weight="600">SEVERE / CRITICAL</tspan>：即使分数 100 也禁止新增风险</text>
+    <text x="596" y="343" fill="#71809a" font-size="12">链 HALTED 同样禁新增；证据未知时失败关闭</text>
+
+    <rect x="32" y="374" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="400" r="14" fill="#0d1017" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="64" y="405" fill="#a78bfa" font-size="13" font-weight="700" text-anchor="middle">6</text>
+    <text x="92" y="397" fill="#e8ecf3" font-size="15" font-weight="600">BTC 机会成本 / Core–Satellite 约束</text>
+    <text x="92" y="415" fill="#71809a" font-size="11.5">「为什么不是加 BTC？」相对强度闸门</text>
+    <text x="596" y="395" fill="#9aa6b8" font-size="12.5">相对强度 &lt;30 一票否决；30–50 只许持有/减，不许新增</text>
+    <text x="596" y="413" fill="#71809a" font-size="12">缺 ETH/BTC 证据会阻止高确信 ETH 加仓</text>
+
+    <rect x="32" y="444" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="470" r="14" fill="#0d1017" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="64" y="475" fill="#2dd4bf" font-size="13" font-weight="700" text-anchor="middle">7</text>
+    <text x="92" y="467" fill="#e8ecf3" font-size="15" font-weight="600">组合配置 + 风险上限</text>
+    <text x="92" y="485" fill="#71809a" font-size="11.5">稳定币下限 · 卫星上限 · 单一资产上限 · 风险档信封</text>
+    <text x="596" y="465" fill="#9aa6b8" font-size="12.5">高信念不能覆盖稳定币下限、集中度上限与风险档硬顶</text>
+    <text x="596" y="483" fill="#71809a" font-size="12">超出硬顶会直接触发 RISK_BUDGET_BREACH 减仓</text>
+
+    <rect x="32" y="514" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="540" r="14" fill="#0d1017" stroke="#f5b23e" stroke-width="1.5"/>
+    <text x="64" y="545" fill="#f5b23e" font-size="13" font-weight="700" text-anchor="middle">8</text>
+    <text x="92" y="537" fill="#e8ecf3" font-size="15" font-weight="600">再平衡阈值</text>
+    <text x="92" y="555" fill="#71809a" font-size="11.5">绝对偏离 2 / 4 / 8 pp ＋ 相对偏离 50% / 100%</text>
+    <text x="596" y="535" fill="#9aa6b8" font-size="12.5">偏离不够就 HOLD/WATCH；足够才产生可执行动作</text>
+    <text x="596" y="553" fill="#71809a" font-size="12">方向反转需要 2 个日收盘确认（除非硬退出原因）</text>
+
+    <rect x="32" y="584" width="540" height="52" rx="10" fill="#1b212c" stroke="#333d4d"/>
+    <circle cx="64" cy="610" r="14" fill="#0d1017" stroke="#f5b23e" stroke-width="1.5"/>
+    <text x="64" y="615" fill="#f5b23e" font-size="13" font-weight="700" text-anchor="middle">9</text>
+    <text x="92" y="607" fill="#e8ecf3" font-size="15" font-weight="600">执行时机 / 分批</text>
+    <text x="92" y="625" fill="#71809a" font-size="11.5">结构位、ATR、量价分布、分批模板</text>
+    <text x="596" y="605" fill="#9aa6b8" font-size="12.5">只能「花得更少」或 WAIT，<tspan fill="#f2637a">永远不能超过已批准金额</tspan></text>
+    <text x="596" y="623" fill="#71809a" font-size="12">当前只生成回踩(PULLBACK)计划；突破模式返回 WAIT</text>
+  </g>
+
+  <!-- connectors -->
+  <g stroke="#3d4a5e" stroke-width="1.6" marker-end="url(#ar1)">
+    <line x1="302" y1="76" x2="302" y2="92"/>
+    <line x1="302" y1="146" x2="302" y2="162"/>
+    <line x1="302" y1="216" x2="302" y2="232"/>
+    <line x1="302" y1="286" x2="302" y2="302"/>
+    <line x1="302" y1="356" x2="302" y2="372"/>
+    <line x1="302" y1="426" x2="302" y2="442"/>
+    <line x1="302" y1="496" x2="302" y2="512"/>
+    <line x1="302" y1="566" x2="302" y2="582"/>
+    <line x1="302" y1="636" x2="302" y2="654"/>
+  </g>
+
+  <!-- result -->
+  <rect x="32" y="662" width="936" height="62" rx="12" fill="#12212b" stroke="#2dd4bf" stroke-width="1.4"/>
+  <text x="52" y="690" fill="#2dd4bf" font-size="12" font-weight="700" letter-spacing="1.2">最终结论</text>
+  <text x="52" y="712" fill="#e8ecf3" font-size="15" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+    INCREASE · HOLD · WATCH · REDUCE · EXIT · WAIT · NO_TRADE
+  </text>
+  <text x="950" y="700" fill="#9aa6b8" font-size="12" text-anchor="end">HOLD / WAIT / NO_TRADE 都是一等公民式的成功结论</text>
+  <text x="950" y="718" fill="#71809a" font-size="11.5" text-anchor="end">金额必须为正才可执行；HOLD/WAIT/NO_TRADE 金额恒为 0</text>
+</svg>
+<figcaption><b>图 1｜决策流水线。</b>注意第 2 层只是「资产有多好」，从第 3 层开始才回答「能不能动、能动多少」。越往下越不能放宽——这是整份文档最重要的一张图。</figcaption>
+</figure>
+
+<!-- ============ 4 ============ -->
+<h2 id="s4"><span class="num">4</span>评分模型</h2>
+<p>基础分是 0–100 的<b>确定性</b>中周期吸引力度量。工具体系里有八个规范因子键，但每个资产用哪几个、权重多少，由 profile 决定。</p>
+
+<h3 id="s4-1">4.1 三套权重 profile</h3>
+<p>默认 profile 六个正权重因子；BTC 与 AAVE 各有专用 profile。权重必须覆盖八个键且和为 1，否则加载即报错。零权重因子解析为 <code>NOT_APPLICABLE</code>（而非 <code>MISSING</code>），不计入分数与覆盖率。</p>
+
+<figure>
+<svg viewBox="0 0 1000 350" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- row labels -->
+  <text x="164" y="70" fill="#e8ecf3" font-size="14" font-weight="650" text-anchor="end">BTC 专用</text>
+  <text x="164" y="89" fill="#71809a" font-size="11.5" text-anchor="end">4 个正权重因子</text>
+  <text x="164" y="150" fill="#e8ecf3" font-size="14" font-weight="650" text-anchor="end">默认 profile</text>
+  <text x="164" y="169" fill="#71809a" font-size="11.5" text-anchor="end">ETH · SOL · BNB</text>
+  <text x="164" y="230" fill="#e8ecf3" font-size="14" font-weight="650" text-anchor="end">AAVE</text>
+  <text x="164" y="249" fill="#71809a" font-size="11.5" text-anchor="end">defi_protocol</text>
+
+  <!-- BTC bar -->
+  <g>
+    <rect x="180" y="52" width="273" height="44" fill="#4c8dff"/>
+    <rect x="453" y="52" width="195" height="44" fill="#f5b23e"/>
+    <rect x="648" y="52" width="156" height="44" fill="#facc15"/>
+    <rect x="804" y="52" width="156" height="44" fill="#94a3b8"/>
+    <rect x="180" y="52" width="780" height="44" rx="7" fill="none" stroke="#333d4d"/>
+    <text x="316" y="80" fill="#08111f" font-size="12.5" font-weight="700" text-anchor="middle">trend 35%</text>
+    <text x="550" y="80" fill="#1a1206" font-size="12.5" font-weight="700" text-anchor="middle">capital_flows 25%</text>
+    <text x="726" y="80" fill="#1a1506" font-size="12.5" font-weight="700" text-anchor="middle">btc_valuation 20%</text>
+    <text x="882" y="80" fill="#0d1017" font-size="12.5" font-weight="700" text-anchor="middle">macro_liquidity 20%</text>
+  </g>
+  <!-- default bar -->
+  <g>
+    <rect x="180" y="132" width="234" height="44" fill="#4c8dff"/>
+    <rect x="414" y="132" width="117" height="44" fill="#a78bfa"/>
+    <rect x="531" y="132" width="156" height="44" fill="#2dd4bf"/>
+    <rect x="687" y="132" width="78" height="44" fill="#38bdf8"/>
+    <rect x="765" y="132" width="78" height="44" fill="#f5b23e"/>
+    <rect x="843" y="132" width="117" height="44" fill="#f472b6"/>
+    <rect x="180" y="132" width="780" height="44" rx="7" fill="none" stroke="#333d4d"/>
+    <text x="297" y="160" fill="#08111f" font-size="12.5" font-weight="700" text-anchor="middle">trend 30%</text>
+    <text x="472" y="160" fill="#140d24" font-size="12.5" font-weight="700" text-anchor="middle">15%</text>
+    <text x="609" y="160" fill="#04231f" font-size="12.5" font-weight="700" text-anchor="middle">fundamentals 20%</text>
+    <text x="726" y="160" fill="#04202e" font-size="12.5" font-weight="700" text-anchor="middle">10%</text>
+    <text x="804" y="160" fill="#1a1206" font-size="12.5" font-weight="700" text-anchor="middle">10%</text>
+    <text x="901" y="160" fill="#26101c" font-size="12.5" font-weight="700" text-anchor="middle">15%</text>
+  </g>
+  <!-- aave bar -->
+  <g>
+    <rect x="180" y="212" width="234" height="44" fill="#4c8dff"/>
+    <rect x="414" y="212" width="156" height="44" fill="#a78bfa"/>
+    <rect x="570" y="212" width="273" height="44" fill="#2dd4bf"/>
+    <rect x="843" y="212" width="117" height="44" fill="#f472b6"/>
+    <rect x="180" y="212" width="780" height="44" rx="7" fill="none" stroke="#333d4d"/>
+    <text x="297" y="240" fill="#08111f" font-size="12.5" font-weight="700" text-anchor="middle">trend 30%</text>
+    <text x="492" y="240" fill="#140d24" font-size="12.5" font-weight="700" text-anchor="middle">valuation 20%</text>
+    <text x="706" y="240" fill="#04231f" font-size="12.5" font-weight="700" text-anchor="middle">fundamentals 35%</text>
+    <text x="901" y="240" fill="#26101c" font-size="12.5" font-weight="700" text-anchor="middle">15%</text>
+  </g>
+  <!-- legend -->
+  <g font-size="12" fill="#9aa6b8">
+    <rect x="180" y="282" width="12" height="12" rx="3" fill="#4c8dff"/><text x="199" y="292">trend</text>
+    <rect x="400" y="282" width="12" height="12" rx="3" fill="#a78bfa"/><text x="419" y="292">valuation</text>
+    <rect x="620" y="282" width="12" height="12" rx="3" fill="#2dd4bf"/><text x="639" y="292">fundamentals</text>
+    <rect x="840" y="282" width="12" height="12" rx="3" fill="#38bdf8"/><text x="859" y="292">onchain</text>
+    <rect x="180" y="310" width="12" height="12" rx="3" fill="#f5b23e"/><text x="199" y="320">capital_flows</text>
+    <rect x="400" y="310" width="12" height="12" rx="3" fill="#f472b6"/><text x="419" y="320">relative_strength_btc</text>
+    <rect x="620" y="310" width="12" height="12" rx="3" fill="#facc15"/><text x="639" y="320">btc_valuation</text>
+    <rect x="840" y="310" width="12" height="12" rx="3" fill="#94a3b8"/><text x="859" y="320">macro_liquidity</text>
+  </g>
+</svg>
+<figcaption><b>图 2｜三套评分权重。</b>趋势在三个 profile 里都是最大权重（30–35%）。BTC 完全不用通用的估值/基本面/链上/相对强度，改用 BTC 原生的实现估值（MVRV、已实现价格等）与宏观流动性。AAVE 作为 DeFi 协议代币，把活动全部压进 fundamentals（TVL、费用、收入、代币经济），<b>ERC-20 转账活动不算 Aave 协议使用量</b>。</figcaption>
+</figure>
+
+<h3 id="s4-2">4.2 因子内部长什么样：以趋势为例</h3>
+<p>趋势因子是全套权重里最大的一个，也是最近唯一出过结构性 bug 的因子。它用一条「基线 + 授权加减分」的结构：</p>
+
+<figure>
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- clip zone -->
+  <rect x="112" y="60" width="848" height="45" fill="#f2637a" opacity="0.07"/>
+  <text x="950" y="54" fill="#f2637a" font-size="11.5" text-anchor="end">100 以上被截断（理论最大 115）</text>
+  <!-- gridlines -->
+  <g stroke="#28313f" stroke-width="1">
+    <line x1="112" y1="330" x2="960" y2="330"/>
+    <line x1="112" y1="274" x2="960" y2="274" stroke-dasharray="3 5"/>
+    <line x1="112" y1="218" x2="960" y2="218" stroke-dasharray="3 5" stroke="#4a5a72"/>
+    <line x1="112" y1="161" x2="960" y2="161" stroke-dasharray="3 5"/>
+    <line x1="112" y1="105" x2="960" y2="105" stroke-width="1.2" stroke="#5a3a44"/>
+  </g>
+  <g font-size="11.5" fill="#71809a" text-anchor="end">
+    <text x="102" y="334">0</text><text x="102" y="278">25</text><text x="102" y="222">50</text>
+    <text x="102" y="165">75</text><text x="102" y="109">100</text>
+  </g>
+  <text x="102" y="96" fill="#4a5a72" font-size="11" text-anchor="end">上限</text>
+
+  <!-- connectors -->
+  <g stroke="#3d4a5e" stroke-width="1" stroke-dasharray="2 3">
+    <line x1="176" y1="218" x2="230" y2="218"/>
+    <line x1="288" y1="168" x2="342" y2="168"/>
+    <line x1="400" y1="145" x2="454" y2="145"/>
+    <line x1="512" y1="92" x2="566" y2="92"/>
+    <line x1="624" y1="83" x2="678" y2="83"/>
+    <line x1="736" y1="71" x2="790" y2="71"/>
+    <line x1="848" y1="89" x2="902" y2="89"/>
+  </g>
+
+  <!-- bars -->
+  <!-- 1 base 0->50 -->
+  <rect x="118" y="218" width="58" height="112" rx="3" fill="#94a3b8"/>
+  <text x="147" y="210" fill="#cbd5e1" font-size="12" font-weight="700" text-anchor="middle">50</text>
+  <!-- 2 ma 50->72 -->
+  <rect x="230" y="168" width="58" height="50" rx="3" fill="#4c8dff"/>
+  <text x="259" y="160" fill="#9dc0ff" font-size="12" font-weight="700" text-anchor="middle">+22</text>
+  <!-- 3 alignment 72->82 -->
+  <rect x="342" y="145" width="58" height="23" rx="3" fill="#4c8dff"/>
+  <text x="371" y="137" fill="#9dc0ff" font-size="12" font-weight="700" text-anchor="middle">+10</text>
+  <!-- 4 momentum 82->106 -->
+  <rect x="454" y="92" width="58" height="53" rx="3" fill="#4c8dff"/>
+  <text x="483" y="84" fill="#9dc0ff" font-size="12" font-weight="700" text-anchor="middle">+24</text>
+  <!-- 5 support 106->110 -->
+  <rect x="566" y="83" width="58" height="9" rx="3" fill="#38bdf8"/>
+  <text x="595" y="75" fill="#7dd3fc" font-size="12" font-weight="700" text-anchor="middle">+4</text>
+  <!-- 6 volume 110->115 -->
+  <rect x="678" y="71" width="58" height="12" rx="3" fill="#38bdf8"/>
+  <text x="707" y="63" fill="#7dd3fc" font-size="12" font-weight="700" text-anchor="middle">+5</text>
+  <!-- 7 extension 115->107 -->
+  <rect x="790" y="89" width="58" height="18" rx="3" fill="#f5b23e"/>
+  <text x="819" y="81" fill="#f5b23e" font-size="12" font-weight="700" text-anchor="middle">−8</text>
+  <!-- 8 final 0->100 -->
+  <rect x="902" y="105" width="58" height="225" rx="3" fill="#2dd4bf"/>
+  <text x="931" y="97" fill="#5eead4" font-size="12" font-weight="700" text-anchor="middle">100</text>
+
+  <!-- x labels -->
+  <g font-size="11.5" fill="#9aa6b8" text-anchor="middle">
+    <text x="147" y="352">基线</text>
+    <text x="259" y="352">均线</text>
+    <text x="371" y="352">排列</text>
+    <text x="483" y="352">动量</text>
+    <text x="595" y="352">支撑</text>
+    <text x="707" y="352">量能</text>
+    <text x="819" y="352">追高</text>
+    <text x="931" y="352">输出</text>
+  </g>
+  <g font-size="10.5" fill="#5b6879" text-anchor="middle">
+    <text x="259" y="368">MA20/50/100/200</text>
+    <text x="371" y="368">多头排列</text>
+    <text x="483" y="368">30/90/180D</text>
+    <text x="595" y="368">结构确认</text>
+    <text x="707" y="368">量价配合</text>
+    <text x="819" y="368">&gt;2 ATR 惩罚</text>
+  </g>
+  <text x="112" y="390" fill="#71809a" font-size="11.5">均线权限：MA20 6 分 · MA50 8 分 · MA100 6 分 · MA200 2 分；排列 = <tspan font-family="ui-monospace,monospace">spot &gt; MA20 &gt; MA50 &gt; MA100</tspan>（或其看空对称）</text>
+</svg>
+<figcaption><b>图 3｜趋势因子的满配路径（理想化：所有证据同向）。</b>真实读数是这些分量的代数和，并截断到 [0,100]。关键是<b>方向中性点严格等于 50</b>：价格恰好落在均线上时<b>不加不减</b>，没有排列、没有动量、没有确认支撑的趋势应该读出 50 而不是 72。这条曾经用 <code>&gt;=</code> 实现，把「无信息」算成了 50+22=72，导致趋势权重最大的因子系统性高估——现已修正。</figcaption>
+</figure>
+
+<div class="note">
+  <b>三个容易被忽略的细节。</b>
+  <ol>
+    <li><b>成交量扣分要做确认。</b>WEAK 量能必须连续 <b>2 个已收盘日线</b>都成立才扣分。写入一条弱读数不扣分，只报告「已确认几个收盘」。历史教训：某次单一弱量读数叠加一个勉强成立的 MA20 金叉，让趋势因子在一次评审里摆动 22 分。</li>
+    <li><b>「没有支撑区」不是缺数据。</b>支撑结构被评估过、结果为空，是一个中性结论，不降低覆盖率。</li>
+    <li><b>技术回撤不算趋势分。</b>回撤只在趋势事实里作为上下文可见，分值由 valuation 拥有——避免同一经济现象被计两次。</li>
+  </ol>
+</div>
+
+<h3 id="s4-3">4.3 可靠性收缩与覆盖率门槛</h3>
+<p>缺失的正权重因子<b>保持自己的权重不重新分配</b>，而是把自己的原始分「向 50 收缩」。缺失数据永远不会被当成利多证据。</p>
+
+<figure>
+<svg viewBox="0 0 1000 414" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- LEFT -->
+  <text x="32" y="34" fill="#e8ecf3" font-size="14" font-weight="650">可靠性收缩</text>
+  <text x="32" y="54" fill="#71809a" font-size="12" font-family="ui-monospace,monospace">eff = 50 + reliability × (raw − 50)</text>
+  <!-- axes -->
+  <g stroke="#28313f">
+    <line x1="90" y1="340" x2="470" y2="340"/>
+    <line x1="90" y1="80" x2="90" y2="340"/>
+    <line x1="90" y1="210" x2="470" y2="210" stroke-dasharray="4 4" stroke="#4a5a72"/>
+  </g>
+  <g font-size="11" fill="#71809a">
+    <text x="90" y="358" text-anchor="middle">0</text>
+    <text x="280" y="358" text-anchor="middle">50</text>
+    <text x="470" y="358" text-anchor="middle">100</text>
+    <text x="82" y="344" text-anchor="end">0</text>
+    <text x="82" y="214" text-anchor="end">50</text>
+    <text x="82" y="84" text-anchor="end">100</text>
+    <text x="76" y="70" text-anchor="end" fill="#5b6879">生效分</text>
+  </g>
+  <!-- lines -->
+  <line x1="90" y1="340" x2="470" y2="80" stroke="#4c8dff" stroke-width="2.2"/>
+  <line x1="90" y1="275" x2="470" y2="145" stroke="#2dd4bf" stroke-width="2.2"/>
+  <line x1="90" y1="242.5" x2="470" y2="177.5" stroke="#a78bfa" stroke-width="2.2"/>
+  <line x1="90" y1="210" x2="470" y2="210" stroke="#f5b23e" stroke-width="2.2" stroke-dasharray="6 4"/>
+  <!-- probe at raw 90 -->
+  <line x1="432" y1="80" x2="432" y2="340" stroke="#5b6879" stroke-dasharray="3 4"/>
+  <circle cx="432" cy="106" r="4.5" fill="#4c8dff"/><text x="440" y="110" fill="#9dc0ff" font-size="11.5">90</text>
+  <circle cx="432" cy="158" r="4.5" fill="#2dd4bf"/><text x="440" y="162" fill="#5eead4" font-size="11.5">70</text>
+  <circle cx="432" cy="184" r="4.5" fill="#a78bfa"/><text x="440" y="188" fill="#c4b5fd" font-size="11.5">60</text>
+  <circle cx="432" cy="210" r="4.5" fill="#f5b23e"/><text x="440" y="214" fill="#f5b23e" font-size="11.5">50</text>
+  <text x="466" y="332" fill="#5b6879" font-size="11" text-anchor="end">原始分 raw</text>
+  <g font-size="11.5">
+    <text x="90" y="374" fill="#71809a">可靠性</text>
+    <text x="136" y="374" fill="#4c8dff">1.0</text>
+    <text x="166" y="374" fill="#2dd4bf">0.5</text>
+    <text x="198" y="374" fill="#a78bfa">0.25</text>
+    <text x="236" y="374" fill="#f5b23e">0.0（缺失 → 恒为 50）</text>
+  </g>
+
+  <!-- RIGHT -->
+  <text x="530" y="34" fill="#e8ecf3" font-size="14" font-weight="650">覆盖率门槛</text>
+  <text x="530" y="54" fill="#71809a" font-size="12">证据齐不齐，决定这次动作能走多远</text>
+  <rect x="560" y="86" width="228" height="36" fill="#f2637a" opacity="0.85"/>
+  <rect x="788" y="86" width="38" height="36" fill="#f5b23e"/>
+  <rect x="826" y="86" width="76" height="36" fill="#2dd4bf"/>
+  <rect x="902" y="86" width="38" height="36" fill="#4c8dff"/>
+  <rect x="560" y="86" width="380" height="36" rx="4" fill="none" stroke="#333d4d"/>
+  <g stroke="#0d1017" stroke-width="1.5">
+    <line x1="788" y1="86" x2="788" y2="122"/>
+    <line x1="826" y1="86" x2="826" y2="122"/>
+    <line x1="902" y1="86" x2="902" y2="122"/>
+  </g>
+  <g font-size="11" fill="#9aa6b8" text-anchor="middle">
+    <text x="674" y="76">0–60%</text>
+    <text x="788" y="76">60%</text>
+    <text x="826" y="76">70%</text>
+    <text x="902" y="76">90%</text>
+    <text x="940" y="76">100%</text>
+  </g>
+  <g font-size="12">
+    <circle cx="570" cy="152" r="4.5" fill="#4c8dff"/>
+    <text x="586" y="156" fill="#e8ecf3">覆盖 ≥ 90% →</text>
+    <text x="690" y="156" fill="#9aa6b8">最多允许 <tspan fill="#4c8dff" font-weight="600">HIGH</tspan></text>
+    <circle cx="570" cy="184" r="4.5" fill="#2dd4bf"/>
+    <text x="586" y="188" fill="#e8ecf3">70–90% →</text>
+    <text x="690" y="188" fill="#9aa6b8">最多允许 <tspan fill="#2dd4bf" font-weight="600">MEDIUM</tspan>，增持按部署因子缩放（0.70）</text>
+    <circle cx="570" cy="216" r="4.5" fill="#f5b23e"/>
+    <text x="586" y="220" fill="#e8ecf3">60–70% →</text>
+    <text x="690" y="220" fill="#9aa6b8">最低可投资线，边界情况</text>
+    <circle cx="570" cy="248" r="4.5" fill="#f2637a"/>
+    <text x="586" y="252" fill="#e8ecf3">&lt; 60% 或硬性关键缺失 →</text>
+    <text x="760" y="252" fill="#9aa6b8">不可投资 / 强制 <tspan fill="#f2637a" font-weight="600">LOW</tspan></text>
+  </g>
+  <rect x="530" y="284" width="440" height="114" rx="10" fill="#191f29" stroke="#28313f"/>
+  <text x="548" y="306" fill="#9aa6b8" font-size="11.5">可靠性来源（三项相乘，同一缺失不重复惩罚两次）：</text>
+  <text x="548" y="330" fill="#cfe0ff" font-size="12" font-family="ui-monospace,monospace">reliability = completeness × freshness × source_quality</text>
+  <text x="548" y="352" fill="#71809a" font-size="11.5">freshness：CURRENT 1.00 / STALE 0.50 / UNKNOWN 0.00</text>
+  <text x="548" y="372" fill="#71809a" font-size="11.5">来源置信：HIGH 1.00 / MEDIUM 0.75 / LOW 0.50</text>
+  <text x="548" y="392" fill="#f5b23e" font-size="11.5">数字置信度带 0.80 / 0.60 与覆盖率门槛同时适用，取更保守者</text>
+</svg>
+<figcaption><b>图 4｜左：缺失数据如何把分数拉回中性。</b>一个真实分数 90 的资产，如果可靠性只有 0.5，实际生效分是 70。<b>右：覆盖率决定动作上限。</b>注意两条独立约束——覆盖率门槛和数字置信度带（0.80/0.60），两者<b>同时适用，取更防御的那个</b>，任何调用方给的标签都无法推翻证据本身。</figcaption>
+</figure>
+
+<pre>base_score = Σ profile_weight[f] × effective_factor_score[f]
+coverage   = Σ profile_weight[f] × reliability[f]</pre>
+<p>权重是<b>已解析的固定权重，不做重归一化</b>。自定义权重也必须和为 1，否则被拒绝。</p>
+
+<h3 id="s4-4">4.4 相对强度 vs BTC：一个数字、一道闸门</h3>
+<p>非 BTC 卫星的 30D/90D/180D 超额收益先做波动率调整，再映射到 0–100：</p>
+<pre>excess_h            = asset_return_h − btc_return_h
+expected_horizon_vol = annualized_std(asset_daily_return − btc_daily_return) × sqrt(horizon_days / 365)
+risk_adjusted_h     = excess_h / max(expected_horizon_vol, epsilon)</pre>
+<p>中性带 <code>0.10</code>、饱和点 <code>1.00</code>：带内视为中性 50，带外连续单调映射并在 0–100 截断。三个视野的权重是 20% / 40% / 40%——一个月暴涨不能压过 90D/180D 的确认。</p>
+<table>
+  <thead><tr><th>相对强度读数</th><th>含义</th><th>允许的动作</th></tr></thead>
+  <tbody>
+    <tr><td class="n">≥ 50</td><td>跑赢或中性</td><td><span class="pill t">允许增持</span></td></tr>
+    <tr><td class="n">30 – 50</td><td>中度弱于 BTC</td><td><span class="pill a">只持有/减仓</span>，禁止新增风险</td></tr>
+    <tr><td class="n">&lt; 30</td><td>确认显著弱于 BTC</td><td><span class="pill r">硬拦截</span>，任何分数都不合格</td></tr>
+  </tbody>
+</table>
+<div class="warn">
+  <b>「缺证据」和「证据为负」是两个相反方向的信号。</b>非 BTC 卫星如果<b>缺失</b> BTC 相对证据，结论是
+  <code>HOLD_OR_REDUCE</code>（不新增风险），而<b>不是</b>卖出；缺失因子只会把加权分拉向中性，
+  <b>永远不能单独造成卫星退出</b>。没有独立的负面证据（论点破裂、严重事件、确认的相对弱势、组合硬风险），
+  一个证据不全的已持有卫星就停在 <code>HOLD_OR_REDUCE</code>，保持当前权重。
+</div>
+<p>同一个相对信号<b>只算一次</b>。对 ETH，它既进基础分，又作为核心配置的机会成本闸门；但不会再被当成连续的仓位乘数用第二次。ETH 的 FDV/市值是 <code>NOT_APPLICABLE</code>，不能贡献正向估值证据。</p>
+
+<h3 id="s4-5">4.5 资金流：两种明确分开的口径</h3>
+<table>
+  <thead><tr><th>口径</th><th>适用</th><th>算法</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>归一化流量</b></td>
+      <td>BTC、ETH 及其他资产</td>
+      <td>优先用比率：ETF 净流入 / ETF AUM，或交易所净流入 / 流通市值。<b>分母拿不到就等于流量缺失</b>，不会退化成绝对美元值替代。死区 <code>|flow| ≤ 0.001</code>（记 50 分），饱和 <code>0.01</code>；7D/30D 权限高于 1D 噪声。</td>
+    </tr>
+    <tr>
+      <td><b>BNB 供给变化分位</b></td>
+      <td>仅 BNB（无 BNB ETF）</td>
+      <td>把 BSC 稳定币供应量的变化<b>绝对值</b>放到自身 365 天历史里排位：<code>s_h = 50 + 50 × sign(g_h) × p_h</code>，7/30/90 天权重 0.2/0.4/0.4。零变化正好 50 分，负变化不可能超过 50 分。样本不足 180 个的视野视为未校准、不贡献分数。</td>
+    </tr>
+  </tbody>
+</table>
+<p>结果里永远记录<b>是哪一种方法算出来的</b>；历史排位永远不会被发布成一个 <code>normalized_flow</code> 比率。</p>
+
+<!-- ============ 5 ============ -->
+<h2 id="s5"><span class="num">5</span>从分数到目标权重</h2>
+
+<h3 id="s5-1">5.1 卫星目标曲线（全文第二重要的图）</h3>
+<p>卫星的战略仓位是一条<b>连续的分段线性曲线</b>，只由分数决定，<b>与当前持有什么无关</b>。这消除了一个历史缺陷：已持有的卫星跨过入场线时，目标反而从「保持现状」掉到 0%（曾经的 66.9 → 67.0 断崖）。</p>
+
+<figure>
+<svg viewBox="0 0 1000 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- bands -->
+  <rect x="120" y="60" width="143.5" height="320" fill="#f2637a" opacity="0.09"/>
+  <rect x="263.5" y="60" width="102.5" height="320" fill="#f5b23e" opacity="0.09"/>
+  <rect x="366" y="60" width="102.5" height="320" fill="#94a3b8" opacity="0.12"/>
+  <rect x="468.5" y="60" width="471.5" height="320" fill="#2dd4bf" opacity="0.07"/>
+  <!-- band labels -->
+  <g font-size="10.5" font-weight="700" text-anchor="middle" letter-spacing=".5">
+    <text x="191" y="50" fill="#f2637a">INELIGIBLE</text>
+    <text x="314" y="50" fill="#f5b23e">SOFT_EXIT</text>
+    <text x="417" y="50" fill="#94a3b8">HOLD/REDUCE</text>
+    <text x="620" y="50" fill="#2dd4bf">ELIGIBLE_INCREASE</text>
+  </g>
+  <!-- gridlines -->
+  <g stroke="#28313f" stroke-dasharray="3 5">
+    <line x1="120" y1="316" x2="940" y2="316"/>
+    <line x1="120" y1="252" x2="940" y2="252"/>
+    <line x1="120" y1="188" x2="940" y2="188"/>
+    <line x1="120" y1="124" x2="940" y2="124"/>
+  </g>
+  <line x1="120" y1="380" x2="940" y2="380" stroke="#3d4a5e"/>
+  <line x1="120" y1="60" x2="120" y2="380" stroke="#3d4a5e"/>
+  <g font-size="11" fill="#71809a" text-anchor="end">
+    <text x="112" y="384">0%</text><text x="112" y="320">20%</text><text x="112" y="256">40%</text>
+    <text x="112" y="192">60%</text><text x="112" y="128">80%</text><text x="112" y="64">100%</text>
+  </g>
+  <text x="40" y="230" fill="#5b6879" font-size="11.5" transform="rotate(-90 40 230)" text-anchor="middle">占卫星额度比例</text>
+  <!-- breakpoint verticals -->
+  <g stroke="#5b6879" stroke-dasharray="4 4">
+    <line x1="263.5" y1="380" x2="263.5" y2="380"/>
+    <line x1="366" y1="380" x2="366" y2="316"/>
+    <line x1="468.5" y1="380" x2="468.5" y2="252"/>
+    <line x1="837.5" y1="380" x2="837.5" y2="60"/>
+  </g>
+  <!-- curve -->
+  <polyline points="120,380 263.5,380 366,316 468.5,252 837.5,60 940,60"
+            fill="none" stroke="#4c8dff" stroke-width="3" stroke-linejoin="round"/>
+  <!-- dots -->
+  <g fill="#0d1017" stroke="#4c8dff" stroke-width="2.5">
+    <circle cx="263.5" cy="380" r="5.5"/>
+    <circle cx="366" cy="316" r="5.5"/>
+    <circle cx="468.5" cy="252" r="5.5"/>
+    <circle cx="837.5" cy="60" r="5.5"/>
+  </g>
+  <!-- dot labels -->
+  <g font-size="12" font-weight="600">
+    <text x="256" y="366" fill="#f5b23e" text-anchor="end">57 → 0%</text>
+    <text x="376" y="300" fill="#f5b23e">62 → 20%</text>
+    <text x="478" y="236" fill="#2dd4bf">67 → 40%</text>
+    <text x="827" y="54" fill="#2dd4bf" text-anchor="end">85 → 100%</text>
+  </g>
+  <!-- annotation -->
+  <text x="500" y="344" fill="#71809a" font-size="11.5">曲线只读分数，与当前持仓无关 → 同一份证据重复评审结果完全一致（幂等）</text>
+  <!-- x axis ticks -->
+  <g font-size="11" fill="#9aa6b8" text-anchor="middle">
+    <text x="120" y="400">50</text>
+    <text x="263.5" y="400" fill="#f5b23e">57</text>
+    <text x="366" y="400" fill="#f5b23e">62</text>
+    <text x="468.5" y="400" fill="#2dd4bf">67</text>
+    <text x="632.5" y="400">75</text>
+    <text x="837.5" y="400" fill="#2dd4bf">85</text>
+    <text x="940" y="400">90</text>
+  </g>
+  <text x="530" y="424" fill="#5b6879" font-size="11.5" text-anchor="middle">资产基础分</text>
+  <!-- eligibility note -->
+  <g font-size="12">
+    <text x="120" y="450" fill="#9aa6b8">资格状态只控制「能不能部署」，不改变曲线形状：</text>
+    <text x="470" y="450" fill="#f2637a">未持有的卫星低于 67 分 → 目标直接为 0，根本不进入配置</text>
+  </g>
+</svg>
+<figcaption><b>图 5｜卫星目标曲线。</b>纵轴是「这份分数值得占卫星额度的百分之多少」。曲线有界、对分数单调不减、在每个断点连续。<b>已持有</b>的卫星落在 57–61 是 <code>SOFT_EXIT</code>（沿曲线渐进减），62–66 是 <code>HOLD_OR_REDUCE</code>（不新增，超出曲线的部分可以向曲线减）；<b>未持有</b>的低于 67 一律没有目标。这是「分数决定想要多少，资格决定这次能动多少」的字面实现。</figcaption>
+</figure>
+
+<h3 id="s5-2">5.2 风险档与硬上限</h3>
+<p><code>risk_tier</code>（<code>normal</code> / <code>high_beta</code> / <code>high</code>）把卫星的<b>风险信封</b>按比例切分：normal 拿满当期的卫星上限，high_beta / high 只拿一半。战略目标就是这个信封内曲线算出的值——满分刚好触到信封，任何更低的分数都严格在信封之下。</p>
+<pre>风险信封 = 当期卫星上限 × 风险档比例          # normal 1.0 / high_beta·high 0.5
+战略目标 = 风险信封 × 曲线分数比例
+硬暴露顶 = 风险信封 + hard_cap_buffer_pp(3.0pp) # 超出即触发 RISK_BUDGET_BREACH 减仓</pre>
+<div class="warn">
+  区分两类越界：<b>超出硬暴露顶</b>会绕过普通再平衡带，直接强制减仓；
+  <b>在缓冲区内的小幅超出</b>仍然由普通 2/4/8pp 带治理。风险档是一个<b>评估输入</b>而非连续的波动率/贝塔估计——
+  目前要么是政策默认 <code>POLICY_DEFAULT</code>，要么是人工声明 <code>MANUAL_ASSESSMENT</code>，
+  代码里<b>还不会</b>输出 <code>DETERMINISTIC_ESTIMATE</code>（见第 9 节 8G）。
+</div>
+
+<h4>核心袖：70/30 是先验，不是承诺</h4>
+<p>BTC/ETH 的 70/30 只用来构造风险核心袖的起点，最终比例还要经过 ETH 分数与置信度、ETH/BTC 机会成本、事件风险、链活跃度、regime、集中度、稳定币要求与组合上限。</p>
+<table>
+  <thead><tr><th>ETH 闸门（来自 <code>core_allocation.eth</code>）</th><th class="n">阈值</th><th>效果</th></tr></thead>
+  <tbody>
+    <tr><td>允许增持</td><td class="n">≥ 55</td><td>可以加仓（还须过其他所有闸门）</td></tr>
+    <tr><td>允许持有</td><td class="n">≥ 45</td><td>低于 45 进入减配评估</td></tr>
+    <tr><td>相对强度允许增持</td><td class="n">≥ 45</td><td>ETH/BTC 单独的机会成本门槛</td></tr>
+    <tr><td>相对强度减配线</td><td class="n">&lt; 30</td><td>相对减配</td></tr>
+    <tr><td>核心袖内 ETH 上限</td><td class="n">40%</td><td><code>max_core_sleeve_share</code></td></tr>
+  </tbody>
+</table>
+<p>ETH 可以是绝对意义上很有吸引力、却仍低于锚定比例甚至 <code>HOLD_OR_REDUCE</code>——只要它的 BTC 相对机会成本不成立。<b>core 标签不恢复任何分数保底，也不绕过其他闸门。</b></p>
+
+<!-- ============ 6 ============ -->
+<h2 id="s6"><span class="num">6</span>组合风险</h2>
+
+<h3 id="s6-1">6.1 市场状态 Regime</h3>
+<p>Regime 由 BTC 趋势、波动率、流量、市场宽度按权重合成，再有回撤地板兜底。它决定本期「可用多少风险预算」，与「资产好不好」完全无关。</p>
+
+<figure>
+<svg viewBox="0 0 1000 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- legend -->
+  <g font-size="12.5">
+    <rect x="240" y="22" width="12" height="12" rx="3" fill="#4c8dff"/><text x="259" y="32" fill="#9aa6b8">NORMAL</text>
+    <rect x="360" y="22" width="12" height="12" rx="3" fill="#f5b23e"/><text x="379" y="32" fill="#9aa6b8">DEFENSIVE</text>
+    <rect x="500" y="22" width="12" height="12" rx="3" fill="#f2637a"/><text x="519" y="32" fill="#9aa6b8">CAPITAL_PRESERVATION</text>
+  </g>
+  <!-- grid -->
+  <g stroke="#28313f" stroke-dasharray="3 5">
+    <line x1="240" y1="60" x2="240" y2="418"/>
+    <line x1="415" y1="60" x2="415" y2="418"/>
+    <line x1="590" y1="60" x2="590" y2="418"/>
+    <line x1="765" y1="60" x2="765" y2="418"/>
+    <line x1="940" y1="60" x2="940" y2="418"/>
+  </g>
+  <g font-size="11" fill="#5b6879" text-anchor="middle">
+    <text x="240" y="436">0%</text><text x="415" y="436">15%</text><text x="590" y="436">30%</text>
+    <text x="765" y="436">45%</text><text x="940" y="436">60%</text>
+  </g>
+  <!-- group 1 : stable target -->
+  <text x="228" y="106" fill="#e8ecf3" font-size="12.5" text-anchor="end">稳定币目标</text>
+  <rect x="240" y="74" width="175" height="15" rx="3" fill="#4c8dff"/><text x="423" y="86" fill="#9dc0ff" font-size="11.5">15%</text>
+  <rect x="240" y="93" width="350" height="15" rx="3" fill="#f5b23e"/><text x="598" y="105" fill="#f5b23e" font-size="11.5">30%</text>
+  <rect x="240" y="112" width="583" height="15" rx="3" fill="#f2637a"/><text x="831" y="124" fill="#f2637a" font-size="11.5">50%</text>
+  <!-- group 2 : satellite max -->
+  <text x="228" y="196" fill="#e8ecf3" font-size="12.5" text-anchor="end">卫星合计上限</text>
+  <rect x="240" y="164" width="292" height="15" rx="3" fill="#4c8dff"/><text x="540" y="176" fill="#9dc0ff" font-size="11.5">25%</text>
+  <rect x="240" y="183" width="175" height="15" rx="3" fill="#f5b23e"/><text x="423" y="195" fill="#f5b23e" font-size="11.5">15%</text>
+  <rect x="240" y="202" width="58" height="15" rx="3" fill="#f2637a"/><text x="306" y="214" fill="#f2637a" font-size="11.5">5%</text>
+  <!-- group 3 : core min -->
+  <text x="228" y="286" fill="#e8ecf3" font-size="12.5" text-anchor="end">核心风险资产下限</text>
+  <rect x="240" y="254" width="583" height="15" rx="3" fill="#4c8dff"/><text x="831" y="266" fill="#9dc0ff" font-size="11.5">50%</text>
+  <rect x="240" y="273" width="583" height="15" rx="3" fill="#f5b23e"/><text x="831" y="285" fill="#f5b23e" font-size="11.5">50%</text>
+  <line x1="240" y1="298" x2="241" y2="298" stroke="#f2637a" stroke-width="3"/>
+  <rect x="240" y="292" width="3" height="15" fill="#f2637a"/><text x="254" y="304" fill="#f2637a" font-size="11.5">0% — 资本保全期不强制持有风险资产</text>
+  <!-- group 4 : single asset max -->
+  <text x="228" y="376" fill="#e8ecf3" font-size="12.5" text-anchor="end">单一资产上限</text>
+  <rect x="240" y="344" width="583" height="15" rx="3" fill="#4c8dff"/><text x="831" y="356" fill="#9dc0ff" font-size="11.5">50%</text>
+  <rect x="240" y="363" width="583" height="15" rx="3" fill="#f5b23e"/><text x="831" y="375" fill="#f5b23e" font-size="11.5">50%</text>
+  <rect x="240" y="382" width="467" height="15" rx="3" fill="#f2637a"/><text x="715" y="394" fill="#f2637a" font-size="11.5">40%</text>
+</svg>
+<figcaption><b>图 6｜三档 regime 的配置信封。</b>稳定币下限的实际值是 <code>max(15% 全局最小值, 当期 regime 目标)</code>，且稳定币<b>没有上限</b>——如果配置的下限超过默认上界，上界就抬上去。NORMAL 给最宽的风险预算，但<b>不等于自动满仓</b>：卫星仍须逐条挣到证据与额度。</figcaption>
+</figure>
+
+<h4>状态切换有刹车</h4>
+<ul>
+  <li>不因为单一噪声指标切换状态；需要趋势/波动/流动性/宽度/事件多个维度相互印证。</li>
+  <li>每次评审最多移动 <b>1 档</b>（<code>regime_transitions.max_notches_per_review = 1</code>）。从 <code>DEFENSIVE</code> 直接跳到（或跳回）<code>CAPITAL_PRESERVATION</code> 必须先经过一次中间档评审，避免一次噪声观察把稳定币袖来回旋转 35 个百分点。</li>
+  <li>严重系统性事件与回撤地板<b>不受</b>这个限速约束，永远不会被延迟。</li>
+</ul>
+
+<h3 id="s6-2">6.2 回撤阶梯：组合层面，不是单资产止损</h3>
+<figure>
+<svg viewBox="0 0 1000 300" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <text x="32" y="34" fill="#e8ecf3" font-size="14" font-weight="650">组合回撤响应阶梯（D = 15%）</text>
+  <text x="968" y="34" fill="#71809a" font-size="11.5" text-anchor="end">这是风险预算与目标，不是保证；加密资产会跳空、会在压力下同向相关</text>
+  <!-- tick labels -->
+  <g font-size="11.5" fill="#9aa6b8" text-anchor="middle">
+    <text x="100" y="64">0%</text><text x="436" y="64">−6%</text><text x="604" y="64">−9%</text>
+    <text x="772" y="64">−12%</text><text x="940" y="64">−15%</text>
+  </g>
+  <!-- bands -->
+  <rect x="100" y="76" width="336" height="60" fill="#2dd4bf" opacity="0.22"/>
+  <rect x="436" y="76" width="168" height="60" fill="#4c8dff" opacity="0.22"/>
+  <rect x="604" y="76" width="168" height="60" fill="#f5b23e" opacity="0.24"/>
+  <rect x="772" y="76" width="168" height="60" fill="#f2637a" opacity="0.26"/>
+  <g stroke="#3d4a5e">
+    <rect x="100" y="76" width="840" height="60" fill="none" stroke="#3d4a5e"/>
+  </g>
+  <g font-size="12.5" fill="#e8ecf3" text-anchor="middle">
+    <text x="268" y="112">正常监控</text>
+    <text x="520" y="112">重估集中度与弱卫星</text>
+    <text x="688" y="112">偏防御 · 新风险需强证据</text>
+    <text x="856" y="112">资本保全为主</text>
+  </g>
+  <g font-size="11" fill="#71809a" text-anchor="middle">
+    <text x="268" y="152">0 ～ −0.40D</text>
+    <text x="520" y="152">−0.40D ～ −0.60D</text>
+    <text x="688" y="152">−0.60D ～ −0.80D</text>
+    <text x="856" y="152">−0.80D ～ −D</text>
+  </g>
+  <!-- floor annotations -->
+  <g stroke="#5b6879" stroke-dasharray="4 4">
+    <line x1="604" y1="136" x2="604" y2="196"/>
+    <line x1="772" y1="136" x2="772" y2="220"/>
+    <line x1="940" y1="136" x2="940" y2="244"/>
+  </g>
+  <g font-size="12">
+    <rect x="120" y="192" width="470" height="34" rx="8" fill="#191f29" stroke="#28313f"/>
+    <text x="136" y="214" fill="#e8ecf3">回撤 ≥ −9% 时，regime <tspan fill="#f5b23e" font-weight="600">不得停留在 NORMAL</tspan></text>
+    <rect x="120" y="234" width="500" height="34" rx="8" fill="#191f29" stroke="#28313f"/>
+    <text x="136" y="256" fill="#e8ecf3">回撤 ≥ −12% 时，regime <tspan fill="#f2637a" font-weight="600">不得低于 CAPITAL_PRESERVATION</tspan></text>
+  </g>
+  <text x="950" y="256" fill="#f2637a" font-size="12" text-anchor="end">回撤 &lt; −15% → 风险预算击穿，禁止「加风险赢回来」</text>
+</svg>
+<figcaption><b>图 7｜回撤响应带。</b>这是<b>组合</b>级别的响应阶梯，不是给每个资产装 15% 止损。回撤地板会直接给 regime 定下限，且优先级高于合成分数与置信度。</figcaption>
+</figure>
+<p>压力测试只作诊断：<code>stress_diagnostic</code> 用 <code>policy.json</code> 里的固定情景（BTC −20%、ETH −30%、SOL −40%、AAVE −40%、BNB −35%）计算加权情景收益、逐资产贡献、相对峰值的预期回撤与剩余预算容量。当前它标记为 <code>DIAGNOSTIC_ONLY</code>——<b>不会</b>自己阻止或缩放目标（哪个情景成为硬约束仍是待决事项，见 8C）。它刻意不用概率预测的口吻，目的是暴露隐藏的集中度与贝塔。</p>
+
+<h3 id="s6-3">6.3 事件风险与链活跃度：两把独立的闸门</h3>
+<figure>
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- LEFT -->
+  <text x="24" y="32" fill="#e8ecf3" font-size="14" font-weight="650">事件风险闸门</text>
+  <text x="24" y="52" fill="#71809a" font-size="11.5">对「新增风险」的部署倍数。分数再高也不能突破。</text>
+  <g font-size="12" fill="#9aa6b8" text-anchor="end">
+    <text x="122" y="98">NORMAL</text>
+    <text x="122" y="158">ELEVATED</text>
+    <text x="122" y="218">HIGH</text>
+    <text x="122" y="278">SEVERE</text>
+    <text x="122" y="338">CRITICAL</text>
+  </g>
+  <rect x="134" y="76" width="310" height="30" rx="4" fill="#2dd4bf"/>
+  <rect x="134" y="136" width="232" height="30" rx="4" fill="#4c8dff"/>
+  <rect x="134" y="196" width="155" height="30" rx="4" fill="#f5b23e"/>
+  <line x1="134" y1="256" x2="136" y2="286" stroke="#f2637a" stroke-width="3"/>
+  <rect x="134" y="254" width="3" height="30" fill="#f2637a"/>
+  <line x1="134" y1="316" x2="136" y2="346" stroke="#f2637a" stroke-width="3"/>
+  <rect x="134" y="314" width="3" height="30" fill="#f2637a"/>
+  <g font-size="12.5" font-weight="700">
+    <text x="456" y="97" fill="#2dd4bf">1.00</text>
+    <text x="378" y="157" fill="#9dc0ff">0.75</text>
+    <text x="301" y="217" fill="#f5b23e">0.50</text>
+    <text x="148" y="277" fill="#f2637a">0.00 — 禁止新增风险，现有敞口进入减仓评估</text>
+    <text x="148" y="337" fill="#f2637a">0.00 — 禁止新增风险，现有敞口进入减/退候选</text>
+  </g>
+  <text x="24" y="378" fill="#71809a" font-size="11.5">事件状态是独立的类型化闸门，<tspan fill="#e8ecf3">不是</tspan>基础分的一个因子，也没有自动清仓的含义。</text>
+
+  <!-- RIGHT -->
+  <text x="530" y="32" fill="#e8ecf3" font-size="14" font-weight="650">链活跃度闸门</text>
+  <text x="530" y="52" fill="#71809a" font-size="11.5">仅链原生资产；AAVE 不做单独的链活跃度评估。</text>
+  <g>
+    <rect x="530" y="76" width="440" height="46" rx="9" fill="#152a28" stroke="#21504d"/>
+    <text x="546" y="98" fill="#2dd4bf" font-size="12.5" font-weight="650">HEALTHY</text>
+    <text x="546" y="115" fill="#9aa6b8" font-size="11.5">规范的出块/最终性进展正常 → 无限制</text>
+    <rect x="530" y="130" width="440" height="46" rx="9" fill="#2a2415" stroke="#5b4a22"/>
+    <text x="546" y="152" fill="#f5b23e" font-size="12.5" font-weight="650">DEGRADED</text>
+    <text x="546" y="169" fill="#9aa6b8" font-size="11.5">在推进但年龄/最终性异常 → 立即部署上限 25%，不允许高确信增持</text>
+    <rect x="530" y="184" width="440" height="46" rx="9" fill="#2a1a20" stroke="#5c2b35"/>
+    <text x="546" y="206" fill="#f2637a" font-size="12.5" font-weight="650">UNKNOWN</text>
+    <text x="546" y="223" fill="#9aa6b8" font-size="11.5">结构化证据不足 → 对新增高确信仓位失败关闭</text>
+    <rect x="530" y="238" width="440" height="46" rx="9" fill="#2a1a20" stroke="#5c2b35"/>
+    <text x="546" y="260" fill="#f2637a" font-size="12.5" font-weight="650">HALTED</text>
+    <text x="546" y="277" fill="#9aa6b8" font-size="11.5">严重停滞且由 ≥2 个独立来源组佐证 → 禁止新增敞口</text>
+  </g>
+  <rect x="530" y="298" width="440" height="86" rx="10" fill="#191f29" stroke="#28313f"/>
+  <text x="546" y="320" fill="#f5b23e" font-size="12" font-weight="600">RPC / DNS / TLS / 超时 / 限流 / provider 故障 ≠ HALTED</text>
+  <text x="546" y="340" fill="#9aa6b8" font-size="11.5">这些是抓取失败，属于「硬性关键证据缺失」，仍然会让建议保持失败关闭，</text>
+  <text x="546" y="358" fill="#9aa6b8" font-size="11.5">但不会被当成链停摆的证据。不确定永远不被猜测抹平。</text>
+</svg>
+<figcaption><b>图 8｜两把独立闸门。</b>它们在流水线里与分数<b>平行</b>，不参与加权。这就是为什么「分数 100 + SEVERE 事件 = 不能加仓」在系统里是自然结果而不是特例。</figcaption>
+</figure>
+
+<h4>不同评审类型的事件关键性</h4>
+<table>
+  <thead><tr><th>指标</th><th><code>SNAPSHOT_REVIEW</code></th><th><code>FULL_REVIEW</code></th><th><code>EVENT_REVIEW</code></th></tr></thead>
+  <tbody>
+    <tr><td>安全事件</td><td>Critical</td><td>Critical</td><td>Critical</td></tr>
+    <tr><td>链活跃度</td><td>Critical</td><td>Critical</td><td>Critical</td></tr>
+    <tr><td>监管事件</td><td>Context（上下文）</td><td>Required（必需）</td><td>Critical</td></tr>
+    <tr><td>治理 / 协议变更</td><td colspan="3">仅通过人工 <code>ManualAssetContext</code> 提供；不自动扫描，缺失不扣置信度</td></tr>
+  </tbody>
+</table>
+<div class="note">
+  <b>「扫完没发现重大事件」不等于安全。</b>完整覆盖且无重大事件，报告文案是
+  <code>NO_KNOWN_MATERIAL_EVENT_IN_SCANNED_SOURCES</code>（在已扫描来源中没有已知重大事件）。
+  来源不可达则给出 <code>INSUFFICIENT_SOURCE_COVERAGE</code> 并降低置信度。
+  抓取到的网页是<b>不可信证据</b>，不能添加可信 URL，也不能注入指令。
+</div>
+
+<!-- ============ 7 ============ -->
+<h2 id="s7"><span class="num">7</span>再平衡与执行</h2>
+
+<h3>7.1 偏离怎么变成动作</h3>
+<p>同时看绝对偏离（百分点）和相对偏离 <code>|current − target| / max(target, 2%)</code>。相对口径里的 2% 下限是为了防止「极小目标」用一个小分母伪造出极端优先级。</p>
+<table>
+  <thead><tr><th>偏离情况</th><th>默认解释</th></tr></thead>
+  <tbody>
+    <tr><td>绝对 &lt; 2pp <b>且</b> 相对 &lt; 50%</td><td><span class="pill s">HOLD</span> 正常持有</td></tr>
+    <tr><td>不是 HOLD，且两个带都没到</td><td><span class="pill b">WATCH</span> 只在强证据或有新资金时行动</td></tr>
+    <tr><td>绝对 &gt; 4pp</td><td><span class="pill a">可主动再平衡</span>（还须通过所有风险闸门）</td></tr>
+    <tr><td>绝对 &gt; 8pp <b>或</b> 相对 &gt; 100%</td><td><span class="pill r">高优先级</span>，除非有书面记录的临时战术偏离</td></tr>
+  </tbody>
+</table>
+
+<h3>7.2 分批与方向确认</h3>
+<ul>
+  <li><b>渐进修复缺口。</b>普通配置修正一次评审最多修复剩余缺口的 50%，且不超过 <b>4pp</b>。这不是拖延：历史带决定什么时候走下一步。</li>
+  <li><b>硬退出绕过分批。</b>论点破裂、SEVERE/CRITICAL 事件、硬分数地板、风险预算击穿——这四类原因立即执行。</li>
+  <li><b>方向反转要确认。</b>如果一次阈值穿越会把某资产的可执行方向<b>翻转</b>（相对既有方向），动作先挂成 <code>DIRECTION_CONFIRMATION</code> 的 <code>WAIT</code>，直到新方向在 <b>2 个不同日收盘</b>上持续成立。同一天重复评审只算一次。</li>
+  <li><b>决定性穿越不等待。</b>超出阈值 2pp 以上的果断穿越立即执行；四条硬退出原因也永不等待。REDUCE → EXIT 始终是降风险方向，从不被这个门拦。</li>
+  <li><b>不再做「小额修补交易」。</b>低于阈值的修补交易被取消（8E），执行分期取代了一次性校正；未解决的约束会显式保留而不是被藏起来。</li>
+</ul>
+
+<h3>7.3 执行层：只能花得更少</h3>
+<table>
+  <thead><tr><th>项目</th><th>当前默认</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>当前支持的计划类型</td><td><code>PULLBACK</code> 回踩</td><td><code>BREAKOUT</code> 返回 <code>WAIT</code>（真实突破/回测规划器尚未实现），<code>MIXED</code> 被拒绝</td></tr>
+    <tr><td>数据要求</td><td>1D OHLCV，首选 240 天 / 最低 200 天</td><td>检查新鲜度、节奏、日历覆盖、来源；已完成 K 线边界口径统一</td></tr>
+    <tr><td>区域质量门槛</td><td><code>minimum_for_entry = 55</code>，高质量 75</td><td>光有长长的干净历史不能把弱结构区变成入场点</td></tr>
+    <tr><td>分批模板</td><td>NORMAL_LOW_VOL 50/30/20 · NORMAL_HIGH_VOL 30/35/35 · DEFENSIVE / CAPITAL_PRESERVATION 20/30/50</td><td>对应场景上限：首笔 ≤ 50% / 35% / 20%</td></tr>
+    <tr><td>部署因子合成</td><td><code>minimum_cap</code>（取最小值）</td><td>独立的多个上限<b>取 min</b>；相乘会悄悄叠加保守度，只有在政策显式选择 multiplicative 时才允许相乘</td></tr>
+    <tr><td>量价分布（Volume Profile）</td><td>优先 1H/4H，回退 1D（置信度封顶 MEDIUM）</td><td>是<b>历史成交量集中度的代理</b>，不是真实持仓成本；LVN 只是过渡背景，不是自动支撑</td></tr>
+    <tr><td>叠加层封顶</td><td>持仓拥挤 HIGH 50% / EXTREME 25%；周期风险 ELEVATED 80% / HIGH 50%</td><td>取 <code>min(基础, 持仓, 周期)</code>；去杠杆只取消拥挤惩罚，绝不变成加仓信号</td></tr>
+  </tbody>
+</table>
+<div class="ok">
+  <b>执行的硬边界。</b>执行层可能把批准的金额拆成结构化的批次、把余额留作
+  <code>PULLBACK_RESERVE</code>（或闸门拦住时的 <code>GATE_HOLD</code>），
+  但<b>已投放 + 保留 = 已批准金额恒成立</b>。它<b>永远不能</b>增加已批准的敞口，也永远不下单。
+  已批准金额是「最终批准美元」：组合层级的置信度上限在配置阶段只被消耗<b>一次</b>，执行层绝不重复相乘。
+</div>
+
+<!-- ============ 8 ============ -->
+<h2 id="s8"><span class="num">8</span>置信度链</h2>
+<p>三层置信度按固定顺序计算，每层都有自己的分数、等级、理由、上限与证据 ID。缺失数据保持缺失；<b>即使是 NORMAL 状态也不授予任何加仓许可</b>。</p>
+
+<figure>
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4c8dff"/>
+    </marker>
+  </defs>
+  <rect x="30" y="24" width="270" height="56" rx="11" fill="#152a28" stroke="#21504d"/>
+  <text x="165" y="48" fill="#2dd4bf" font-size="13.5" font-weight="650" text-anchor="middle">Data Confidence</text>
+  <text x="165" y="67" fill="#9aa6b8" font-size="11.5" text-anchor="middle">证据质量本身好不好</text>
+
+  <rect x="365" y="24" width="270" height="56" rx="11" fill="#1b2436" stroke="#2c4568"/>
+  <text x="500" y="48" fill="#4c8dff" font-size="13.5" font-weight="650" text-anchor="middle">Regime Confidence</text>
+  <text x="500" y="67" fill="#9aa6b8" font-size="11.5" text-anchor="middle">状态判断有多确定</text>
+
+  <rect x="700" y="24" width="270" height="56" rx="11" fill="#211d33" stroke="#463a6b"/>
+  <text x="835" y="48" fill="#a78bfa" font-size="13.5" font-weight="650" text-anchor="middle">Decision Confidence</text>
+  <text x="835" y="67" fill="#9aa6b8" font-size="11.5" text-anchor="middle">这份证据支持这个动作有多强</text>
+
+  <line x1="304" y1="52" x2="359" y2="52" stroke="#4c8dff" stroke-width="1.6" marker-end="url(#ar2)"/>
+  <line x1="639" y1="52" x2="694" y2="52" stroke="#4c8dff" stroke-width="1.6" marker-end="url(#ar2)"/>
+  <text x="331" y="42" fill="#5b6879" font-size="10.5" text-anchor="middle">驱动</text>
+  <text x="666" y="42" fill="#5b6879" font-size="10.5" text-anchor="middle">输入</text>
+
+  <!-- bar A -->
+  <text x="212" y="128" fill="#e8ecf3" font-size="12.5" font-weight="600" text-anchor="end">数据置信度</text>
+  <text x="212" y="146" fill="#71809a" font-size="11" text-anchor="end">四个维度</text>
+  <rect x="226" y="112" width="216" height="30" fill="#38bdf8"/>
+  <rect x="442" y="112" width="144" height="30" fill="#2dd4bf"/>
+  <rect x="586" y="112" width="144" height="30" fill="#a78bfa"/>
+  <rect x="730" y="112" width="216" height="30" fill="#f5b23e"/>
+  <rect x="226" y="112" width="720" height="30" rx="4" fill="none" stroke="#333d4d"/>
+  <g font-size="11.5" font-weight="700" text-anchor="middle">
+    <text x="334" y="132" fill="#04202e">coverage 30%</text>
+    <text x="514" y="132" fill="#04231f">freshness 20%</text>
+    <text x="658" y="132" fill="#140d24">source 20%</text>
+    <text x="838" y="132" fill="#1a1206">redundancy 30%</text>
+  </g>
+
+  <!-- bar B -->
+  <text x="212" y="208" fill="#e8ecf3" font-size="12.5" font-weight="600" text-anchor="end">决策置信度</text>
+  <text x="212" y="226" fill="#71809a" font-size="11" text-anchor="end">五个分量</text>
+  <rect x="226" y="192" width="216" height="30" fill="#4c8dff"/>
+  <rect x="442" y="192" width="144" height="30" fill="#2dd4bf"/>
+  <rect x="586" y="192" width="144" height="30" fill="#a78bfa"/>
+  <rect x="730" y="192" width="108" height="30" fill="#f5b23e"/>
+  <rect x="838" y="192" width="108" height="30" fill="#f472b6"/>
+  <rect x="226" y="192" width="720" height="30" rx="4" fill="none" stroke="#333d4d"/>
+  <g font-size="11.5" font-weight="700" text-anchor="middle">
+    <text x="334" y="212" fill="#08111f">portfolio_data 30%</text>
+    <text x="514" y="212" fill="#04231f">regime 20%</text>
+    <text x="658" y="212" fill="#140d24">asset 20%</text>
+    <text x="784" y="212" fill="#1a1206">acct 15%</text>
+    <text x="892" y="212" fill="#26101c">agreement 15%</text>
+  </g>
+
+  <!-- notes -->
+  <rect x="30" y="252" width="940" height="34" rx="8" fill="#191f29" stroke="#28313f"/>
+  <text x="48" y="274" fill="#9aa6b8" font-size="12">数据置信度只衡量<tspan fill="#e8ecf3">证据质量</tspan>：看多趋势 + 看空估值不代表数据差。跨因子的分歧只在决策置信度的 signal_agreement 里表达一次。</text>
+  <rect x="30" y="294" width="940" height="90" rx="8" fill="#191f29" stroke="#28313f"/>
+  <text x="48" y="316" fill="#9aa6b8" font-size="12">决策置信度<tspan fill="#e8ecf3">按动作划范围</tspan>：HOLD / NO_TRADE 看当前持仓（忽略零敞口的观察名单）；INCREASE 看目标资产与组合约束；</text>
+  <text x="48" y="338" fill="#9aa6b8" font-size="12">REDUCE / EXIT 看受影响持仓与执行证据；再平衡只看实际参与的重要资产。</text>
+  <text x="48" y="366" fill="#71809a" font-size="11.5">已持有资产的证据按<tspan fill="#e8ecf3">敞口加权</tspan>并设集中度保护，一个重要的低置信度持仓不会消失在组合平均里。</text>
+</svg>
+<figcaption><b>图 9｜置信度链。</b>等级只会被应用<b>一次</b>：HIGH 全额部署；MEDIUM 按部署因子（0.70）缩放新增；LOW <b>阻止新增</b>但不强制卖出本来有效的持仓——来自确定性闸门的硬风险 REDUCE/EXIT 仍然放行。</figcaption>
+</figure>
+
+<div class="warn">
+  <b>置信度不是盈利概率。</b><code>0.90 HIGH</code> 的含义是「这个决策被证据强力支持」，<b>不是</b>「这笔记
+  90% 会赚钱」。分数同理：80 分不是 80% 的上涨概率。
+</div>
+
+<h4>硬性上限（任一条命中即封顶）</h4>
+<table>
+  <thead><tr><th>情况</th><th class="n">置信度封顶</th></tr></thead>
+  <tbody>
+    <tr><td>硬性关键数据缺失 / 过期</td><td class="n">0.59</td></tr>
+    <tr><td>安全事件状态未知（对增险目标失败关闭）</td><td class="n">0.59</td></tr>
+    <tr><td>安全事件 Critical</td><td class="n">0.39</td></tr>
+    <tr><td>链活跃度 HALTED</td><td class="n">0.39</td></tr>
+    <tr><td>链活跃度 DEGRADED</td><td class="n">0.79</td></tr>
+    <tr><td>信号一致性低 / regime 未知</td><td class="n">0.79</td></tr>
+    <tr><td>NAV 未结清现金流 / 暂定值</td><td class="n">0.79</td></tr>
+  </tbody>
+</table>
+<p>每个结果都带确定性归因：每个维度/分量报告 <code>score</code>、<code>weight</code>、<code>contribution = score × weight</code>，
+以及上限、软惩罚与最终分。被上限削减的结果<b>永远同时展示削减前后</b>（例如 <code>raw 0.85, cap 0.79, final 0.79</code>），
+所以报告能明确说出是哪个域把数字拉下来的。</p>
+
+<h4>记账与基准（高完整性逻辑，单列一节避免被忽略）</h4>
+<ul>
+  <li><b>外部现金流用单位化 NAV 处理</b>，且约定「挂在这一张快照上的现金流发生在该快照估值<b>之前</b>」：<code>pre_flow_nav = (snapshot_value − flow) / existing_units</code>，之后 <code>new_nav = snapshot_value / new_units</code>。首张快照的外部现金流必须为 0。</li>
+  <li><b>原始余额变化不是投资收益。</b>已经披露但未结清的现金流会让 NAV 停在 <code>PROVISIONAL</code>，绝不会被猜成 <code>FINAL</code>。</li>
+  <li><b>稳定币之间互换不是外部现金流，也不是市场盈亏</b>：它保持 <code>external_cash_flow = 0</code>，通过 <code>INTERNAL_REALLOCATION</code>（用户/交易所确认）或 <code>INFERRED_INTERNAL_REALLOCATION</code>（快照中方向相反的稳定币变动配对，带推断置信度）归因，配不平的部分体现为换汇成本/滑点。</li>
+  <li><b>持有资产的收益数据必须完整</b>：某个持仓的收益缺失时，<b>绝不</b>对剩余权重重新归一化来假装完整。</li>
+  <li><b>基准是业绩对标尺，不是目标配置。</b>主基准是 100% BTC 买入持有，它是<b>唯一</b>计算超额收益的对手（<code>超额收益 = 组合 NAV 收益 − 主基准收益</code>）；次基准 70/30 BTC·ETH 买入持有只作参照，<b>不参与</b>超额收益计算。</li>
+  <li><b>外部现金流按事件点摊进基准。</b>主基准的入金全额进 BTC；次基准的入金 $70 进 BTC、$30 进 ETH。分摊之后<b>不做日度再平衡</b>，权重任其自然漂移。基准的初始规模被设成组合的首期价值——否则真实美元金额的出入金会把基准冲垮，并悄悄把 70/30 拉回锚定比例。</li>
+  <li><b>组合与基准的评估期、现金流时点必须严格一致</b>，不一致直接报错而不是给一个看似合理的数字。两边都用同一套现金流调整后的单位化 NAV，所以「跑赢 / 跑输」是同一口径下的可比结论。</li>
+  <li><b>别把两个 70/30 混为一谈。</b><code>benchmarks.secondary</code> 的 70/30 是<b>被动参照线</b>（买着不动）；<code>core_allocation.anchor</code> 的 70/30 是<b>主动构造核心袖的先验</b>（会随分数、置信度、ETH/BTC 机会成本、事件风险、regime 变化）。数字相同，用途完全不同。</li>
+</ul>
+
+<!-- ============ 9 ============ -->
+<h2 id="s9"><span class="num">9</span>不可动摇的边界与已知待决事项</h2>
+
+<h3>9.1 架构红线</h3>
+<ul>
+  <li><b>确定性金融计算归 Python。</b>语言模型不得重算或覆盖引擎已产出的分数、权重、金额、区段、动作与风险标记。报告只能解释已定稿的数值。</li>
+  <li><b>不做兼容层。</b>只支持最新的 policy / data 合同，不加别名、不加迁移；破坏性变更后本地生成状态需要手动重建，用户数据永不自动迁移或静默删除。</li>
+  <li><b>不接交易。</b>不引入交易所交易密钥、下单、合约、永续、杠杆、保证金、清算逻辑或自动交易。只读集成都需要显式请求。</li>
+  <li><b>失败关闭。</b>核心原则一句话：<b>不确定性只会降低可执行性，永远不会被猜测抹平。</b><code>NO_TRADE</code> 是有效结论，不是系统错误。</li>
+</ul>
+
+<h3>9.2 不得凭观察改动的策略不变量</h3>
+<table>
+  <thead><tr><th>不变量</th><th>为什么</th></tr></thead>
+  <tbody>
+    <tr><td><b>趋势因子中性点 = 50</b>，均线比较严格方向性（<code>&gt;</code> 加、<code>&lt;</code> 减、<b>相等不加不减</b>）</td><td>历史 bug 把相等算成看多，让「无信息」读数变成 72/81；趋势是权重最大的因子，会系统性抬高所有分数</td></tr>
+    <tr><td><b>趋势权重不动</b>（default 0.30 / btc 0.35）</td><td>评审结论是该权重不低于合理区间，不属于阈值重校准问题</td></tr>
+    <tr><td><b>分数阈值与风险档不得凭观察调整</b></td><td>阈值是在旧（偏高）分布上校准的，修正后并未同步调整——这被登记为待决事项 <b>8F</b>，必须等冻结时点的样本外面板证据</td></tr>
+    <tr><td><b><code>stress_scenario</code> 必须覆盖全部 core + satellite</b></td><td>policy 加载时校验；漏掉卫星会让 <code>portfolio_stress</code> 变成 UNAVAILABLE</td></tr>
+    <tr><td><b>不重新引入 <code>valuation.fee_revenue_multiple</code></b></td><td>它与 <code>fees_30d</code>/<code>revenue_30d</code> 同源，会把同一份 DeFiLlama 费用序列计两次</td></tr>
+    <tr><td><b>语义判断的 confidence 必须进入可靠性</b></td><td>HIGH 1.0 / MEDIUM 0.75 / LOW 0.5；否则一个低置信度的语义因子会以满分权重参与</td></tr>
+  </tbody>
+</table>
+
+<h3>9.3 明确待决：不要把它们当成已定论的参数</h3>
+<table>
+  <thead><tr><th>ID</th><th>事项</th><th>状态</th></tr></thead>
+  <tbody>
+    <tr><td>8A–8E</td><td>卫星滞回、核心目标 vs 临时限制、风险预算、regime 防抖、阈值下修补交易</td><td><span class="pill t">已决</span> 由 2026-09-15 结构重构落地</td></tr>
+    <tr><td><b>8F</b></td><td><b>趋势中性点修正后的分数阈值重校准</b>：卫星曲线 67/62/57/85、相对强度 50/30、ETH 闸门 55/45/45/30 全部沿用旧分布数值，<b>没有被重新校准</b>，理论上偏保守/偏严。需要冻结时点的样本外评分面板来重新锚定分位点。</td><td><span class="pill a">待决</span></td></tr>
+    <tr><td><b>8G</b></td><td><b>确定性的 risk_tier 估计</b>：风险档目前仍是纯语义输入（要么政策默认 <code>normal</code>，要么人工声明），代码从不输出 <code>DETERMINISTIC_ESTIMATE</code>。需要跨宇宙稳定的波动率/贝塔面板证明分层不抖动。</td><td><span class="pill a">待决</span></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>同样重要的是：系统目前没有历史策略验证的声明。</b>现有验证是确定性回归测试（<b>920 个测试</b>通过：
+  <code>python -m unittest discover -s tests</code>）与合成数据工具。在仓库之外存在冻结的时点证据之前，
+  「这套阈值在历史上是否最优」这个问题<b>无法回答</b>——这正是 8F / 8G 保持待决的原因。
+  语义因子（例如 AAVE 的评分锚点）目前是研究校准，<b>不是</b>配置。
+</div>
+
+<!-- ============ 10 ============ -->
+<h2 id="s10"><span class="num">10</span>十句常见误读</h2>
+<table>
+  <thead><tr><th>常见说法</th><th>实际契约</th></tr></thead>
+  <tbody>
+    <tr><td>「80 分就是 80% 概率要涨」</td><td>分数是<b>证据强度排序</b>，不是概率。置信度也不是盈利概率。</td></tr>
+    <tr><td>「分数 67 → 应买 67%」</td><td>分数只通过曲线映射到卫星额度的比例（67 → 40%），再受限 regime 上限、风险档信封、集中度、稳定币下限。</td></tr>
+    <tr><td>「BTC/ETH 是 core，所以该持有」</td><td>core 是分类，不是配置权利，没有分数保底。70/30 是先验，不是承诺。</td></tr>
+    <tr><td>「已经持有了，所以总得留着」</td><td>沉没成本不参与前瞻判断。要问的是：「如果这笔钱现在是稳定币，我今天会主动买它而不是买 BTC 吗？」</td></tr>
+    <tr><td>「跌了很多可以抄底」</td><td>BTC 相对强度弱 + 基本面弱 = 不新增配置，跌得多不构成理由。</td></tr>
+    <tr><td>「数据缺失，用中性值补上就行」</td><td>缺失因子保留权重并向 50 收缩，覆盖率和置信度同时下降；缺失永远不会变成利多。</td></tr>
+    <tr><td>「某个指标转差，应该马上换仓」</td><td>换仓要过 2/4/8pp 带、方向确认（2 个收盘）、集中度与全部闸门。一到两根噪声日线不足以反转中周期建议。</td></tr>
+    <tr><td>「事件风险高，应该清仓」</td><td>SEVERE/CRITICAL 禁止<b>新增风险</b>，不等于自动清仓；现有敞口仍走论点、再平衡与组合风险规则。</td></tr>
+    <tr><td>「杠杆/永续只是执行细节」</td><td>整个策略仅现货。合约、永续、杠杆、保证金越界即违反安全边界。</td></tr>
+    <tr><td>「没有交易机会，说明系统没跑完」</td><td><code>NO_TRADE</code> / <code>WAIT</code> / <code>HOLD</code> 是一等公民的成功结论。</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  <p>
+    来源：<code>config/policy.json</code>（唯一机器可读权威）、<code>references/investment-strategy.md</code>、
+    <code>references/scoring-model.md</code>、<code>references/risk-model.md</code>、
+    <code>references/decision-rules.md</code>、<code>references/investment-policy.md</code>、
+    <code>docs/HOW_IT_WORKS.md</code>、<code>docs/PENDING_POLICY_DECISIONS.md</code>，
+    并核对了 <code>crypto_portfolio/engine/</code> 下的 allocation / scoring / confidence / regime / risk / rebalance
+    与 <code>engine/factors/trend.py</code> 的实现。整理日期 2026-09-21。
+  </p>
+  <p>本文件是阅读辅助材料，<b>不覆盖</b> <code>config/policy.json</code> 与 Python 运行时逻辑。要改策略请改权威配置，并同步依赖文档、测试与 schema。</p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>
