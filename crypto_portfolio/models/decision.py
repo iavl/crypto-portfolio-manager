@@ -12,7 +12,7 @@ from .decision_packet import NoTradeAttribution
 from .execution import ExecutionPlan
 from .factor_packet import freeze_packet_value, thaw_packet_value
 from .policy import policy_hash
-from .time import normalize_timestamp
+from .time import normalize_timestamp, parse_timestamp
 
 
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
@@ -238,6 +238,18 @@ class Decision:
         evidence_by_id = {
             item.id: item for item in self.evidence if isinstance(item, Evidence)
         }
+        decision_timestamp = normalize_timestamp(self.timestamp)
+        for item in self.evidence:
+            # Technical execution evidence is collected after the strategic
+            # decision and is bound to its approved execution plan.  Its own
+            # timestamp is validated against that plan's technical inputs;
+            # it is not a future scoring fact.
+            if item.factor == "execution_technical":
+                continue
+            if parse_timestamp(item.observed_at) > parse_timestamp(decision_timestamp):
+                raise ValueError(f"decision evidence {item.id} is observed after decision timestamp")
+            if parse_timestamp(item.fetched_at) > parse_timestamp(decision_timestamp):
+                raise ValueError(f"decision evidence {item.id} is fetched after decision timestamp")
         for symbol, assessment in self.factor_scores.items():
             validate_factor_evidence_binding(
                 assessment.factor_scores,
@@ -280,6 +292,26 @@ class Decision:
                 expected_policy_hash=self.policy_hash,
                 expected_as_of=self.timestamp,
                 expected_symbols=set(self.factor_scores),
+                expected_assessments=self.factor_scores,
+            )
+        if self.review_diagnostics is None:
+            object.__setattr__(
+                self,
+                "review_diagnostics",
+                {
+                    "status": "DIAGNOSTIC_ONLY",
+                    "availability": "UNAVAILABLE",
+                    "reason": "PORTFOLIO_VALUE_REQUIRED",
+                },
+            )
+        if self.target_attribution is None:
+            object.__setattr__(
+                self,
+                "target_attribution",
+                {
+                    "availability": "UNAVAILABLE",
+                    "reason": "ALLOCATION_INPUTS_REQUIRED",
+                },
             )
         for name in ("calculation_context", "review_diagnostics", "target_attribution"):
             value = getattr(self, name)

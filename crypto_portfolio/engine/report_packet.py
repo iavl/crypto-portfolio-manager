@@ -14,6 +14,84 @@ from ..models.report_packet import ReportPacket
 REPORT_PROMPT_RULE = "DO NOT recompute or alter numeric conclusions. Use the supplied structured outputs as authoritative."
 
 
+def build_execution_summary(
+    actions: Iterable[Mapping[str, Any]],
+    execution_plans: Mapping[str, Any],
+    *,
+    stable_symbols: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Separate strategic approvals from the currently executable proposal."""
+    stable = {str(symbol).strip().upper() for symbol in stable_symbols}
+    plans = {
+        str(symbol).strip().upper(): (
+            plan.as_dict() if hasattr(plan, "as_dict") else dict(plan)
+        )
+        for symbol, plan in (execution_plans or {}).items()
+    }
+    rows: list[dict[str, Any]] = []
+    gated_buys: set[str] = set()
+    planned_buys = 0.0
+    immediate = 0.0
+    for raw_action in actions:
+        action = raw_action.as_dict() if hasattr(raw_action, "as_dict") else dict(raw_action)
+        symbol = str(action.get("symbol", "")).strip().upper()
+        strategic_action = str(action.get("action", "")).strip().upper()
+        amount = float(action.get("amount_usd", 0.0) or 0.0)
+        plan = plans.get(symbol)
+        if strategic_action == "INCREASE" and amount > 0:
+            if plan is None:
+                raise ValueError(f"execution plan is required for approved increase {symbol}")
+            planned = float(plan.get("planned_amount_usd", 0.0) or 0.0)
+            planned_buys += planned
+            if str(plan.get("action", "")).upper() == "WAIT" or planned <= 0:
+                gated_buys.add(symbol)
+                status = "GATE_HOLD"
+                executable = 0.0
+            else:
+                status = "PROPOSED_NOT_CONFIRMED"
+                executable = planned
+            immediate += executable
+        elif plan is not None and str(plan.get("action", "")).upper() == "WAIT":
+            status = "GATE_HOLD"
+            executable = 0.0
+        else:
+            status = (
+                "PROPOSED_NOT_CONFIRMED"
+                if strategic_action in {"REDUCE", "EXIT"} and amount > 0
+                else "NO_EXECUTABLE_CHANGE"
+            )
+            executable = amount if status == "PROPOSED_NOT_CONFIRMED" else 0.0
+            immediate += executable
+        rows.append({
+            "symbol": symbol,
+            "strategic_action": strategic_action,
+            "approved_amount_usd": amount,
+            "execution_status": status,
+            "executable_amount_usd": executable,
+            "planned_amount_usd": float(plan.get("planned_amount_usd", 0.0) or 0.0) if plan else 0.0,
+            "reserve_amount_usd": float(plan.get("reserve_amount_usd", 0.0) or 0.0) if plan else 0.0,
+            "reserve_policy": plan.get("reserve_policy") if plan else None,
+        })
+    if gated_buys and planned_buys <= 1e-9:
+        for row in rows:
+            if (
+                row["symbol"] in stable
+                and row["strategic_action"] == "REDUCE"
+                and row["execution_status"] == "PROPOSED_NOT_CONFIRMED"
+            ):
+                row["execution_status"] = "FUNDING_DEFERRED"
+                immediate -= row["executable_amount_usd"]
+                row["executable_amount_usd"] = 0.0
+    return {
+        "status": "FINAL_OPERATION_VIEW",
+        "strategic_approvals_preserved": True,
+        "execution_actions": rows,
+        "immediate_executable_amount_usd": max(0.0, immediate),
+        "gated_buy_symbols": sorted(gated_buys),
+        "funding_deferred": bool(gated_buys and planned_buys <= 1e-9),
+    }
+
+
 def _require_acquisition_finalized(acquisition: Any) -> None:
     if hasattr(acquisition, "require_finalized"):
         acquisition.require_finalized()
@@ -204,6 +282,8 @@ def build_final_review_output(
     snapshot: Any | None = None,
 ) -> dict[str, Any]:
     """Assemble and validate the immutable output before a caller persists it."""
+    from ..models.policy import resolve_policy
+
     packet = report_packet if isinstance(report_packet, ReportPacket) else ReportPacket.from_mapping(report_packet)
     validate_report_packet(packet)
     packet_value = packet.as_dict()
@@ -250,6 +330,11 @@ def build_final_review_output(
     }
     from .calculation_evidence import validate_packet_calculations
     calculations = validate_packet_calculations(packet.calculation_context, packet.actions, packet.scores)
+    execution_summary = build_execution_summary(
+        packet.actions,
+        packet.execution_plans,
+        stable_symbols=resolve_policy().stable_symbols,
+    )
     result = {
         "calculations": calculations,
         "review_diagnostics": packet_value["review_diagnostics"],
@@ -279,6 +364,7 @@ def build_final_review_output(
         "rebalance": {
             "actions": packet_value["actions"],
             "approved_amounts": packet_value["approved_amounts"],
+            "execution_summary": execution_summary,
             "no_trade_attribution": packet_value["no_trade_attribution"],
             "post_action_projection": packet_value["post_action_projection"],
         },
@@ -317,6 +403,7 @@ def validate_final_review_output(value: Mapping[str, Any]) -> bool:
 
 __all__ = [
     "REPORT_PROMPT_RULE",
+    "build_execution_summary",
     "build_final_review_output",
     "build_report_packet",
     "validate_final_review_output",

@@ -10,7 +10,7 @@ from typing import Any, Mapping
 from ..models.evidence import AssetAssessment, Evidence
 from ..models.factor_packet import thaw_packet_value
 from ..models.policy import Policy, policy_from_mapping, policy_hash
-from ..models.time import parse_timestamp
+from ..models.time import normalize_timestamp, parse_timestamp
 
 TREND_SOURCE = "crypto_portfolio.engine.factors.trend"
 FLOW_SOURCE = "crypto_portfolio.engine.factors.flows"
@@ -42,15 +42,43 @@ def trend_calculation_evidence(
     }
     if previous_relative_volumes is not None:
         history = list(previous_relative_volumes)
-        if any(
-            isinstance(item, bool)
-            or not isinstance(item, (int, float))
-            or not math.isfinite(float(item))
-            or float(item) < 0
-            for item in history
-        ):
-            raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
-        metadata["previous_relative_volumes"] = [float(item) for item in history]
+        if any(not isinstance(item, Mapping) for item in history):
+            raise ValueError(
+                "persisted trend calculations require dated previous volume history entries"
+            )
+        normalized_history = []
+        prior_timestamp = None
+        current_close = (snapshot.ohlcv_metadata or {}).get("latest_candle_timestamp")
+        current_close_time = parse_timestamp(current_close) if current_close else None
+        for item in history:
+            if set(item) != {"observed_at", "relative_volume"}:
+                raise ValueError(
+                    "previous volume history entries must contain observed_at and relative_volume"
+                )
+            normalized_observed_at = normalize_timestamp(
+                item["observed_at"], "previous volume observed_at"
+            )
+            observed_at = parse_timestamp(normalized_observed_at)
+            reading = item["relative_volume"]
+            if (
+                isinstance(reading, bool)
+                or not isinstance(reading, (int, float))
+                or not math.isfinite(float(reading))
+                or float(reading) < 0
+            ):
+                raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
+            if prior_timestamp is not None and observed_at >= prior_timestamp:
+                raise ValueError("previous volume history must be most recent first with distinct closes")
+            if current_close_time is not None and observed_at >= current_close_time:
+                raise ValueError("previous volume history must precede the current completed close")
+            prior_timestamp = observed_at
+            normalized_history.append(
+                {
+                    "observed_at": normalized_observed_at,
+                    "relative_volume": float(reading),
+                }
+            )
+        metadata["previous_relative_volume_history"] = normalized_history
     identity = calculation_hash({"input": value, "metadata": metadata})
     return Evidence(identity, snapshot.symbol, "trend", TREND_SOURCE,
                     snapshot.as_of, snapshot.as_of,
@@ -73,7 +101,7 @@ def validate_trend_calculation(factor: Any, evidence: Mapping[str, Evidence],
     snapshot = receipt.value
     if not isinstance(snapshot, Mapping) or snapshot.get("symbol") != symbol:
         raise ValueError("CALCULATION_EVIDENCE_MISMATCH: snapshot")
-    previous_relative_volumes = (receipt.metadata or {}).get("previous_relative_volumes")
+    previous_relative_volumes = (receipt.metadata or {}).get("previous_relative_volume_history")
     result = calculate_trend_factor(
         snapshot,
         policy=policy,
@@ -198,6 +226,21 @@ def validate_flow_calculation(
     result = calculate_flow_factor(receipt.value, symbol=symbol, policy=policy)
     if result.score is None or not math.isclose(result.score, factor.score, abs_tol=1e-9, rel_tol=0):
         raise ValueError("CALCULATION_SCORE_MISMATCH: capital_flows")
+    # The source-confidence carried by a normalized flow result is part of
+    # the deterministic contract.  A caller may not publish a fully reliable
+    # FactorScore after the provider has declared MEDIUM/LOW evidence quality.
+    from .scoring import calculate_factor_reliability
+
+    expected_reliability = calculate_factor_reliability(
+        result.coverage,
+        result.facts.freshness,
+        result.source_confidence,
+    )
+    claimed_reliability = getattr(factor, "reliability", None)
+    if claimed_reliability is not None and not math.isclose(
+        float(claimed_reliability), expected_reliability, abs_tol=1e-9, rel_tol=0
+    ):
+        raise ValueError("CALCULATION_RELIABILITY_MISMATCH: capital_flows")
     return {
         "score": result.score,
         "method": result.method,
@@ -206,6 +249,7 @@ def validate_flow_calculation(
         "horizons": {key: dict(value) for key, value in (result.horizons or {}).items()},
         "calculation_input_hash": receipt.metadata["calculation_input_hash"],
         "evidence_ids": list(factor.evidence_ids),
+        "reliability": expected_reliability,
     }
 
 
@@ -293,6 +337,7 @@ def validate_calculation_context(
     expected_policy_hash: str | None = None,
     expected_as_of: str | None = None,
     expected_symbols: set[str] | None = None,
+    expected_assessments: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Used by Decision, review packet and report; never trust a validation flag."""
     from ..models.decision import validate_factor_evidence_binding
@@ -318,7 +363,52 @@ def validate_calculation_context(
         raise ValueError("calculation_context has duplicate evidence")
     summaries = {}
     for symbol, raw in context["assessments"].items():
-        assessment = AssetAssessment.from_mapping(symbol, thaw_packet_value(raw))
+        context_assessment_mapping = thaw_packet_value(raw)
+        assessment = AssetAssessment.from_mapping(symbol, context_assessment_mapping)
+        if expected_assessments is not None:
+            expected = expected_assessments.get(symbol)
+            if expected is None:
+                expected = expected_assessments.get(str(symbol).strip().upper())
+            if expected is None:
+                raise ValueError(f"CALCULATION_ASSESSMENT_MISSING: {symbol}")
+            expected_assessment = AssetAssessment.from_mapping(
+                symbol,
+                expected if isinstance(expected, AssetAssessment) else thaw_packet_value(expected),
+            )
+            actual_values = assessment.as_dict()
+            expected_values = expected_assessment.as_dict()
+            # Contexts created before optional confidence explanation fields
+            # were added remain current when all fields they actually carry
+            # agree.  Every material score/eligibility field is present in
+            # the context and therefore still participates in the binding.
+            context_keys = {
+                key
+                for key, value in context_assessment_mapping.items()
+                if value is not None
+                or key
+                in {
+                    "symbol",
+                    "factor_scores",
+                    "weighted_score",
+                    "confidence",
+                    "asset_type",
+                    "relative_strength_vs_btc",
+                    "thesis_broken",
+                    "critical_data_complete",
+                    "risk_tier",
+                    "risk_tier_source",
+                    "event_risk",
+                    "scoring_profile_name",
+                    "score_coverage",
+                    "confidence_score",
+                }
+            }
+            if any(
+                expected_values.get(key) != actual_values.get(key)
+                for key in context_keys
+                if key in expected_values
+            ):
+                raise ValueError(f"CALCULATION_ASSESSMENT_MISMATCH: {symbol}")
         validate_factor_evidence_binding(assessment.factor_scores, evidence, symbol=symbol)
         for factor in assessment.factor_scores.values():
             for key in factor.evidence_ids:
@@ -328,20 +418,45 @@ def validate_calculation_context(
         trend = assessment.factor_scores.get("trend")
         detail = {}
         if trend is not None and trend.availability == "AVAILABLE":
-            if require_trend or any(evidence[key].source == TREND_SOURCE for key in trend.evidence_ids):
-                detail = validate_trend_calculation(trend, evidence, symbol=symbol,
-                                                    as_of=context["as_of"], policy=policy)
+            if require_trend or any(
+                evidence[key].source == TREND_SOURCE
+                for key in trend.evidence_ids
+                if key in evidence
+            ):
+                detail = validate_trend_calculation(
+                    trend,
+                    evidence,
+                    symbol=symbol,
+                    as_of=context["as_of"],
+                    policy=policy,
+                )
         flow = assessment.factor_scores.get("capital_flows")
         if flow is not None and flow.availability == "AVAILABLE":
-            if any(evidence[key].source == FLOW_SOURCE for key in flow.evidence_ids if key in evidence):
+            if require_trend or any(
+                evidence[key].source == FLOW_SOURCE
+                for key in flow.evidence_ids
+                if key in evidence
+            ):
                 detail["capital_flows"] = validate_flow_calculation(
-                    flow, evidence, symbol=symbol, as_of=context["as_of"], policy=policy
+                    flow,
+                    evidence,
+                    symbol=symbol,
+                    as_of=context["as_of"],
+                    policy=policy,
                 )
         relative = assessment.factor_scores.get("relative_strength_btc")
         if relative is not None and relative.availability == "AVAILABLE":
-            if any(evidence[key].source == RELATIVE_STRENGTH_SOURCE for key in relative.evidence_ids if key in evidence):
+            if require_trend or any(
+                evidence[key].source == RELATIVE_STRENGTH_SOURCE
+                for key in relative.evidence_ids
+                if key in evidence
+            ):
                 detail["relative_strength_btc"] = validate_relative_strength_calculation(
-                    relative, evidence, symbol=symbol, as_of=context["as_of"], policy=policy
+                    relative,
+                    evidence,
+                    symbol=symbol,
+                    as_of=context["as_of"],
+                    policy=policy,
                 )
         scored = score_factors(assessment.factor_scores, policy=policy, symbol=symbol,
                               critical_data_complete=assessment.critical_data_complete)
@@ -365,6 +480,7 @@ def validate_packet_calculations(
     expected_policy_hash: str | None = None,
     expected_as_of: str | None = None,
     expected_symbols: set[str] | None = None,
+    expected_assessments: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     executable = any((a.get("action") if isinstance(a, Mapping) else a.action) in {"INCREASE", "REDUCE", "EXIT"} for a in actions)
     if context is None:
@@ -377,6 +493,7 @@ def validate_packet_calculations(
         expected_policy_hash=expected_policy_hash,
         expected_as_of=expected_as_of,
         expected_symbols=expected_symbols,
+        expected_assessments=expected_assessments,
     )
     for symbol, value in scores.items():
         if isinstance(value, (int, float)):

@@ -10,7 +10,11 @@ from crypto_portfolio.data_collection import build_failed_data_fetches
 from crypto_portfolio.engine.decision_packet import build_decision_review_packet
 from crypto_portfolio.engine.metric_normalization import normalize_metric_result
 from crypto_portfolio.engine.metric_plan import MetricCollectionPlan, MetricRequest
-from crypto_portfolio.engine.report_packet import build_final_review_output, build_report_packet
+from crypto_portfolio.engine.report_packet import (
+    build_execution_summary,
+    build_final_review_output,
+    build_report_packet,
+)
 from crypto_portfolio.models.report_packet import ReportPacket
 
 
@@ -57,6 +61,27 @@ def report_decision(asset="ETH", review_type="SNAPSHOT_REVIEW"):
 
 
 class ReportFailureTests(unittest.TestCase):
+    def test_execution_summary_defers_stable_funding_for_gated_buy(self):
+        summary = build_execution_summary(
+            (
+                {"symbol": "BNB", "action": "INCREASE", "amount_usd": 100.0},
+                {"symbol": "USDT", "action": "REDUCE", "amount_usd": 100.0},
+            ),
+            {
+                "BNB": {
+                    "action": "WAIT",
+                    "planned_amount_usd": 0.0,
+                    "reserve_amount_usd": 100.0,
+                    "reserve_policy": "GATE_HOLD",
+                }
+            },
+            stable_symbols=("USDT",),
+        )
+        rows = {item["symbol"]: item for item in summary["execution_actions"]}
+        self.assertEqual(rows["BNB"]["execution_status"], "GATE_HOLD")
+        self.assertEqual(rows["USDT"]["execution_status"], "FUNDING_DEFERRED")
+        self.assertEqual(summary["immediate_executable_amount_usd"], 0.0)
+
     def test_single_provider_failure_keeps_final_metric_and_safe_attempt(self):
         failed = result(
             "ETH",

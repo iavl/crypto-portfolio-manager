@@ -66,6 +66,19 @@ def _validated_decision(
             expected_policy_hash=expected_hash,
             expected_as_of=model.timestamp,
             expected_symbols=set(model.factor_scores),
+            expected_assessments=model.factor_scores,
+        )
+    increase_symbols = {
+        item.symbol
+        for item in model.actions
+        if item.action == "INCREASE" and item.amount_usd > 0
+    }
+    planned_symbols = set(model.execution_plans or {})
+    missing_plans = sorted(increase_symbols - planned_symbols)
+    if missing_plans:
+        raise ValueError(
+            "EXECUTION_PLAN_REQUIRED: approved INCREASE actions missing plans: "
+            + ", ".join(missing_plans)
         )
     # Write gate only: history is append-only, so legacy records are parsed
     # permissively while new appends must not carry a scope contradiction.

@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -54,6 +55,25 @@ class ReplayRecordTests(unittest.TestCase):
 
 
 class ReplayStrategyTests(unittest.TestCase):
+    def test_frozen_wait_plan_keeps_approved_buy_out_of_simulated_holdings(self):
+        review = replace(
+            _reviews()[0],
+            execution_plans={
+                "SOL": {
+                    "action": "WAIT",
+                    "approved_amount_usd": 280.6946688206785,
+                    "planned_amount_usd": 0.0,
+                    "reserve_amount_usd": 280.6946688206785,
+                    "rationale": "synthetic gate hold",
+                }
+            },
+        )
+        result = replay_strategy([review])
+        row = result["review_detail"][0]
+        self.assertEqual(row["entry_plan_waits"][0]["symbol"], "SOL")
+        self.assertEqual(row["executable_actions"], 1)
+        self.assertTrue(row["execution_plans_used"])
+
     def test_replay_is_deterministic_and_self_consistent(self):
         reviews = _reviews()
         first = replay_strategy(reviews, fee_bps=10, slippage_bps=5)

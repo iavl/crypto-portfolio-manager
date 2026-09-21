@@ -1008,6 +1008,15 @@ class BnbSupplyProxyContractTests(unittest.TestCase):
         self.assertEqual(validated["method"], "supply_change_percentile")
         self.assertIsNone(validated["normalized_flow"])
         self.assertEqual(set(validated["horizons"]), {"7d", "30d", "90d"})
+        self.assertAlmostEqual(validated["reliability"], 0.75, places=9)
+
+        wrong_quality = _Factor()
+        wrong_quality.score = result.score
+        wrong_quality.reliability = 1.0
+        with self.assertRaisesRegex(ValueError, "CALCULATION_RELIABILITY_MISMATCH"):
+            validate_flow_calculation(
+                wrong_quality, {receipt.id: receipt}, symbol="BNB", as_of=as_of, policy=policy
+            )
 
         tampered = _Factor()
         tampered.score = result.score + 5.0

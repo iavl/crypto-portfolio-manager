@@ -88,6 +88,68 @@ class DecisionContractGateTests(unittest.TestCase):
             {},
         )
 
+    def test_context_binding_rejects_top_level_assessment_mismatch(self):
+        policy = resolve_policy()
+        context = {
+            "as_of": "2026-01-01T00:00:00Z",
+            "resolved_policy": policy.as_dict(),
+            "assessments": {
+                "BTC": {
+                    "factor_scores": {},
+                    "weighted_score": None,
+                    "confidence": "LOW",
+                    "asset_type": "core",
+                }
+            },
+            "evidence": [],
+        }
+        with self.assertRaisesRegex(ValueError, "CALCULATION_ASSESSMENT_MISMATCH"):
+            validate_calculation_context(
+                context,
+                expected_assessments={
+                    "BTC": {
+                        **context["assessments"]["BTC"],
+                        "confidence": "HIGH",
+                    }
+                },
+            )
+
+    def test_append_gate_requires_execution_plan_for_approved_increase(self):
+        decision = Decision(
+            "2026-01-01T00:00:00Z",
+            "NORMAL",
+            {"BTC": 0.5, "USDT": 0.5},
+            {"BTC": 0.6, "USDT": 0.4},
+            actions=(RebalanceAction("BTC", "INCREASE", 0.5, 0.6, 100.0, "NORMAL"),),
+        )
+        with TemporaryDirectory() as directory, self.assertRaisesRegex(
+            ValueError, "EXECUTION_PLAN_REQUIRED"
+        ):
+            append_decision(decision, Path(directory) / "decisions.jsonl")
+
+    def test_decision_rejects_future_non_execution_evidence(self):
+        from crypto_portfolio.models.evidence import Evidence
+
+        with self.assertRaisesRegex(ValueError, "observed after decision timestamp"):
+            Decision(
+                "2026-01-01T00:00:00Z",
+                "NORMAL",
+                {"BTC": 1.0},
+                {"BTC": 1.0},
+                evidence=(
+                    Evidence(
+                        "future-event",
+                        "BTC",
+                        "event_risk",
+                        "fixture",
+                        "2026-01-02T00:00:00Z",
+                        "2026-01-02T00:00:00Z",
+                        "CURRENT",
+                        "HIGH",
+                    ),
+                ),
+            )
+
     def test_missing_quality_provenance_is_visible_in_confidence_reasons(self):
         result = score_factors(
             {
@@ -195,7 +257,8 @@ class DecisionContractGateTests(unittest.TestCase):
             volume_state="WEAK",
             relative_volume=0.5,
         )
-        result = calculate_trend_factor(snapshot, policy=policy, previous_relative_volumes=[0.5])
+        history = [{"observed_at": "2026-05-30T00:00:00Z", "relative_volume": 0.5}]
+        result = calculate_trend_factor(snapshot, policy=policy, previous_relative_volumes=history)
         receipt = {item.id: item for item in result.evidence_records}
         detail = validate_trend_calculation(
             SimpleNamespace(score=result.score, evidence_ids=result.evidence_ids),
@@ -205,7 +268,37 @@ class DecisionContractGateTests(unittest.TestCase):
             policy=policy,
         )
         self.assertEqual(detail["score"], result.score)
-        self.assertEqual(receipt[result.evidence_ids[0]].metadata["previous_relative_volumes"], [0.5])
+        self.assertEqual(
+            receipt[result.evidence_ids[0]].metadata["previous_relative_volume_history"],
+            history,
+        )
+
+    def test_trend_receipt_rejects_undated_or_current_close_history(self):
+        from crypto_portfolio.engine.factors.trend import calculate_trend_factor
+        from crypto_portfolio.engine.technical import build_technical_snapshot
+
+        policy = resolve_policy()
+        start = date(2025, 4, 1)
+        candles = tuple(
+            Candle(
+                (start + timedelta(days=index)).isoformat() + "T00:00:00Z",
+                99.0, 102.0, 98.0, 100.0, 100.0,
+            )
+            for index in range(426)
+        )
+        series = OHLCVSeries("ETH", "1D", candles, source="synthetic", fetched_at="2026-06-01T08:00:00Z")
+        spot = SpotPrice("ETH", 100.0, "2026-06-01T08:00:00Z", "synthetic", "2026-06-01T08:00:00Z")
+        snapshot = build_technical_snapshot(series, spot, as_of="2026-06-01T08:00:00Z", policy=policy)
+        with self.assertRaisesRegex(ValueError, "dated previous volume history"):
+            calculate_trend_factor(snapshot, policy=policy, previous_relative_volumes=[0.5])
+        with self.assertRaisesRegex(ValueError, "precede the current completed close"):
+            calculate_trend_factor(
+                snapshot,
+                policy=policy,
+                previous_relative_volumes=[
+                    {"observed_at": "2026-05-31T00:00:00Z", "relative_volume": 0.5}
+                ],
+            )
 
     def test_flow_receipt_rejects_score_changes_without_input_changes(self):
         import copy
@@ -226,6 +319,7 @@ class DecisionContractGateTests(unittest.TestCase):
                 "factor": "capital_flows",
                 "score": flow.score,
                 "evidence_ids": [receipt.id],
+                "reliability": flow.coverage,
             },
             "btc_valuation": 70,
             "macro_liquidity": 70,

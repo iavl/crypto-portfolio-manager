@@ -516,6 +516,25 @@ class ReportPacket:
                 self, "post_action_projection", freeze_packet_value(self.post_action_projection, path="post_action_projection")
             )
 
+        if self.review_diagnostics is None:
+            object.__setattr__(
+                self,
+                "review_diagnostics",
+                {
+                    "status": "DIAGNOSTIC_ONLY",
+                    "availability": "UNAVAILABLE",
+                    "reason": "PORTFOLIO_VALUE_REQUIRED",
+                },
+            )
+        if self.target_attribution is None:
+            object.__setattr__(
+                self,
+                "target_attribution",
+                {
+                    "availability": "UNAVAILABLE",
+                    "reason": "ALLOCATION_INPUTS_REQUIRED",
+                },
+            )
         for name in ("calculation_context", "review_diagnostics", "target_attribution"):
             value = getattr(self, name)
             if value is not None:

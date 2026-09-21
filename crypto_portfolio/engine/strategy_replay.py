@@ -120,6 +120,7 @@ class ReplayReview:
     hard_action_reasons: Mapping[str, str] | None = None
     next_returns: Mapping[str, float] = field(default_factory=dict)
     technical_inputs: Mapping[str, Any] = field(default_factory=dict)
+    execution_plans: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _parse_as_of(self.as_of)
@@ -134,6 +135,23 @@ class ReplayReview:
             raise ValueError("assessments must be an object")
         if not isinstance(self.regime_inputs, Mapping):
             raise ValueError("regime_inputs must be an object")
+        if not isinstance(self.execution_plans, Mapping):
+            raise ValueError("execution_plans must be an object")
+        normalized_plans = {}
+        for raw_symbol, raw_plan in self.execution_plans.items():
+            symbol = str(raw_symbol).strip().upper()
+            if not symbol or not isinstance(raw_plan, Mapping):
+                raise ValueError("execution_plans must map symbols to objects")
+            action = str(raw_plan.get("action", "")).strip().upper()
+            if action not in {"INCREASE", "WAIT"}:
+                raise ValueError("replay execution plan action must be INCREASE or WAIT")
+            planned = raw_plan.get("planned_amount_usd", 0.0)
+            approved = raw_plan.get("approved_amount_usd", planned)
+            for name, value in (("planned_amount_usd", planned), ("approved_amount_usd", approved)):
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) < 0:
+                    raise ValueError(f"execution_plans.{symbol}.{name} must be finite and >= 0")
+            normalized_plans[symbol] = dict(raw_plan)
+        object.__setattr__(self, "execution_plans", normalized_plans)
         if isinstance(self.thesis_broken, str):
             raise ValueError("thesis_broken must be a sequence of symbols")
         broken = tuple(str(item).strip().upper() for item in self.thesis_broken if str(item).strip())
@@ -169,6 +187,7 @@ class ReplayReview:
             "as_of", "current_weights", "portfolio_value", "assessments",
             "regime_inputs", "new_cash", "thesis_broken", "hard_action_reasons",
             "next_returns", "technical_inputs",
+            "execution_plans",
         }
         unknown = sorted(set(value) - known)
         if unknown:
@@ -187,6 +206,7 @@ class ReplayReview:
             hard_action_reasons=value.get("hard_action_reasons"),
             next_returns=value.get("next_returns", {}),
             technical_inputs=value.get("technical_inputs", {}),
+            execution_plans=value.get("execution_plans", {}),
         )
 
 
@@ -287,8 +307,30 @@ def replay_strategy(
         )
         executable = [a for a in signals.confirmed(view, rebalance.actions)
                       if a.action in {"INCREASE", "REDUCE", "EXIT"} and a.symbol not in stables]
+        entry_waits: list[dict[str, Any]] = []
+        if review.execution_plans:
+            from dataclasses import replace as replace_action
+
+            gated: list[Any] = []
+            for action in executable:
+                raw_plan = review.execution_plans.get(action.symbol)
+                if raw_plan is None or action.action != "INCREASE":
+                    gated.append(action)
+                    continue
+                plan_action = str(raw_plan.get("action", "")).strip().upper()
+                planned = float(raw_plan.get("planned_amount_usd", 0.0) or 0.0)
+                if plan_action == "WAIT" or planned <= 0:
+                    entry_waits.append({
+                        "symbol": action.symbol,
+                        "approved_amount_usd": action.amount_usd,
+                        "planned_amount_usd": planned,
+                        "reason": raw_plan.get("rationale", "entry plan returned WAIT"),
+                    })
+                    continue
+                gated.append(replace_action(action, amount_usd=min(action.amount_usd, planned)))
+            executable = gated
         candidate_projection = None
-        if research_variant == "confirm_2":
+        if research_variant == "confirm_2" or review.execution_plans:
             def projection(selected):
                 return build_review_diagnostics(current_weights=view.current_weights,
                     target_weights=allocation.target_weights, portfolio_value=view.portfolio_value,
@@ -351,6 +393,8 @@ def replay_strategy(
             "regime": regime.regime,
             "decision": rebalance.decision,
             "executable_actions": len(executable),
+            "entry_plan_waits": entry_waits,
+            "execution_plans_used": bool(review.execution_plans),
             "staged_actions": sum(1 for a in executable if a.staging_applied),
             "actions": [a.as_dict() for a in executable],
             "turnover": turnover,
@@ -382,6 +426,11 @@ def replay_strategy(
         "assumptions": {
             "risk_free_rate": 0.0,
             "annualization": "365.25-day year scaled by mean review cadence",
+            "entry_execution": (
+                "frozen execution_plans applied; WAIT plans remain in stable sleeve"
+                if any(review.execution_plans for review in reviews)
+                else "configuration-level approved actions; no frozen execution plans supplied"
+            ),
         },
         "total_turnover": turnover_total,
         "total_cost": cost_total,

@@ -11,6 +11,7 @@ from ...models.execution import PriceZone
 from ...models.market import OHLCVSeries, SpotPrice, SwingPoint, TechnicalSnapshot
 from ...models.volume_profile import VolumeNode
 from ...models.policy import Policy, resolve_policy
+from ...models.time import normalize_timestamp, parse_timestamp
 from ..technical import build_technical_snapshot, _volume_state
 
 
@@ -119,6 +120,64 @@ def _confidence(coverage: float, data_confidence: str) -> str:
     return _CONFIDENCE_ORDER[index]
 
 
+def _previous_volume_values(
+    snapshot: Any,
+    history: Sequence[Any] | None,
+) -> tuple[float, ...]:
+    """Validate prior completed-close volume readings and return their values.
+
+    Persisted trend receipts use ``observed_at`` plus ``relative_volume`` for
+    every reading.  The timestamp requirement prevents the current close from
+    being copied into its own history and makes same-day re-reviews unable to
+    manufacture an additional confirmation.  Small synthetic snapshots used
+    by unit tests may still pass numeric readings because they have no
+    persisted technical timestamp and therefore cannot emit a receipt.
+    """
+    if history is None:
+        return ()
+    values: list[float] = []
+    timestamps = []
+    for item in history:
+        if isinstance(item, Mapping):
+            if set(item) != {"observed_at", "relative_volume"}:
+                raise ValueError(
+                    "previous volume history entries must contain observed_at and relative_volume"
+                )
+            observed_at = normalize_timestamp(item["observed_at"], "previous volume observed_at")
+            reading = item["relative_volume"]
+            if isinstance(reading, bool) or not isinstance(reading, (int, float)):
+                raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
+            reading = float(reading)
+            if not math.isfinite(reading) or reading < 0:
+                raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
+            timestamp = parse_timestamp(observed_at)
+            if timestamps and timestamp >= timestamps[-1]:
+                raise ValueError("previous volume history must be most recent first with distinct closes")
+            timestamps.append(timestamp)
+            values.append(reading)
+            continue
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ValueError("previous volume history entries must be objects")
+        # Numeric readings are accepted only for non-persisted test inputs.
+        if hasattr(snapshot, "as_of"):
+            raise ValueError(
+                "persisted trend calculations require dated previous volume history entries"
+            )
+        reading = float(item)
+        if not math.isfinite(reading) or reading < 0:
+            raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
+        values.append(reading)
+    current_close = None
+    metadata = getattr(snapshot, "ohlcv_metadata", None)
+    if isinstance(metadata, Mapping):
+        current_close = metadata.get("latest_candle_timestamp")
+    if current_close is not None:
+        cutoff = parse_timestamp(current_close)
+        if any(timestamp >= cutoff for timestamp in timestamps):
+            raise ValueError("previous volume history must precede the current completed close")
+    return tuple(values)
+
+
 def calculate_trend_factor(
     value: TechnicalSnapshot | OHLCVSeries | Mapping[str, Any],
     *,
@@ -126,7 +185,7 @@ def calculate_trend_factor(
     as_of: str | None = None,
     policy: Policy | None = None,
     evidence_ids: tuple[str, ...] | list[str] = (),
-    previous_relative_volumes: Sequence[float] | None = None,
+    previous_relative_volumes: Sequence[Any] | None = None,
 ) -> TrendFactorResult:
     """Return the same score for the same validated technical snapshot.
 
@@ -137,6 +196,7 @@ def calculate_trend_factor(
     """
     resolved = policy or resolve_policy()
     snapshot = _snapshot(value, spot=spot, policy=resolved, as_of=as_of)
+    previous_values = _previous_volume_values(snapshot, previous_relative_volumes)
     rules = _rules(resolved)
     score = rules["base_score"]
     contributions = {"base": score, "alignment": 0.0, "momentum": 0.0, "support": 0.0, "volume": 0.0, "extension": 0.0}
@@ -250,7 +310,7 @@ def calculate_trend_factor(
             supportive_min = float(
                 resolved.execution.get("breakout", {}).get("minimum_relative_volume", 1.2)
             )
-            for reading in previous_relative_volumes or ():
+            for reading in previous_values:
                 reading = float(reading)
                 if not math.isfinite(reading) or reading < 0:
                     raise ValueError("previous_relative_volumes must contain finite non-negative numbers")
