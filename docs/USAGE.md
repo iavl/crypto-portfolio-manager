@@ -32,6 +32,8 @@ current evidence with deterministic Python calculations, it provides:
 
 - portfolio accounting, cash-flow-adjusted NAV, drawdown, and the BTC benchmark;
 - market metrics, scoring, regime, target allocation, and rebalancing;
+- a detailed current-positions table that opens every report (cost
+  columns render `--` when the intake carries no cost basis);
 - Position P&L, cost data coverage, risk checks, and staged execution plans;
 - security and regulatory event scanning;
 - analysis of user-supplied material governance, tokenomics, legal, or

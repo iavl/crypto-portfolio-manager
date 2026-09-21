@@ -165,7 +165,9 @@ holder cost basis.
 Provider responses and recording manifests are cached under
 `provider-cache/`; for schemas and cleanup see
 [Data Providers](references/data-providers.md). Position P&L is the
-unrealized performance of the remaining position; this feature makes no claim
+unrealized performance of the remaining position; every review report opens
+with a detailed current-positions table whose cost columns render `--` when
+the intake carries no cost basis; this feature makes no claim
 about realized P&L, fees, tax lots, or lifetime returns.
 Having provider or API trouble? See the
 [Development and Provider Debugging Guide](docs/DEVELOPMENT_DEBUGGING.md).

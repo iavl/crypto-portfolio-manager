@@ -272,11 +272,17 @@ display data, so the engine uses value ÷ quantity and records a note.
     script in the section 1 `Debug report` with its exit status and captured
     failure log. Keep logs redacted and bounded; do not include raw response
     bodies, credentials, headers, or private reasoning.
-    Every normal review shows Position P&L
-    when available, using the template's canonical columns `Average cost`,
-    `Position cost`, `Current value`, `Unrealized P&L`, `Position return`,
-    and `Cost data coverage` (render the template's Chinese names, e.g.
-    `平均成本`, `成本数据覆盖率`, in Chinese reports); do not
+    The report body opens with the current positions section: one row for
+    every held asset showing quantity, current price, current value, and
+    portfolio share (`ReportPacket.current_weights`), rendered
+    unconditionally. Position P&L uses the template's canonical columns
+    `Average cost`, `Position cost`, `Current value`, `Unrealized P&L`,
+    `Position return`, and `Cost data coverage` (render the template's
+    Chinese names, e.g. `平均成本`, `成本数据覆盖率`, in Chinese reports).
+    When cost basis is unavailable — the read-only Binance API intake
+    reports `INSUFFICIENT_DATA` cost status by design — keep every row and
+    render `--` in the cost columns with the intake's cost status; never
+    coerce an unknown cost to zero and never drop the table. Do not
     label it total portfolio return. `FULL_REVIEW` also compares the prior/current return by asset in
     percentage points; `SNAPSHOT_REVIEW` shows the current table without
     treating cost basis as a buy signal. Every portfolio conclusion and

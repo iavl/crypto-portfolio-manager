@@ -17,10 +17,10 @@ fixed strings as follows. Headings not listed here keep their English text
 (matching historical Chinese reports).
 
 - Section names: `1. 结论`, `结论依据`, `Debug 报告`,
-  `本轮数据抓取失败明细`, `本轮脚本执行异常`, `2. 组合诊断`,
-  `当前持仓收益`, `3. 市场状态`, `术语解释与决策影响`, `4. 单币评估`,
-  `5. 当前仓位 vs 目标仓位`, `6. 操作计划`, `7. 风险检查`,
-  `8. 什么情况会改变建议`, `9. 数据质量`.
+  `本轮数据抓取失败明细`, `本轮脚本执行异常`, `2. 当前持仓明细`,
+  `3. 组合诊断`, `4. 市场状态`, `术语解释与决策影响`, `5. 单币评估`,
+  `6. 当前仓位 vs 目标仓位`, `7. 操作计划`, `8. 风险检查`,
+  `9. 什么情况会改变建议`, `10. 数据质量`.
 - Decision basis chain: `证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action`.
 - Position P&L table headers: `资产 | 数量 | 当前价 | 平均成本 | 当前价值 |
   持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比`; coverage bullet
@@ -103,7 +103,7 @@ If the list is empty, write `No final data fetch failures this round.` For a
 `STALE` refresh failure, write `The current refresh failed; the last usable data is <timestamp>, so this round is treated as STALE.`
 Use the structured reason, error code, stage/provider, timestamp, and decision
 effect exactly as supplied by the packet. `SKIPPED` and `NOT_APPLICABLE` are not failed fetches
-and must not appear in this subsection; keep them in section 9.
+and must not appear in this subsection; keep them in section 10.
 
 When multiple attempts belong to one final metric, keep them under the same
 row, for example: `Attempt path: CoinGecko HTTP_429 → Coin Metrics Community PROVIDER_UNSUPPORTED`.
@@ -133,7 +133,36 @@ exclusion is not an automatic sell signal. Pass-1 diagnostics may separately
 show `PENDING_EXTERNAL_RESOLUTION`, but a final portfolio report requires
 `pending_external_resolution == 0`.
 
-## 2. Portfolio diagnostics
+## 2. Current Positions
+
+This is the first detailed section of the report body: render one row for
+every held asset, including stablecoin/cash rows, unconditionally. Take
+quantity, current price, and current value from the snapshot position detail
+(or the position performance summary when produced), and portfolio share from
+`ReportPacket.current_weights`. End with a total row (portfolio value, 100%):
+
+| Asset | Quantity | Current price | Average cost | Current value | Position cost | Unrealized P&L | Position return | Portfolio share |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+
+The table is never dropped for missing cost data. When average cost is
+unknown for a row — for example the read-only Binance API intake reports an
+`INSUFFICIENT_DATA` cost status by design — render `--` for Average cost,
+Position cost, Unrealized P&L, and Position return, keep the row, and state
+the intake's cost status under the table. Never coerce an unknown cost to
+zero and never drop a held asset from the table. Stablecoin/cash rows still
+contribute to portfolio value and the stable sleeve. Below the table, report:
+
+- unrealized P&L of positions with known cost;
+- the weighted unrealized return of positions with known cost;
+- cost data coverage (`pnl_value_coverage_ratio`);
+- reported total and visible-value coverage when the snapshot is partial.
+
+Position unrealized return is not Portfolio NAV Return and must not be called
+`total portfolio return`. For `FULL_REVIEW`, also compare the previous and
+current Position P&L by asset in percentage points when both cost bases are
+usable.
+
+## 3. Portfolio diagnostics
 
 Include:
 
@@ -144,26 +173,7 @@ Include:
 - current drawdown when known;
 - major concentration issue.
 
-When position cost data is available, also include:
-
-### Current position returns
-
-| Asset | Quantity | Current price | Average cost | Current value | Position cost | Unrealized P&L | Position return | Portfolio share |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-
-Rows with unknown cost show `--` for cost, unrealized P&L, and Position
-return. Stablecoin/cash rows still contribute to portfolio value and the
-stable sleeve. Below the table, report:
-
-- unrealized P&L of positions with known cost;
-- the weighted unrealized return of positions with known cost;
-- cost data coverage (`pnl_value_coverage_ratio`);
-- reported total and visible-value coverage when the screenshot is partial.
-
-Position unrealized return is not Portfolio NAV Return and must not be called
-`total portfolio return`.
-
-## 3. Market Regime
+## 4. Market Regime
 
 Explain the regime using only the most decision-relevant evidence:
 
@@ -200,7 +210,7 @@ Use the actual source term when it is more precise. Do not call a proposal a
 "governance case" or a security incident unless the Evidence explicitly
 supports that classification.
 
-## 4. Per-Asset Assessment
+## 5. Per-Asset Assessment
 
 Start with the overview table:
 
@@ -267,7 +277,7 @@ Below the factor table, include this compact decision bridge:
   threshold explicitly and explain any retained stablecoin optionality or
   turnover concern.
 - **What would change the recommendation**: link to the concrete
-  invalidation/catalyst in section 8.
+  invalidation/catalyst in section 9.
 
 Make each bridge distinguish four layers: the observed fact, its bounded
 meaning, the portfolio-level constraint, and the resulting Action. A high score
@@ -319,14 +329,14 @@ Gates: score=<...>, confidence=<...>, regime=<...>, event=<...>, liveness=<...>,
 
 Do not replace these reason codes with model judgment.
 
-## 5. Current vs Target Allocation
+## 6. Current vs Target Allocation
 
 | Asset | Current | Target | Deviation | Action | Priority |
 |---|---:|---:|---:|---|---|
 
 Targets should sum to approximately 100%.
 
-## 6. Action Plan
+## 7. Action Plan
 
 For each approved recommendation:
 
@@ -375,7 +385,7 @@ If new capital is supplied, explicitly state:
 - amount retained as approved conditional reserve;
 - reason not to deploy the remainder.
 
-## 7. Risk Checks
+## 8. Risk Checks
 
 State:
 
@@ -385,11 +395,11 @@ State:
 - whether the portfolio appears consistent with the configured drawdown risk budget (15% by default);
 - note that the risk budget cannot guarantee a loss ceiling.
 
-## 8. What Would Change the Recommendation
+## 9. What Would Change the Recommendation
 
 List 2–5 concrete invalidation/catalyst conditions.
 
-## 9. Data Quality
+## 10. Data Quality
 
 State:
 
@@ -420,12 +430,12 @@ explicit effect `non-blocking`. Optional `SKIPPED` values are excluded from
 applicable coverage; they must not be promoted to final required failures or
 silently counted as success.
 
-For `FULL_REVIEW`, compare the previous and current Position P&L by asset and
-show the change in percentage points when both cost bases are usable. For
-`SNAPSHOT_REVIEW`, always show the current table when cost observations are
-present.
+The current positions table in section 2 always renders, with cost columns
+available or `--`; `FULL_REVIEW` additionally compares the previous and
+current Position P&L by asset in percentage points when both cost bases are
+usable.
 
-## 10. Final action line
+## 11. Final action line
 
 End with one unambiguous sentence such as:
 
@@ -435,7 +445,7 @@ or:
 
 > This round's execution recommendation: NO TRADE; keep all 5,000U in stablecoins while waiting for the risk/reward balance to improve.
 
-## 11. Confidence and performance chain
+## 12. Confidence and performance chain
 
 Finalized reports show Data Confidence dimensions, Regime Confidence, Decision
 Confidence, raw/final scores, bands, caps, evidence IDs, and their action

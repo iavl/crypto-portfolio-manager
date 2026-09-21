@@ -167,6 +167,7 @@ class DocumentationTests(unittest.TestCase):
             "labels such as `Fact` and `Judgment`",
             "STALE",
             "Position P&L",
+            "## 2. Current Positions",
             "NAV Return",
             "Cost data coverage",
             "performance_finality",
@@ -186,7 +187,11 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertLess(
             template.index("### Failed data fetches this round"),
-            template.index("## 2. Portfolio diagnostics"),
+            template.index("## 2. Current Positions"),
+        )
+        self.assertLess(
+            template.index("## 2. Current Positions"),
+            template.index("## 3. Portfolio diagnostics"),
         )
         self.assertIn("MATERIAL_EVENT_FOUND` means a relevant security or regulatory", skill)
         self.assertIn("result.pending_event_scans", skill)
@@ -210,6 +215,7 @@ class DocumentationTests(unittest.TestCase):
             "English invocation produces an English report",
             "a Chinese invocation produces",
             "结论依据",
+            "当前持仓明细",
             "证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action",
             "本轮数据抓取失败明细",
             "术语解释与决策影响",
