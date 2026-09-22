@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "backtest-spec.schema.json",
+  "title": "BacktestSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "start_at", "end_at", "warmup_start_at", "initial_value_usd", "initial_portfolios", "asset_scopes", "decision_cadence", "full_review_interval_days", "fee_bps", "slippage_bps", "cost_sensitivity_bps", "semantic_scenarios", "policy_hash", "git_sha", "valuation_currency"],
+  "properties": {
+    "run_id": {"type": "string", "minLength": 1},
+    "start_at": {"type": "string", "format": "date-time"},
+    "end_at": {"type": "string", "format": "date-time"},
+    "warmup_start_at": {"type": "string", "format": "date-time"},
+    "initial_value_usd": {"type": "number", "exclusiveMinimum": 0},
+    "initial_portfolios": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}},
+    "asset_scopes": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}},
+    "decision_cadence": {"enum": ["DAILY_WITH_14D_FULL", "WEEKLY_WITH_DAILY_RISK"]},
+    "full_review_interval_days": {"type": "integer", "minimum": 1},
+    "fee_bps": {"type": "number", "minimum": 0},
+    "slippage_bps": {"type": "number", "minimum": 0},
+    "cost_sensitivity_bps": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "number", "minimum": 0}},
+    "semantic_scenarios": {"const": [30, 50, 70]},
+    "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "minLength": 7},
+    "valuation_currency": {"const": "USD"}
+  }
+}

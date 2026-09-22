@@ -36,6 +36,7 @@ def simulate_execution_plan(
     prior_time = decision_time
     events: list[dict[str, Any]] = []
     invalidated = False
+    pending_close_confirmation: int | None = None
     for raw_bar in bars:
         if not isinstance(raw_bar, Mapping):
             raise ValueError("execution bars must be objects")
@@ -71,14 +72,43 @@ def simulate_execution_plan(
         ):
             raise ValueError("fill_fraction must be in (0, 1]")
         fraction = float(raw_fraction)
+        if pending_close_confirmation is not None:
+            tranche = next(item for item in tranches if item["sequence"] == pending_close_confirmation)
+            sequence = tranche["sequence"]
+            low, high = float(tranche["price_low"]), float(tranche["price_high"])
+            if values["open"] < low:
+                invalidated = True
+                events.append({
+                    "timestamp": raw_bar["timestamp"], "sequence": sequence,
+                    "status": "GAP_BELOW_ZONE_REQUIRES_REVIEW",
+                })
+                break
+            if values["open"] <= high:
+                amount = remaining[sequence] * fraction
+                remaining[sequence] -= amount
+                events.append({
+                    "timestamp": raw_bar["timestamp"], "sequence": sequence,
+                    "status": "FILLED" if remaining[sequence] <= 1e-9 else "PARTIAL_FILL",
+                    "amount_usd": amount, "fill_price": values["open"],
+                    "confirmation": "PRIOR_BAR_CLOSE",
+                })
+            else:
+                events.append({
+                    "timestamp": raw_bar["timestamp"], "sequence": sequence,
+                    "status": "CONFIRMED_BUT_OPEN_ABOVE_LIMIT",
+                })
+            pending_close_confirmation = None
+            # One tranche may progress per bar.
+            continue
         for tranche in tranches:
             sequence = tranche["sequence"]
             if remaining[sequence] <= 1e-9:
                 continue
             low, high = float(tranche["price_low"]), float(tranche["price_high"])
             touched = values["low"] <= high and values["high"] >= low
-            confirmed = touched and (values["open"] <= high or values["close"] <= high)
-            if touched and not confirmed:
+            open_confirmed = touched and low <= values["open"] <= high
+            close_confirmed = touched and low <= values["close"] <= high
+            if touched and not open_confirmed and not close_confirmed:
                 events.append(
                     {
                         "timestamp": raw_bar["timestamp"],
@@ -87,12 +117,12 @@ def simulate_execution_plan(
                     }
                 )
                 break
-            if confirmed:
+            if open_confirmed:
                 amount = remaining[sequence] * fraction
                 remaining[sequence] -= amount
                 fill_price = min(
                     float(tranche["reference_price"]),
-                    values["open"] if values["open"] <= high else values["close"],
+                    values["open"],
                 )
                 events.append(
                     {
@@ -103,6 +133,13 @@ def simulate_execution_plan(
                         "fill_price": fill_price,
                     }
                 )
+                break
+            if close_confirmed:
+                pending_close_confirmation = sequence
+                events.append({
+                    "timestamp": raw_bar["timestamp"], "sequence": sequence,
+                    "status": "CLOSE_CONFIRMED_NEXT_BAR_REQUIRED",
+                })
                 break
     filled = sum(float(item["amount_usd"]) - remaining[item["sequence"]] for item in tranches)
     planned = float(plan.get("planned_amount_usd", sum(float(item["amount_usd"]) for item in tranches)))

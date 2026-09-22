@@ -245,6 +245,13 @@ class FREDProvider:
             "observation_start": str(request.parameters.get("start", ""))[:10] or None,
             "observation_end": str(request.parameters.get("as_of") or request.parameters.get("end") or "")[:10] or None,
         }
+        # Ask FRED/ALFRED for the vintage that was available on the simulated
+        # decision date.  observation_end alone filters dates but still serves
+        # today's revised values, which is look-ahead leakage.
+        vintage = str(request.parameters.get("as_of") or "")[:10] or None
+        if vintage is not None:
+            params["realtime_start"] = vintage
+            params["realtime_end"] = vintage
         try:
             payload = self.client.get_json(BASE_URL + OBSERVATIONS_PATH, params=params)
         except ProviderError:

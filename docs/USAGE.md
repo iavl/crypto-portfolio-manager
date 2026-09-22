@@ -722,3 +722,9 @@ python3 scripts/evaluate_strategy.py tests/fixtures/strategy_replay_basic.json \
     --fee-bps 10 --slippage-bps 5
 python3 scripts/evaluate_strategy.py reviews.json --candidate candidate_policy.json
 ```
+
+For point-in-time historical dataset construction, quantity-level backtests,
+decision mark-to-market, and report artifacts, use `scripts/backtest.py`. The
+full methodology and the strict-versus-synthetic evidence boundary are in
+`docs/BACKTEST_VALIDATION.md`. `evaluate_strategy.py` remains the compact
+frozen-review/configuration replay and does not itself acquire historical data.

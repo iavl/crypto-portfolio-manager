@@ -314,9 +314,39 @@ class BinanceProvider:
             params["startTime"] = _epoch_millis(start, "start")
         if end is not None:
             params["endTime"] = _epoch_millis(end, "end")
-        rows = _list_response(self._get(SPOT_BASE_URL, "/api/v3/klines", params), "klines")
         now = _now(self.clock)
         current = parse_timestamp(now)
+        # Binance caps klines at 1,000 rows.  A historical range must be
+        # exhausted explicitly; returning the first page as if it covered the
+        # range would make a backtest silently incomplete.
+        target_end_ms = params.get("endTime")
+        if params.get("startTime") is not None and target_end_ms is None:
+            target_end_ms = int(current.timestamp() * 1000)
+        rows: list[Any] = []
+        request_params = dict(params)
+        seen_open_times: set[int] = set()
+        while True:
+            page = _list_response(self._get(SPOT_BASE_URL, "/api/v3/klines", request_params), "klines")
+            if not page:
+                break
+            for row in page:
+                if not isinstance(row, (list, tuple)) or not row:
+                    raise ProviderDataError("Binance kline row is malformed")
+                open_ms = int(row[0])
+                if open_ms not in seen_open_times:
+                    rows.append(row)
+                    seen_open_times.add(open_ms)
+            if len(page) < 1000 or request_params.get("startTime") is None:
+                break
+            last_open = int(page[-1][0])
+            next_start = last_open + {"1H": 3_600_000, "4H": 14_400_000, "1D": 86_400_000}[frame]
+            if next_start <= int(request_params["startTime"]):
+                raise ProviderDataError("Binance kline pagination did not advance")
+            if target_end_ms is not None and next_start > target_end_ms:
+                break
+            request_params["startTime"] = next_start
+            if len(rows) > 1_000_000:
+                raise ProviderDataError("Binance kline range is unexpectedly large")
         candles: list[Candle] = []
         for index, row in enumerate(rows):
             if not isinstance(row, (list, tuple)) or len(row) < 7:

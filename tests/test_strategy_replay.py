@@ -38,7 +38,7 @@ class ReplayRecordTests(unittest.TestCase):
 
     def test_naive_timestamps_and_unknown_fields_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "timezone-aware"):
-            ReplayReview("2026-01-05T12:00:00", {"USDT": 1.0}, 100.0)
+            ReplayReview("2026-01-05T12:00:00", "2026-01-06T12:00:00Z", {"USDT": 1.0}, 100.0)
         with self.assertRaisesRegex(ValueError, "unknown fields"):
             ReplayReview.from_mapping({
                 "as_of": "2026-01-05T12:00:00Z",
@@ -121,6 +121,7 @@ class ReplayStrategyTests(unittest.TestCase):
         reviews = list(_reviews())
         damaged = ReplayReview(
             as_of=reviews[3].as_of,
+            period_end=reviews[3].period_end,
             current_weights=reviews[3].current_weights,
             portfolio_value=reviews[3].portfolio_value,
             assessments=reviews[3].assessments,

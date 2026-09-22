@@ -42,6 +42,7 @@ from .confidence import (
 from .portfolio import EXTERNAL_CASH_FLOW_TYPES, Position, PortfolioSnapshot
 from .evidence import AVAILABILITY_STATES, AssetAssessment, EventRiskAssessment, Evidence, FactorScore, ManualAssetContext
 from .structural_risk import StructuralRiskContext
+from .backtest import BacktestSpec, HistoricalDataManifest, HistoricalSeriesManifest
 
 __all__ = [
     "Candle",
@@ -112,4 +113,7 @@ __all__ = [
     "build_event_scan_result",
     "event_scan_observation",
     "confidence_band",
+    "BacktestSpec",
+    "HistoricalDataManifest",
+    "HistoricalSeriesManifest",
 ]

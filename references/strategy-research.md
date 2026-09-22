@@ -53,3 +53,18 @@ The registered candidate families are:
 No candidate is adopted merely because it is best in-sample. Unstable,
 constraint-breaking, cost-sensitive, or data-insufficient results produce
 `NO_CHANGE` or `INSUFFICIENT_EVIDENCE`.
+
+## Historical backtest boundary
+
+`docs/BACKTEST_VALIDATION.md` defines the historical runner and its evidence
+classes. A formal result requires point-in-time inputs and audited USD
+valuation. USDT-quoted OHLCV without an independent conversion series is an
+explicit `USDT_APPROXIMATION`. Unreconstructable semantic factors stay missing
+in strict mode; fixed 30/50/70 semantic assumptions are reported only as
+`SYNTHETIC_ASSUMPTIONS` and are excluded from predictive score evaluation.
+
+Historical runs use a quantity-and-cash ledger. Close-confirmed conditional
+entries execute no earlier than the next hourly bar; risk reductions use the
+next eligible hourly open. Fees apply to actual fills, and every mark uses one
+synchronized portfolio timestamp. Frozen experiment specs bind the policy
+hash, Git SHA, data range, initial portfolios, universe, cadence, and costs.

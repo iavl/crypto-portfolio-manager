@@ -99,6 +99,8 @@ class FrozenReviewView:
     thesis_broken: tuple[str, ...]
     hard_action_reasons: Mapping[str, str] | None
     technical_inputs: Mapping[str, Any] = field(default_factory=dict)
+    overlays: Mapping[str, Any] | None = None
+    chain_liveness: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ class ReplayReview:
     """
 
     as_of: str
+    period_end: str
     current_weights: Mapping[str, float]
     portfolio_value: float
     assessments: Mapping[str, Any] = field(default_factory=dict)
@@ -122,9 +125,15 @@ class ReplayReview:
     technical_inputs: Mapping[str, Any] = field(default_factory=dict)
     execution_plans: Mapping[str, Any] = field(default_factory=dict)
     execution_bars: Mapping[str, tuple[Mapping[str, Any], ...]] = field(default_factory=dict)
+    overlays: Mapping[str, Any] | None = None
+    chain_liveness: Mapping[str, Any] | None = None
+    current_prices: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        _parse_as_of(self.as_of)
+        moment = _parse_as_of(self.as_of)
+        period_end = _parse_as_of(self.period_end)
+        if period_end <= moment:
+            raise ValueError("period_end must be after as_of")
         weights = _normalized_weights(self.current_weights, "current_weights")
         if isinstance(self.portfolio_value, bool) or not isinstance(self.portfolio_value, (int, float)) \
                 or not math.isfinite(float(self.portfolio_value)) or float(self.portfolio_value) <= 0:
@@ -162,6 +171,20 @@ class ReplayReview:
                 raise ValueError("execution_bars must map symbols to bar sequences")
             normalized_bars[symbol] = tuple(dict(item) for item in raw_bars)
         object.__setattr__(self, "execution_bars", normalized_bars)
+        if self.overlays is not None and not isinstance(self.overlays, Mapping):
+            raise ValueError("overlays must be an object or null")
+        if self.chain_liveness is not None and not isinstance(self.chain_liveness, Mapping):
+            raise ValueError("chain_liveness must be an object or null")
+        normalized_prices: dict[str, float] = {}
+        for raw_symbol, raw_price in self.current_prices.items():
+            symbol = str(raw_symbol).strip().upper()
+            if not symbol or symbol in normalized_prices:
+                raise ValueError("current_prices contains an empty or duplicate symbol")
+            price = float(raw_price)
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError("current_prices values must be finite and positive")
+            normalized_prices[symbol] = price
+        object.__setattr__(self, "current_prices", normalized_prices)
         if isinstance(self.thesis_broken, str):
             raise ValueError("thesis_broken must be a sequence of symbols")
         broken = tuple(str(item).strip().upper() for item in self.thesis_broken if str(item).strip())
@@ -176,6 +199,10 @@ class ReplayReview:
     def moment(self) -> datetime:
         return _parse_as_of(self.as_of)
 
+    @property
+    def end_moment(self) -> datetime:
+        return _parse_as_of(self.period_end)
+
     def decision_view(self, *, current_weights: Mapping[str, float] | None = None,
                       portfolio_value: float | None = None) -> FrozenReviewView:
         """Frozen view for the decision path; never includes next_returns."""
@@ -189,25 +216,30 @@ class ReplayReview:
             new_cash=float(self.new_cash),
             thesis_broken=tuple(self.thesis_broken),
             hard_action_reasons=dict(self.hard_action_reasons) if self.hard_action_reasons else None,
+            overlays=dict(self.overlays) if self.overlays is not None else None,
+            chain_liveness=dict(self.chain_liveness) if self.chain_liveness is not None else None,
         )
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ReplayReview":
         known = {
-            "as_of", "current_weights", "portfolio_value", "assessments",
+            "as_of", "period_end", "current_weights", "portfolio_value", "assessments",
             "regime_inputs", "new_cash", "thesis_broken", "hard_action_reasons",
             "next_returns", "technical_inputs",
             "execution_plans",
             "execution_bars",
+            "overlays", "chain_liveness",
+            "current_prices",
         }
         unknown = sorted(set(value) - known)
         if unknown:
             raise ValueError("replay review contains unknown fields: " + ", ".join(unknown))
-        for required in ("as_of", "current_weights", "portfolio_value"):
+        for required in ("as_of", "period_end", "current_weights", "portfolio_value"):
             if required not in value:
                 raise ValueError(f"replay review is missing {required}")
         return cls(
             as_of=value["as_of"],
+            period_end=value["period_end"],
             current_weights=value["current_weights"],
             portfolio_value=value["portfolio_value"],
             assessments=value.get("assessments", {}),
@@ -219,6 +251,9 @@ class ReplayReview:
             technical_inputs=value.get("technical_inputs", {}),
             execution_plans=value.get("execution_plans", {}),
             execution_bars=value.get("execution_bars", {}),
+            overlays=value.get("overlays"),
+            chain_liveness=value.get("chain_liveness"),
+            current_prices=value.get("current_prices", {}),
         )
 
 
@@ -287,6 +322,8 @@ def replay_strategy(
     moments = [review.moment for review in reviews]
     if moments != sorted(moments) or len(set(moments)) != len(moments):
         raise ValueError("replay reviews must be unique and ordered by as_of")
+    if any(review.end_moment > following.moment for review, following in zip(reviews, reviews[1:])):
+        raise ValueError("replay label periods must not overlap the next decision boundary")
 
     from .research_variants import ResearchSignals
     from .review_diagnostics import build_review_diagnostics
@@ -309,6 +346,7 @@ def replay_strategy(
     staged_reductions = 0
     stable_weight_sum = 0.0
     review_rows: list[dict[str, Any]] = []
+    replayed_decisions: list[dict[str, Any]] = []
 
     for index, review in enumerate(reviews):
         if index > 0:
@@ -320,8 +358,15 @@ def replay_strategy(
             )
         else:
             view = review.decision_view()
+        # The replayed portfolio owns its drawdown path.  Frozen external
+        # drawdown values may describe another account or another candidate
+        # policy and therefore cannot drive the simulated risk floor.
+        peak_nav = max(nav_path)
+        replay_drawdown = nav_path[-1] / peak_nav - 1.0
+        regime_values = dict(view.regime_inputs)
+        regime_values["portfolio_drawdown_band"] = replay_drawdown
         regime = determine_regime(
-            RegimeInputs(**view.regime_inputs), policy=resolved, previous=previous_regime
+            RegimeInputs(**regime_values), policy=resolved, previous=previous_regime
         )
         previous_regime = regime
         regime_counts[regime.regime] = regime_counts.get(regime.regime, 0) + 1
@@ -331,6 +376,16 @@ def replay_strategy(
             assessments=signals.assessments(view),
             current_weights=view.current_weights,
         )
+        from .risk import run_risk_gate
+        risk = run_risk_gate(
+            allocation, policy=resolved, regime=regime.regime,
+            assessments=signals.assessments(view), current_drawdown=replay_drawdown,
+            overlays=view.overlays, chain_liveness=view.chain_liveness,
+            current_weights=view.current_weights,
+        )
+        if not risk.ok:
+            raise ValueError("REPLAY_RISK_GATE_FAILED: " + "; ".join(item.code for item in risk.errors))
+        from .rebalance import direction_history_from_decisions
         rebalance = recommend_rebalance(
             view.current_weights,
             dict(allocation.target_weights),
@@ -346,19 +401,41 @@ def replay_strategy(
                 for symbol, value in allocation.deployment_allowances.items()
                 if value.get("hard_exposure_cap") is not None
             },
+            direction_history=direction_history_from_decisions(replayed_decisions),
         )
         executable = [a for a in signals.confirmed(view, rebalance.actions)
                       if a.action in {"INCREASE", "REDUCE", "EXIT"} and a.symbol not in stables]
         entry_waits: list[dict[str, Any]] = []
         entry_outcomes: list[dict[str, Any]] = []
-        if review.execution_plans:
+        effective_plans = dict(review.execution_plans)
+        if view.technical_inputs:
+            from .entry import build_entry_plan
+            from ..models.market import TechnicalSnapshot
+            assessment_values = signals.assessments(view)
+            for action in executable:
+                if action.action != "INCREASE" or action.symbol in effective_plans:
+                    continue
+                candidates = view.technical_inputs.get(action.symbol, ())
+                if not candidates:
+                    continue
+                raw_snapshot = list(candidates)[-1]
+                snapshot = raw_snapshot if isinstance(raw_snapshot, TechnicalSnapshot) else TechnicalSnapshot.from_mapping(raw_snapshot)
+                assessment = assessment_values.get(action.symbol, {})
+                confidence = getattr(assessment, "confidence", None) or (
+                    assessment.get("confidence", "LOW") if isinstance(assessment, Mapping) else "LOW"
+                )
+                effective_plans[action.symbol] = build_entry_plan(
+                    action.symbol, action.amount_usd, snapshot, regime.regime, confidence,
+                    policy=resolved,
+                ).as_dict()
+        if effective_plans:
             from dataclasses import replace as replace_action
             from .execution_replay import simulate_execution_plan
             from ..models.policy import policy_hash
 
             gated: list[Any] = []
             for action in executable:
-                raw_plan = review.execution_plans.get(action.symbol)
+                raw_plan = effective_plans.get(action.symbol)
                 if raw_plan is None or action.action != "INCREASE":
                     gated.append(action)
                     continue
@@ -398,7 +475,7 @@ def replay_strategy(
                 gated.append(replace_action(action, amount_usd=filled))
             executable = gated
         candidate_projection = None
-        if research_variant == "confirm_2" or review.execution_plans:
+        if research_variant == "confirm_2" or effective_plans:
             def projection(selected):
                 return build_review_diagnostics(current_weights=view.current_weights,
                     target_weights=allocation.target_weights, portfolio_value=view.portfolio_value,
@@ -456,14 +533,30 @@ def replay_strategy(
         period_returns.append(period_return)
         nav_path.append(nav_path[-1] * (1.0 + period_return))
         value = sum(dollars.values())
+        replayed_decisions.append({
+            "timestamp": review.as_of,
+            "actions": [action.as_dict() for action in rebalance.actions],
+        })
+        from .operation import build_final_operation
+        try:
+            operation: Any = build_final_operation(executable, effective_plans, stable_symbols=stables).as_dict()
+        except ValueError as exc:
+            # Frozen configuration-level fixtures may predate technical plans.
+            # Keep that limitation explicit instead of inventing an executable
+            # operation or preventing return/risk diagnostics.
+            operation = {"status": "UNAVAILABLE", "reason": str(exc)}
         review_rows.append({
             "as_of": review.as_of,
+            "period_end": review.period_end,
+            "portfolio_drawdown_input": replay_drawdown,
             "regime": regime.regime,
             "decision": rebalance.decision,
             "executable_actions": len(executable),
             "entry_plan_waits": entry_waits,
             "entry_outcomes": entry_outcomes,
-            "execution_plans_used": bool(review.execution_plans),
+            "risk_gate": risk.as_dict(),
+            "final_operation": operation,
+            "execution_plans_used": bool(effective_plans),
             "staged_actions": sum(1 for a in executable if a.staging_applied),
             "actions": [a.as_dict() for a in executable],
             "turnover": turnover,
@@ -476,8 +569,9 @@ def replay_strategy(
     final_nav = nav_path[-1]
     count = len(reviews)
     total_return = final_nav - 1.0
-    elapsed_days = max((moments[-1] - moments[0]).total_seconds() / 86400.0, 1.0)
-    periods_per_year = 365.25 / max(elapsed_days / max(count - 1, 1), 1e-9)
+    elapsed_days = max((reviews[-1].end_moment - moments[0]).total_seconds() / 86400.0, 1.0)
+    period_days = [(review.end_moment - review.moment).total_seconds() / 86400.0 for review in reviews]
+    periods_per_year = 365.25 / max(sum(period_days) / count, 1e-9)
     average_return = sum(period_returns) / count
     variance = sum((item - average_return) ** 2 for item in period_returns) / max(count - 1, 1)
     volatility = math.sqrt(variance) * math.sqrt(periods_per_year)
@@ -495,7 +589,7 @@ def replay_strategy(
         "sharpe_like_rf_zero": sharpe_like,
         "assumptions": {
             "risk_free_rate": 0.0,
-            "annualization": "365.25-day year scaled by mean review cadence",
+            "annualization": "365.25-day year over explicit as_of-to-period_end label intervals",
             "entry_execution": (
                 "future bars confirm at most one tranche per bar; wick-only touches do not fill; "
                 "explicit fill_fraction controls partial liquidity"

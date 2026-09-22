@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "historical-data-manifest.schema.json",
+  "title": "HistoricalDataManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_id", "created_at", "spec_hash", "series", "strict_ready", "blockers"],
+  "properties": {
+    "manifest_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "spec_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "strict_ready": {"type": "boolean"},
+    "blockers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "series": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["series_id", "symbol", "metric", "timeframe", "source", "quote_currency", "observed_start_at", "observed_end_at", "fetched_at", "available_at_field", "point_in_time_quality", "content_sha256", "row_count", "missing_intervals", "consumer", "limitations", "status"],
+        "properties": {
+          "series_id": {"type": "string", "minLength": 1},
+          "symbol": {"type": "string", "minLength": 1},
+          "metric": {"type": "string", "minLength": 1},
+          "timeframe": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "quote_currency": {"type": "string", "minLength": 1},
+          "observed_start_at": {"type": ["string", "null"], "format": "date-time"},
+          "observed_end_at": {"type": ["string", "null"], "format": "date-time"},
+          "fetched_at": {"type": "string", "format": "date-time"},
+          "available_at_field": {"type": ["string", "null"]},
+          "point_in_time_quality": {"enum": ["PUBLISHED_AT_TIME", "HISTORICAL_APPROXIMATION", "UNRECONSTRUCTABLE"]},
+          "content_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "row_count": {"type": "integer", "minimum": 0},
+          "missing_intervals": {"type": "integer", "minimum": 0},
+          "consumer": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "limitations": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "status": {"enum": ["AVAILABLE", "PARTIAL", "BLOCKED", "UNAVAILABLE"]}
+        }
+      }
+    }
+  }
+}

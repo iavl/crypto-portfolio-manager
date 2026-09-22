@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "backtest-result.schema.json",
+  "title": "BacktestResultEnvelope",
+  "type": "object",
+  "required": ["run_id", "spec", "manifest", "valuation_basis", "strict_status", "runs"],
+  "properties": {
+    "run_id": {"type": "string", "minLength": 1},
+    "spec": {"$ref": "backtest-spec.schema.json"},
+    "manifest": {"$ref": "historical-data-manifest.schema.json"},
+    "valuation_basis": {"enum": ["USD", "USDT_APPROXIMATION"]},
+    "strict_status": {"enum": ["ELIGIBLE", "BLOCKED"]},
+    "runs": {"type": "object"}
+  }
+}

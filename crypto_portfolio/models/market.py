@@ -587,6 +587,27 @@ class TechnicalSnapshot:
             "ohlcv_hash": self.ohlcv_hash or None,
         }
 
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "TechnicalSnapshot":
+        """Materialize the canonical serialized snapshot for research replay."""
+        if not isinstance(value, Mapping):
+            raise ValueError("technical snapshot must be an object")
+        allowed = set(cls.__dataclass_fields__)
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError("technical snapshot contains unknown fields: " + ", ".join(sorted(unknown)))
+        data = dict(value)
+        for field_name, model in (
+            ("swing_highs", SwingPoint), ("swing_lows", SwingPoint),
+            ("support_zones", PriceZone), ("resistance_zones", PriceZone),
+            ("volume_hvns", VolumeNode), ("volume_lvns", VolumeNode),
+        ):
+            data[field_name] = tuple(
+                item if isinstance(item, model) else model.from_mapping(item)
+                for item in value.get(field_name, ())
+            )
+        return cls(**data)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
