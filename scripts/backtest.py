@@ -23,6 +23,7 @@ from crypto_portfolio.research.dataset import build_binance_dataset, load_datase
 from crypto_portfolio.research.decision_evaluation import evaluate_decision_history  # noqa: E402
 from crypto_portfolio.research.historical_builder import (  # noqa: E402
     apply_semantic_scenario, build_historical_reviews, rebind_initial_weights,
+    review_gap_diagnostics,
 )
 from crypto_portfolio.research.orchestrator import run_historical_backtest  # noqa: E402
 from crypto_portfolio.research.reporting import render_run_report  # noqa: E402
@@ -99,6 +100,17 @@ def command_build(args):
         run_id=args.run_id, end_at=args.end_at or _default_end(),
         policy_hash=policy_hash(canonical), git_sha=_git_sha(),
     ) if args.spec is None else BacktestSpec.from_mapping(json.loads(Path(args.spec).read_text(encoding="utf-8")))
+    overrides = (
+        ("warmup_start_at", args.warmup_start_at),
+        ("start_at", args.start_at),
+        ("end_at", args.end_at),
+    )
+    if any(value for _, value in overrides):
+        payload = spec.as_dict()
+        for field, value in overrides:
+            if value:
+                payload[field] = value
+        spec = BacktestSpec.from_mapping(payload)
     result = build_binance_dataset(spec, output_root=args.output)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -127,7 +139,8 @@ def command_run(args):
             "ELIGIBLE_WITH_ASSUMED_STABLE_PEG" if manifest.strict_ready and spec.stablecoin_peg_assumption
             else "ELIGIBLE" if manifest.strict_ready else "BLOCKED"
         ),
-        "policy_hashes": {}, "stress": drawdown_boundary_stress(), "score_evaluations": {}, "runs": {},
+        "policy_hashes": {}, "stress": drawdown_boundary_stress(), "score_evaluations": {},
+        "runs": {}, "review_calendar": {},
     }
     if not manifest.strict_ready and not args.allow_usdt_approximation:
         run["status"] = "BLOCKED_BY_DATA_MANIFEST"
@@ -157,6 +170,10 @@ def command_run(args):
                         "status": "BLOCKED", "reason": f"{exc.__class__.__name__}: {exc}",
                     }
             continue
+        run["review_calendar"][scope_name] = review_gap_diagnostics(
+            daily, symbols=scope_symbols, start_at=spec.start_at, end_at=spec.end_at,
+            produced_reviews=len(base_reviews),
+        )
         score_observations = []
         for review in base_reviews:
             for symbol, raw_assessment in review.assessments.items():
@@ -275,6 +292,8 @@ def parse_args(argv=None):
     build = sub.add_parser("build-dataset")
     build.add_argument("--run-id", default="strategy-validation-2024-present")
     build.add_argument("--end-at")
+    build.add_argument("--start-at", help="override the default review window start")
+    build.add_argument("--warmup-start-at", help="override the warm-up start feeding indicator history")
     build.add_argument("--spec")
     build.add_argument("--output")
     build.set_defaults(handler=command_build)

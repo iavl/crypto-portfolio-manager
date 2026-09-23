@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from datetime import timedelta
+from datetime import datetime, timedelta
 from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
@@ -12,11 +12,97 @@ from ..engine.factors.trend import calculate_trend_factor
 from ..engine.regime_inputs import build_regime_inputs
 from ..engine.scoring import score_assessment
 from ..engine.strategy_replay import ReplayReview
-from ..engine.technical import build_technical_snapshot
+from ..engine.technical import build_technical_snapshot, moving_average
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
-from ..models.market import OHLCVSeries, SpotPrice
+from ..models.market import Candle, OHLCVSeries, SpotPrice
 from ..models.policy import Policy, SCORING_FACTORS
 from ..models.time import parse_timestamp
+
+BREADTH_MA_WINDOW = 200
+
+
+def breadth_above_ma(
+    completed_by_symbol: Mapping[str, Sequence[Candle]], *, window: int = BREADTH_MA_WINDOW,
+) -> float | None:
+    """Fraction of symbols whose close exceeds their own simple moving average.
+
+    Point-in-time research proxy for the regime breadth domain: the caller
+    supplies only candles completed at the review boundary, so no future bar
+    can reach it.  Production derives ``market.breadth`` from CoinGecko's
+    fraction of the top-20 non-stable universe with a positive 30d return;
+    until that history is harvested this proxy keeps the domain deterministic
+    from frozen OHLCV alone.  Returns None when any symbol lacks a full
+    window, which the regime reads as UNKNOWN rather than a fabricated value.
+    """
+    if not completed_by_symbol:
+        raise ValueError("breadth requires at least one symbol")
+    if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+        raise ValueError("breadth window must be a positive integer")
+    above = 0
+    for candles in completed_by_symbol.values():
+        if len(candles) < window:
+            return None
+        if candles[-1].close > moving_average(candles[-window:], window):
+            above += 1
+    return above / len(completed_by_symbol)
+
+
+def _candidate_boundaries(
+    btc_candles: Sequence[Candle], *, start: datetime, end: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """Daily decision boundaries (as_of, period_end) inside [start, end]."""
+    boundaries: list[tuple[datetime, datetime]] = []
+    for candle in btc_candles:
+        as_of_moment = parse_timestamp(candle.timestamp) + timedelta(days=1)
+        if as_of_moment < start:
+            continue
+        if as_of_moment + timedelta(days=1) > end:
+            break
+        boundaries.append((as_of_moment, as_of_moment + timedelta(days=1)))
+    return boundaries
+
+
+def review_gap_diagnostics(
+    daily_by_symbol: Mapping[str, OHLCVSeries],
+    *,
+    symbols: Sequence[str],
+    start_at: str,
+    end_at: str,
+    produced_reviews: int,
+) -> dict[str, Any]:
+    """Explain review boundaries dropped to daily-candle gaps, not traded.
+
+    A skipped boundary is one where the frozen data could not support a
+    complete review (a symbol lacked the next daily candle, so no return
+    label exists).  The per-symbol counts are lower bounds on skip causes;
+    execution-bar gaps can drop additional boundaries.
+    """
+    risk_symbols = tuple(symbol for symbol in symbols if symbol != "USD")
+    if "BTC" not in risk_symbols:
+        raise ValueError("review gap diagnostics require BTC as the boundary anchor")
+    missing_daily = sorted(set(risk_symbols) - set(daily_by_symbol))
+    if missing_daily:
+        raise ValueError("daily OHLCV is missing for: " + ", ".join(missing_daily))
+    start, end = parse_timestamp(start_at), parse_timestamp(end_at)
+    boundaries = _candidate_boundaries(daily_by_symbol["BTC"].completed_candles(), start=start, end=end)
+    if produced_reviews > len(boundaries):
+        raise ValueError("produced reviews exceed the candidate boundary count")
+    missing_next: dict[str, int] = {}
+    for symbol in risk_symbols:
+        times = tuple(parse_timestamp(item.timestamp) for item in daily_by_symbol[symbol].completed_candles())
+        count = 0
+        for as_of_moment, period_end in boundaries:
+            available = bisect_right(times, as_of_moment - timedelta(days=1))
+            following = bisect_right(times, period_end - timedelta(days=1))
+            if following <= available:
+                count += 1
+        missing_next[symbol] = count
+    return {
+        "candidate_boundaries": len(boundaries),
+        "produced_reviews": produced_reviews,
+        "skipped_boundaries": len(boundaries) - produced_reviews,
+        "boundaries_missing_next_candle": missing_next,
+    }
 
 
 def _asset_type(policy: Policy, symbol: str) -> str:
@@ -107,14 +193,9 @@ def build_historical_reviews(
     execution_cache = {symbol: tuple(series.completed_candles()) for symbol, series in execution_series.items()}
     execution_times = {symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
                        for symbol, candles in execution_cache.items()}
-    btc_candles = [item for item in daily_cache["BTC"]
-                   if start <= parse_timestamp(item.timestamp) + timedelta(days=1) < end]
+    btc_candles = daily_cache["BTC"]
     reviews: list[ReplayReview] = []
-    for btc_candle in btc_candles:
-        as_of_moment = parse_timestamp(btc_candle.timestamp) + timedelta(days=1)
-        period_end = as_of_moment + timedelta(days=1)
-        if period_end > end:
-            break
+    for as_of_moment, period_end in _candidate_boundaries(btc_candles, start=start, end=end):
         as_of = as_of_moment.isoformat().replace("+00:00", "Z")
         period_end_text = period_end.isoformat().replace("+00:00", "Z")
         snapshots: dict[str, Any] = {}
@@ -122,12 +203,14 @@ def build_historical_reviews(
         next_returns: dict[str, float] = {"USD": 0.0}
         current_prices: dict[str, float] = {}
         execution_bars: dict[str, tuple[Mapping[str, Any], ...]] = {}
+        completed_by_symbol: dict[str, tuple[Candle, ...]] = {}
         usable = True
         for symbol in risk_symbols:
             series = daily_by_symbol[symbol]
             available_index = bisect_right(daily_times[symbol], as_of_moment - timedelta(days=1))
             next_index = bisect_right(daily_times[symbol], period_end - timedelta(days=1))
             completed = daily_cache[symbol][:available_index]
+            completed_by_symbol[symbol] = completed
             next_completed = daily_cache[symbol][:next_index]
             if not completed or len(next_completed) <= len(completed):
                 usable = False
@@ -188,7 +271,7 @@ def build_historical_reviews(
             continue
         btc_snapshot = snapshots["BTC"][-1]
         regime_inputs = build_regime_inputs(
-            btc_snapshot, portfolio_drawdown=0.0, breadth="UNKNOWN",
+            btc_snapshot, portfolio_drawdown=0.0, breadth=breadth_above_ma(completed_by_symbol),
             systemic_event_risk=False, provenance_complete=semantic_score is not None,
         ).as_dict()
         reviews.append(ReplayReview(
@@ -244,4 +327,11 @@ def apply_semantic_scenario(
     return tuple(result)
 
 
-__all__ = ["apply_semantic_scenario", "build_historical_reviews", "rebind_initial_weights"]
+__all__ = [
+    "BREADTH_MA_WINDOW",
+    "apply_semantic_scenario",
+    "breadth_above_ma",
+    "build_historical_reviews",
+    "rebind_initial_weights",
+    "review_gap_diagnostics",
+]

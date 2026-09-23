@@ -48,10 +48,27 @@ drawdown; it cannot prove an intraday drawdown that occurred inside a daily
 candle. Missing held-asset prices, missing execution bars, overlapping label
 periods, and price-boundary mismatches fail closed.
 
+## Reconstructed inputs and their limits
+
+Only inputs derivable from the frozen OHLCV are reconstructed. The regime
+breadth domain uses `research/historical_builder.py:breadth_above_ma` — the
+fraction of scope symbols whose close is above their own 200-day simple moving
+average at the review boundary, computed from candles completed at that
+boundary only. This is a research proxy: production derives `market.breadth`
+from CoinGecko's fraction of the top-20 non-stable universe with a positive
+30d return. The proxy differs in universe and horizon, and a symbol with less
+than a full window leaves the domain UNKNOWN rather than fabricating a value.
+All other non-OHLCV inputs (fundamentals, events, liveness, on-chain, ETF and
+stablecoin flows) stay MISSING or UNKNOWN in historical reviews until their
+point-in-time history is harvested; a run does not silently invent them.
+
 ## Commands
 
 ```bash
 python3 scripts/backtest.py build-dataset --run-id strategy-validation-2024-present
+python3 scripts/backtest.py build-dataset --run-id strategy-validation-2021-2023-bear \
+    --warmup-start-at 2020-11-01T00:00:00Z --start-at 2021-07-01T00:00:00Z \
+    --end-at 2023-12-31T00:00:00Z
 python3 scripts/backtest.py audit-data ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py run ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py run ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present --allow-usdt-approximation
@@ -60,6 +77,20 @@ python3 scripts/backtest.py evaluate-scores ~/.local/share/crypto-portfolio-mana
 python3 scripts/backtest.py report ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present/run.json
 python3 scripts/strategy_validity.py ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 ```
+
+`--start-at`, `--warmup-start-at`, and `--end-at` override the window of the
+default spec (or of `--spec`) after the fact; the warm-up must still precede
+the start, and indicator history (200-day moving averages, trend structure)
+needs the longer warm-up, so a window that starts early must push the warm-up
+earlier too. The bear-market window above exists to exercise the regime
+machinery across the 2021 top, the 2022 drawdown, and the 2023 recovery with
+the same frozen experiment; it is a second run id, not a change to the default.
+
+Each `run.json` also publishes `review_calendar` per scope: candidate decision
+boundaries, produced reviews, skipped boundaries, and per-symbol counts of
+boundaries whose next daily candle is missing. A skipped boundary is a data
+gap, not a deliberate no-trade day, and a large skip count narrows what the
+run can claim.
 
 The first `run` command emits `BLOCKED_BY_DATA_MANIFEST` when formal USD or
 point-in-time requirements are not met. The explicit approximation flag runs

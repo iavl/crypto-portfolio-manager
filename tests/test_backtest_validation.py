@@ -16,7 +16,9 @@ from crypto_portfolio.providers.binance import BinanceProvider
 from crypto_portfolio.providers.fred import FREDProvider
 from crypto_portfolio.research.dataset import convert_usdt_series_to_usd
 from crypto_portfolio.research.data_audit import audit_ohlcv_series, build_historical_manifest
-from crypto_portfolio.research.historical_builder import build_historical_reviews
+from crypto_portfolio.research.historical_builder import (
+    BREADTH_MA_WINDOW, breadth_above_ma, build_historical_reviews, review_gap_diagnostics,
+)
 from crypto_portfolio.research.orchestrator import run_historical_backtest
 from crypto_portfolio.research.score_evaluation import evaluate_scores
 from crypto_portfolio.research.stress import drawdown_boundary_stress
@@ -248,6 +250,87 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(len(result["rows"]), 1)
         self.assertEqual(result["rows"][0]["labels"]["30"]["status"], "AVAILABLE")
         self.assertEqual(result["rows"][0]["labels"]["90"]["status"], "PENDING")
+
+
+class BreadthAndGapDiagnosticsTests(unittest.TestCase):
+    DAILY_START = datetime(2023, 5, 1, tzinfo=timezone.utc)
+
+    @staticmethod
+    def _candles(closes, start):
+        return tuple(
+            Candle(
+                (start + timedelta(days=index)).isoformat(),
+                close, close * 1.01, close * 0.99, close, 100,
+            )
+            for index, close in enumerate(closes)
+        )
+
+    @classmethod
+    def _daily(cls, symbol, closes):
+        return OHLCVSeries(
+            symbol, "1D", cls._candles(closes, cls.DAILY_START),
+            "test", "2026-09-23T00:00:00Z", "TEST", "spot", "USD",
+        )
+
+    def test_breadth_fraction_is_fractional_and_requires_full_history(self):
+        start = datetime(2023, 1, 1, tzinfo=timezone.utc)
+        rising = self._candles([100 + index for index in range(210)], start)
+        falling = self._candles([1000 - index for index in range(210)], start)
+        self.assertEqual(breadth_above_ma({"BTC": rising, "ETH": falling}), 0.5)
+        self.assertEqual(breadth_above_ma({"BTC": rising, "ETH": rising}), 1.0)
+        self.assertEqual(breadth_above_ma({"BTC": falling, "ETH": falling}), 0.0)
+        short = self._candles([100 + index for index in range(BREADTH_MA_WINDOW - 1)], start)
+        self.assertIsNone(breadth_above_ma({"BTC": short}))
+        with self.assertRaisesRegex(ValueError, "at least one symbol"):
+            breadth_above_ma({})
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            breadth_above_ma({"BTC": rising}, window=0)
+
+    def test_historical_breadth_uses_only_candles_completed_at_the_boundary(self):
+        # ETH falls through 2023-12-31, then one huge spike candle lands on
+        # 2024-01-01.  The first review boundary sits exactly before that
+        # spike: breadth must read the falling history and stay NEUTRAL
+        # (BTC above, ETH below) instead of leaking the not-yet-completed bar.
+        eth = self._daily("ETH", [2000 - index for index in range(245)] + [5000.0, 4900.0, 4800.0, 4700.0])
+        btc = self._daily("BTC", [30_000 + index for index in range(250)])
+        daily = {"BTC": btc, "ETH": eth}
+        reviews = build_historical_reviews(
+            daily_by_symbol=daily, execution_by_symbol=daily, execution_timeframe="1D",
+            symbols=("BTC", "ETH", "USD"), initial_weights={"USD": 1.0},
+            initial_value=100_000, start_at="2024-01-01T00:00:00Z",
+            end_at="2024-01-04T00:00:00Z", policy=load_policy(), semantic_score=None,
+        )
+        self.assertGreaterEqual(len(reviews), 2)
+        self.assertEqual(reviews[0].regime_inputs["breadth_state"], "NEUTRAL")
+        self.assertEqual(reviews[1].regime_inputs["breadth_state"], "HEALTHY")
+
+    def test_review_gap_diagnostics_count_dropped_boundaries_per_symbol(self):
+        btc = self._daily("BTC", [30_000 + index for index in range(250)])
+        eth_closes = [2000 - index for index in range(250)]
+        eth_with_gap = OHLCVSeries(
+            "ETH", "1D", self._candles(eth_closes, self.DAILY_START)[:246] + self._candles(eth_closes, self.DAILY_START)[247:],
+            "test", "2026-09-23T00:00:00Z", "TEST", "spot", "USD",
+        )
+        daily = {"BTC": btc, "ETH": eth_with_gap}
+        reviews = build_historical_reviews(
+            daily_by_symbol=daily, execution_by_symbol=daily, execution_timeframe="1D",
+            symbols=("BTC", "ETH", "USD"), initial_weights={"USD": 1.0},
+            initial_value=100_000, start_at="2024-01-01T00:00:00Z",
+            end_at="2024-01-04T00:00:00Z", policy=load_policy(), semantic_score=None,
+        )
+        diagnostics = review_gap_diagnostics(
+            daily, symbols=("BTC", "ETH", "USD"), start_at="2024-01-01T00:00:00Z",
+            end_at="2024-01-04T00:00:00Z", produced_reviews=len(reviews),
+        )
+        self.assertEqual(diagnostics["candidate_boundaries"], 3)
+        self.assertEqual(diagnostics["produced_reviews"], 2)
+        self.assertEqual(diagnostics["skipped_boundaries"], 1)
+        self.assertEqual(diagnostics["boundaries_missing_next_candle"], {"BTC": 0, "ETH": 1})
+        with self.assertRaisesRegex(ValueError, "exceed the candidate"):
+            review_gap_diagnostics(
+                daily, symbols=("BTC", "ETH", "USD"), start_at="2024-01-01T00:00:00Z",
+                end_at="2024-01-04T00:00:00Z", produced_reviews=4,
+            )
 
 
 if __name__ == "__main__":
