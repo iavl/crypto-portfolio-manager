@@ -96,8 +96,10 @@ def _price_rows(series):
 
 def command_build(args):
     canonical = load_policy()
+    # The base spec keeps the default window so an early --end-at is never
+    # validated against the default 2024 start before overrides apply.
     spec = default_backtest_spec(
-        run_id=args.run_id, end_at=args.end_at or _default_end(),
+        run_id=args.run_id, end_at=_default_end(),
         policy_hash=policy_hash(canonical), git_sha=_git_sha(),
     ) if args.spec is None else BacktestSpec.from_mapping(json.loads(Path(args.spec).read_text(encoding="utf-8")))
     overrides = (
