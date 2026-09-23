@@ -235,6 +235,11 @@ class FREDProvider:
         value = self.clock() if callable(self.clock) else datetime.now(timezone.utc)
         return normalize_timestamp(value.isoformat() if isinstance(value, datetime) else value, "fetched_at")
 
+    def _utc_today(self) -> str:
+        value = self.clock() if callable(self.clock) else datetime.now(timezone.utc)
+        moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return moment.astimezone(timezone.utc).date().isoformat()
+
     def _fetch(self, spec: SeriesSpec, request: ProviderRequest) -> tuple[FREDPoint, ...]:
         if not self.api_key:
             raise ProviderAuthenticationError("FRED API key is not configured")
@@ -247,9 +252,12 @@ class FREDProvider:
         }
         # Ask FRED/ALFRED for the vintage that was available on the simulated
         # decision date.  observation_end alone filters dates but still serves
-        # today's revised values, which is look-ahead leakage.
+        # today's revised values, which is look-ahead leakage.  Only strictly
+        # past decision dates pin a vintage: a live request carries as_of =
+        # now (UTC), FRED's server date lags UTC across the US-night window,
+        # and realtime_start after the server's today is a hard HTTP 400.
         vintage = str(request.parameters.get("as_of") or "")[:10] or None
-        if vintage is not None:
+        if vintage is not None and vintage < self._utc_today():
             params["realtime_start"] = vintage
             params["realtime_end"] = vintage
         try:

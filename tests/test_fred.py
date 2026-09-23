@@ -82,6 +82,34 @@ class FREDFreshnessTests(unittest.TestCase):
         self.assertEqual(metadata["expected_publication_lag_days"], 3)
         self.assertEqual(metadata["max_expected_observation_age_days"], 14)
 
+    def _captured_params(self, as_of, clock):
+        captured = {}
+
+        class Client:
+            def get_json(self, _url, *, params=None, headers=None):
+                captured.update(params)
+                return {"observations": [{"date": "2026-08-28", "value": "100"}]}
+
+        FREDProvider(client=Client(), api_key="fake-key", clock=clock).collect(
+            ProviderRequest("fred", "macro", "BTC", {"as_of": as_of}, ("macro.dff",))
+        )
+        return captured
+
+    def test_live_as_of_today_pins_no_realtime_vintage(self):
+        # A live request runs as_of the current UTC instant; FRED's server
+        # date lags UTC across the US-night window and realtime_start after
+        # the server's today is a hard HTTP 400, so no vintage is pinned.
+        params = self._captured_params("2026-09-23T01:00:00Z", lambda: "2026-09-23T01:00:00Z")
+        self.assertNotIn("realtime_start", params)
+        self.assertNotIn("realtime_end", params)
+        self.assertEqual(params["observation_end"], "2026-09-23")
+
+    def test_past_simulated_as_of_pins_realtime_vintage(self):
+        params = self._captured_params("2026-09-05T00:00:00Z", lambda: "2026-09-07T00:00:00Z")
+        self.assertEqual(params["realtime_start"], "2026-09-05")
+        self.assertEqual(params["realtime_end"], "2026-09-05")
+        self.assertEqual(params["observation_end"], "2026-09-05")
+
 
 if __name__ == "__main__":
     unittest.main()
