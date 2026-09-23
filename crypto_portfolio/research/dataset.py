@@ -110,24 +110,28 @@ def build_binance_dataset(
     acquired: dict[str, OHLCVSeries] = {}
     failures: list[dict[str, str]] = []
     fx_by_timeframe: dict[str, OHLCVSeries] = {}
-    for timeframe, start_at in (("1D", spec.warmup_start_at), ("1H", spec.start_at)):
-        series_id = f"coinbase:USDT-USD:{timeframe}"
-        try:
-            fx = _load_cached_series(root, series_id) or coinbase.candles(
-                "USDT", timeframe=timeframe, start=start_at, end=spec.end_at,
-            )
-            fx_by_timeframe[timeframe] = fx
-            acquired[series_id] = fx
-            entries.append(audit_ohlcv_series(fx, series_id=series_id, consumers=("valuation", "quote_conversion")))
-            _write_json(root / "series" / _series_filename(series_id), fx.as_dict())
-        except Exception as exc:
-            reason = f"{exc.__class__.__name__}: {exc}"
-            failures.append({"series_id": series_id, "reason": reason})
-            entries.append(_unavailable_ohlcv(
-                symbol="USDT", timeframe=timeframe, fetched_at=fetched_at, reason=reason,
-            ))
+    requested_timeframes = [("1D", spec.warmup_start_at)]
+    if spec.execution_timeframe != "1D":
+        requested_timeframes.append((spec.execution_timeframe, spec.start_at))
+    if not spec.stablecoin_peg_assumption:
+        for timeframe, start_at in requested_timeframes:
+            series_id = f"coinbase:USDT-USD:{timeframe}"
+            try:
+                fx = _load_cached_series(root, series_id) or coinbase.candles(
+                    "USDT", timeframe=timeframe, start=start_at, end=spec.end_at,
+                )
+                fx_by_timeframe[timeframe] = fx
+                acquired[series_id] = fx
+                entries.append(audit_ohlcv_series(fx, series_id=series_id, consumers=("valuation", "quote_conversion")))
+                _write_json(root / "series" / _series_filename(series_id), fx.as_dict())
+            except Exception as exc:
+                reason = f"{exc.__class__.__name__}: {exc}"
+                failures.append({"series_id": series_id, "reason": reason})
+                entries.append(_unavailable_ohlcv(
+                    symbol="USDT", timeframe=timeframe, fetched_at=fetched_at, reason=reason,
+                ))
     for symbol in symbols:
-        for timeframe, start_at in (("1D", spec.warmup_start_at), ("1H", spec.start_at)):
+        for timeframe, start_at in requested_timeframes:
             series_id = f"binance:{symbol}:{timeframe}"
             try:
                 series = _load_cached_series(root, series_id) or source.candles(
@@ -147,7 +151,9 @@ def build_binance_dataset(
                     ))
                 continue
             acquired[series_id] = series
-            entries.append(audit_ohlcv_series(series, series_id=series_id))
+            entries.append(audit_ohlcv_series(
+                series, series_id=series_id, assume_stablecoin_peg=spec.stablecoin_peg_assumption,
+            ))
             _write_json(root / "series" / _series_filename(series_id), series.as_dict())
             fx = fx_by_timeframe.get(timeframe)
             if fx is None:

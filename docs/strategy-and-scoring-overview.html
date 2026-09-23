@@ -80,6 +80,25 @@
   .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media (max-width:960px){.wrap{grid-template-columns:1fr;gap:0;padding:0 20px 72px}nav.toc{display:none}.two{grid-template-columns:1fr}}
   footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
+  /* ---------- 打印 / 导出 PDF ----------
+     只影响 print media，屏幕显示完全不变。页面尺寸与页边距由导出工具决定，
+     这里只管版式：去掉无法点击的侧栏目录、避免把图形/卡片/表格拦腰截断。 */
+  @media print{
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    html,body{background:#0d1017}
+    .wrap{display:block;max-width:none;margin:0;padding:0}
+    nav.toc{display:none}
+    main{padding-top:0}
+    h2,h3,h4{break-after:avoid-page;page-break-after:avoid}
+    figure,.cards,.card,.note,.warn,.ok,.two,pre,header.hero,footer{break-inside:avoid;page-break-inside:avoid}
+    figcaption{break-before:avoid-page;page-break-before:avoid}
+    /* 表格允许跨页（打印常态），但表头重复、单行不拆 */
+    table{break-inside:auto;page-break-inside:auto}
+    thead{display:table-header-group}
+    tr,td,th{break-inside:avoid;page-break-inside:avoid}
+    img,svg,table,pre{max-width:100%}
+    a{color:#4c8dff;text-decoration:none}
+  }
 </style>
 </head>
 <body>
@@ -93,7 +112,7 @@
   <a href="#s3">3 · 决策流水线</a>
   <a href="#s4">4 · 评分模型</a>
   <a href="#s4-1">　4.1 三套权重 profile</a>
-  <a href="#s4-2">　4.2 因子内部（趋势）</a>
+  <a href="#s4-2">　4.2 八个因子逐个拆</a>
   <a href="#s4-3">　4.3 可靠性收缩与覆盖率</a>
   <a href="#s4-4">　4.4 相对强度 vs BTC</a>
   <a href="#s4-5">　4.5 资金流两种口径</a>
@@ -436,7 +455,34 @@
 <figcaption><b>图 2｜三套评分权重。</b>趋势在三个 profile 里都是最大权重（30–35%）。BTC 完全不用通用的估值/基本面/链上/相对强度，改用 BTC 原生的实现估值（MVRV、已实现价格等）与宏观流动性。AAVE 作为 DeFi 协议代币，把活动全部压进 fundamentals（TVL、费用、收入、代币经济），<b>ERC-20 转账活动不算 Aave 协议使用量</b>。</figcaption>
 </figure>
 
-<h3 id="s4-2">4.2 因子内部长什么样：以趋势为例</h3>
+<h3 id="s4-2">4.2 八个因子逐个拆</h3>
+<p>八个规范因子键是一个<b>固定集合</b>：<code>trend</code>、<code>valuation</code>、<code>fundamentals</code>、<code>onchain</code>、<code>capital_flows</code>、<code>relative_strength_btc</code>、<code>btc_valuation</code>、<code>macro_liquidity</code>。<b>每个 profile 必须恰好覆盖这八个键</b>——多一个、少一个都在加载时直接报错。所以「某个 profile 不用某个因子」是靠<b>把权重写成 0</b> 来表达的，而不是删掉键；零权重解析为 <code>NOT_APPLICABLE</code>，既不计入分数，也不计入覆盖率。</p>
+
+<table>
+  <thead><tr><th>因子</th><th class="n">default<br>ETH · SOL · BNB</th><th class="n">btc<br>BTC</th><th class="n">defi_protocol<br>AAVE</th></tr></thead>
+  <tbody>
+    <tr><td><code>trend</code> 趋势</td><td class="n">30%</td><td class="n">35%</td><td class="n">30%</td></tr>
+    <tr><td><code>valuation</code> 估值</td><td class="n">15%</td><td class="n">—</td><td class="n">20%</td></tr>
+    <tr><td><code>fundamentals</code> 基本面</td><td class="n">20%</td><td class="n">—</td><td class="n">35%</td></tr>
+    <tr><td><code>onchain</code> 链上活动</td><td class="n">10%</td><td class="n">—</td><td class="n">—</td></tr>
+    <tr><td><code>capital_flows</code> 资金流</td><td class="n">10%</td><td class="n">25%</td><td class="n">—</td></tr>
+    <tr><td><code>relative_strength_btc</code> 相对强度</td><td class="n">15%</td><td class="n">—</td><td class="n">15%</td></tr>
+    <tr><td><code>btc_valuation</code> BTC 估值</td><td class="n">—</td><td class="n">20%</td><td class="n">—</td></tr>
+    <tr><td><code>macro_liquidity</code> 宏观流动性</td><td class="n">—</td><td class="n">20%</td><td class="n">—</td></tr>
+    <tr><td><b>合计</b></td><td class="n">100%</td><td class="n">100%</td><td class="n">100%</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>先记住这条分界：八个因子里只有三个有「公式」。</b>
+  <ul>
+    <li><b>确定性打分（3 个）</b>：<code>trend</code>、<code>capital_flows</code>、<code>relative_strength_btc</code>。只有这三个在 <code>config/policy.json</code> 里挂着 <code>factor_rules</code> 条目——它们是<b>闭式算术</b>，由 Python 直接算出 0–100，同一份输入必然得同一分，可复算、可审计。</li>
+    <li><b>语义打分（5 个）</b>：<code>valuation</code>、<code>fundamentals</code>、<code>onchain</code>、<code>btc_valuation</code>、<code>macro_liquidity</code>。Python <b>只</b>把原始观测预处理成<b>不可变事实</b>（当前值 / 上期值 / 变化 / 趋势分类 / 覆盖率 / 新鲜度 / 来源 id），0–100 分与置信度由<b>有界判断</b>给出，且必须附上支持证据与反方证据的 id。置信度随后进入可靠性计算（见 4.3）。</li>
+  </ul>
+  所以下面五节要读的不是「公式」，而是<b>它拿到哪些事实、边界在哪里</b>。这也是 4.2 原先只拿趋势举例的原因：只有那三个画得出算式。
+</div>
+
+<h4>① <code>trend</code> 趋势 · 30% / 35% / 30%</h4>
 <p>趋势因子是全套权重里最大的一个，也是最近唯一出过结构性 bug 的因子。它用一条「基线 + 授权加减分」的结构：</p>
 
 <figure>
@@ -520,7 +566,7 @@
 </figure>
 
 <div class="note">
-  <b>三个容易被忽略的细节。</b>
+  <b>趋势因子的三个容易被忽略的细节。</b>
   <ol>
     <li><b>成交量扣分要做确认。</b>WEAK 量能必须连续 <b>2 个已收盘日线</b>都成立才扣分。写入一条弱读数不扣分，只报告「已确认几个收盘」。历史教训：某次单一弱量读数叠加一个勉强成立的 MA20 金叉，让趋势因子在一次评审里摆动 22 分。</li>
     <li><b>「没有支撑区」不是缺数据。</b>支撑结构被评估过、结果为空，是一个中性结论，不降低覆盖率。</li>

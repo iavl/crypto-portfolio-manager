@@ -4,7 +4,7 @@
   "title": "BacktestSpec",
   "type": "object",
   "additionalProperties": false,
-  "required": ["run_id", "start_at", "end_at", "warmup_start_at", "initial_value_usd", "initial_portfolios", "asset_scopes", "decision_cadence", "full_review_interval_days", "fee_bps", "slippage_bps", "cost_sensitivity_bps", "semantic_scenarios", "policy_hash", "git_sha", "valuation_currency"],
+  "required": ["run_id", "start_at", "end_at", "warmup_start_at", "initial_value_usd", "initial_portfolios", "asset_scopes", "decision_cadence", "full_review_interval_days", "fee_bps", "slippage_bps", "cost_sensitivity_bps", "semantic_scenarios", "policy_hash", "git_sha", "valuation_currency", "execution_timeframe", "stablecoin_peg_assumption"],
   "properties": {
     "run_id": {"type": "string", "minLength": 1},
     "start_at": {"type": "string", "format": "date-time"},
@@ -21,6 +21,8 @@
     "semantic_scenarios": {"const": [30, 50, 70]},
     "policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "git_sha": {"type": "string", "minLength": 7},
-    "valuation_currency": {"const": "USD"}
+    "valuation_currency": {"const": "USD"},
+    "execution_timeframe": {"enum": ["1D", "1H"]},
+    "stablecoin_peg_assumption": {"type": "boolean"}
   }
 }

@@ -25,8 +25,10 @@ Results are kept separate because they answer different questions:
 Historical data is classified as `PUBLISHED_AT_TIME`,
 `HISTORICAL_APPROXIMATION`, or `UNRECONSTRUCTABLE`. Only the first class can
 support a formal point-in-time result. Binance public OHLCV is USDT quoted; a
-run is labelled `USDT_APPROXIMATION` and blocked from formal USD status unless
-an audited USDT/USD conversion series is present.
+run uses the explicit `stablecoin_peg_assumption=true` default and labels the
+valuation basis `USD_ASSUMED_STABLECOIN_PEG`. This means USDT/USDC-like quote
+assets are valued at 1 USD by assumption; it is not evidence that the peg was
+exact at every historical hour.
 
 ## Fixed experiment
 
@@ -38,11 +40,13 @@ semantic scenarios 30/50/70. The spec binds the Git SHA and canonical policy
 hash. Core-only research uses an independently resolved policy with an empty
 satellite universe; it never modifies the canonical policy.
 
-The quantity engine records holdings, cash, each fill, fees, slippage, hourly
-marks, and period-end marks. A close-confirmed buy can execute only from the
-next hourly bar. Risk reductions use the next eligible hourly open. Missing
-held-asset prices, missing hourly execution data, overlapping label periods,
-and price-boundary mismatches fail closed.
+The default quantity engine uses daily decision bars and executes at the next
+daily open. This matches the medium-term horizon and avoids inventing an
+intraday fill. An optional `execution_timeframe=1H` can provide hourly fills,
+but it requires a complete hourly series. Daily mode reports daily maximum
+drawdown; it cannot prove an intraday drawdown that occurred inside a daily
+candle. Missing held-asset prices, missing execution bars, overlapping label
+periods, and price-boundary mismatches fail closed.
 
 ## Commands
 

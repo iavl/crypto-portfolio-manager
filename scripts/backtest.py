@@ -59,8 +59,9 @@ def _default_end() -> str:
 
 def _series_maps(series, *, prefer_normalized: bool):
     daily, hourly = {}, {}
+    has_normalized = any(key.startswith("normalized:") for key in series)
     for key, value in series.items():
-        if prefer_normalized and not key.startswith("normalized:"):
+        if prefer_normalized and has_normalized and not key.startswith("normalized:"):
             continue
         if not prefer_normalized and not key.startswith("binance:"):
             continue
@@ -118,8 +119,14 @@ def command_run(args):
     root = Path(args.dataset)
     run = {
         "run_id": spec.run_id, "spec": spec.as_dict(), "manifest": manifest.as_dict(),
-        "valuation_basis": "USD" if manifest.strict_ready else "USDT_APPROXIMATION",
-        "strict_status": "ELIGIBLE" if manifest.strict_ready else "BLOCKED",
+        "valuation_basis": (
+            "USD_ASSUMED_STABLECOIN_PEG" if manifest.strict_ready and spec.stablecoin_peg_assumption
+            else "USD" if manifest.strict_ready else "USDT_APPROXIMATION"
+        ),
+        "strict_status": (
+            "ELIGIBLE_WITH_ASSUMED_STABLE_PEG" if manifest.strict_ready and spec.stablecoin_peg_assumption
+            else "ELIGIBLE" if manifest.strict_ready else "BLOCKED"
+        ),
         "policy_hashes": {}, "stress": drawdown_boundary_stress(), "score_evaluations": {}, "runs": {},
     }
     if not manifest.strict_ready and not args.allow_usdt_approximation:
@@ -129,13 +136,15 @@ def command_run(args):
         print(json.dumps({"status": run["status"], "output": str(path), "blockers": list(manifest.blockers)}, ensure_ascii=False, indent=2))
         return
     daily, hourly = _series_maps(series, prefer_normalized=manifest.strict_ready)
+    execution_series = daily if spec.execution_timeframe == "1D" else hourly
     policies = {"core": _core_policy(), "full": load_policy()}
     for scope_name, scope_symbols in spec.asset_scopes.items():
         policy = policies[scope_name]
         run["policy_hashes"][scope_name] = policy_hash(policy)
         try:
             base_reviews = build_historical_reviews(
-                daily_by_symbol=daily, hourly_by_symbol=hourly,
+                daily_by_symbol=daily, execution_by_symbol=execution_series,
+                hourly_by_symbol=execution_series, execution_timeframe=spec.execution_timeframe,
                 symbols=scope_symbols, initial_weights=next(iter(spec.initial_portfolios.values())),
                 initial_value=spec.initial_value_usd, start_at=spec.start_at,
                 end_at=spec.end_at, policy=policy, semantic_score=None,
@@ -223,11 +232,13 @@ def command_evaluate_scores(args):
         {key: value for key, value in series.items() if key.startswith("binance:")},
         prefer_normalized=False,
     )
+    execution_series = daily if spec.execution_timeframe == "1D" else hourly
     observations_by_scope = {}
     for scope_name, symbols in spec.asset_scopes.items():
         policy = _core_policy() if scope_name == "core" else load_policy()
         reviews = build_historical_reviews(
-            daily_by_symbol=daily, hourly_by_symbol=hourly, symbols=symbols,
+            daily_by_symbol=daily, execution_by_symbol=execution_series,
+            hourly_by_symbol=execution_series, execution_timeframe=spec.execution_timeframe, symbols=symbols,
             initial_weights=next(iter(spec.initial_portfolios.values())),
             initial_value=spec.initial_value_usd, start_at=spec.start_at,
             end_at=spec.end_at, policy=policy, semantic_score=None,

@@ -74,7 +74,9 @@ def _assessment(
 def build_historical_reviews(
     *,
     daily_by_symbol: Mapping[str, OHLCVSeries],
-    hourly_by_symbol: Mapping[str, OHLCVSeries],
+    hourly_by_symbol: Mapping[str, OHLCVSeries] | None = None,
+    execution_by_symbol: Mapping[str, OHLCVSeries] | None = None,
+    execution_timeframe: str = "1H",
     symbols: Sequence[str],
     initial_weights: Mapping[str, float],
     initial_value: float,
@@ -88,7 +90,11 @@ def build_historical_reviews(
     if "BTC" not in risk_symbols:
         raise ValueError("historical reviews require BTC as the benchmark and regime anchor")
     missing_daily = sorted(set(risk_symbols) - set(daily_by_symbol))
-    missing_hourly = sorted(set(risk_symbols) - set(hourly_by_symbol))
+    execution_series = execution_by_symbol or hourly_by_symbol or {}
+    execution_timeframe = str(execution_timeframe).strip().upper()
+    if execution_timeframe not in {"1D", "1H"}:
+        raise ValueError("execution_timeframe must be 1D or 1H")
+    missing_hourly = sorted(set(risk_symbols) - set(execution_series))
     if missing_daily:
         raise ValueError("daily OHLCV is missing for: " + ", ".join(missing_daily))
     if missing_hourly:
@@ -98,9 +104,9 @@ def build_historical_reviews(
     daily_cache = {symbol: tuple(series.completed_candles()) for symbol, series in daily_by_symbol.items()}
     daily_times = {symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
                    for symbol, candles in daily_cache.items()}
-    hourly_cache = {symbol: tuple(series.completed_candles()) for symbol, series in hourly_by_symbol.items()}
-    hourly_times = {symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
-                    for symbol, candles in hourly_cache.items()}
+    execution_cache = {symbol: tuple(series.completed_candles()) for symbol, series in execution_series.items()}
+    execution_times = {symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
+                       for symbol, candles in execution_cache.items()}
     btc_candles = [item for item in daily_cache["BTC"]
                    if start <= parse_timestamp(item.timestamp) + timedelta(days=1) < end]
     reviews: list[ReplayReview] = []
@@ -156,12 +162,23 @@ def build_historical_reviews(
             ).as_dict()
             next_returns[symbol] = next_close / current_close - 1.0
             bars = []
-            start_index = bisect_right(hourly_times[symbol], as_of_moment)
-            end_index = bisect_right(hourly_times[symbol], period_end - timedelta(microseconds=1))
-            for candle in hourly_cache[symbol][start_index:end_index]:
+            if execution_timeframe == "1D":
+                start_index = bisect_right(execution_times[symbol], as_of_moment - timedelta(microseconds=1))
+                end_index = bisect_right(execution_times[symbol], period_end - timedelta(microseconds=1))
+                interval = timedelta(days=1)
+            else:
+                start_index = bisect_right(execution_times[symbol], as_of_moment)
+                end_index = bisect_right(execution_times[symbol], period_end - timedelta(microseconds=1))
+                interval = timedelta(hours=1)
+            for candle in execution_cache[symbol][start_index:end_index]:
+                actual_timestamp = parse_timestamp(candle.timestamp)
+                execution_timestamp = actual_timestamp
+                if execution_timeframe == "1D" and actual_timestamp == as_of_moment:
+                    execution_timestamp = as_of_moment + timedelta(microseconds=1)
                 bars.append({
-                    "timestamp": candle.timestamp, "open": candle.open, "high": candle.high,
-                    "low": candle.low, "close": candle.close,
+                    "timestamp": execution_timestamp.isoformat().replace("+00:00", "Z"),
+                    "mark_timestamp": (actual_timestamp + interval).isoformat().replace("+00:00", "Z"),
+                    "open": candle.open, "high": candle.high, "low": candle.low, "close": candle.close,
                 })
             if not bars:
                 usable = False

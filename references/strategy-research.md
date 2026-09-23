@@ -63,8 +63,9 @@ explicit `USDT_APPROXIMATION`. Unreconstructable semantic factors stay missing
 in strict mode; fixed 30/50/70 semantic assumptions are reported only as
 `SYNTHETIC_ASSUMPTIONS` and are excluded from predictive score evaluation.
 
-Historical runs use a quantity-and-cash ledger. Close-confirmed conditional
-entries execute no earlier than the next hourly bar; risk reductions use the
-next eligible hourly open. Fees apply to actual fills, and every mark uses one
-synchronized portfolio timestamp. Frozen experiment specs bind the policy
+Historical runs use a quantity-and-cash ledger. The default execution
+timeframe is daily: close-confirmed conditional entries execute at the next
+daily open. Hourly execution is optional and must have complete hourly data.
+Daily mode cannot measure intraday maximum drawdown. Fees apply to actual
+fills, and every mark uses one synchronized portfolio timestamp. Frozen experiment specs bind the policy
 hash, Git SHA, data range, initial portfolios, universe, cadence, and costs.

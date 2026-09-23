@@ -160,6 +160,86 @@ check that reclassification does not silently change the portfolio drawdown
 budget. Until approved, `risk_tier` stays an assessment input and empirical
 calibration remains a separate task.
 
+## 8H — Score reachability under partial factor coverage
+
+Current behavior: `engine.scoring._score_factors` composes the base score as
+`sum(weight_i * effective_i)`, where an AVAILABLE factor contributes
+`50 + reliability_i * (raw_i - 50)` and a MISSING factor with positive weight
+contributes exactly 50. Because `raw_i` is bounded to [0, 100], the score an
+asset can possibly attain is `50 +/- 50 * coverage` with
+`coverage = sum(weight_i * reliability_i)`. The configured thresholds are
+expressed in the full-information space, so their reachability depends on how
+much of the profile weight is actually backed by evidence: a threshold `t`
+needs `coverage >= (t - 50) / 50`. On the 2024-01-01 to 2026-09-21 panel,
+coverage never exceeded 0.45 (`btc` profile 0.35), giving reachable bands of
+[32.5, 67.5] and [27.5, 72.5]. `satellite_full_score` 85 therefore requires
+coverage 0.70 and fired in 0 of 1990 core and 0 of 4975 full readings, and the
+ETH gate at 55 sits close to the ceiling. Separately, coverage below
+`scoring.minimum_investable_coverage` 0.6 forces the LOW band, and
+`execution.confidence_deployment_factor.LOW` is a hard `0.0`, so a
+score-driven increase is blocked regardless of score; on that panel the score
+still reached 67 in 13.0% of readings, but the strategy executed no buys in the
+strict mode. This is the mechanism behind the observed "only reduces, never
+re-enters" path; it is a property of the evidence set, not of the market.
+
+Candidate direction: express thresholds as positions inside the reachable band
+for the coverage actually available (equivalently rescale
+`score' = 50 + (score - 50) / coverage`) so a threshold and a score are compared
+in the same space, or make the semantic factors evidence-required rather than
+neutral-pinned. Define an explicit low-evidence contract at the same time:
+either "de-risk only and label the run `NOT_A_TEST`", or a declared
+trend-only conservative entry path. Do not adjust the legacy integers by
+inspection, and do not weaken the missing-factor rule that keeps absent
+evidence counted at its configured weight.
+
+Required evidence: a frozen per-review-date panel carrying per-factor
+availability and reliability, so the achievable band per profile per date is
+known independently of the score; the before/after distribution of rescored
+values; a demonstration that rescaled thresholds restore the intended
+percentile separation across the entry/exit/soft-exit/full tiers rather than
+merely making them attainable; and a turnover and chase-entry check. Until
+then thresholds stay unchanged.
+
+## 8I — Drawdown-budget feasibility under the configured regime floors
+
+Current behavior: `risk.max_portfolio_drawdown` (0.15) is compared against a
+realized drawdown, but nothing asks whether the configured regimes can satisfy
+it in the first place. The most defensive portfolio a regime permits holds
+`stablecoin_target` in stables, so the implied drawdown is
+`(1 - stablecoin_target) * stressed_risky_return`. Under the policy's own
+`stress_scenario` with the core anchor (0.7 BTC at -0.2, 0.3 ETH at -0.3, i.e.
+-0.23) this projects -0.1955 in NORMAL and -0.1610 in DEFENSIVE, both beyond the
+0.15 budget; only CAPITAL_PRESERVATION fits at -0.1150. Concentrating the risky
+sleeve in the worst configured asset (-0.40) breaches in every regime: NORMAL
+-0.34, DEFENSIVE -0.28, CAPITAL_PRESERVATION -0.20. Holding the budget under
+the core-anchor stress needs a stablecoin target of at least 0.3478, and under
+the worst-asset stress at least 0.6250, which no regime reaches. The window
+itself realized a BTC drawdown of -0.5306, a factor of 2.65 over the configured
+-0.2, so the budget was calibrated against a materially milder tail than the
+one that occurred. The observed strategy maximum drawdown of -32.13% is
+consistent with the DEFENSIVE projection, which is evidence the engine follows
+its configuration rather than evidence of slow execution.
+
+Candidate direction: decide first whether the 15% budget is defined against the
+`stress_scenario` or against realized history. If against the stress scenario,
+raise `stress_scenario` toward observed tail behavior. If against realized
+history, lift the `regimes.*.stablecoin_target` targets (and confirm
+`core_risky_min` no longer floors exposure above what the budget allows) so the
+most defensive regime can actually meet the budget. Then add a load-time
+feasibility assertion, per regime and under the configured scenario, so the
+contradiction cannot be reintroduced silently. The conservative-balanced
+posture, the core sleeve anchor, and `min_stablecoin_weight` are not part of
+this decision.
+
+Required evidence: an explicit statement of what the budget is measured
+against; a drawdown tail study over a window longer than one cycle to set the
+stress scenario; confirmation that revised targets simultaneously satisfy
+`min_stablecoin_weight`, `core_risky_min`, `satellite_max`, and
+`single_asset_max`; and out-of-sample evidence that the revised budget is met
+rather than merely declared. Both 8H and 8I are reported by
+`crypto_portfolio/engine/feasibility.py` and `scripts/strategy_validity.py`;
+those checks assert the properties, they do not change any number.
+
 ## Post-review corrections (2026-09-21)
 
 The 2026-09-21 scoring-layer review produced four changes that are

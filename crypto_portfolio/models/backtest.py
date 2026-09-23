@@ -13,6 +13,7 @@ from .time import normalize_timestamp, parse_timestamp
 
 _POINT_IN_TIME_QUALITY = {"PUBLISHED_AT_TIME", "HISTORICAL_APPROXIMATION", "UNRECONSTRUCTABLE"}
 _CADENCES = {"DAILY_WITH_14D_FULL", "WEEKLY_WITH_DAILY_RISK"}
+_EXECUTION_TIMEFRAMES = {"1D", "1H"}
 _VALIDATION_MODES = {"STRICT_POINT_IN_TIME", "SYNTHETIC_ASSUMPTIONS"}
 
 
@@ -74,6 +75,8 @@ class BacktestSpec:
     policy_hash: str
     git_sha: str
     valuation_currency: str = "USD"
+    execution_timeframe: str = "1D"
+    stablecoin_peg_assumption: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _text(self.run_id, "run_id"))
@@ -131,6 +134,12 @@ class BacktestSpec:
         if currency != "USD":
             raise ValueError("formal backtests require valuation_currency=USD")
         object.__setattr__(self, "valuation_currency", currency)
+        execution_timeframe = _text(self.execution_timeframe, "execution_timeframe").upper()
+        if execution_timeframe not in _EXECUTION_TIMEFRAMES:
+            raise ValueError(f"execution_timeframe must be one of {sorted(_EXECUTION_TIMEFRAMES)}")
+        object.__setattr__(self, "execution_timeframe", execution_timeframe)
+        if not isinstance(self.stablecoin_peg_assumption, bool):
+            raise ValueError("stablecoin_peg_assumption must be boolean")
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "BacktestSpec":
@@ -163,6 +172,8 @@ class BacktestSpec:
             "policy_hash": self.policy_hash,
             "git_sha": self.git_sha,
             "valuation_currency": self.valuation_currency,
+            "execution_timeframe": self.execution_timeframe,
+            "stablecoin_peg_assumption": self.stablecoin_peg_assumption,
         }
 
     @property

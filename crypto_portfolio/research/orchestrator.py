@@ -177,13 +177,21 @@ def run_historical_backtest(
                     amount_usd=amount, reference_price=reference,
                     fee_bps=fee_bps, slippage_bps=slippage_bps, reason=reason,
                 )
+            mark_moments = []
             for symbol, bar in bars_by_time[moment].items():
                 current_prices[symbol] = float(bar["close"])
-            # A synchronized portfolio mark uses last-known closes for every
-            # asset; it never combines each asset's independent intrabar low.
-            ledger.mark(moment.isoformat().replace("+00:00", "Z"), current_prices)
+                mark_moments.append(parse_timestamp(bar.get("mark_timestamp", bar["timestamp"])))
+            # A bar's close is only known at its mark_timestamp.  This keeps
+            # daily execution from leaking the next day's close into the
+            # opening fill and preserves the same rule for optional 1H bars.
+            mark_moment = max(mark_moments)
+            period_end_moment = parse_timestamp(review.period_end)
+            if mark_moment < period_end_moment:
+                ledger.mark(mark_moment.isoformat().replace("+00:00", "Z"), current_prices)
         current_prices = _period_end_prices(review)
-        ledger.mark(review.period_end, current_prices)
+        period_end_moment = parse_timestamp(review.period_end)
+        if parse_timestamp(ledger.valuations[-1].timestamp) < period_end_moment:
+            ledger.mark(review.period_end, current_prices)
         period_trades = ledger.trades[period_trade_start:]
         turnover = sum(item.gross_notional_usd for item in period_trades) / point.total_value_usd
         cost = sum(

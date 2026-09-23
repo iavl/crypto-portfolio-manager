@@ -16,6 +16,7 @@ def audit_ohlcv_series(
     series_id: str | None = None,
     consumers: Iterable[str] = ("scoring", "regime", "execution", "valuation"),
     usd_conversion_series_id: str | None = None,
+    assume_stablecoin_peg: bool = False,
 ) -> HistoricalSeriesManifest:
     model = series if isinstance(series, OHLCVSeries) else OHLCVSeries.from_mapping(series)
     candles = model.completed_candles()
@@ -28,7 +29,10 @@ def audit_ohlcv_series(
         limitations.append("OHLCV_GAPS_PRESENT")
         status = "PARTIAL"
     if quote != "USD":
-        if usd_conversion_series_id:
+        if assume_stablecoin_peg and quote in {"USDT", "USDC", "FDUSD", "DAI", "TUSD"}:
+            limitations.append("ASSUMED_STABLECOIN_PEG_1_TO_1")
+            point_in_time = "HISTORICAL_APPROXIMATION"
+        elif usd_conversion_series_id:
             limitations.append(f"USD_CONVERSION_REQUIRED:{usd_conversion_series_id}")
         else:
             limitations.append("UNVERIFIED_USD_CONVERSION")
@@ -88,18 +92,24 @@ def build_historical_manifest(
     required_assets = set().union(*(set(scope) for scope in spec.asset_scopes.values())) - {"USD"}
     for symbol in sorted(required_assets):
         daily = [item for item in entries if item.symbol == symbol and item.metric == "market.ohlcv"
-                 and item.timeframe == "1D" and item.quote_currency == "USD"]
-        hourly = [item for item in entries if item.symbol == symbol and item.metric == "market.ohlcv"
-                  and item.timeframe == "1H" and item.quote_currency == "USD"]
+                 and item.timeframe == "1D" and (item.quote_currency == "USD" or spec.stablecoin_peg_assumption)]
+        execution = [item for item in entries if item.symbol == symbol and item.metric == "market.ohlcv"
+                     and item.timeframe == spec.execution_timeframe
+                     and (item.quote_currency == "USD" or spec.stablecoin_peg_assumption)]
         if not daily or all(item.status == "UNAVAILABLE" for item in daily):
             blockers.append(f"{symbol}:DAILY_OHLCV_REQUIRED")
         elif all(item.status != "AVAILABLE" for item in daily):
             blockers.append(f"{symbol}:DAILY_USD_VALUATION_BLOCKED")
-        if not hourly or all(item.status == "UNAVAILABLE" for item in hourly):
-            blockers.append(f"{symbol}:HOURLY_EXECUTION_OHLCV_REQUIRED")
-        elif all(item.status != "AVAILABLE" for item in hourly):
-            blockers.append(f"{symbol}:HOURLY_USD_VALUATION_BLOCKED")
-    if any(item.point_in_time_quality != "PUBLISHED_AT_TIME" and item.status == "AVAILABLE" for item in entries):
+        if not execution or all(item.status == "UNAVAILABLE" for item in execution):
+            blockers.append(f"{symbol}:{spec.execution_timeframe}_EXECUTION_OHLCV_REQUIRED")
+        elif all(item.status != "AVAILABLE" for item in execution):
+            blockers.append(f"{symbol}:{spec.execution_timeframe}_EXECUTION_VALUATION_BLOCKED")
+    if any(
+        item.point_in_time_quality != "PUBLISHED_AT_TIME" and item.status == "AVAILABLE"
+        and not (spec.stablecoin_peg_assumption and item.metric == "market.ohlcv"
+                 and item.quote_currency in {"USDT", "USDC", "FDUSD", "DAI", "TUSD"})
+        for item in entries
+    ):
         blockers.append("NON_POINT_IN_TIME_SERIES_PRESENT")
     now = created_at or datetime.now(timezone.utc).isoformat()
     return HistoricalDataManifest(

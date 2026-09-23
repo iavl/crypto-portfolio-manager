@@ -8,8 +8,8 @@
     "run_id": {"type": "string", "minLength": 1},
     "spec": {"$ref": "backtest-spec.schema.json"},
     "manifest": {"$ref": "historical-data-manifest.schema.json"},
-    "valuation_basis": {"enum": ["USD", "USDT_APPROXIMATION"]},
-    "strict_status": {"enum": ["ELIGIBLE", "BLOCKED"]},
+    "valuation_basis": {"enum": ["USD", "USD_ASSUMED_STABLECOIN_PEG", "USDT_APPROXIMATION"]},
+    "strict_status": {"enum": ["ELIGIBLE", "ELIGIBLE_WITH_ASSUMED_STABLE_PEG", "BLOCKED"]},
     "runs": {"type": "object"}
   }
 }

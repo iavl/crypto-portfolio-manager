@@ -49,7 +49,7 @@ class BacktestContractTests(unittest.TestCase):
             errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value))
             self.assertEqual(errors, [])
         self.assertFalse(manifest.strict_ready)
-        self.assertIn("BTC:HOURLY_EXECUTION_OHLCV_REQUIRED", manifest.blockers)
+        self.assertIn("AAVE:1D_EXECUTION_OHLCV_REQUIRED", manifest.blockers)
 
     def test_usdt_without_conversion_is_blocked(self):
         series = OHLCVSeries(
@@ -60,6 +60,16 @@ class BacktestContractTests(unittest.TestCase):
         result = audit_ohlcv_series(series)
         self.assertEqual(result.status, "BLOCKED")
         self.assertIn("UNVERIFIED_USD_CONVERSION", result.limitations)
+
+    def test_explicit_stablecoin_peg_assumption_is_visible(self):
+        series = OHLCVSeries(
+            "BTC", "1D", (Candle("2024-01-01T00:00:00Z", 100, 101, 99, 100, 1),),
+            "binance", "2024-01-02T00:00:00Z", "BINANCE", "spot", "USDT",
+        )
+        result = audit_ohlcv_series(series, assume_stablecoin_peg=True)
+        self.assertEqual(result.status, "AVAILABLE")
+        self.assertIn("ASSUMED_STABLECOIN_PEG_1_TO_1", result.limitations)
+        self.assertEqual(result.point_in_time_quality, "HISTORICAL_APPROXIMATION")
 
 
 class QuantityAccountingTests(unittest.TestCase):
@@ -209,6 +219,14 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["initial_value_usd"], 100_000)
         self.assertEqual(result["metrics"]["final_value_usd"], 100_000)
         self.assertEqual(result["trades"], [])
+
+        daily_reviews = build_historical_reviews(
+            daily_by_symbol=daily, execution_by_symbol=daily, execution_timeframe="1D",
+            symbols=("BTC", "ETH", "USD"), initial_weights={"USD": 1.0},
+            initial_value=100_000, start_at="2024-01-01T00:00:00Z",
+            end_at="2024-01-04T00:00:00Z", policy=load_policy(), semantic_score=None,
+        )
+        self.assertEqual(daily_reviews[0].execution_bars["BTC"][0]["mark_timestamp"], daily_reviews[0].period_end)
 
     def test_stress_boundaries_are_immediate_and_monotonic(self):
         result = drawdown_boundary_stress()
