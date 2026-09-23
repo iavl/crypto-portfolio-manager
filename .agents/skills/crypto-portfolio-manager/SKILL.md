@@ -313,6 +313,16 @@ display data, so the engine uses value ÷ quantity and records a note.
     available; locked, Earn, redeeming, or otherwise restricted value remains
     in NAV but requires a release condition. Missing availability is UNKNOWN.
     Never redeem, convert, submit, or confirm a trade automatically.
+    Whenever the decision carries executable execution plans, also render the
+    prior plan disposition (`crypto_portfolio.state.review.prior_plan_disposition`,
+    produced by `finalize_review` as `prior_plan_disposition`): for every asset
+    whose most recent prior decision planned executable tranches, show the
+    per-tranche fill attribution and the resting-order instruction
+    (`CANCEL_RESTING` / `REPLACE_WITH_NEW_PLAN` / `KEEP_EQUIVALENT_ORDERS` /
+    `NOTHING_RESTING`) with its deterministic reason. These are advisory
+    instructions for manually rested exchange orders; the system cancels
+    nothing itself. A `STATUS_EVENT_CONFLICT` or `UNRESOLVED_EXTERNAL_FLOW`
+    attribution must be surfaced as a verify-before-acting warning.
     For `NO_TRADE`/`WAIT`, include the finalized `NoTradeAttribution` gate
     states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
@@ -572,7 +582,11 @@ private model reasoning.
 Use `scripts/finalize_review.py` as the publication boundary for a frozen
 bundle. It binds the referenced snapshot value into diagnostics, validates
 confidence and execution artifacts, produces the same `FinalOperation` for the
-decision record and report, and optionally appends only after every gate passes.
+decision record and report, derives the prior plan disposition for resting
+orders, and optionally appends only after every gate passes. The bundle may
+carry `status_events` and `snapshots` sequences so that disposition fill
+attribution uses exchange snapshot quantity deltas instead of falling back to
+status events only.
 
 ## Current acquisition contracts
 

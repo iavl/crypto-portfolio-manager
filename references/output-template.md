@@ -22,6 +22,11 @@ fixed strings as follows. Headings not listed here keep their English text
   `6. 当前仓位 vs 目标仓位`, `7. 操作计划`, `8. 风险检查`,
   `9. 什么情况会改变建议`, `10. 数据质量`.
 - Decision basis chain: `证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action`.
+- Prior plan disposition section name: `上一计划挂单处置`; instruction
+  labels `撤销未成交挂单` / `按新计划替换挂单` / `等价挂单可保留` /
+  `无未成交挂单`; attribution labels `交易所数量差分` / `仅状态事件` /
+  `外部资金流阻断` / `状态事件矛盾`; fill states `足额成交` / `部分成交` /
+  `未成交` / `无法归因`.
 - Position P&L table headers: `资产 | 数量 | 当前价 | 平均成本 | 当前价值 |
   持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比`; coverage bullet
   `成本数据覆盖率`; never label it `总收益`.
@@ -71,6 +76,34 @@ unknown value, observation time, and source. Total economic holdings remain in
 NAV. `RELEASE_RESTRICTIONS_OR_REFRESH_REQUIRED` and `CONVERSION_REQUIRED` are
 conditions, not actions performed by the system. Unknown fees, slippage, and
 redemption delay remain `--`/`UNAVAILABLE`, never zero.
+
+### Prior plan disposition
+
+When the finalized output provides `prior_plan_disposition`, render one row
+per asset whose most recent prior decision planned executable tranches — this
+answers "what happens to my still-resting orders from previous plans" next to
+the new plan. For each asset show: prior decision id and effective status
+(`PENDING` / `CONFIRMED` / `NOT_EXECUTED`), attribution basis
+(`EXCHANGE_QUANTITY_DELTA` / `STATUS_EVENT_ONLY` / `UNRESOLVED_EXTERNAL_FLOW` /
+`STATUS_EVENT_CONFLICT`), per-tranche fill state
+(`FULL` / `PARTIAL` / `UNFILLED` / `UNKNOWN` with fill fraction), the
+remaining planned dollars, and the order instruction with its deterministic
+reason:
+
+- `CANCEL_RESTING` — the unfilled remainder is superseded (budgets are not
+  additive) or terminally unexecuted; cancel the manually rested orders.
+- `REPLACE_WITH_NEW_PLAN` — the current review re-plans the asset at different
+  zones; cancel the old orders and rest the new plan's zones.
+- `KEEP_EQUIVALENT_ORDERS` — the current review re-issues identical zones;
+  equivalent resting orders may remain, with the current decision as the
+  authoritative record.
+- `NOTHING_RESTING` — every planned tranche is filled.
+
+Attribution caveats must be rendered verbatim as verify-before-acting
+warnings: `UNRESOLVED_EXTERNAL_FLOW` (an external flow between the reference
+snapshots blocks quantity attribution) and `STATUS_EVENT_CONFLICT` (the
+quantity delta and the terminal status event disagree). Instructions are
+advisory for manually rested exchange orders; the system cancels nothing.
 
 ### Decision basis
 

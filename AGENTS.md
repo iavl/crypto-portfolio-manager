@@ -229,7 +229,11 @@ Every executable `INCREASE`, `REDUCE`, or `EXIT` has a strictly positive
 Reconcile new cash, executable sales, purchases, and residual stable change;
 do not create or destroy unexplained dollars. Execution plans use structural
 zones and explicit tranche fractions; no false precision or mechanical
-percentage ladders. Tranche fractions must sum to 1.
+percentage ladders. Tranche fractions must sum to 1. A decision that plans
+executable tranches must also state the disposition of prior unfilled tranches
+per asset (cancel, replace with the new zones, or keep equivalent orders),
+derived deterministically from decision history, status events, and snapshot
+quantity deltas — never silently dropped.
 
 ## History, evidence, and persistence
 
