@@ -6,7 +6,13 @@ from collections import Counter
 from typing import Any, Mapping, Sequence
 
 from ..engine.allocation import build_target_allocation
-from ..engine.backtest import QuantityLedger, buy_and_hold_benchmark, performance_metrics
+from ..engine.backtest import (
+    QuantityLedger,
+    buy_and_hold_benchmark,
+    constant_weight_rebalanced_benchmark,
+    performance_metrics,
+)
+from ..engine.benchmark import vol_matched_cash_weight
 from ..engine.entry import build_entry_plan
 from ..engine.execution_replay import simulate_execution_plan
 from ..engine.operation import build_final_operation
@@ -38,6 +44,71 @@ def _period_end_prices(review: ReplayReview) -> dict[str, float]:
         result[symbol] = price * (1.0 + review.next_returns[symbol])
         if result[symbol] <= 0:
             raise ValueError("period return produces a non-positive price")
+    return result
+
+
+def _metric_delta(strategy: Mapping[str, Any], benchmark: Mapping[str, Any], field: str) -> float | None:
+    """Difference of one performance metric, or None when either side lacks it."""
+    left = strategy.get(field)
+    right = benchmark.get(field)
+    if left is None or right is None:
+        return None
+    return float(left) - float(right)
+
+
+def _benchmark_comparison(strategy: Mapping[str, Any], benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Pair a strategy with one benchmark on cumulative and annualized terms."""
+    return {
+        "total_return": benchmark["total_return"],
+        "excess_return": strategy["total_return"] - benchmark["total_return"],
+        "maximum_drawdown": benchmark["maximum_drawdown"],
+        "cagr": benchmark.get("cagr"),
+        "annualized_volatility": benchmark.get("annualized_volatility"),
+        "sharpe_rf_zero": benchmark.get("sharpe_rf_zero"),
+        "excess_return_annualized": _metric_delta(strategy, benchmark, "cagr"),
+        "volatility_delta": _metric_delta(strategy, benchmark, "annualized_volatility"),
+        "sharpe_delta": _metric_delta(strategy, benchmark, "sharpe_rf_zero"),
+        "drawdown_delta": _metric_delta(strategy, benchmark, "maximum_drawdown"),
+    }
+
+
+def _vol_matched_benchmark(
+    prices_by_time: Sequence[tuple[str, Mapping[str, float]]],
+    *,
+    metrics: Mapping[str, Any],
+    initial_value_usd: float,
+    fee_bps: float,
+    slippage_bps: float,
+) -> dict[str, Any] | None:
+    """Size a static BTC/cash mix to the strategy's own volatility.
+
+    This answers "was the risk that was taken worth it" instead of "did the
+    strategy beat the riskiest available single holding".  It returns None when
+    the strategy has no measurable volatility or would be matched by cash
+    alone, because the all-cash experiments already cover that case.
+    """
+    target = metrics.get("annualized_volatility")
+    mean_period_days = metrics.get("mean_period_days")
+    if not target or not mean_period_days or target <= 0 or mean_period_days <= 0:
+        return None
+    btc_prices = [prices.get("BTC") for _, prices in prices_by_time]
+    if any(price is None for price in btc_prices):
+        return None
+    weight = vol_matched_cash_weight(
+        btc_returns=[right / left - 1.0 for left, right in zip(btc_prices, btc_prices[1:])],
+        target_volatility=float(target),
+        periods_per_year=365.25 / float(mean_period_days),
+    )
+    if weight <= 0:
+        return None
+    result = constant_weight_rebalanced_benchmark(
+        prices_by_time=prices_by_time, weights={"BTC": weight, "USD": 1.0 - weight},
+        initial_value_usd=initial_value_usd, fee_bps=fee_bps, slippage_bps=slippage_bps,
+    )
+    result["methodology"] = (
+        f"{result['methodology']}; BTC weight {weight:.4f} solved to match the strategy's "
+        f"{float(target):.4%} annualized volatility"
+    )
     return result
 
 
@@ -241,14 +312,25 @@ def run_historical_backtest(
             prices_by_time=aligned_prices, weights={"BTC": 0.7, "ETH": 0.3},
             initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
         ),
+        # Fair comparisons.  The four BTC benchmarks above can only answer "did
+        # the strategy beat the riskiest available holding"; these answer "did
+        # the active decisions add anything over the starting allocation" and
+        # "was the risk that was taken worth it".  A risk-reducing strategy can
+        # lose the first comparison by design, so judging it on that alone
+        # misreads the strategy instead of testing it.
+        "static_initial_weights_investable": buy_and_hold_benchmark(
+            prices_by_time=aligned_prices, weights=dict(first.current_weights),
+            initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        ),
     }
-    strategy_return = metrics["total_return"]
+    vol_matched = _vol_matched_benchmark(
+        aligned_prices, metrics=metrics, initial_value_usd=first.portfolio_value,
+        fee_bps=fee_bps, slippage_bps=slippage_bps,
+    )
+    if vol_matched is not None:
+        benchmarks["vol_matched_btc_cash_investable"] = vol_matched
     benchmark_comparison = {
-        name: {
-            "total_return": value["metrics"]["total_return"],
-            "excess_return": strategy_return - value["metrics"]["total_return"],
-            "maximum_drawdown": value["metrics"]["maximum_drawdown"],
-        }
+        name: _benchmark_comparison(metrics, value["metrics"])
         for name, value in benchmarks.items()
     }
     return {

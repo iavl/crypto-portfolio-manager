@@ -263,7 +263,9 @@ def command_evaluate_scores(args):
 def command_report(args):
     path = Path(args.run)
     run = json.loads(path.read_text(encoding="utf-8"))
-    result = render_run_report(run, args.output or path.parent / "report")
+    result = render_run_report(
+        run, args.output or path.parent / "report", run_dir=path.parent
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

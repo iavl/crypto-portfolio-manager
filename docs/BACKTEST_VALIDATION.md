@@ -58,15 +58,50 @@ python3 scripts/backtest.py run ~/.local/share/crypto-portfolio-manager/research
 python3 scripts/backtest.py evaluate-decisions ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py evaluate-scores ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py report ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present/run.json
+python3 scripts/strategy_validity.py ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 ```
 
 The first `run` command emits `BLOCKED_BY_DATA_MANIFEST` when formal USD or
 point-in-time requirements are not met. The explicit approximation flag runs
 the same frozen experiment and keeps the limitation in every artifact.
 
-`result.json`, valuation/trade CSVs, Chinese Markdown/HTML, and SVG equity
+`summary.json`, valuation/trade CSVs, Chinese Markdown/HTML, and SVG equity
 curves are generated from finalized result values. The renderer does not
-recalculate scores, targets, trades, or performance.
+recalculate scores, targets, trades, or performance. `scripts/backtest.py
+report` also runs the validity gate over the run directory it is given, so the
+rendered report and `summary.json` carry the same verdict; the gate reads the
+CSVs from that same directory, so always render into the run's own `report/`
+directory rather than a copy elsewhere.
+
+## Before reading any report
+
+Run `scripts/strategy_validity.py <run_dir>` first. It decides whether the run
+is a test of the strategy at all, and the verdict is one of:
+
+- `DEGENERATE_NOT_A_TEST_OF_THE_STRATEGY` — the run did not exercise the
+  strategy; its performance numbers describe a path, not a strategy;
+- `VALID_RUN_UNDERPOWERED_INFERENCE` — a real run whose sample cannot support
+  an inference;
+- `NO_STRUCTURAL_OBJECTION_FOUND` — no structural objection was found.
+
+`manifest.strict_ready` is not a substitute. It only asserts that OHLCV data is
+complete (`research/data_audit.py`); an empty `blockers` list says nothing about
+factor availability, scoring coverage, or whether any decision has a realized
+outcome. A run can be `strict_ready` and still be degenerate.
+
+Read performance only together with the two fair comparisons the report now
+publishes:
+
+- `static_initial_weights_investable` — the experiment's own starting weights
+  held untouched. Answers "did the active decisions add anything over doing
+  nothing".
+- `vol_matched_btc_cash_investable` — a constant BTC/cash mix whose weight is
+  solved in closed form to the strategy's own annualized volatility. Answers
+  "was the risk that was taken worth it".
+
+A 100% BTC benchmark is the policy anchor, but it is not a fair risk
+comparison: a risk-reducing strategy loses to it by construction. Losing to it
+proves nothing on its own.
 
 ## Interpretation
 
@@ -76,3 +111,10 @@ return estimate. Fixed present-day satellite membership also carries survivor
 bias. With a medium-term horizon, one historical cycle cannot establish a
 reliable confidence interval. Policy changes remain separately preregistered
 research and are never adopted automatically from a best backtest result.
+
+When the verdict is `DEGENERATE_NOT_A_TEST_OF_THE_STRATEGY`, every performance
+number in that run must be read as a description of the mechanism under a
+degenerate input, never as evidence about the strategy. A degraded run answers
+"what does the risk machinery do when almost no evidence is available", which
+is a legitimate and useful question — just not the one a performance table
+appears to answer.

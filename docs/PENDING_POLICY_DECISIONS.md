@@ -278,3 +278,62 @@ implemented, not pending:
   per the execution contract; if its orchestration text references the old
   confidence-label or relative-strength-number semantics, syncing it is a
   separate follow-up task for the owner.
+
+## Evidence log (2026-09-23) — run `strategy-validation-2024-present`
+
+Observations recorded for 8H and 8I. Nothing in this section changes a
+candidate direction, a threshold, or a number; it is accumulated evidence only,
+and 8H/8I remain PENDING.
+
+Report-layer conformance:
+
+- `research/reporting.py` now consumes `research/validity_gate.py`, so the
+  rendered report leads with the verdict instead of leaving it in a CLI the
+  reader may never run. That run renders as
+  `DEGENERATE_NOT_A_TEST_OF_THE_STRATEGY` (28 ERROR, 47 WARNING).
+- The old "manifest did not report blockers" sentence is gone. It described
+  `manifest.strict_ready`, which only asserts OHLCV completeness; both 8H and 8I
+  live in the signal layer it says nothing about, so the sentence invited the
+  reader to treat a degenerate run as clean.
+
+Evidence supporting 8H (coverage, not thresholds):
+
+- 8 of 8 core `symbol x factor` combinations were measured; 7 had zero
+  available readings across 996 daily reviews. Only `trend` was fully
+  available. Median coverage 0.35 against a 0.60 floor, band collapsed to
+  `[32.5, 67.5]`, and `ENTRY_LOCKED_BY_COVERAGE` fires for all three profiles.
+- Consequence, now measured rather than asserted: of 32 experiments, 12 were
+  comparable, 10 never traded, and 10 were one-way ratchets. That is 20 of 32
+  (62.5%) experiments that do not measure the strategy at all.
+
+Evidence supporting 8I (budget feasibility, not the budget):
+
+- The 15% budget was unreachable in every regime under the policy's own
+  `stress_scenario`: NORMAL -0.1955, DEFENSIVE -0.1610, worst-configured-asset
+  -0.3400.
+- The window realized a BTC drawdown of -53.06% against a configured -0.20
+  (2.65x), so the tail that the budget was calibrated on is materially milder
+  than the observed one.
+- The observed -32.13% strategy drawdown was reached with 64.7% of the
+  portfolio already in cash at the trough, and the last trade was 321 days
+  before the window ended. Both are consistent with the DEFENSIVE projection,
+  i.e. with the engine following its configuration. They are not evidence of
+  slow execution, and they are not evidence that the budget is achievable.
+
+Risk-matched comparison added by this work (context for both items):
+
+- `engine/backtest.py::constant_weight_rebalanced_benchmark` and
+  `engine/benchmark.py::vol_matched_cash_weight` now let a run compare itself
+  against its own starting weights held untouched and against a BTC/cash mix
+  solved to the same annualized volatility. On the 12 comparable experiments
+  the realized volatility of the risk-matched benchmark differs from the
+  strategy's by at most 3.2e-05, so the comparison is genuinely risk matched.
+- All 12 lagged the risk-matched benchmark by -3.9% to -10.6% annualized
+  (median -5.41%), with a lower Sharpe in every case (0.394-0.662 against
+  0.778-0.780) and a slightly deeper drawdown. Read together with the
+  degeneracy above, this is a statement about the risk machinery under a
+  degenerate input, not about the strategy when evidence is available.
+- The widely quoted gap against 100% BTC (-53.72pp) is not a fair comparison:
+  BTC ran at 47.73% volatility and -52.97% maximum drawdown against the
+  strategy's ~28% and ~-36%. Reporting it without the risk-matched line is
+  what made an unequal-risk comparison look like a strategy verdict.

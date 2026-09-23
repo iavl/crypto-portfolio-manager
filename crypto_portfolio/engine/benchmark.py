@@ -259,6 +259,132 @@ def build_aligned_benchmark_result(
     )
 
 
+def _return_series(values: Sequence[Any], field: str) -> list[float]:
+    series = [_finite(value, f"{field}[{index}]") for index, value in enumerate(values)]
+    if any(value < -1 for value in series):
+        raise ValueError(f"{field} must not contain a return below -100%")
+    return series
+
+
+def _sample_moments(left: Sequence[float], right: Sequence[float]) -> tuple[float, float, float]:
+    """Sample variances and covariance, using the ddof=1 convention of performance_metrics."""
+    count = len(left)
+    mean_left = sum(left) / count
+    mean_right = sum(right) / count
+    return (
+        sum((value - mean_left) ** 2 for value in left) / (count - 1),
+        sum((value - mean_right) ** 2 for value in right) / (count - 1),
+        sum((a - mean_left) * (b - mean_right) for a, b in zip(left, right)) / (count - 1),
+    )
+
+
+def _mixture_variance(
+    weight: float, variance_btc: float, variance_cash: float, covariance: float
+) -> float:
+    """Variance of the constant mix holding ``weight`` in BTC and the rest in cash."""
+    return (
+        weight * weight * variance_btc
+        + (1.0 - weight) ** 2 * variance_cash
+        + 2.0 * weight * (1.0 - weight) * covariance
+    )
+
+
+def vol_matched_cash_weight(
+    *,
+    btc_returns: Sequence[float],
+    target_volatility: float,
+    cash_returns: Sequence[float] | None = None,
+    periods_per_year: float = 365.25,
+    tolerance: float = 1e-4,
+) -> float:
+    """Return the fixed BTC weight whose constant mix matches a target volatility.
+
+    This sizes the "would the same risk have paid better as a static BTC/cash
+    mix" benchmark, so it must be reproducible: the weight is solved in closed
+    form from sample variances and never searched for.
+
+    The reachable range of a constant mix is a closed interval, and a target
+    outside it is capped at the nearest end instead of rejected, because either
+    endpoint is still a meaningful benchmark:
+
+    - a target at or above the riskiest leg returns ``1.0`` when that leg is
+      BTC and ``0.0`` when it is cash; exposure cannot leave ``[0, 1]``;
+    - a target at or below the least volatile mix returns the weight that
+      achieves that minimum, which for a riskless cash leg is ``0.0``;
+    - when two weights reach the target, the smaller one wins, so the answer is
+      the least risky mix that does, not the most risky.
+
+    Identical legs are rejected rather than capped: when both legs carry the
+    same risk no weight can change the volatility, so no answer is correct.
+
+    ``cash_returns`` defaults to a flat zero series, matching the engine's
+    convention that the USD leg earns nothing.  ``periods_per_year`` must match
+    the annualization behind ``target_volatility`` (``365.25 /
+    mean_period_days`` for historical runs).  The realized volatility of the
+    solved mix is re-derived and checked against ``tolerance`` so a silent miss
+    cannot reach a report.
+    """
+    btc = _return_series(btc_returns, "btc_returns")
+    if len(btc) < 2:
+        raise ValueError("btc_returns needs at least two observations")
+    cash = [0.0] * len(btc) if cash_returns is None else _return_series(cash_returns, "cash_returns")
+    if len(cash) != len(btc):
+        raise ValueError("cash_returns and btc_returns must have equal lengths")
+    target = _finite(target_volatility, "target_volatility")
+    if target < 0:
+        raise ValueError("target_volatility must be non-negative")
+    horizon = _finite(periods_per_year, "periods_per_year")
+    if horizon <= 0:
+        raise ValueError("periods_per_year must be > 0")
+    slack = _finite(tolerance, "tolerance")
+    if slack < 0:
+        raise ValueError("tolerance must be non-negative")
+
+    variance_btc, variance_cash, covariance = _sample_moments(btc, cash)
+    # mixture variance(w) = quadratic*w^2 + linear*w + variance_cash.
+    quadratic = variance_btc + variance_cash - 2.0 * covariance
+    linear = 2.0 * (covariance - variance_cash)
+    scale = max(variance_btc, variance_cash)
+    if abs(quadratic) <= 1e-15 * scale and abs(linear) <= 1e-15 * scale:
+        raise ValueError("volatility matching is undefined when both legs carry identical risk")
+
+    # A convex parabola reaches its minimum at its turning point, clamped into
+    # the domain, and its maximum at one of the two endpoints.
+    turning = min(max(-linear / (2.0 * quadratic), 0.0), 1.0) if quadratic > 0.0 else 0.0
+    quietest = math.sqrt(max(_mixture_variance(turning, variance_btc, variance_cash, covariance), 0.0) * horizon)
+    loudest = max(math.sqrt(variance_btc * horizon), math.sqrt(variance_cash * horizon))
+    if target <= quietest:
+        return turning
+    if target >= loudest:
+        return 1.0 if variance_btc >= variance_cash else 0.0
+
+    constant = variance_cash - target * target / horizon
+    if quadratic <= 0.0:
+        weight = -constant / linear
+    else:
+        discriminant = max(linear * linear - 4.0 * quadratic * constant, 0.0)
+        offset = math.sqrt(discriminant)
+        reachable = sorted(
+            value
+            for value in (
+                (-linear - offset) / (2.0 * quadratic),
+                (-linear + offset) / (2.0 * quadratic),
+            )
+            if 0.0 <= value <= 1.0
+        )
+        if not reachable:
+            raise ValueError("no whole-portfolio BTC weight reaches the target volatility")
+        weight = reachable[0]
+    realized = math.sqrt(
+        max(_mixture_variance(weight, variance_btc, variance_cash, covariance), 0.0) * horizon
+    )
+    if abs(realized - target) > slack:
+        raise ValueError(
+            f"cannot reach {target:.6f} annualized volatility; the closest achievable is {realized:.6f}"
+        )
+    return weight
+
+
 __all__ = [
     "benchmark_return",
     "benchmark_return_from_prices",
@@ -269,4 +395,5 @@ __all__ = [
     "secondary_benchmark_return",
     "benchmark_70_30",
     "build_aligned_benchmark_result",
+    "vol_matched_cash_weight",
 ]

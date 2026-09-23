@@ -323,6 +323,104 @@ def buy_and_hold_benchmark(
     }
 
 
+def constant_weight_rebalanced_benchmark(
+    *,
+    prices_by_time: Sequence[tuple[str, Mapping[str, float]]],
+    weights: Mapping[str, float],
+    initial_value_usd: float,
+    fee_bps: float = 0.0,
+    slippage_bps: float = 0.0,
+    rebalance_every: int = 1,
+) -> dict[str, Any]:
+    """Fixed-weight benchmark that restores its target weights on a schedule.
+
+    ``buy_and_hold_benchmark`` answers "what if nothing had been done after the
+    initial allocation".  This answers "what if the starting weights had been
+    mechanically maintained instead".  The gap between the two is what the
+    strategy's own rebalancing has to justify, so both must be reported
+    together.  ``USD`` is the uninvested cash leg and earns nothing, exactly as
+    in ``buy_and_hold_benchmark``.
+
+    ``rebalance_every`` counts aligned price points: 1 restores the weights at
+    every mark, 2 at every second mark, and so on.  A rebalance smaller than a
+    relative ``1e-9`` of the portfolio is skipped so float noise cannot
+    manufacture trades.
+
+    A mark always shows the state carried into it, so rebalancing costs land in
+    the following valuation point.  This is the same treatment the initial
+    entry costs already receive in ``buy_and_hold_benchmark``.
+    """
+    if len(prices_by_time) < 2:
+        raise ValueError("benchmark needs at least two aligned price points")
+    if isinstance(rebalance_every, bool) or not isinstance(rebalance_every, int) or rebalance_every < 1:
+        raise ValueError("rebalance_every must be a positive integer count of aligned price points")
+    normalized_weights = {
+        str(symbol).strip().upper(): _number(weight, f"weights.{symbol}", minimum=0)
+        for symbol, weight in weights.items()
+    }
+    if not math.isclose(sum(normalized_weights.values()), 1.0, abs_tol=1e-9):
+        raise ValueError("benchmark weights must sum to 1")
+    invested = sorted(symbol for symbol, weight in normalized_weights.items() if symbol != "USD" and weight > 0)
+
+    initial_value = _number(initial_value_usd, "initial_value_usd", minimum=0)
+    first_timestamp, first_prices = prices_by_time[0]
+    ledger = QuantityLedger(initial_value, {})
+    ledger.mark(first_timestamp, first_prices)
+    for symbol in invested:
+        if symbol not in first_prices:
+            raise ValueError(f"benchmark initial price is missing for {symbol}")
+        ledger.execute(
+            timestamp=first_timestamp, symbol=symbol, side="BUY",
+            amount_usd=initial_value * normalized_weights[symbol], reference_price=first_prices[symbol],
+            fee_bps=fee_bps, slippage_bps=slippage_bps, reason="BENCHMARK_INITIAL_BUY",
+        )
+
+    for index, (timestamp, prices) in enumerate(prices_by_time[1:], start=1):
+        ledger.mark(timestamp, prices)
+        if index % rebalance_every:
+            continue
+        point = ledger.valuations[-1]
+        normalized_prices = _prices(prices)
+        dust = 1e-9 * point.total_value_usd
+        targets: list[tuple[str, float, float]] = []
+        for symbol in invested:
+            if symbol not in normalized_prices:
+                raise ValueError(f"benchmark rebalance is missing a price for {symbol}")
+            delta = point.total_value_usd * normalized_weights[symbol] - point.positions_usd.get(symbol, 0.0)
+            if abs(delta) <= dust:
+                continue
+            targets.append((symbol, delta, normalized_prices[symbol]))
+        # Reductions run first so the following increases are funded by the
+        # proceeds instead of being clipped by the available cash.
+        for symbol, delta, price in targets:
+            if delta >= 0:
+                continue
+            ledger.execute(
+                timestamp=timestamp, symbol=symbol, side="SELL", amount_usd=-delta,
+                reference_price=price, fee_bps=fee_bps, slippage_bps=slippage_bps,
+                reason="BENCHMARK_REBALANCE",
+            )
+        for symbol, delta, price in targets:
+            if delta <= 0:
+                continue
+            ledger.execute(
+                timestamp=timestamp, symbol=symbol, side="BUY", amount_usd=delta,
+                reference_price=price, fee_bps=fee_bps, slippage_bps=slippage_bps,
+                reason="BENCHMARK_REBALANCE",
+            )
+
+    return {
+        "metrics": performance_metrics(ledger.valuations),
+        "trades": [item.as_dict() for item in ledger.trades],
+        "valuations": [item.as_dict() for item in ledger.valuations],
+        "methodology": (
+            f"target weights restored every {rebalance_every} aligned price point(s); "
+            "the USD leg is uninvested cash and earns nothing"
+        ),
+    }
+
+
 __all__ = [
-    "LedgerTrade", "QuantityLedger", "ValuationPoint", "buy_and_hold_benchmark", "performance_metrics",
+    "LedgerTrade", "QuantityLedger", "ValuationPoint", "buy_and_hold_benchmark",
+    "constant_weight_rebalanced_benchmark", "performance_metrics",
 ]
