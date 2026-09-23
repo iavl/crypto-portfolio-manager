@@ -20,6 +20,7 @@ from crypto_portfolio.engine.strategy_replay import (
     load_replay_reviews,
     replay_benchmarks,
     replay_strategy,
+    research_readiness,
 )
 from crypto_portfolio.models.policy import load_policy
 
@@ -213,6 +214,18 @@ class ReplayCliTests(unittest.TestCase):
         self.assertIn("baseline", payload)
         self.assertIn("excess_return", payload)
         self.assertLess(payload["baseline"]["reviews"], 8)
+
+
+class ResearchReadinessTests(unittest.TestCase):
+    def test_readiness_uses_determined_regimes_not_frozen_inputs(self):
+        reviews = load_replay_reviews(
+            json.loads((Path(__file__).parent / "fixtures/strategy_replay_basic.json").read_text())
+        )
+        readiness = research_readiness(reviews, regimes=["NORMAL", "DEFENSIVE", "NORMAL"])
+        self.assertNotIn("INSUFFICIENT_REGIME_DIVERSITY", readiness["reasons"])
+        self.assertEqual(readiness["observed_regime_labels"], ["DEFENSIVE", "NORMAL"])
+        degenerate = research_readiness(reviews, regimes=[])
+        self.assertIn("INSUFFICIENT_REGIME_DIVERSITY", degenerate["reasons"])
 
 
 if __name__ == "__main__":

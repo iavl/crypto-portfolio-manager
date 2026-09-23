@@ -98,8 +98,12 @@ def main(argv: list[str] | None = None) -> int:
             research_variant=args.research_variant
         )
         result["benchmarks"] = replay_benchmarks(reviews)
-    if isinstance(result, dict):
-        result.setdefault("research_readiness", research_readiness(reviews))
+    if isinstance(result, dict) and "research_readiness" not in result:
+        baseline_result = result.get("baseline", result)
+        detail = baseline_result.get("review_detail", ()) if isinstance(baseline_result, dict) else ()
+        result["research_readiness"] = research_readiness(
+            reviews, regimes=[row["regime"] for row in detail if "regime" in row]
+        )
     payload = json.dumps(result, indent=2, ensure_ascii=False, default=str)
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")

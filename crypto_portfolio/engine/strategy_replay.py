@@ -266,20 +266,19 @@ def _max_drawdown(navs: Sequence[float]) -> float:
     return worst
 
 
-def research_readiness(reviews: Sequence[ReplayReview]) -> dict[str, Any]:
+def research_readiness(reviews: Sequence[ReplayReview], *, regimes: Sequence[str]) -> dict[str, Any]:
     """State whether the frozen sample can support a strategy policy choice."""
 
     days = {review.moment.date() for review in reviews}
-    regimes = {
-        str(review.regime_inputs.get("regime", review.regime_inputs.get("state", "UNKNOWN"))).upper()
-        for review in reviews
-    }
+    # Frozen regime inputs carry per-domain states, never the determined
+    # regime, so diversity is judged on the labels the replay itself produced.
+    observed = {str(item).strip().upper() for item in regimes if str(item).strip()}
     planned = sum(bool(review.execution_plans) for review in reviews)
     fill_capable = sum(bool(review.execution_bars) for review in reviews)
     reasons = []
     if len(days) < 90:
         reasons.append("FEWER_THAN_90_DISTINCT_REVIEW_DAYS")
-    if len(regimes - {"UNKNOWN"}) < 2:
+    if len(observed - {"UNKNOWN"}) < 2:
         reasons.append("INSUFFICIENT_REGIME_DIVERSITY")
     if planned < 30:
         reasons.append("FEWER_THAN_30_FROZEN_EXECUTION_PLANS")
@@ -288,7 +287,7 @@ def research_readiness(reviews: Sequence[ReplayReview]) -> dict[str, Any]:
     return {
         "status": "INSUFFICIENT_EVIDENCE" if reasons else "READY_FOR_PREREGISTERED_COMPARISON",
         "distinct_review_days": len(days),
-        "observed_regime_labels": sorted(regimes),
+        "observed_regime_labels": sorted(observed),
         "reviews_with_execution_plans": planned,
         "reviews_with_execution_bars": fill_capable,
         "reasons": reasons,
@@ -579,7 +578,9 @@ def replay_strategy(
     sharpe_like = (annualized / volatility) if volatility > 0 else None
     return {
         "research_variant": research_variant,
-        "research_readiness": research_readiness(reviews),
+        "research_readiness": research_readiness(
+            reviews, regimes=[row["regime"] for row in review_rows]
+        ),
         "reviews": count,
         "final_nav": final_nav,
         "total_return": total_return,
