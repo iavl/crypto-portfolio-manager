@@ -17,7 +17,7 @@ from ..engine.entry import build_entry_plan
 from ..engine.execution_replay import simulate_execution_plan
 from ..engine.operation import build_final_operation
 from ..engine.rebalance import direction_history_from_decisions, recommend_rebalance
-from ..engine.regime import RegimeInputs, determine_regime
+from ..engine.regime import RegimeInputs, determine_regime, market_only_regime
 from ..engine.risk import run_risk_gate
 from ..engine.strategy_replay import ReplayReview
 from ..models.evidence import AssetAssessment
@@ -144,6 +144,7 @@ def run_historical_backtest(
     regime_counts: Counter[str] = Counter()
     constraint_violations: Counter[str] = Counter()
     plan_counts: Counter[str] = Counter()
+    market_recovery_streak = 0
 
     for index, review in enumerate(reviews):
         if index > 0:
@@ -157,17 +158,30 @@ def run_historical_backtest(
         assessments = _assessments(review.assessments)
         regime_values = dict(review.regime_inputs)
         regime_values["portfolio_drawdown_band"] = point.drawdown
+        # Market-anchored recovery streak: consecutive reviews whose ordinary
+        # market domains alone read NORMAL. It feeds the drawdown-budget
+        # overlay's re-risk floor; it never touches the regime label itself,
+        # so the mandatory drawdown floors stay immediate in both directions.
+        market_streak_inputs = RegimeInputs(**regime_values)
+        market_recovery_streak = (
+            market_recovery_streak + 1
+            if market_only_regime(market_streak_inputs, policy=resolved) == "NORMAL"
+            else 0
+        )
         regime = determine_regime(RegimeInputs(**regime_values), policy=resolved, previous=previous_regime)
         previous_regime = regime
         regime_counts[regime.regime] += 1
         allocation = build_target_allocation(
             policy=resolved, regime=regime.regime, assessments=assessments,
             current_weights=point.weights,
+            portfolio_drawdown=point.drawdown,
+            market_recovery_streak=market_recovery_streak,
         )
         risk = run_risk_gate(
             allocation, policy=resolved, regime=regime.regime, assessments=assessments,
             current_drawdown=point.drawdown, overlays=review.overlays,
             chain_liveness=review.chain_liveness, current_weights=point.weights,
+            market_recovery_streak=market_recovery_streak,
         )
         for violation in risk.violations:
             constraint_violations[violation.code] += 1
@@ -183,6 +197,8 @@ def run_historical_backtest(
             thesis_broken=review.thesis_broken or None,
             hard_action_reasons=review.hard_action_reasons,
             direction_history=direction_history_from_decisions(replayed_decisions),
+            portfolio_drawdown=point.drawdown,
+            market_recovery_streak=market_recovery_streak,
         )
         actions = [action for action in rebalance.actions
                    if action.symbol not in resolved.stable_symbols
