@@ -83,7 +83,7 @@ class ObservationSeriesTests(unittest.TestCase):
 class ParserTests(unittest.TestCase):
     def test_stablecoin_supply_history(self):
         payload = [
-            {"date": 1767225600, "totalCirculatingUSD": {"peggedUSD": 1.5e11}},
+            {"date": "1767225600", "totalCirculatingUSD": {"peggedUSD": 1.5e11}},
             {"date": 1767312000, "totalCirculatingUSD": {"peggedUSD": 1.51e11}},
             {"date": 1767398400, "totalCirculatingUSD": {}},
         ]
@@ -130,8 +130,8 @@ class ParserTests(unittest.TestCase):
 
     def test_coinmetrics_mvrv_history(self):
         payload = {"data": [
-            {"time": "2026-01-05", "CapMVRVCur": "1.85"},
-            {"time": "2026-01-06", "CapMVRVCur": "1.87"},
+            {"time": "2026-01-05T00:00:00.000000000Z", "CapMVRVCur": "1.85"},
+            {"time": "2026-01-06T00:00:00.000000000Z", "CapMVRVCur": "1.87"},
             {"time": "2026-01-07"},
         ]}
         points = parse_coinmetrics_mvrv_history(payload)

@@ -193,9 +193,12 @@ def parse_stablecoin_supply_history(payload: Any) -> tuple[EvidencePoint, ...]:
         if not isinstance(row, Mapping):
             raise ValueError(f"stablecoin row {index} is malformed")
         raw_date = row.get("date")
-        if isinstance(raw_date, bool) or not isinstance(raw_date, (int, float)):
-            raise ValueError(f"stablecoin row {index} has no numeric date")
-        moment = datetime.fromtimestamp(float(raw_date), tz=timezone.utc)
+        # The API serves unix seconds as a JSON string (or a number).
+        try:
+            stamp = float(str(raw_date))
+        except (TypeError, ValueError):
+            raise ValueError(f"stablecoin row {index} has no numeric date") from None
+        moment = datetime.fromtimestamp(stamp, tz=timezone.utc)
         if (moment.hour, moment.minute, moment.second) != (0, 0, 0):
             moment = moment.replace(hour=0, minute=0, second=0, microsecond=0)
         total = row.get("totalCirculatingUSD")
@@ -300,7 +303,9 @@ def parse_coinmetrics_mvrv_history(payload: Any) -> tuple[EvidencePoint, ...]:
         value = float(raw_value)
         if not math.isfinite(value):
             continue
-        observed = f"{str(row['time']).strip()}T00:00:00Z"
+        # CoinMetrics serves full RFC3339 timestamps (often with nanosecond
+        # precision); normalize through the shared parser instead of pasting.
+        observed = normalize_timestamp(str(row["time"]).strip(), "CoinMetrics time")
         points.append(EvidencePoint(observed, value))
     if not points:
         raise ValueError("CoinMetrics MVRV history has no usable rows")
@@ -628,13 +633,18 @@ def acquire_evidence_series(
     except Exception as exc:
         fail(supply_id, "market.stablecoin_supply", "MARKET", f"{exc.__class__.__name__}: {exc}")
 
-    # 2. DeFiLlama ETH chain fees (free, no key).
+    # 2. DeFiLlama ETH chain fees (free, no key). The breakdown chart would
+    # push the payload past the client's size limit; only the aggregate
+    # totalDataChart is needed.
     fees_id = "defillama:fees:ETH"
     try:
         series = fetch(fees_id) or ObservationSeries(
             fees_id, "onchain.blockspace_fees", "defillama", "USD", fetched_at,
             parse_chain_fees_history(
-                client.get_json(LLAMA_BASE + CHAIN_FEES_PATH + "/ethereum?excludeTotalDataChart=false"),
+                client.get_json(
+                    LLAMA_BASE + CHAIN_FEES_PATH
+                    + "/ethereum?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=true",
+                ),
             ),
         )
         store(series, "onchain.blockspace_fees", "ETH",
@@ -649,7 +659,11 @@ def acquire_evidence_series(
     for asset in ("BTC", "ETH"):
         flow_id = f"sosovalue:etf:{asset}:netflow"
         aum_id = f"sosovalue:etf:{asset}:aum"
-        if fetch(flow_id) is not None and fetch(aum_id) is not None:
+        cached_flow = fetch(flow_id)
+        cached_aum = fetch(aum_id)
+        if cached_flow is not None and cached_aum is not None:
+            store(cached_flow, "flows.etf_net", asset)
+            store(cached_aum, "flows.etf_aum", asset)
             continue
         try:
             flows, aum = parse_etf_flow_history(provider.history_payload(_ETF_TYPES[asset]))
@@ -677,7 +691,7 @@ def acquire_evidence_series(
                 series_id, metric, "fred", "index", fetched_at,
                 parse_fred_vintage_history(client.get_json(
                     FRED_BASE + OBSERVATIONS_PATH,
-                    {
+                    params={
                         "series_id": name, "api_key": key, "file_type": "json",
                         "observation_start": warmup_date,
                         "realtime_start": warmup_date, "realtime_end": realtime_end,
@@ -696,8 +710,8 @@ def acquire_evidence_series(
             mvrv_id, "btc_valuation.mvrv", "coinmetrics", "ratio", fetched_at,
             parse_coinmetrics_mvrv_history(client.get_json(
                 "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics",
-                {"assets": "btc", "metrics": "CapMVRVCur", "frequency": "1d",
-                 "start_time": warmup_date, "end_time": end_date, "page_size": 10000},
+                params={"assets": "btc", "metrics": "CapMVRVCur", "frequency": "1d",
+                        "start_time": warmup_date, "end_time": end_date, "page_size": 10000},
             )),
         )
         store(series, "btc_valuation.mvrv", "BTC",
