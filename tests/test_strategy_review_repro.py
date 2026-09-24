@@ -329,6 +329,17 @@ class S1StressDiagnosticTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cannot be below -100%"):
             scenario_portfolio_return(self.WEIGHTS, {**scenario, "USDT": -1.5})
 
+    def test_scenario_return_skips_zero_weight_symbols_without_scenario(self):
+        from crypto_portfolio.engine.risk import scenario_portfolio_return
+
+        # A fully exited dust holding carries zero weight, needs no scenario
+        # input, and must not raise a KeyError during the weighted sum.
+        weights = {"BTC": 0.42, "ETH": 0.18, "SOL": 0.25, "USDT": 0.15, "TRX": 0.0}
+        scenario = {"BTC": -0.30, "ETH": -0.45, "SOL": -0.60, "USDT": 0.0}
+        self.assertAlmostEqual(scenario_portfolio_return(weights, scenario), -0.357)
+        with self.assertRaisesRegex(ValueError, "missing for exposed asset"):
+            scenario_portfolio_return({**weights, "TRX": 1e-12}, scenario)
+
     def test_projected_drawdown_and_remaining_capacity(self):
         from crypto_portfolio.engine.risk import (
             projected_peak_drawdown,

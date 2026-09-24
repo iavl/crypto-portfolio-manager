@@ -650,7 +650,9 @@ def scenario_portfolio_return(
     missing = sorted(symbol for symbol, weight in parsed_weights.items() if weight > 0 and symbol not in returns)
     if missing:
         raise ValueError("scenario return is missing for exposed asset(s): " + ", ".join(missing))
-    return sum(weight * returns[symbol] for symbol, weight in parsed_weights.items())
+    # Zero-weight symbols (e.g. fully exited dust holdings) carry no exposure,
+    # so they need no scenario input and must not be looked up.
+    return sum(weight * returns[symbol] for symbol, weight in parsed_weights.items() if weight > 0)
 
 
 def projected_peak_drawdown(
