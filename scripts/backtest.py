@@ -257,6 +257,8 @@ def command_evaluate_scores(args):
         prefer_normalized=False,
     )
     execution_series = daily if spec.execution_timeframe == "1D" else hourly
+    harvested = load_evidence_series(args.dataset)
+    evidence = EvidenceContext.from_series(harvested) if harvested else None
     observations_by_scope = {}
     for scope_name, symbols in spec.asset_scopes.items():
         policy = _core_policy() if scope_name == "core" else load_policy()
@@ -266,6 +268,7 @@ def command_evaluate_scores(args):
             initial_weights=next(iter(spec.initial_portfolios.values())),
             initial_value=spec.initial_value_usd, start_at=spec.start_at,
             end_at=spec.end_at, policy=policy, semantic_score=None,
+            evidence=evidence,
         )
         observations = []
         for review in reviews:
