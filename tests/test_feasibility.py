@@ -8,6 +8,7 @@ from pathlib import Path
 from crypto_portfolio.engine.feasibility import (
     DRAWDOWN_BUDGET_INFEASIBLE,
     ENTRY_LOCKED_BY_COVERAGE,
+    REGIME_BELOW_REQUIRED_STABLE_TARGET,
     SCENARIO_CORE_ANCHOR,
     SCENARIO_WORST_ASSET,
     SCORE_THRESHOLD_UNREACHABLE,
@@ -123,7 +124,7 @@ class ProfileBandTests(unittest.TestCase):
 
 
 class DrawdownBudgetTests(unittest.TestCase):
-    """The policy's own stress scenario already breaches its own budget."""
+    """Budget feasibility: the ladder holds what the one-shot projection breaches."""
 
     def setUp(self):
         self.policy = load_policy()
@@ -133,8 +134,17 @@ class DrawdownBudgetTests(unittest.TestCase):
             for row in rows if row.get("status") == "AVAILABLE"
         }
         self.findings = findings
+        raw = copy.deepcopy(self.policy.as_dict())
+        raw["risk"]["drawdown_budget_overlay"]["enabled"] = False
+        self.static_policy = policy_from_mapping(raw)
+        static_rows, static_findings = drawdown_budget_feasibility(self.static_policy)
+        self.static_rows = {
+            (row["regime"], row["scenario"]): row
+            for row in static_rows if row.get("status") == "AVAILABLE"
+        }
+        self.static_findings = static_findings
 
-    def test_core_anchor_projection_per_regime(self):
+    def test_static_projection_per_regime_without_the_overlay(self):
         expected = {
             "NORMAL": -0.1955,
             "DEFENSIVE": -0.1610,
@@ -142,35 +152,46 @@ class DrawdownBudgetTests(unittest.TestCase):
         }
         for regime, value in expected.items():
             with self.subTest(regime=regime):
-                row = self.rows[(regime, SCENARIO_CORE_ANCHOR)]
+                row = self.static_rows[(regime, SCENARIO_CORE_ANCHOR)]
                 self.assertAlmostEqual(row["projected_drawdown"], value, places=4)
 
-    def test_normal_and_defensive_breach_their_own_stress_scenario(self):
-        self.assertTrue(self.rows[("NORMAL", SCENARIO_CORE_ANCHOR)]["budget_breach"])
-        self.assertTrue(self.rows[("DEFENSIVE", SCENARIO_CORE_ANCHOR)]["budget_breach"])
+    def test_static_breach_pattern_without_the_overlay(self):
+        self.assertTrue(self.static_rows[("NORMAL", SCENARIO_CORE_ANCHOR)]["budget_breach"])
+        self.assertTrue(self.static_rows[("DEFENSIVE", SCENARIO_CORE_ANCHOR)]["budget_breach"])
         self.assertFalse(
-            self.rows[("CAPITAL_PRESERVATION", SCENARIO_CORE_ANCHOR)]["budget_breach"]
+            self.static_rows[("CAPITAL_PRESERVATION", SCENARIO_CORE_ANCHOR)]["budget_breach"]
         )
-
-    def test_no_regime_survives_the_worst_configured_asset(self):
         for regime in ("NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"):
             with self.subTest(regime=regime):
-                self.assertTrue(self.rows[(regime, SCENARIO_WORST_ASSET)]["budget_breach"])
+                self.assertTrue(self.static_rows[(regime, SCENARIO_WORST_ASSET)]["budget_breach"])
 
-    def test_required_stable_target_matches_hand_arithmetic(self):
-        anchor = self.rows[("NORMAL", SCENARIO_CORE_ANCHOR)]
-        # 1 - 0.15 / 0.23, with the core anchor stressed at 0.7*-0.2 + 0.3*-0.3
-        self.assertAlmostEqual(anchor["required_stablecoin_target"], 0.3478, places=4)
-        worst = self.rows[("NORMAL", SCENARIO_WORST_ASSET)]
-        self.assertAlmostEqual(worst["required_stablecoin_target"], 0.6250, places=4)
+    def test_ladder_projection_shallows_every_scenario(self):
+        # With the overlay enabled the projected drawdown is the stepped
+        # ladder path; it must be strictly shallower than the one-shot static
+        # projection and stay within the budget on every configured scenario.
+        for key, row in self.rows.items():
+            with self.subTest(regime=key[0], scenario=key[1]):
+                self.assertGreater(row["projected_drawdown"], row["static_projected_drawdown"])
+                self.assertFalse(row["budget_breach"])
+                self.assertIn("ladder", row)
+        self.assertFalse(
+            [item for item in self.findings if item.code == DRAWDOWN_BUDGET_INFEASIBLE]
+        )
 
-    def test_infeasible_findings_are_errors(self):
-        codes = [item.code for item in self.findings]
+    def test_infeasible_findings_are_errors_when_the_ladder_cannot_hold(self):
+        codes = [item.code for item in self.static_findings]
         self.assertIn(DRAWDOWN_BUDGET_INFEASIBLE, codes)
-        for item in self.findings:
+        for item in self.static_findings:
             if item.code == DRAWDOWN_BUDGET_INFEASIBLE:
                 self.assertEqual(item.severity, "ERROR")
                 self.assertIn("scenario_name", item.values)
+
+    def test_required_stable_target_matches_hand_arithmetic(self):
+        anchor = self.static_rows[("NORMAL", SCENARIO_CORE_ANCHOR)]
+        # 1 - 0.15 / 0.23, with the core anchor stressed at 0.7*-0.2 + 0.3*-0.3
+        self.assertAlmostEqual(anchor["required_stablecoin_target"], 0.3478, places=4)
+        worst = self.static_rows[("NORMAL", SCENARIO_WORST_ASSET)]
+        self.assertAlmostEqual(worst["required_stablecoin_target"], 0.6250, places=4)
 
     def test_raising_the_defensive_target_clears_the_breach(self):
         raw = copy.deepcopy(load_policy().as_dict())
@@ -228,8 +249,14 @@ class CheckPolicyFeasibilityTests(unittest.TestCase):
         self.assertFalse(
             [item for item in report.findings if item.code == ENTRY_LOCKED_BY_COVERAGE]
         )
-        self.assertTrue(
+        # The canonical overlay holds the ladder inside the budget, so the
+        # one-shot infeasibility errors are gone; the warning that documents
+        # the gap the overlay closes is still present.
+        self.assertFalse(
             [item for item in report.findings if item.code == DRAWDOWN_BUDGET_INFEASIBLE]
+        )
+        self.assertTrue(
+            [item for item in report.findings if item.code == REGIME_BELOW_REQUIRED_STABLE_TARGET]
         )
 
     def test_realized_history_is_compared_against_the_configured_stress(self):
@@ -247,7 +274,9 @@ class CheckPolicyFeasibilityTests(unittest.TestCase):
             if row.get("scenario_name") == "REALIZED_HISTORY"
         ]
         self.assertTrue(realized_rows)
-        self.assertTrue(all(row["budget_breach"] for row in realized_rows))
+        # What actually happened breaches in one shot; the ladder projection
+        # answers whether the overlay would have contained the same path.
+        self.assertTrue(all(row["static_projected_drawdown"] <= row["budget"] for row in realized_rows))
 
 
 def _write_json(path: Path, payload) -> None:

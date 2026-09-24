@@ -94,7 +94,8 @@ _DEFAULT_REGIME_MODEL: dict[str, Any] = {
     },
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
-_RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown"}
+_RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown", "drawdown_budget_overlay"}
+_OVERLAY_FIELDS = {"enabled", "recovery_reviews", "recovery_risky_floor"}
 _CHAIN_LIVENESS_FIELDS = {"degraded_deployment_factor", "BTC", "ETH", "BNB", "SOL"}
 _CHAIN_HEAD_FIELDS = {
     "healthy_head_age_seconds",
@@ -522,6 +523,44 @@ def _parse_regime_transitions(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_notches_per_review": max_notches}
 
 
+def _parse_drawdown_budget_overlay(value: Any) -> dict[str, Any]:
+    """Parse the ``risk.drawdown_budget_overlay`` block.
+
+    The overlay enforces the drawdown budget at position level: every unit of
+    budget consumed removes one unit of risky-weight allowance, and a
+    confirmed market recovery re-risks up to ``recovery_risky_floor`` while
+    the ladder would otherwise pin the book in stable.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("risk.drawdown_budget_overlay must be an object")
+    _unknown_fields(value, _OVERLAY_FIELDS, "risk.drawdown_budget_overlay")
+    if set(value) != _OVERLAY_FIELDS:
+        raise PolicyError("risk.drawdown_budget_overlay fields are incomplete")
+    enabled = value["enabled"]
+    if not isinstance(enabled, bool):
+        raise PolicyError("risk.drawdown_budget_overlay.enabled must be boolean")
+    recovery_reviews = value["recovery_reviews"]
+    if (
+        isinstance(recovery_reviews, bool)
+        or not isinstance(recovery_reviews, int)
+        or recovery_reviews < 1
+    ):
+        raise PolicyError("risk.drawdown_budget_overlay.recovery_reviews must be an integer >= 1")
+    recovery_risky_floor = _fraction(
+        value["recovery_risky_floor"],
+        "risk.drawdown_budget_overlay.recovery_risky_floor",
+    )
+    if recovery_risky_floor >= 1.0:
+        raise PolicyError(
+            "risk.drawdown_budget_overlay.recovery_risky_floor must be below 1"
+        )
+    return {
+        "enabled": enabled,
+        "recovery_reviews": recovery_reviews,
+        "recovery_risky_floor": recovery_risky_floor,
+    }
+
+
 def _parse_scoring_families(
     value: Any,
     profiles: Mapping[str, Mapping[str, float]],
@@ -738,6 +777,7 @@ class Policy:
     high_impact_review: Mapping[str, float] = dataclass_field(default_factory=dict)
     regime_transitions: Mapping[str, Any] = dataclass_field(default_factory=dict)
     regime_model: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    drawdown_budget_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
@@ -795,6 +835,7 @@ class Policy:
             "risk": {
                 "min_stablecoin_weight": self.min_stablecoin_weight,
                 "max_portfolio_drawdown": self.max_portfolio_drawdown,
+                "drawdown_budget_overlay": _copy_mapping(self.drawdown_budget_overlay),
             },
             "benchmarks": {name: dict(weights) for name, weights in self.benchmarks.items()},
             "rebalance": _copy_mapping(self.rebalance),
@@ -1981,7 +2022,11 @@ def _parse_policy(
         raise PolicyError("risk must be an object")
     _unknown_fields(risk, _RISK_FIELDS, "risk")
     if set(risk) != _RISK_FIELDS:
-        raise PolicyError("risk must contain min_stablecoin_weight and max_portfolio_drawdown")
+        raise PolicyError(
+            "risk must contain min_stablecoin_weight, max_portfolio_drawdown, "
+            "and drawdown_budget_overlay"
+        )
+    parsed_overlay = _parse_drawdown_budget_overlay(risk["drawdown_budget_overlay"])
 
     benchmarks = data["benchmarks"]
     if not isinstance(benchmarks, dict) or not benchmarks:
@@ -2324,6 +2369,7 @@ def _parse_policy(
         high_impact_review=parsed_high_impact_review,
         regime_transitions=parsed_regime_transitions,
         regime_model=parsed_regime_model,
+        drawdown_budget_overlay=parsed_overlay,
         scoring_families=parsed_scoring_families,
     )
     return policy

@@ -220,6 +220,111 @@ def apply_chain_liveness_deployment_cap(
     return amount * chain_liveness_deployment_factor(status, policy=policy)
 
 
+def drawdown_budget_overlay_floor(
+    policy: Policy | None = None,
+    portfolio_drawdown: float | None = None,
+    market_recovery_streak: int = 0,
+) -> tuple[float, str | None]:
+    """Stable-sleeve floor that enforces the drawdown budget at position level.
+
+    Every unit of budget consumed removes one unit of risky-weight allowance:
+    ``risky_cap = 1 - |drawdown| / budget``. At zero drawdown the cap does not
+    bind (regime targets govern); at the budget limit the book is fully
+    stable. A drawdown pinned at the limit can never heal from a 100% stable
+    position, so a confirmed market recovery (``market_recovery_streak`` at or
+    above ``recovery_reviews`` consecutive reviews whose market-only regime is
+    NORMAL) re-risks up to ``recovery_risky_floor`` while the ladder would
+    otherwise hold less. Returns ``(floor, reason)``; the reason is set only
+    when the overlay produces a binding floor or applies the recovery floor.
+    """
+    resolved = policy or resolve_policy()
+    overlay = resolved.drawdown_budget_overlay or {}
+    if not overlay.get("enabled", False) or portfolio_drawdown is None:
+        return 0.0, None
+    if isinstance(portfolio_drawdown, bool) or not isinstance(portfolio_drawdown, (int, float)):
+        raise ValueError("portfolio_drawdown must be numeric")
+    drawdown = float(portfolio_drawdown)
+    if not math.isfinite(drawdown) or drawdown > 0:
+        raise ValueError("portfolio_drawdown must be finite and <= 0")
+    if isinstance(market_recovery_streak, bool) or not isinstance(market_recovery_streak, int):
+        raise ValueError("market_recovery_streak must be an integer")
+    if market_recovery_streak < 0:
+        raise ValueError("market_recovery_streak must be >= 0")
+    budget = float(resolved.max_portfolio_drawdown)
+    consumed = min(1.0, max(0.0, -drawdown / budget))
+    risky_cap = 1.0 - consumed
+    reason: str | None = None
+    if consumed > 0.0:
+        reason = (
+            f"drawdown budget overlay caps risky weight at {risky_cap:.2%} "
+            f"({consumed:.0%} of the {budget:.2%} budget consumed)"
+        )
+    recovery_floor = float(overlay.get("recovery_risky_floor", 0.0))
+    recovery_reviews = int(overlay.get("recovery_reviews", 1))
+    if market_recovery_streak >= recovery_reviews and recovery_floor > risky_cap:
+        risky_cap = recovery_floor
+        reason = (
+            f"market recovery for {market_recovery_streak} reviews re-risks up to "
+            f"{risky_cap:.2%} despite the drawdown budget ladder"
+        )
+    return 1.0 - risky_cap, reason
+
+
+def drawdown_budget_ladder_path(
+    policy: Policy | None = None,
+    *,
+    risky_sleeve_return: float,
+    steps: int,
+    regime_risky_weight: float,
+    start_drawdown: float = 0.0,
+    market_recovery_streak: int = 0,
+) -> dict[str, Any]:
+    """Deterministic budget-ladder projection along a stepped risky-sleeve path.
+
+    The sleeve return ``risky_sleeve_return`` compounds over ``steps`` equal
+    geometric steps; between steps the risky weight is rebalanced down to
+    ``min(regime_risky_weight, overlay cap(drawdown))``. Stables return zero.
+    This is the closed-form answer to "can the configured floors keep the
+    portfolio inside the drawdown budget when the risky sleeve falls like
+    this", which a single-shot projection cannot give: a reactive overlay
+    always absorbs the first gap at pre-crash exposure and earns its keep by
+    stopping the compounding afterwards.
+    """
+    resolved = policy or resolve_policy()
+    if isinstance(risky_sleeve_return, bool) or not isinstance(risky_sleeve_return, (int, float)):
+        raise ValueError("risky_sleeve_return must be numeric")
+    sleeve = float(risky_sleeve_return)
+    if not math.isfinite(sleeve) or sleeve <= -1.0:
+        raise ValueError("risky_sleeve_return must be finite and > -1")
+    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
+        raise ValueError("steps must be an integer >= 1")
+    regime_weight = float(regime_risky_weight)
+    if not math.isfinite(regime_weight) or not 0.0 <= regime_weight <= 1.0:
+        raise ValueError("regime_risky_weight must be finite in [0, 1]")
+    if isinstance(start_drawdown, bool) or not isinstance(start_drawdown, (int, float)):
+        raise ValueError("start_drawdown must be numeric")
+    start = float(start_drawdown)
+    if not math.isfinite(start) or start > 0:
+        raise ValueError("start_drawdown must be finite and <= 0")
+    equity = 1.0 + start
+    peak = 1.0
+    drawdown = start
+    worst = start
+    step_return = (1.0 + sleeve) ** (1.0 / steps) - 1.0
+    for _ in range(steps):
+        floor, _ = drawdown_budget_overlay_floor(resolved, drawdown, market_recovery_streak)
+        risky = min(regime_weight, 1.0 - floor)
+        equity *= 1.0 + risky * step_return
+        drawdown = equity / peak - 1.0
+        worst = min(worst, drawdown)
+    return {
+        "terminal_drawdown": drawdown,
+        "worst_drawdown": worst,
+        "budget": float(resolved.max_portfolio_drawdown),
+        "single_step_bound": abs(step_return),
+    }
+
+
 def run_risk_gate(
     target_weights: Mapping[str, float] | Any,
     *,
@@ -232,6 +337,7 @@ def run_risk_gate(
     actions: Iterable[Any] | None = None,
     current_weights: Mapping[str, float] | None = None,
     decision_confidence: Any | None = None,
+    market_recovery_streak: int = 0,
 ) -> RiskCheckResult:
     resolved = policy or resolve_policy()
     if hasattr(target_weights, "target_weights"):
@@ -261,7 +367,12 @@ def run_risk_gate(
     regime_name = regime.regime if hasattr(regime, "regime") else str(regime).upper()
     limits = resolved.regime(regime_name)
     stable_weight = sum(weights.get(symbol, 0.0) for symbol in resolved.stable_symbols)
-    required_stable = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
+    overlay_floor, _overlay_reason = drawdown_budget_overlay_floor(
+        resolved, current_drawdown, market_recovery_streak
+    )
+    required_stable = max(
+        resolved.min_stablecoin_weight, limits.stablecoin_target, overlay_floor
+    )
     if stable_weight + 1e-9 < required_stable:
         violations.append(
             RiskViolation(
@@ -639,6 +750,8 @@ __all__ = [
     "RiskViolation",
     "apply_chain_liveness_deployment_cap",
     "chain_liveness_deployment_factor",
+    "drawdown_budget_ladder_path",
+    "drawdown_budget_overlay_floor",
     "event_risk_deployment_factor",
     "projected_peak_drawdown",
     "remaining_drawdown_capacity",

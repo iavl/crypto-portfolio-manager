@@ -38,7 +38,12 @@
   },
   "risk": {
     "min_stablecoin_weight": 0.15,
-    "max_portfolio_drawdown": 0.15
+    "max_portfolio_drawdown": 0.15,
+    "drawdown_budget_overlay": {
+      "enabled": true,
+      "recovery_reviews": 5,
+      "recovery_risky_floor": 0.25
+    }
   },
   "chain_liveness": {
     "degraded_deployment_factor": 0.25,

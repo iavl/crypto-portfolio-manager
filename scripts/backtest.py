@@ -28,7 +28,7 @@ from crypto_portfolio.research.historical_builder import (  # noqa: E402
 from crypto_portfolio.research.orchestrator import run_historical_backtest  # noqa: E402
 from crypto_portfolio.research.reporting import render_run_report  # noqa: E402
 from crypto_portfolio.research.score_evaluation import evaluate_scores  # noqa: E402
-from crypto_portfolio.research.stress import drawdown_boundary_stress  # noqa: E402
+from crypto_portfolio.research.stress import drawdown_boundary_stress, drawdown_budget_stress  # noqa: E402
 from crypto_portfolio.state._jsonl import read_records  # noqa: E402
 from crypto_portfolio.state.decisions import (  # noqa: E402
     default_decision_path, default_status_event_path,
@@ -141,7 +141,8 @@ def command_run(args):
             "ELIGIBLE_WITH_ASSUMED_STABLE_PEG" if manifest.strict_ready and spec.stablecoin_peg_assumption
             else "ELIGIBLE" if manifest.strict_ready else "BLOCKED"
         ),
-        "policy_hashes": {}, "stress": drawdown_boundary_stress(), "score_evaluations": {},
+        "policy_hashes": {}, "stress": drawdown_boundary_stress(),
+        "budget_stress": drawdown_budget_stress(), "score_evaluations": {},
         "runs": {}, "review_calendar": {},
     }
     if not manifest.strict_ready and not args.allow_usdt_approximation:

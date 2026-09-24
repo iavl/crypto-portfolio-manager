@@ -206,8 +206,13 @@ composition, scales it to the sleeve target, and uses the configured/default
 settlement asset only when no stable asset exists. Never create
 stablecoin-to-stablecoin trades merely to select a symbol. The risk gate and
 allocation engine both require stable exposure of at least
-`max(global_floor, regime_target)`. Treat a configured `core_risky_min` as a
-hard constraint unless its name and documentation explicitly change.
+`max(global_floor, regime_target, drawdown_budget_overlay_floor)`. The
+drawdown budget overlay enforces `max_portfolio_drawdown` at position level
+(`risky_cap = 1 - |drawdown| / D`) and its confirmed-market-recovery re-risk
+floor is documented in `references/risk-model.md`. Treat a configured
+`core_risky_min` as a hard constraint on the composition of the remaining
+risky sleeve (never on its size, which the overlay may shrink); any other
+reading requires its name and documentation to explicitly change.
 
 ## Rebalancing and execution plans
 

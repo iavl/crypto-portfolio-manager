@@ -165,8 +165,52 @@ These are portfolio-level bands and should be interpreted alongside regime and v
 The deterministic regime engine applies a floor from these bands: drawdown at
 or below `-0.60D` cannot remain `NORMAL`, drawdown at or below `-0.80D` cannot
 remain below `CAPITAL_PRESERVATION`, and drawdown below `-D` is a risk-budget
-breach. Allocation and the risk gate both require the stable sleeve to be at
-least the larger of the global minimum and the selected regime target.
+breach. Allocation, the risk gate, and the rebalance engine all require the
+stable sleeve to be at least the larger of the global minimum, the selected
+regime target, and the drawdown budget overlay floor below.
+
+## Drawdown budget overlay
+
+The response bands above relabel the regime; they cannot by themselves keep a
+portfolio inside `D`; a `CAPITAL_PRESERVATION` target of 50% stable still
+implies roughly a 30% portfolio drawdown when core assets fall 60%, which is
+twice the default budget. The drawdown budget overlay (`risk.drawdown_budget_overlay`)
+therefore enforces the budget at position level, on top of the regime targets:
+
+- **Ladder**: every unit of budget consumed removes one unit of risky-weight
+  allowance, `risky_cap = 1 - |drawdown| / D`. At zero drawdown the cap does
+  not bind (regime targets govern); at `-0.60D` the cap is 40% risky, at
+  `-0.80D` it is 20%, and at `-D` the book is fully stable. The floor this
+  imposes on the stable sleeve is applied by allocation, validated by the
+  risk gate, and re-validated by the rebalance engine. A reactive overlay
+  always absorbs the first gap at pre-crash exposure; its job is to stop the
+  compounding afterwards, so drawdown converges toward `D` instead of running
+  to a multiple of it.
+- **Execution speed**: while the overlay floor exceeds the regime's own
+  stable target, every overweight risky position is a hard
+  `RISK_BUDGET_BREACH` reduction that bypasses staging, watch bands, and
+  direction-flip confirmation. Positions at or below target are untouched;
+  the overlay already capped them.
+- **Recovery path**: a book pinned at `-D` cannot heal from a fully stable
+  position, because its peak is fixed and stable assets return ~zero. When
+  the ordinary market domains alone (trend, volatility, flows, breadth — no
+  drawdown, no events) read `NORMAL` for
+  `drawdown_budget_overlay.recovery_reviews` consecutive reviews, the book
+  may re-risk up to `recovery_risky_floor` (default 25%) even while the
+  ladder would allow less. This relaxes only the overlay floor; the regime
+  label, its mandatory floors, and every other constraint still apply, and
+  the ladder re-tightens immediately if drawdown worsens again.
+
+The `core_risky_min` regime constraint applies to the composition of whatever
+risky sleeve remains after the overlay, not to the sleeve's size: capital
+preservation overrides the regime's risky minimum, which is the stated
+policy hierarchy.
+
+`drawdown_budget_stress` in the research package asserts the mechanism
+directly: the floor is monotone, a severe configured single-asset decline
+applied to the whole risky sleeve in steps stays within `D` with the overlay
+enabled and clearly breaches with it disabled, and a confirmed recovery heals
+a budget-limit drawdown instead of locking the book in stable forever.
 
 ## Concentration and volatility
 

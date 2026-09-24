@@ -50,7 +50,12 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..models.policy import Policy, resolve_policy
-from .risk import stress_diagnostic
+from .risk import drawdown_budget_ladder_path, stress_diagnostic
+
+# Steps used by the ladder feasibility projection. Thirty geometric steps is
+# fine enough that the single-step discretization tolerance stays an order of
+# magnitude below the drawdown budget, and coarse enough to stay cheap.
+_LADDER_STEPS = 30
 
 __all__ = [
     "DRAWDOWN_BUDGET_INFEASIBLE",
@@ -451,6 +456,7 @@ def _drawdown_rows_for(
         )
         stressed_risky = diagnostic["scenario_return"]
         required_stable = None
+        risky_only: float | None = None
         if risky > 0 and stressed_risky < 0:
             risky_only = diagnostic["scenario_return"] / risky
             if risky_only < 0:
@@ -458,6 +464,33 @@ def _drawdown_rows_for(
                     0.0,
                     1.0 - policy.max_portfolio_drawdown / abs(risky_only),
                 )
+        # The projection the budget verdict rests on depends on whether the
+        # drawdown budget overlay enforces the ladder. Without it, the one-shot
+        # stress at the regime's own target is the mechanism; with it, a
+        # reactive overlay always absorbs the first gap at pre-crash exposure
+        # and earns its keep by stopping the compounding, so the honest
+        # question is the stepped ladder path over the same sleeve return.
+        overlay_enabled = bool((policy.drawdown_budget_overlay or {}).get("enabled", False))
+        ladder: dict[str, Any] | None = None
+        if overlay_enabled and risky_only is not None:
+            path = drawdown_budget_ladder_path(
+                policy,
+                risky_sleeve_return=risky_only,
+                steps=_LADDER_STEPS,
+                regime_risky_weight=risky,
+            )
+            tolerance = path["single_step_bound"] + 1e-9
+            ladder = {
+                "worst_drawdown": path["worst_drawdown"],
+                "terminal_drawdown": path["terminal_drawdown"],
+                "steps": _LADDER_STEPS,
+                "tolerance": tolerance,
+            }
+            projected = path["worst_drawdown"]
+            breach = abs(path["worst_drawdown"]) > path["budget"] + tolerance
+        else:
+            projected = diagnostic["projected_drawdown"]
+            breach = bool(diagnostic["budget_breach"])
         row = {
             "regime": regime,
             "scenario": name,
@@ -466,22 +499,26 @@ def _drawdown_rows_for(
             "stablecoin_target": stable_target,
             "risky_weight": risky,
             "scenario_return": stressed_risky,
-            "projected_drawdown": diagnostic["projected_drawdown"],
+            "projected_drawdown": projected,
+            "static_projected_drawdown": diagnostic["projected_drawdown"],
             "budget": policy.max_portfolio_drawdown,
-            "budget_breach": diagnostic["budget_breach"],
+            "budget_breach": breach,
             "required_stablecoin_target": required_stable,
             "weights": dict(sorted(weights.items())),
         }
+        if ladder is not None:
+            row["ladder"] = ladder
         rows.append(row)
-        if diagnostic["budget_breach"]:
+        if breach:
             findings.append(Finding(
                 code=DRAWDOWN_BUDGET_INFEASIBLE,
                 severity=SEVERITY_ERROR,
                 subject=f"{regime}/{name}",
                 message=(
-                    f"regime {regime} at its most defensive target still projects "
-                    f"{diagnostic['projected_drawdown']:.4f} against a "
+                    f"regime {regime} projects {projected:.4f} against a "
                     f"{policy.max_portfolio_drawdown:.4f} budget under {scenario_name}"
+                    + (" along the drawdown budget ladder" if ladder is not None else
+                       " at its own target in one shot")
                 ),
                 values=row,
             ))

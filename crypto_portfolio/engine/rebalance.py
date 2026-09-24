@@ -11,6 +11,7 @@ from ..models.decision_packet import NoTradeAttribution
 from ..models.confidence import DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.policy import Policy, resolve_policy
 from .confidence import compose_deployment_factors, confidence_deployment_factor
+from .risk import drawdown_budget_overlay_floor
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"}
@@ -762,6 +763,8 @@ def recommend_rebalance(
     hard_action_reasons: Mapping[str, str] | None = None,
     hard_exposure_caps: Mapping[str, float] | None = None,
     direction_history: Mapping[str, Any] | None = None,
+    portfolio_drawdown: float | None = None,
+    market_recovery_streak: int = 0,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -863,15 +866,20 @@ def recommend_rebalance(
     if not stable_symbols:
         raise ValueError("policy must define at least one stable symbol")
     stable_target = _stable_target_weights(current, target, stable_symbols)
-    # The stablecoin/cash sleeve must satisfy the harder of the global floor
-    # and the active regime target; allocation and the risk gate enforce it on
-    # their paths, and rebalance validates the target it is asked to execute.
+    # The stablecoin/cash sleeve must satisfy the harder of the global floor,
+    # the active regime target, and the drawdown budget overlay; allocation
+    # and the risk gate enforce it on their paths, and rebalance validates the
+    # target it is asked to execute.
     regime_name = str(regime).strip().upper()
     if regime_name not in _REGIMES:
         raise ValueError(f"regime must be one of {sorted(_REGIMES)}")
+    overlay_floor, _overlay_reason = drawdown_budget_overlay_floor(
+        resolved, portfolio_drawdown, market_recovery_streak
+    )
     required_stable = max(
         resolved.min_stablecoin_weight,
         resolved.regime(regime_name).stablecoin_target,
+        overlay_floor,
     )
     target_stable_total = sum(target.get(symbol, 0.0) for symbol in stable_symbols)
     if target_stable_total + 1e-9 < required_stable:
@@ -879,6 +887,23 @@ def recommend_rebalance(
             f"target stablecoin sleeve {target_stable_total:.2%} is below "
             f"required {required_stable:.2%}"
         )
+    # When the drawdown budget overlay raises the stable floor beyond the
+    # regime's own mandate, every overweight risky position is a hard
+    # risk reduction: it bypasses staging, watch bands, and direction-flip
+    # confirmation via the existing RISK_BUDGET_BREACH reason so the ladder
+    # converges at execution speed instead of 4pp per review. Positions at
+    # or below target are untouched; the overlay already capped them.
+    if overlay_floor > max(
+        resolved.min_stablecoin_weight,
+        resolved.regime(regime_name).stablecoin_target,
+    ) + 1e-12:
+        for symbol, weight in current.items():
+            if symbol in stable_symbols_set or resolved.is_excluded(symbol):
+                continue
+            if symbol in normalized_hard_reasons:
+                continue
+            if weight > target.get(symbol, 0.0) + 1e-12:
+                normalized_hard_reasons[symbol] = "RISK_BUDGET_BREACH"
     effective_current: dict[str, float] = {
         symbol: weight * portfolio_value for symbol, weight in current.items()
     }

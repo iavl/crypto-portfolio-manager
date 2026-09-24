@@ -28,7 +28,7 @@ from typing import Any, Mapping, Sequence
 from ..models.policy import Policy, resolve_policy
 from .allocation import build_target_allocation
 from .evaluation import buy_and_hold_path
-from .regime import RegimeInputs, determine_regime
+from .regime import RegimeInputs, determine_regime, market_only_regime
 from .rebalance import recommend_rebalance
 
 
@@ -329,6 +329,7 @@ def replay_strategy(
     signals = ResearchSignals(research_variant, resolved)
     stables = set(resolved.stable_symbols)
     previous_regime: Any = None
+    market_recovery_streak = 0
     # Dollar positions, seeded from the first frozen record.
     dollars: dict[str, float] = {
         symbol: weight * reviews[0].portfolio_value
@@ -364,6 +365,13 @@ def replay_strategy(
         replay_drawdown = nav_path[-1] / peak_nav - 1.0
         regime_values = dict(view.regime_inputs)
         regime_values["portfolio_drawdown_band"] = replay_drawdown
+        # Market-anchored recovery streak feeding the drawdown-budget
+        # overlay's re-risk floor; the regime label itself is untouched.
+        market_recovery_streak = (
+            market_recovery_streak + 1
+            if market_only_regime(RegimeInputs(**regime_values), policy=resolved) == "NORMAL"
+            else 0
+        )
         regime = determine_regime(
             RegimeInputs(**regime_values), policy=resolved, previous=previous_regime
         )
@@ -374,12 +382,15 @@ def replay_strategy(
             regime=regime.regime,
             assessments=signals.assessments(view),
             current_weights=view.current_weights,
+            portfolio_drawdown=replay_drawdown,
+            market_recovery_streak=market_recovery_streak,
         )
         from .risk import run_risk_gate
         risk = run_risk_gate(
             allocation, policy=resolved, regime=regime.regime,
             assessments=signals.assessments(view), current_drawdown=replay_drawdown,
             overlays=view.overlays, chain_liveness=view.chain_liveness,
+            market_recovery_streak=market_recovery_streak,
             current_weights=view.current_weights,
         )
         if not risk.ok:
@@ -401,6 +412,8 @@ def replay_strategy(
                 if value.get("hard_exposure_cap") is not None
             },
             direction_history=direction_history_from_decisions(replayed_decisions),
+            portfolio_drawdown=replay_drawdown,
+            market_recovery_streak=market_recovery_streak,
         )
         executable = [a for a in signals.confirmed(view, rebalance.actions)
                       if a.action in {"INCREASE", "REDUCE", "EXIT"} and a.symbol not in stables]

@@ -238,7 +238,17 @@ display data, so the engine uses value ÷ quantity and records a note.
     The regime flow domain is market-level: aggregate BTC and ETH ETF flows
     with `aggregate_market_flow` instead of feeding BTC-only flow into the
     regime; BTC-specific flow stays in BTC scoring.
-12. Run the allocation engine.
+12. Run the allocation engine with the cash-flow-adjusted portfolio drawdown
+    as `portfolio_drawdown` and the market recovery streak as
+    `market_recovery_streak`. The streak counts consecutive prior reviews
+    (including this one) whose market-only regime —
+    `market_only_regime(regime_inputs)` over trend, volatility, flows, and
+    breadth, with no drawdown or event inputs — read `NORMAL`; maintain it
+    from the loaded decision history and reset it to zero whenever that
+    reading is not `NORMAL`. These feed the drawdown budget overlay
+    (`references/risk-model.md`): consumed budget caps the risky sleeve, and
+    a confirmed recovery re-risks up to the configured floor. Pass the same
+    two values to the risk gate and the rebalance engine.
 13. Run the risk gate and stop on `ERROR` violations.
 14. Recalculate post-new-cash economic weights.
 15. Run the rebalance engine. Every executable action carries a

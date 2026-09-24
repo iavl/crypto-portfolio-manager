@@ -388,6 +388,45 @@ def _weighted_regime(
     return "CAPITAL_PRESERVATION"
 
 
+def market_only_regime(
+    inputs: RegimeInputs | dict[str, Any],
+    *,
+    policy: Policy | None = None,
+) -> str:
+    """Regime the four ordinary market domains alone would produce.
+
+    Drawdown floors, severe systemic events, and transition caps are
+    deliberately excluded: this is the market-anchored second opinion the
+    drawdown-budget recovery path counts consecutive ``NORMAL`` readings
+    from, so a portfolio pinned in drawdown by its own floors can still
+    observe that the market itself has recovered.
+    """
+    resolved = policy or resolve_policy()
+    if isinstance(inputs, Mapping):
+        inputs = RegimeInputs(**inputs)
+    if not isinstance(inputs, RegimeInputs):
+        raise ValueError("inputs must be RegimeInputs or a mapping")
+    model = resolved.regime_model if isinstance(resolved.regime_model, Mapping) else {}
+    mode = str(model.get("mode", "vote_count")).strip().lower()
+    if mode == "weighted":
+        reasons: list[str] = []
+        return _weighted_regime(inputs, resolved, reasons)
+    risk_count = 0
+    if _state(inputs.btc_trend) in _BEARISH:
+        risk_count += 1
+    if _state(inputs.volatility_state) in _ELEVATED_VOL:
+        risk_count += 1
+    if _state(inputs.flow_state) in _RISK_OFF:
+        risk_count += 1
+    if _state(inputs.breadth_state) in _RISK_OFF:
+        risk_count += 1
+    if risk_count >= 3:
+        return "CAPITAL_PRESERVATION"
+    if risk_count >= 2:
+        return "DEFENSIVE"
+    return "NORMAL"
+
+
 def determine_regime(
     inputs: RegimeInputs | dict[str, Any],
     *,
@@ -524,4 +563,4 @@ def regime_engine(
     return determine_regime(inputs, policy=policy, previous=previous)
 
 
-__all__ = ["RegimeInputs", "RegimeResult", "determine_regime", "regime_engine"]
+__all__ = ["RegimeInputs", "RegimeResult", "determine_regime", "market_only_regime", "regime_engine"]

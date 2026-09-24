@@ -185,7 +185,7 @@ def target_change_attribution(previous: Mapping[str, Any], current: Mapping[str,
                 assessments[symbol] = score_assessment(asset, policy=policy)[0]
             result = build_target_allocation(policy=policy, regime=market["regime"],
                                              assessments=assessments, current_weights=weights,
-                                             **{k: market[k] for k in ("overlays", "chain_liveness", "structural_risk", "decision_confidence") if k in market})
+                                             **{k: market[k] for k in ("overlays", "chain_liveness", "structural_risk", "decision_confidence", "portfolio_drawdown", "market_recovery_streak") if k in market})
             return dict(result.target_weights)
 
         stages = [run(previous, previous, old_policy), run(previous, previous, new_policy),

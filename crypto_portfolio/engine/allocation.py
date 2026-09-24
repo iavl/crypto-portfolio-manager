@@ -11,6 +11,7 @@ from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
 from .confidence import compose_deployment_factors, confidence_deployment_factor
 from .core_eligibility import eth_core_eligibility
+from .risk import drawdown_budget_overlay_floor
 from .scoring import score_assessment
 
 
@@ -559,6 +560,8 @@ def build_target_allocation(
     chain_liveness: Mapping[str, Any] | None = None,
     structural_risk: Mapping[str, Any] | None = None,
     decision_confidence: Any | None = None,
+    portfolio_drawdown: float | None = None,
+    market_recovery_streak: int = 0,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
     parsed_overlays = None
@@ -595,8 +598,13 @@ def build_target_allocation(
     if sum(current_weights.values()) > 1.0 + 1e-9:
         raise ValueError("current_weights must sum to no more than 1")
 
-    stable_target = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
-    strategic_stable_only = stable_target
+    overlay_floor, overlay_reason = drawdown_budget_overlay_floor(
+        resolved, portfolio_drawdown, market_recovery_streak
+    )
+    stable_target = max(
+        resolved.min_stablecoin_weight, limits.stablecoin_target, overlay_floor
+    )
+    strategic_stable_only = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
     risky_budget = 1.0 - stable_target
     satellite_cap = min(limits.satellite_max, risky_budget)
     candidates = _assessment_symbols(assessments, resolved)
@@ -604,11 +612,18 @@ def build_target_allocation(
         str(symbol).strip().upper(): value for symbol, value in assessments.items()
     }
     reasons = [f"{regime_name} reserves {stable_target:.2%} for stablecoin/cash"]
+    if overlay_reason is not None:
+        reasons.append(overlay_reason)
     constraints = [
         f"stablecoin floor {resolved.min_stablecoin_weight:.2%}",
         f"satellite cap {satellite_cap:.2%}",
         f"single-asset cap {limits.single_asset_max:.2%}",
     ]
+    if overlay_floor > strategic_stable_only + 1e-12:
+        constraints.append(
+            f"drawdown budget overlay floor {overlay_floor:.2%} overrides the "
+            f"{regime_name} stable target {strategic_stable_only:.2%}"
+        )
 
     strategic_satellite_raw: dict[str, float] = {}
     # Preserve-existing bucket: HOLD_ONLY keeps the full current weight while
@@ -860,11 +875,15 @@ def allocate(
     chain_liveness: Mapping[str, Any] | None = None,
     structural_risk: Mapping[str, Any] | None = None,
     decision_confidence: Any | None = None,
+    portfolio_drawdown: float | None = None,
+    market_recovery_streak: int = 0,
 ) -> AllocationResult:
     return build_target_allocation(
         policy, regime, assessments, current_weights,
         overlays=overlays, chain_liveness=chain_liveness, structural_risk=structural_risk,
         decision_confidence=decision_confidence,
+        portfolio_drawdown=portfolio_drawdown,
+        market_recovery_streak=market_recovery_streak,
     )
 
 
