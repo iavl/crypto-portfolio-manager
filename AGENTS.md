@@ -232,8 +232,11 @@ zones and explicit tranche fractions; no false precision or mechanical
 percentage ladders. Tranche fractions must sum to 1. A decision that plans
 executable tranches must also state the disposition of prior unfilled tranches
 per asset (cancel, replace with the new zones, or keep equivalent orders),
-derived deterministically from decision history, status events, and snapshot
-quantity deltas — never silently dropped.
+derived deterministically from decision history, status events, and persisted
+exchange trade records — never silently dropped. Fill attribution prefers
+read-only exchange trade history (`myTrades`, persisted append-only with
+dedup); snapshot quantity deltas are only the fallback when no trade history
+was fetched for the symbol.
 
 ## History, evidence, and persistence
 

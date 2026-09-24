@@ -150,15 +150,129 @@ def _zones_match(prior_tranches, current_tranches):
     return True
 
 
-def prior_plan_disposition(decision, history, snapshots=(), status_events=()):
+def _snapshot_timestamp(snapshots, snapshot_id):
+    for snapshot in snapshots:
+        if _field(snapshot, "snapshot_id") == snapshot_id:
+            return parse_timestamp(_field(snapshot, "timestamp"))
+    return None
+
+
+def _attribution_window(snapshots, prior, decision):
+    """(start, end] datetimes bounding the fills/delta attribution interval."""
+    prior_ts = _snapshot_timestamp(snapshots, _field(prior, "based_on_snapshot_id"))
+    current_ts = _snapshot_timestamp(snapshots, _field(decision, "based_on_snapshot_id"))
+    if prior_ts is None or current_ts is None:
+        prior_ts = parse_timestamp(prior["timestamp"])
+        current_ts = parse_timestamp(_field(decision, "timestamp"))
+    return prior_ts, current_ts
+
+
+def _supplied_fills(fills, symbol):
+    """Normalized trade records for a symbol, or None when not fetched.
+
+    Key presence in the supplied mapping means the exchange trade history was
+    fetched for that symbol — an empty sequence is a confident zero, not a gap.
+    """
+    if not isinstance(fills, Mapping):
+        return None
+    supplied = fills.get(symbol)
+    if supplied is None:
+        return None
+    from ..models.fill import TradeFill
+
+    return tuple(
+        fill if isinstance(fill, TradeFill) else TradeFill.from_mapping(fill)
+        for fill in supplied
+    )
+
+
+def _fills_attribution(records, tranches, plan_action, effective_status, window):
+    """Attribute exchange trade records to tranche zones; records are truth."""
+    start, end = window
+    required_side = "BUY" if plan_action == "INCREASE" else "SELL"
+    in_window = [
+        fill for fill in records
+        if start < parse_timestamp(fill.executed_at) <= end
+    ]
+    attributed_qty = [0.0] * len(tranches)
+    attributed_notional = [0.0] * len(tranches)
+    out_of_zone = {"count": 0, "quantity": 0.0, "notional": 0.0}
+    opposite = {"count": 0, "quantity": 0.0, "notional": 0.0}
+    for fill in in_window:
+        if fill.side != required_side:
+            opposite["count"] += 1
+            opposite["quantity"] += fill.quantity
+            opposite["notional"] += fill.notional
+            continue
+        for index, tranche in enumerate(tranches):
+            if _tranche_number(tranche, "price_low") <= fill.price <= _tranche_number(tranche, "price_high"):
+                attributed_qty[index] += fill.quantity
+                attributed_notional[index] += fill.notional
+                break
+        else:
+            out_of_zone["count"] += 1
+            out_of_zone["quantity"] += fill.quantity
+            out_of_zone["notional"] += fill.notional
+
+    tranche_states = []
+    remaining_planned_usd = 0.0
+    for index, tranche in enumerate(tranches):
+        est = _tranche_number(tranche, "estimated_quantity")
+        amount = _tranche_number(tranche, "amount_usd")
+        fraction = min(1.0, attributed_qty[index] / est) if est > 0 else 0.0
+        if fraction >= _TRANCHE_FULL_FRACTION:
+            state = "FULL"
+        elif fraction >= _TRANCHE_PARTIAL_FRACTION:
+            state = "PARTIAL"
+        else:
+            state = "UNFILLED"
+        if state != "FULL":
+            remaining_planned_usd += max(0.0, amount - attributed_notional[index])
+        tranche_states.append({
+            "sequence": _field(tranche, "sequence"),
+            "zone_low": _tranche_number(tranche, "price_low"),
+            "zone_high": _tranche_number(tranche, "price_high"),
+            "fill_state": state,
+            "fill_fraction": fraction,
+            "fill_quantity": attributed_qty[index],
+            "fill_notional_usd": attributed_notional[index],
+        })
+
+    attribution = "EXCHANGE_TRADE_RECORDS"
+    matched_qty = sum(attributed_qty)
+    total_est = sum(_tranche_number(t, "estimated_quantity") for t in tranches)
+    caveat = None
+    if effective_status == "NOT_EXECUTED" and total_est > 0 \
+            and matched_qty / total_est >= _TRANCHE_PARTIAL_FRACTION:
+        attribution = "STATUS_EVENT_CONFLICT"
+    elif effective_status == "CONFIRMED" and matched_qty <= 0.0:
+        caveat = ("terminal CONFIRMED but no in-window trade records matched — verify the "
+                  "trade-history fetch window covers the attribution interval")
+    return {
+        "attribution": attribution,
+        "tranche_states": tranche_states,
+        "remaining_planned_usd": remaining_planned_usd,
+        "unmatched_out_of_zone": out_of_zone,
+        "unmatched_opposite_side": opposite,
+        "caveat": caveat,
+    }
+
+
+def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fills=None):
     """State what the current review does with resting orders from prior plans.
 
     For every asset whose most recent prior decision planned executable
-    tranches, attribute fills from exchange snapshot quantity deltas (the
-    ladder fills in tranche order) and derive one advisory instruction for the
+    tranches, attribute fills and derive one advisory instruction for the
     unfilled remainder: ``CANCEL_RESTING`` (superseded — budgets are not
     additive), ``REPLACE_WITH_NEW_PLAN`` / ``KEEP_EQUIVALENT_ORDERS`` (the
-    current decision re-plans the asset), or ``NOTHING_RESTING``. The system
+    current decision re-plans the asset), or ``NOTHING_RESTING``.
+
+    Attribution prefers exchange trade records: pass ``fills`` as a mapping of
+    symbol -> trade records; key presence means the history was fetched (an
+    empty sequence is a confident zero). Records are matched to tranche zones
+    by executed price inside the attribution window. Without records for a
+    symbol, fills are inferred from snapshot quantity deltas in tranche order,
+    guarded against external flows and status-event contradictions. The system
     never places or cancels real orders; these are deterministic instructions
     for the human's manually rested exchange orders.
     """
@@ -193,60 +307,81 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=()):
     disposition = {}
     for symbol, (prior, plan) in sorted(latest_plan_by_symbol.items()):
         tranches = _plan_tranches(plan)
+        plan_action = str(_field(plan, "action", "")).strip().upper()
         effective_status = _effective_plan_status(prior, events_by_decision)
         prior_snapshot_id = _field(prior, "based_on_snapshot_id")
         current_snapshot_id = _field(decision, "based_on_snapshot_id")
-        first = _snapshot_quantity(snapshots, prior_snapshot_id, symbol)
-        second = _snapshot_quantity(snapshots, current_snapshot_id, symbol)
-        quantity_delta = None if first is None or second is None else second - first
-        attribution = "STATUS_EVENT_ONLY"
-        if quantity_delta is not None:
-            attribution = (
-                "UNRESOLVED_EXTERNAL_FLOW"
-                if _external_flow_between(snapshots, prior_snapshot_id, current_snapshot_id)
-                else "EXCHANGE_QUANTITY_DELTA"
-            )
-            total_est = sum(_tranche_number(t, "estimated_quantity") for t in tranches)
-            delta_shows_fill = total_est > 0 and abs(quantity_delta) / total_est >= _TRANCHE_PARTIAL_FRACTION
-            if effective_status == "NOT_EXECUTED" and delta_shows_fill:
-                attribution = "STATUS_EVENT_CONFLICT"
-            elif effective_status == "CONFIRMED" and not delta_shows_fill:
-                attribution = "STATUS_EVENT_CONFLICT"
 
-        remaining = None
-        if attribution == "EXCHANGE_QUANTITY_DELTA":
-            buy = str(_field(plan, "action", "")).strip().upper() == "INCREASE"
-            remaining = quantity_delta if buy else -quantity_delta
-        tranche_states = []
-        remaining_planned_usd = 0.0
-        for tranche in tranches:
-            est = _tranche_number(tranche, "estimated_quantity")
-            amount = _tranche_number(tranche, "amount_usd")
-            fraction = 0.0
-            if remaining is not None:
-                filled = min(max(remaining, 0.0), est)
-                fraction = filled / est if est > 0 else 0.0
-                remaining -= filled
-            elif effective_status == "CONFIRMED":
-                fraction = None
-            if fraction is None:
-                state = "UNKNOWN"
-                remaining_planned_usd += amount
-            elif fraction >= _TRANCHE_FULL_FRACTION:
-                state = "FULL"
-            elif fraction >= _TRANCHE_PARTIAL_FRACTION:
-                state = "PARTIAL"
-                remaining_planned_usd += (1.0 - fraction) * amount
-            else:
-                state = "UNFILLED"
-                remaining_planned_usd += amount
-            tranche_states.append({
-                "sequence": _field(tranche, "sequence"),
-                "zone_low": _tranche_number(tranche, "price_low"),
-                "zone_high": _tranche_number(tranche, "price_high"),
-                "fill_state": state,
-                "fill_fraction": fraction,
-            })
+        fills_for_symbol = _supplied_fills(fills, symbol)
+        if fills_for_symbol is not None:
+            derived = _fills_attribution(
+                fills_for_symbol, tranches, plan_action, effective_status,
+                _attribution_window(snapshots, prior, decision),
+            )
+            attribution = derived["attribution"]
+            tranche_states = derived["tranche_states"]
+            remaining_planned_usd = derived["remaining_planned_usd"]
+            quantity_delta = None
+            unmatched = {
+                "out_of_zone": derived["unmatched_out_of_zone"],
+                "opposite_side": derived["unmatched_opposite_side"],
+            }
+            caveat = derived["caveat"]
+        else:
+            unmatched = None
+            caveat = None
+            first = _snapshot_quantity(snapshots, prior_snapshot_id, symbol)
+            second = _snapshot_quantity(snapshots, current_snapshot_id, symbol)
+            quantity_delta = None if first is None or second is None else second - first
+            attribution = "STATUS_EVENT_ONLY"
+            if quantity_delta is not None:
+                attribution = (
+                    "UNRESOLVED_EXTERNAL_FLOW"
+                    if _external_flow_between(snapshots, prior_snapshot_id, current_snapshot_id)
+                    else "EXCHANGE_QUANTITY_DELTA"
+                )
+                total_est = sum(_tranche_number(t, "estimated_quantity") for t in tranches)
+                delta_shows_fill = total_est > 0 and abs(quantity_delta) / total_est >= _TRANCHE_PARTIAL_FRACTION
+                if effective_status == "NOT_EXECUTED" and delta_shows_fill:
+                    attribution = "STATUS_EVENT_CONFLICT"
+                elif effective_status == "CONFIRMED" and not delta_shows_fill:
+                    attribution = "STATUS_EVENT_CONFLICT"
+
+            remaining = None
+            if attribution == "EXCHANGE_QUANTITY_DELTA":
+                remaining = quantity_delta if plan_action == "INCREASE" else -quantity_delta
+            tranche_states = []
+            remaining_planned_usd = 0.0
+            for tranche in tranches:
+                est = _tranche_number(tranche, "estimated_quantity")
+                amount = _tranche_number(tranche, "amount_usd")
+                fraction = 0.0
+                if remaining is not None:
+                    filled = min(max(remaining, 0.0), est)
+                    fraction = filled / est if est > 0 else 0.0
+                    remaining -= filled
+                elif effective_status == "CONFIRMED":
+                    fraction = None
+                if fraction is None:
+                    state = "UNKNOWN"
+                    remaining_planned_usd += amount
+                elif fraction >= _TRANCHE_FULL_FRACTION:
+                    state = "FULL"
+                elif fraction >= _TRANCHE_PARTIAL_FRACTION:
+                    state = "PARTIAL"
+                    remaining_planned_usd += (1.0 - fraction) * amount
+                else:
+                    state = "UNFILLED"
+                    remaining_planned_usd += amount
+                tranche_states.append({
+                    "sequence": _field(tranche, "sequence"),
+                    "zone_low": _tranche_number(tranche, "price_low"),
+                    "zone_high": _tranche_number(tranche, "price_high"),
+                    "fill_state": state,
+                    "fill_fraction": fraction,
+                    "fill_quantity": None,
+                    "fill_notional_usd": None,
+                })
 
         resting = any(t["fill_state"] in ("UNFILLED", "PARTIAL", "UNKNOWN") for t in tranche_states)
         current_plan = current_plans.get(symbol)
@@ -263,7 +398,7 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=()):
             reason = ("superseded by the current review, which funds a different priority: cancel the "
                       "unfilled resting orders; the remaining strategic gap is re-evaluated and prior "
                       "budgets are not additive")
-        elif current_action != str(_field(plan, "action", "")).strip().upper() or not _zones_match(
+        elif current_action != plan_action or not _zones_match(
                 tranches, _plan_tranches(current_plan)):
             instruction = "REPLACE_WITH_NEW_PLAN"
             reason = ("the current review re-plans this asset at different zones: cancel the unfilled "
@@ -273,16 +408,26 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=()):
             reason = ("the current review re-issues identical zones: equivalent resting orders may remain, "
                       "with the current decision as the authoritative plan record")
         if attribution == "STATUS_EVENT_CONFLICT":
-            reason += "; the snapshot quantity delta and the terminal status event disagree — verify exchange history before cancelling or resting orders"
+            reason += ("; the attribution evidence and the terminal status event disagree — verify "
+                       "exchange history before cancelling or resting orders")
         elif attribution == "UNRESOLVED_EXTERNAL_FLOW":
-            reason += "; an external cash flow between the reference snapshots prevents quantity-based fill attribution — verify fills against exchange history before cancelling"
+            reason += ("; an external cash flow between the reference snapshots prevents quantity-based "
+                       "fill attribution — verify fills against exchange history before cancelling")
         elif attribution == "STATUS_EVENT_ONLY":
             reason += "; referenced snapshots were not supplied, so per-tranche fills rely on the status event only"
+        if unmatched is not None:
+            for label, bucket in (("outside every planned zone", unmatched["out_of_zone"]),
+                                  ("on the opposite side of the plan", unmatched["opposite_side"])):
+                if bucket["count"]:
+                    reason += (f"; {bucket['count']} in-window trade(s) {label} totalling "
+                               f"{bucket['quantity']:.8f} / ${bucket['notional']:.2f} were not attributed")
+        if caveat:
+            reason += f"; {caveat}"
 
-        disposition[symbol] = {
+        record = {
             "decision_id": prior["decision_id"],
             "decision_timestamp": prior["timestamp"],
-            "action": str(_field(plan, "action", "")).strip().upper(),
+            "action": plan_action,
             "effective_status": effective_status,
             "attribution": attribution,
             "quantity_delta": quantity_delta,
@@ -291,12 +436,15 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=()):
             "instruction_reason": reason,
             "tranches": tranche_states,
         }
+        if unmatched is not None:
+            record["unmatched_trades"] = unmatched
+        disposition[symbol] = record
     return disposition
 
 
 def finalize_review(decision, snapshot, *, acquisition, artifact_root=None, history=(),
                     new_cash=0.0, persist=False, decision_path=None,
-                    status_events=(), snapshots=()):
+                    status_events=(), snapshots=(), fills=None):
     """Validate frozen inputs, calculate diagnostics, publish a single operation view.
 
     The caller supplies the already authorized allocation/rebalance and confidence.
@@ -354,7 +502,7 @@ def finalize_review(decision, snapshot, *, acquisition, artifact_root=None, hist
     output['wait_history'] = wait_history(model, history)
     output['superseded_status_events_to_append'] = superseded_status_events(model, history)
     output['prior_plan_disposition'] = prior_plan_disposition(
-        model, history, snapshots=snapshots, status_events=status_events)
+        model, history, snapshots=snapshots, status_events=status_events, fills=fills)
     if output['operation'] != record['operation']:
         raise ValueError('report and persisted operation differ')
     if persist:

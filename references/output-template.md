@@ -24,9 +24,9 @@ fixed strings as follows. Headings not listed here keep their English text
 - Decision basis chain: `证据 → 事实含义 → 组合约束 → 风险门 → 调仓阈值 → Action`.
 - Prior plan disposition section name: `上一计划挂单处置`; instruction
   labels `撤销未成交挂单` / `按新计划替换挂单` / `等价挂单可保留` /
-  `无未成交挂单`; attribution labels `交易所数量差分` / `仅状态事件` /
-  `外部资金流阻断` / `状态事件矛盾`; fill states `足额成交` / `部分成交` /
-  `未成交` / `无法归因`.
+  `无未成交挂单`; attribution labels `交易所成交记录` / `交易所数量差分` /
+  `仅状态事件` / `外部资金流阻断` / `状态事件矛盾`; fill states `足额成交` /
+  `部分成交` / `未成交` / `无法归因`.
 - Position P&L table headers: `资产 | 数量 | 当前价 | 平均成本 | 当前价值 |
   持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比`; coverage bullet
   `成本数据覆盖率`; never label it `总收益`.
@@ -84,11 +84,12 @@ per asset whose most recent prior decision planned executable tranches — this
 answers "what happens to my still-resting orders from previous plans" next to
 the new plan. For each asset show: prior decision id and effective status
 (`PENDING` / `CONFIRMED` / `NOT_EXECUTED`), attribution basis
-(`EXCHANGE_QUANTITY_DELTA` / `STATUS_EVENT_ONLY` / `UNRESOLVED_EXTERNAL_FLOW` /
-`STATUS_EVENT_CONFLICT`), per-tranche fill state
-(`FULL` / `PARTIAL` / `UNFILLED` / `UNKNOWN` with fill fraction), the
-remaining planned dollars, and the order instruction with its deterministic
-reason:
+(`EXCHANGE_TRADE_RECORDS` / `EXCHANGE_QUANTITY_DELTA` / `STATUS_EVENT_ONLY` /
+`UNRESOLVED_EXTERNAL_FLOW` / `STATUS_EVENT_CONFLICT`), per-tranche fill state
+(`FULL` / `PARTIAL` / `UNFILLED` / `UNKNOWN` with fill fraction, plus executed
+quantity and notional when trade records attributed the fill), unmatched
+in-window trades, the remaining planned dollars, and the order instruction
+with its deterministic reason:
 
 - `CANCEL_RESTING` — the unfilled remainder is superseded (budgets are not
   additive) or terminally unexecuted; cancel the manually rested orders.

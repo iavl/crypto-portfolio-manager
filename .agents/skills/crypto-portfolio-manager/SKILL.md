@@ -123,6 +123,20 @@ Assets without a USD price or an unclassifiable WBETH cross-check fail
 closed; the user may explicitly exclude a symbol with `--exclude`, which
 is recorded in the snapshot warnings.
 
+Before publishing a decision with executable plans, also refresh the
+exchange-confirmed fill history so resting-order disposition attributes
+from trade records instead of snapshot deltas:
+
+```bash
+python3 scripts/binance_fills.py --persist
+```
+
+It fetches `myTrades` for held non-stable assets plus recently planned
+symbols over the attribution window, appends only new records
+(deduplicated by symbol and trade id) to the append-only fill store, and
+is read-only. Fetch coverage matters: a symbol absent from the fetched
+set falls back to snapshot-delta attribution.
+
 ### Binance screenshot intake (fallback)
 
 When the user provides the standard Binance wallet-overview screenshot, do
@@ -319,10 +333,15 @@ display data, so the engine uses value ÷ quantity and records a note.
     whose most recent prior decision planned executable tranches, show the
     per-tranche fill attribution and the resting-order instruction
     (`CANCEL_RESTING` / `REPLACE_WITH_NEW_PLAN` / `KEEP_EQUIVALENT_ORDERS` /
-    `NOTHING_RESTING`) with its deterministic reason. These are advisory
-    instructions for manually rested exchange orders; the system cancels
-    nothing itself. A `STATUS_EVENT_CONFLICT` or `UNRESOLVED_EXTERNAL_FLOW`
-    attribution must be surfaced as a verify-before-acting warning.
+    `NOTHING_RESTING`) with its deterministic reason. Fills are attributed from
+    exchange trade records (`EXCHANGE_TRADE_RECORDS`, matched to tranche zones
+    by executed price) whenever the fill history was fetched; snapshot
+    quantity deltas are only the fallback. Unmatched in-window trades
+    (outside every zone or on the opposite side) must be surfaced. These are
+    advisory instructions for manually rested exchange orders; the system
+    cancels nothing itself. A `STATUS_EVENT_CONFLICT` or
+    `UNRESOLVED_EXTERNAL_FLOW` attribution must be surfaced as a
+    verify-before-acting warning.
     For `NO_TRADE`/`WAIT`, include the finalized `NoTradeAttribution` gate
     states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
@@ -548,7 +567,9 @@ fake fixtures and `.gitkeep` files only. Metric history is stored under
 public market/profile artifacts use
 `market-data/sha256/<ohlcv_hash>.json` and
 `volume-profiles/sha256/<profile_hash>.json`. Provider acquisition artifacts
-use `provider-cache/responses/` and `provider-cache/series/`.
+use `provider-cache/responses/` and `provider-cache/series/`. Exchange-confirmed
+executions are appended to `fills/trades.jsonl` (deduplicated by symbol and
+trade id) by `scripts/binance_fills.py`.
 
 Only the current internal runtime contract is supported. If a breaking change
 makes generated local state incompatible, report it clearly and regenerate the
@@ -584,9 +605,10 @@ bundle. It binds the referenced snapshot value into diagnostics, validates
 confidence and execution artifacts, produces the same `FinalOperation` for the
 decision record and report, derives the prior plan disposition for resting
 orders, and optionally appends only after every gate passes. The bundle may
-carry `status_events` and `snapshots` sequences so that disposition fill
-attribution uses exchange snapshot quantity deltas instead of falling back to
-status events only.
+carry `status_events`, `snapshots`, and `fills` (symbol -> trade records; a
+present symbol key means fetched, an empty list means confidently zero trades)
+so the disposition attributes fills from exchange trade records first and
+falls back to snapshot quantity deltas only for symbols without records.
 
 ## Current acquisition contracts
 

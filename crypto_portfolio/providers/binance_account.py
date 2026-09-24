@@ -114,6 +114,57 @@ class FlowEvent:
             raise ProviderDataError("flow event raw_status must be an integer")
 
 
+@dataclass(frozen=True)
+class AccountTrade:
+    """One executed spot trade from the account's own history."""
+
+    symbol: str
+    trade_id: int
+    order_id: int
+    side: str
+    price: float
+    quantity: float
+    quote_quantity: float
+    commission: float
+    commission_asset: str
+    timestamp_ms: int
+    is_maker: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbol", str(self.symbol).strip().upper())
+        for field, value in (("trade_id", self.trade_id), ("order_id", self.order_id)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ProviderDataError(f"trade {field} must be an integer")
+        if self.side not in {"BUY", "SELL"}:
+            raise ProviderDataError("trade side is unsupported")
+        object.__setattr__(
+            self, "price", _decimal_string(self.price, f"{self.symbol}.trade price", minimum=0.0)
+        )
+        object.__setattr__(
+            self, "quantity", _decimal_string(self.quantity, f"{self.symbol}.trade quantity")
+        )
+        object.__setattr__(
+            self,
+            "quote_quantity",
+            _decimal_string(self.quote_quantity, f"{self.symbol}.trade quote quantity"),
+        )
+        object.__setattr__(
+            self,
+            "commission",
+            _decimal_string(self.commission, f"{self.symbol}.trade commission", minimum=0.0),
+        )
+        if self.price <= 0 or self.quantity <= 0:
+            raise ProviderDataError("trade price and quantity must be > 0")
+        object.__setattr__(
+            self, "commission_asset", str(self.commission_asset).strip().upper()
+        )
+        if not self.commission_asset:
+            raise ProviderDataError("trade commission asset must be non-empty")
+        if isinstance(self.timestamp_ms, bool) or not isinstance(self.timestamp_ms, int):
+            raise ProviderDataError("trade timestamp_ms must be an integer")
+        object.__setattr__(self, "is_maker", bool(self.is_maker))
+
+
 def _error_codes(exception: Exception) -> set[int]:
     detail = str(exception)
     diagnostic = getattr(exception, "diagnostic", None)
@@ -340,6 +391,48 @@ class BinanceAccountClient:
             completed_statuses=_COMPLETED_WITHDRAWAL_STATUSES,
         )
 
+    def my_trades(self, symbol: str, since_ms: int, until_ms: int) -> tuple[AccountTrade, ...]:
+        """Executed spot trades of one base asset against the USDT quote.
+
+        The exchange rejects windows wider than 24 hours (-1127), so the
+        requested interval is chunked into sub-24-hour slices. Within a chunk
+        ``/api/v3/myTrades`` pages by ``fromId``; when ``fromId`` is sent the
+        time bounds are ignored by the exchange, so cursor pages are filtered
+        to the chunk window locally and the cursor stops once a page reaches
+        past the chunk end. Chunk-boundary trades are deduplicated by trade id.
+        """
+        pair = f"{symbol.strip().upper()}USDT"
+        if len(pair) <= 4:
+            raise ProviderDataError("trade symbol must be non-empty")
+        chunk_ms = 23 * 60 * 60 * 1000
+        trades: list[AccountTrade] = []
+        seen_ids: set[int] = set()
+        chunk_start = since_ms
+        while chunk_start < until_ms:
+            chunk_end = min(chunk_start + chunk_ms, until_ms)
+            from_id: int | None = None
+            while True:
+                params: dict[str, str] = {"symbol": pair, "limit": str(_PAGE_SIZE)}
+                if from_id is None:
+                    params.update({"startTime": str(chunk_start), "endTime": str(chunk_end)})
+                else:
+                    params["fromId"] = str(from_id)
+                payload = self._signed_get("/api/v3/myTrades", params)
+                if not isinstance(payload, list):
+                    raise ProviderDataError(f"binance myTrades response for {pair} is invalid")
+                if not payload:
+                    break
+                page = [_account_trade(entry, pair) for entry in payload]
+                for trade in page:
+                    if chunk_start <= trade.timestamp_ms <= chunk_end and trade.trade_id not in seen_ids:
+                        seen_ids.add(trade.trade_id)
+                        trades.append(trade)
+                if len(payload) < _PAGE_SIZE or page[-1].timestamp_ms > chunk_end:
+                    break
+                from_id = page[-1].trade_id + 1
+            chunk_start = chunk_end
+        return tuple(trades)
+
     def _flow_history(
         self,
         path: str,
@@ -416,7 +509,29 @@ class BinanceAccountClient:
         return int(parsed.timestamp() * 1000)
 
 
+def _account_trade(entry: Any, pair: str) -> AccountTrade:
+    if not isinstance(entry, Mapping):
+        raise ProviderDataError(f"binance myTrades entry for {pair} is invalid")
+    try:
+        return AccountTrade(
+            symbol=pair[:-4],
+            trade_id=entry["id"],
+            order_id=entry["orderId"],
+            side="BUY" if entry["isBuyer"] else "SELL",
+            price=entry["price"],
+            quantity=entry["qty"],
+            quote_quantity=entry["quoteQty"],
+            commission=entry["commission"],
+            commission_asset=entry["commissionAsset"],
+            timestamp_ms=entry["time"],
+            is_maker=bool(entry["isMaker"]),
+        )
+    except KeyError as exc:
+        raise ProviderDataError(f"binance myTrades entry for {pair} misses {exc.args[0]}") from exc
+
+
 __all__ = [
+    "AccountTrade",
     "BinanceAccountClient",
     "DEFAULT_BASE_URL",
     "FlowEvent",

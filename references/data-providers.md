@@ -135,6 +135,15 @@ only when both are present, otherwise intake fails closed with
 | `GET /sapi/v1/simple-earn/locked/position` | locked positions incl. redeeming amounts |
 | `GET /sapi/v1/capital/deposit/hisrec`, `GET /sapi/v1/capital/withdraw/history` | completed external flows since the previous snapshot |
 | `GET /sapi/v1/simple-earn/account` | Simple Earn valuation cross-check (warning only) |
+| `GET /api/v3/myTrades` | executed spot trades (`<SYM>USDT`) with price, quantity, fee, and timestamp; appended to the fill store via `scripts/binance_fills.py`, deduplicated by symbol and trade id |
+
+`myTrades` rejects windows wider than 24 hours (-1127), so the client chunks
+the interval into sub-24-hour slices and pages each slice by `fromId`,
+filtering cursor pages back to the slice window locally (the exchange ignores
+time bounds once `fromId` is sent) and deduplicating boundary trades by id.
+Fill records are the primary attribution evidence for the
+resting-order disposition (`EXCHANGE_TRADE_RECORDS`); the snapshot
+quantity-delta method is only the fallback when no trade history was fetched.
 
 The normalized snapshot separates economic ownership from funding readiness.
 All valid spot, Earn, and redeeming balances remain in portfolio value and NAV.
