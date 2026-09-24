@@ -184,11 +184,13 @@ def build_binance_dataset(
                 reason="CURRENT_OPERATIONAL_CHECK_IS_NOT_HISTORICAL_EVIDENCE", fetched_at=fetched_at,
             ),
         ))
-    entries.append(unavailable_series(
-        series_id="macro:fred-vintage", symbol="BTC", metric="macro.point_in_time",
-        source="fred-alfred", consumers=("scoring", "regime"),
-        reason="REQUIRES_FRED_API_KEY_AND_VINTAGE_DOWNLOAD", fetched_at=fetched_at,
-    ))
+    # Deterministic evidence series with full dated public history: they fill
+    # capital_flows / macro_liquidity / btc_valuation / ETH onchain in replay
+    # and feed the regime flows domain.  Each failure degrades to MISSING.
+    from .evidence_series import acquire_evidence_series
+    evidence_result = acquire_evidence_series(spec, root)
+    entries.extend(evidence_result["entries"])
+    failures.extend(evidence_result["failures"])
     manifest = build_historical_manifest(spec, entries, created_at=fetched_at)
     _write_json(root / "spec.json", spec.as_dict())
     _write_json(root / "manifest.json", manifest.as_dict())

@@ -507,6 +507,10 @@ class SoSoValueProvider:
                 redact_secrets(str(exc), (self.api_key,)) or exc.__class__.__name__
             ) from None
 
+    def history_payload(self, etf_type: str) -> Any:
+        """Raw v2 history response for research harvesting, keyed by ETF type."""
+        return self._post(etf_type=etf_type)
+
     def collect(self, request: ProviderRequest) -> ProviderResponse:
         if not isinstance(request, ProviderRequest):
             raise ValueError("request must be a ProviderRequest")

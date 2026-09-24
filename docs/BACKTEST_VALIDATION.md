@@ -58,9 +58,20 @@ boundary only. This is a research proxy: production derives `market.breadth`
 from CoinGecko's fraction of the top-20 non-stable universe with a positive
 30d return. The proxy differs in universe and horizon, and a symbol with less
 than a full window leaves the domain UNKNOWN rather than fabricating a value.
-All other non-OHLCV inputs (fundamentals, events, liveness, on-chain, ETF and
-stablecoin flows) stay MISSING or UNKNOWN in historical reviews until their
-point-in-time history is harvested; a run does not silently invent them.
+
+Deterministic evidence with full dated public history is harvested alongside
+the OHLCV: DeFiLlama stablecoin total supply and ETH chain fees, SoSoValue
+BTC/ETH ETF net flow and AUM, FRED realtime-vintage WALCL/DFF, and CoinMetrics
+BTC MVRV. `build-dataset` fetches them (SosoValue and FRED need their API keys;
+each missing source degrades to MISSING, never fabricates), and the replay
+derives documented proxy scores for `capital_flows`, `macro_liquidity`,
+`btc_valuation`, and ETH `onchain` from the values that were published at each
+decision boundary, plus the regime flows domain. An asset whose entire
+positive-weight scoring profile is reconstructable this way (BTC with the full
+harvest) counts as critical-data-complete in replay; the judgment layer
+(fundamentals, satellite valuation, events, liveness) stays MISSING or UNKNOWN
+on purpose — it cannot be replayed without look-ahead, and a run does not
+silently invent it.
 
 ## Commands
 

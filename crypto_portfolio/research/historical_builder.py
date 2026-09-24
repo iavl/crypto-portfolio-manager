@@ -17,6 +17,7 @@ from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.market import Candle, OHLCVSeries, SpotPrice
 from ..models.policy import Policy, SCORING_FACTORS
 from ..models.time import parse_timestamp
+from .evidence_series import EvidenceContext
 
 BREADTH_MA_WINDOW = 200
 
@@ -118,6 +119,7 @@ def _assessment(
     as_of: str,
     policy: Policy,
     semantic_score: int | None,
+    evidence: EvidenceContext | None = None,
 ) -> AssetAssessment:
     trend = calculate_trend_factor(snapshot, policy=policy)
     factors: dict[str, FactorScore] = {
@@ -131,16 +133,30 @@ def _assessment(
         )
         relative_score = relative.score
     profile = policy.scoring_profile(symbol)
+    harvested: dict[str, FactorScore] = (
+        evidence.factor_scores(symbol, as_of) if evidence is not None else {}
+    )
     for factor in SCORING_FACTORS:
         if profile[factor] <= 0:
             factors[factor] = FactorScore(factor, None, availability="NOT_APPLICABLE")
-        elif factor not in factors:
+        elif factor in factors:
+            continue
+        elif factor in harvested:
+            factors[factor] = harvested[factor]
+        else:
             factors[factor] = FactorScore(
                 factor,
                 None if semantic_score is None else float(semantic_score),
                 availability="MISSING" if semantic_score is None else "AVAILABLE",
                 reliability=None if semantic_score is None else 1.0,
             )
+    # An asset whose entire positive-weight profile is AVAILABLE from frozen
+    # point-in-time inputs has complete critical data for replay purposes:
+    # the judgment layer is explicitly ablated, not silently ignored.
+    missing_critical = any(
+        profile[factor] > 0 and factors[factor].availability == "MISSING"
+        for factor in SCORING_FACTORS
+    )
     raw = AssetAssessment(
         symbol=symbol,
         factor_scores=factors,
@@ -148,10 +164,10 @@ def _assessment(
         relative_strength_vs_btc=relative_score,
         risk_tier="normal",
         risk_tier_source="POLICY_DEFAULT",
-        critical_data_complete=semantic_score is not None,
+        critical_data_complete=semantic_score is not None or not missing_critical,
         event_risk=EventRiskAssessment(
-            "NORMAL", reasons=("historical event state is unresolved",) if semantic_score is None else (),
-            unresolved=semantic_score is None,
+            "NORMAL", reasons=("historical event state is unresolved",) if semantic_score is None and missing_critical else (),
+            unresolved=semantic_score is None and missing_critical,
         ),
     )
     return score_assessment(raw, policy=policy)[0]
@@ -170,6 +186,7 @@ def build_historical_reviews(
     end_at: str,
     policy: Policy,
     semantic_score: int | None = None,
+    evidence: EvidenceContext | None = None,
 ) -> tuple[ReplayReview, ...]:
     """Build reviews using only candles completed at each decision boundary."""
     risk_symbols = tuple(symbol for symbol in symbols if symbol != "USD")
@@ -242,6 +259,7 @@ def build_historical_reviews(
                 symbol=symbol, snapshot=snapshot, daily=asset_assessment_series,
                 btc_daily=btc_assessment_series,
                 as_of=as_of, policy=policy, semantic_score=semantic_score,
+                evidence=evidence,
             ).as_dict()
             next_returns[symbol] = next_close / current_close - 1.0
             bars = []
@@ -270,9 +288,12 @@ def build_historical_reviews(
         if not usable:
             continue
         btc_snapshot = snapshots["BTC"][-1]
+        market_flow = evidence.market_flow_state(as_of) if evidence is not None else None
         regime_inputs = build_regime_inputs(
             btc_snapshot, portfolio_drawdown=0.0, breadth=breadth_above_ma(completed_by_symbol),
-            systemic_event_risk=False, provenance_complete=semantic_score is not None,
+            flow_facts={"state": market_flow} if market_flow is not None else None,
+            systemic_event_risk=False,
+            provenance_complete=semantic_score is not None or market_flow is not None,
         ).as_dict()
         reviews.append(ReplayReview(
             as_of=as_of, period_end=period_end_text,

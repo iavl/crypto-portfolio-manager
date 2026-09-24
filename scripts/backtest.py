@@ -20,6 +20,7 @@ from crypto_portfolio.models.policy import load_policy, policy_from_mapping, pol
 from crypto_portfolio.models.time import parse_timestamp  # noqa: E402
 from crypto_portfolio.research.data_audit import coverage_matrix  # noqa: E402
 from crypto_portfolio.research.dataset import build_binance_dataset, load_dataset  # noqa: E402
+from crypto_portfolio.research.evidence_series import EvidenceContext, load_evidence_series  # noqa: E402
 from crypto_portfolio.research.decision_evaluation import evaluate_decision_history  # noqa: E402
 from crypto_portfolio.research.historical_builder import (  # noqa: E402
     apply_semantic_scenario, build_historical_reviews, rebind_initial_weights,
@@ -153,6 +154,8 @@ def command_run(args):
         return
     daily, hourly = _series_maps(series, prefer_normalized=manifest.strict_ready)
     execution_series = daily if spec.execution_timeframe == "1D" else hourly
+    harvested = load_evidence_series(root)
+    evidence = EvidenceContext.from_series(harvested) if harvested else None
     policies = {"core": _core_policy(), "full": load_policy()}
     for scope_name, scope_symbols in spec.asset_scopes.items():
         policy = policies[scope_name]
@@ -164,6 +167,7 @@ def command_run(args):
                 symbols=scope_symbols, initial_weights=next(iter(spec.initial_portfolios.values())),
                 initial_value=spec.initial_value_usd, start_at=spec.start_at,
                 end_at=spec.end_at, policy=policy, semantic_score=None,
+                evidence=evidence,
             )
         except Exception as exc:
             for portfolio_name in spec.initial_portfolios:
