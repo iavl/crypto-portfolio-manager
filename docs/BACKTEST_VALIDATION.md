@@ -88,7 +88,17 @@ python3 scripts/backtest.py evaluate-decisions ~/.local/share/crypto-portfolio-m
 python3 scripts/backtest.py evaluate-scores ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py report ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present/run.json
 python3 scripts/strategy_validity.py ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
+python3 scripts/backtest.py validate ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
+python3 scripts/backtest.py ablation ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 ```
+
+`validate` and `ablation` implement the Strategy V2 Phase 6 protocol
+(`docs/STRATEGY_V2_VALIDATION_PROTOCOL.md`): a freeze record, walk-forward
+window calendar, point-in-time universe eligibility timeline, score ranking
+power (threshold calibration), seeded block bootstrap with budget-breach
+frequency, gap-risk and stablecoin stress, and layer-ablation replays.
+`validation.json` and `ablation.json` land next to the run artifacts and
+are diagnostics only — nothing there feeds back into engine inputs.
 
 `--start-at`, `--warmup-start-at`, and `--end-at` override the window of the
 default spec (or of `--spec`) after the fact; the warm-up must still precede

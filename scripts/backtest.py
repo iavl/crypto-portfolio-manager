@@ -7,6 +7,7 @@ import argparse
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+from typing import Any
 from pathlib import Path
 import subprocess
 import sys
@@ -339,6 +340,251 @@ def command_budget_sensitivity(args):
     print(json.dumps({"output": str(output), "mechanism_note": result["mechanism_note"]}, ensure_ascii=False))
 
 
+def command_validate(args):
+    """Walk-forward validation diagnostics over one frozen dataset (Phase 6)."""
+    from crypto_portfolio.models.policy import load_policy, policy_hash
+    from crypto_portfolio.research.validation import (
+        PARAMETER_CLASSIFICATION,
+        block_bootstrap,
+        dynamic_universe_eligibility,
+        gap_risk_stress,
+        stablecoin_stress,
+        threshold_rank_monotonicity,
+        walk_forward_windows,
+    )
+
+    root = Path(args.dataset)
+    spec, manifest, series = load_dataset(root)
+    run = json.loads((root / "run.json").read_text(encoding="utf-8"))
+    policy = load_policy()
+    experiment = run["runs"].get(args.experiment)
+    if not experiment or experiment.get("status") != "COMPLETED":
+        raise SystemExit(f"experiment {args.experiment} is not COMPLETED in run.json")
+    result_payload = experiment["result"]
+
+    # Daily strategy returns from the ledger valuation path.
+    valuations = result_payload["valuations"]
+    navs = [float(item["total_value_usd"]) for item in valuations]
+    returns = [navs[i] / navs[i - 1] - 1.0 for i in range(1, len(navs))]
+    stable_symbols = set(policy.stable_symbols)
+    risky_valuations = [
+        {
+            "nav": float(item["total_value_usd"]),
+            "risky_weight": max(0.0, 1.0 - sum(
+                float(weight) for symbol, weight in (item.get("weights") or {}).items()
+                if symbol in stable_symbols
+            )),
+        }
+        for item in valuations
+    ]
+
+    # Point-in-time universe eligibility at quarterly boundaries.
+    from crypto_portfolio.models.market import OHLCVSeries
+    from crypto_portfolio.models.time import parse_timestamp
+    from datetime import timedelta
+    daily = {k: v for k, v in series.items() if isinstance(v, OHLCVSeries) and v.timeframe == "1D"}
+    universe_rows = []
+    boundaries = sorted({
+        parse_timestamp(spec.start_at) + timedelta(days=step)
+        for step in range(0, max(1, (parse_timestamp(spec.end_at) - parse_timestamp(spec.start_at)).days) + 1, 90)
+    })
+    caches = {
+        s.symbol: [item for item in s.completed_candles()]
+        for s in daily.values()
+    }
+    for boundary in boundaries:
+        closes: dict[str, list[float]] = {}
+        volumes: dict[str, list[float]] = {}
+        for symbol, candles in caches.items():
+            window = [c for c in candles if parse_timestamp(c.timestamp) < boundary]
+            closes[symbol] = [float(c.close) for c in window]
+            volumes[symbol] = [float(c.volume) for c in window]
+        row = dynamic_universe_eligibility(
+            closes_by_symbol=closes, volumes_by_symbol=volumes,
+        )
+        universe_rows.append({"as_of": boundary.date().isoformat(), **row})
+
+    # Threshold calibration over the score-evaluation rows.
+    score_rows: list[dict[str, Any]] = []
+    score_path = root / "score-evaluation.json"
+    if score_path.exists():
+        evaluation = json.loads(score_path.read_text(encoding="utf-8"))
+        for scope in (evaluation.get("scopes") or {}).values():
+            for row in scope.get("rows", []):
+                for horizon in (30, 90, 180):
+                    label = (row.get("labels") or {}).get(str(horizon)) or {}
+                    if label.get("status") != "AVAILABLE":
+                        continue
+                    score_rows.append({
+                        "symbol": row["symbol"],
+                        "horizon": horizon,
+                        "normalized_score": row.get("normalized_score"),
+                        "score": row.get("score"),
+                        "forward_return": label.get("forward_return"),
+                        "relative_return_vs_btc": label.get("relative_return_vs_btc"),
+                    })
+    calibration: dict[str, Any] = {}
+    for horizon in (30, 90, 180):
+        horizon_rows = [r for r in score_rows if r["horizon"] == horizon]
+        block = {"samples": len(horizon_rows)}
+        for field in ("normalized_score", "score"):
+            block[field] = threshold_rank_monotonicity(
+                horizon_rows, score_field=field, forward_field="forward_return",
+            )
+        block["normalized_vs_btc_relative"] = threshold_rank_monotonicity(
+            horizon_rows, score_field="normalized_score",
+            forward_field="relative_return_vs_btc",
+        )
+        calibration[str(horizon)] = block
+
+    final_weights = {
+        str(symbol): float(weight)
+        for symbol, weight in (valuations[-1].get("weights") or {}).items()
+    }
+    result = {
+        "contract": "STRATEGY_V2_VALIDATION",
+        "freeze": {
+            "git_sha": _git_sha(),
+            "policy_hash": policy_hash(policy),
+            "dataset_manifest_id": manifest.manifest_id,
+            "dataset_strict_ready": manifest.strict_ready,
+            "window": {"start_at": spec.start_at, "end_at": spec.end_at},
+            "experiment": args.experiment,
+            "universe": sorted(set(policy.core_symbols) | set(policy.satellite_symbols)),
+        },
+        "parameter_classification": PARAMETER_CLASSIFICATION,
+        "walk_forward_windows": walk_forward_windows(
+            start_at=spec.start_at, end_at=spec.end_at,
+            train_years=args.train_years, validate_years=args.validate_years,
+        ),
+        "dynamic_universe": universe_rows,
+        "threshold_calibration": calibration,
+        "block_bootstrap": block_bootstrap(
+            returns, block_days=args.block_days, draws=args.draws,
+            seed=args.seed, risk_budget=float(policy.max_portfolio_drawdown),
+        ),
+        "gap_risk_stress": gap_risk_stress(
+            valuations=risky_valuations, risk_budget=float(policy.max_portfolio_drawdown),
+        ),
+        "stablecoin_stress": stablecoin_stress(final_weights, policy=policy),
+        "attribution": result_payload.get("strategy_attribution"),
+    }
+    output = Path(args.output) if args.output else root / "validation.json"
+    _write(output, result)
+    print(json.dumps({
+        "output": str(output),
+        "windows": len(result["walk_forward_windows"]),
+        "calibration_samples": len(score_rows),
+        "bootstrap_breach_frequency": result["block_bootstrap"]["breach_frequency"],
+        "gap_breaches": sum(1 for row in result["gap_risk_stress"]["rows"] if row["budget_breach"]),
+    }, ensure_ascii=False))
+
+
+def command_ablation(args):
+    """Layer-ablation replays over one frozen dataset (Phase 6)."""
+    from crypto_portfolio.models.policy import load_policy, policy_from_mapping, policy_hash
+    from crypto_portfolio.research.historical_builder import (
+        build_historical_reviews,
+        rebind_initial_weights,
+    )
+    from crypto_portfolio.research.validation import ablation_policy
+
+    spec, manifest, series = load_dataset(args.dataset)
+    daily, hourly = _series_maps(series, prefer_normalized=manifest.strict_ready)
+    execution_series = daily if spec.execution_timeframe == "1D" else hourly
+    harvested = load_evidence_series(Path(args.dataset))
+    evidence = EvidenceContext.from_series(harvested) if harvested else None
+    scope_name, portfolio_name, mode, cost = args.experiment.split("/")
+    symbols = spec.asset_scopes[scope_name]
+    policy = _core_policy() if scope_name == "core" else load_policy()
+    initial_weights = spec.initial_portfolios[portfolio_name]
+    variants: list[tuple[str, dict[str, Any]]] = [
+        ("baseline", {}),
+        ("without_fundamentals", {"disable_factors": ("fundamentals",)}),
+        ("without_valuation", {"disable_factors": ("valuation", "btc_valuation")}),
+        ("without_onchain", {"disable_factors": ("onchain",)}),
+        ("without_relative_strength", {"disable_factors": ("relative_strength_btc",)}),
+        ("without_regime_trend_domain", {}),
+        ("without_execution_overlay", {"disable_execution_overlay": True}),
+        ("without_satellites", {"disable_satellites": True}),
+        ("without_drawdown_emergency_overlay", {"disable_emergency_overlay": True}),
+    ]
+    rows = []
+    for name, options in variants:
+        if args.only is not None and name != args.only:
+            continue
+        variant_manifest: dict[str, Any] = {}
+        if name == "without_regime_trend_domain":
+            import json as _json
+            variant_data = _json.loads(_json.dumps(policy.as_dict()))
+            weights = dict(variant_data["regime_model"]["domain_weights"])
+            # Zero the trend domain and renormalize the systemic domains; the
+            # key stays because the parser requires the exact domain set.
+            weights["trend"] = 0.0
+            total_weight = sum(weights.values())
+            variant_data["regime_model"]["domain_weights"] = {
+                k: v / total_weight for k, v in weights.items()
+            }
+            variant_manifest = {"disable_regime_trend_domain": True}
+        else:
+            variant_data, variant_manifest = ablation_policy(policy, **options)
+        try:
+            variant_policy = policy_from_mapping(variant_data)
+            reviews = build_historical_reviews(
+                daily_by_symbol=daily, execution_by_symbol=execution_series,
+                hourly_by_symbol=execution_series, execution_timeframe=spec.execution_timeframe,
+                symbols=symbols, initial_weights=next(iter(spec.initial_portfolios.values())),
+                initial_value=spec.initial_value_usd, start_at=spec.start_at,
+                end_at=spec.end_at, policy=variant_policy, semantic_score=None,
+                evidence=evidence,
+            )
+            reviews = rebind_initial_weights(reviews, initial_weights, spec.initial_value_usd)
+            result = run_historical_backtest(
+                reviews, policy=variant_policy,
+                fee_bps=spec.fee_bps, slippage_bps=spec.slippage_bps,
+            )
+        except Exception as exc:
+            rows.append({
+                "variant": name, "status": "BLOCKED",
+                "reason": f"{exc.__class__.__name__}: {exc}",
+                "policy_hash": policy_hash(variant_policy),
+            })
+            continue
+        metrics = result["metrics"]
+        rows.append({
+            "variant": name,
+            "status": "COMPLETED",
+            "policy_hash": policy_hash(variant_policy),
+            "manifest": variant_manifest,
+            "cagr": metrics["cagr"],
+            "total_return": metrics["total_return"],
+            "maximum_drawdown": metrics["maximum_drawdown"],
+            "annualized_volatility": metrics["annualized_volatility"],
+            "sharpe_rf_zero": metrics["sharpe_rf_zero"],
+            "trades": len(result["trades"]),
+            "total_turnover": result["total_turnover"],
+            "regime_counts": result["regime_counts"],
+            "risk_engine_diagnostics": result.get("risk_engine_diagnostics"),
+            "attribution": result.get("strategy_attribution"),
+        })
+    output = Path(args.output) if args.output else Path(args.dataset) / "ablation.json"
+    _write(output, {
+        "contract": "STRATEGY_V2_ABLATION",
+        "freeze": {"git_sha": _git_sha(), "experiment": args.experiment},
+        "rows": rows,
+    })
+    for row in rows:
+        if row["status"] != "COMPLETED":
+            print(f"{row['variant']}: BLOCKED {row['reason'][:80]}")
+            continue
+        print(
+            f"{row['variant']}: cagr={row['cagr']:+.4f} maxdd={row['maximum_drawdown']:.4f} "
+            f"vol={row['annualized_volatility']:.4f} sharpe={row['sharpe_rf_zero']:.3f} "
+            f"trades={row['trades']} turnover={row['total_turnover']:.3f}"
+        )
+    print(json.dumps({"output": str(output)}, ensure_ascii=False))
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -380,6 +626,24 @@ def parse_args(argv=None):
     report.add_argument("run")
     report.add_argument("--output")
     report.set_defaults(handler=command_report)
+    validate = sub.add_parser("validate")
+    validate.add_argument("dataset")
+    validate.add_argument("--experiment", default="full/core_existing/strict/main_cost")
+    validate.add_argument("--train-years", type=int, default=2)
+    validate.add_argument("--validate-years", type=int, default=1)
+    validate.add_argument("--block-days", type=int, default=21)
+    validate.add_argument("--draws", type=int, default=200)
+    validate.add_argument("--seed", type=int, default=20260925)
+    validate.add_argument("--output")
+    validate.set_defaults(handler=command_validate)
+
+    ablation = sub.add_parser("ablation")
+    ablation.add_argument("dataset")
+    ablation.add_argument("--experiment", default="full/core_existing/strict/main_cost")
+    ablation.add_argument("--only", default=None, help="run a single variant by name")
+    ablation.add_argument("--output")
+    ablation.set_defaults(handler=command_ablation)
+
     sensitivity = sub.add_parser("budget-sensitivity")
     sensitivity.add_argument("dataset")
     sensitivity.add_argument("--budgets", default="0.15,0.20,0.25")
