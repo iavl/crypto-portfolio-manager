@@ -11,7 +11,14 @@ from ..models.market_overlays import MarketOverlays
 from ..models.policy import Policy, RegimeLimits, resolve_policy
 from .confidence import compose_deployment_factors, confidence_deployment_factor
 from .core_eligibility import eth_core_eligibility
-from .risk import drawdown_budget_overlay_floor
+from .portfolio_risk import (
+    PortfolioRiskInputs,
+    combined_risk_cap,
+    marginal_risk_contributions,
+    portfolio_volatility,
+    volatility_budget_scale,
+)
+from .risk import risk_overlay_floor
 from .scoring import score_assessment
 
 
@@ -23,6 +30,7 @@ class AllocationResult:
     stable_sleeve_target: float = 0.0
     deployment_allowances: Mapping[str, Mapping[str, Any]] | None = None
     strategic_stable_target: float = 0.0
+    risk_engine: Mapping[str, Any] | None = None
 
     @property
     def constraint_residual_cash(self) -> float:
@@ -60,6 +68,7 @@ class AllocationResult:
                 symbol: dict(value)
                 for symbol, value in (self.deployment_allowances or {}).items()
             },
+            "risk_engine": dict(self.risk_engine) if self.risk_engine is not None else None,
         }
 
 
@@ -562,8 +571,23 @@ def build_target_allocation(
     decision_confidence: Any | None = None,
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
+    risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
+    risk_mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
+    risk_metrics: PortfolioRiskInputs | None = None
+    if risk_inputs is not None:
+        risk_metrics = (
+            risk_inputs
+            if isinstance(risk_inputs, PortfolioRiskInputs)
+            else PortfolioRiskInputs.from_mapping(risk_inputs)
+        )
+    if risk_mode == "volatility_budget" and risk_metrics is None:
+        raise ValueError(
+            "risk_engine.mode=volatility_budget requires portfolio risk inputs "
+            "(asset volatilities and correlations); the drawdown ladder is not a "
+            "fallback for normal sizing"
+        )
     parsed_overlays = None
     if overlays is not None:
         parsed_overlays = overlays if isinstance(overlays, MarketOverlays) else MarketOverlays.from_mapping(overlays)
@@ -598,13 +622,21 @@ def build_target_allocation(
     if sum(current_weights.values()) > 1.0 + 1e-9:
         raise ValueError("current_weights must sum to no more than 1")
 
-    overlay_floor, overlay_reason = drawdown_budget_overlay_floor(
+    overlay_floor, overlay_reason, overlay_state = risk_overlay_floor(
         resolved, portfolio_drawdown, market_recovery_streak
     )
-    stable_target = max(
-        resolved.min_stablecoin_weight, limits.stablecoin_target, overlay_floor
-    )
     strategic_stable_only = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
+    if risk_mode == "volatility_budget":
+        # Drawdown is only the emergency brake in this mode. The base stable
+        # floor stays the policy/regime one; the emergency cap joins the
+        # combined risk-cap minimum after the strategic allocation is built.
+        emergency_floor = overlay_floor
+        base_stable = strategic_stable_only
+        stable_target = base_stable
+    else:
+        emergency_floor = 0.0
+        base_stable = strategic_stable_only
+        stable_target = max(strategic_stable_only, overlay_floor)
     risky_budget = 1.0 - stable_target
     satellite_cap = min(limits.satellite_max, risky_budget)
     candidates = _assessment_symbols(assessments, resolved)
@@ -619,7 +651,7 @@ def build_target_allocation(
         f"satellite cap {satellite_cap:.2%}",
         f"single-asset cap {limits.single_asset_max:.2%}",
     ]
-    if overlay_floor > strategic_stable_only + 1e-12:
+    if risk_mode != "volatility_budget" and overlay_floor > strategic_stable_only + 1e-12:
         constraints.append(
             f"drawdown budget overlay floor {overlay_floor:.2%} overrides the "
             f"{regime_name} stable target {strategic_stable_only:.2%}"
@@ -834,7 +866,88 @@ def build_target_allocation(
             f"{residual_core:.2%} of core budget stayed unabsorbed after every core cap; "
             "it becomes constraint residual cash in the stable sleeve"
         )
-    stable_target += residual_core
+
+    risk_engine_block: dict[str, Any] | None = None
+    if risk_mode == "volatility_budget":
+        # Combined risk-cap minimum: the strategic risky sleeve is bounded by
+        # the tightest of the volatility budget, the emergency drawdown brake,
+        # and the policy/regime stable floor. Caps never multiply, so a
+        # stressed book cannot be shrunk 0.7 x 0.75 x 0.5 by stacked layers.
+        assert risk_metrics is not None  # guarded at function entry
+        covariance = risk_metrics.covariance()
+        portfolio_cfg = resolved.risk_engine["portfolio_risk"]
+        risky_raw = {**core_weights, **satellite_weights}
+        raw_risky_total = sum(risky_raw.values())
+        scale_info: Mapping[str, Any] = {"risk_scaling_factor": 1.0, "binding": "none", "max_volatility_exceeded": False}
+        sigma_raw = 0.0
+        if raw_risky_total > 1e-12:
+            sigma_raw = portfolio_volatility(risky_raw, covariance)
+            scale_info = volatility_budget_scale(
+                sigma_raw,
+                target_volatility=float(portfolio_cfg["target_volatility"]),
+                max_volatility=float(portfolio_cfg["max_volatility"]),
+            )
+        cap_candidates: dict[str, float | None] = {
+            "base_stable_floor": 1.0 - base_stable if raw_risky_total > 0 else None,
+            "emergency_overlay": 1.0 - emergency_floor if emergency_floor > 0 else None,
+            "volatility_budget": (
+                raw_risky_total * float(scale_info["risk_scaling_factor"])
+                if raw_risky_total > 0 else None
+            ),
+        }
+        combined = combined_risk_cap(cap_candidates)
+        final_risky_total = min(raw_risky_total, float(combined["cap"]))
+        if final_risky_total < raw_risky_total - 1e-12:
+            binding = str(combined["binding_constraint"])
+        else:
+            binding = "strategic_target"
+        final_scale = final_risky_total / raw_risky_total if raw_risky_total > 1e-12 else 0.0
+        if final_scale < 1.0 - 1e-12:
+            reasons.append(
+                f"volatility-budget risk engine scales the risky sleeve to "
+                f"{final_risky_total:.2%} (raw strategic {raw_risky_total:.2%}, "
+                f"estimated portfolio volatility {sigma_raw:.2%}); binding constraint {binding}"
+            )
+        core_weights = {s: w * final_scale for s, w in core_weights.items()}
+        satellite_weights = {s: w * final_scale for s, w in satellite_weights.items()}
+        final_risky = {**core_weights, **satellite_weights}
+        contributions = (
+            marginal_risk_contributions(final_risky, covariance)
+            if sum(final_risky.values()) > 1e-12 else {}
+        )
+        risk_engine_block = {
+            "mode": risk_mode,
+            "portfolio_volatility": sigma_raw,
+            "target_volatility": float(portfolio_cfg["target_volatility"]),
+            "max_volatility": float(portfolio_cfg["max_volatility"]),
+            "max_volatility_exceeded": bool(scale_info["max_volatility_exceeded"]),
+            "risk_scaling_factor": final_scale,
+            "volatility_budget_scale": dict(scale_info),
+            "asset_risk_contributions": {
+                symbol: {
+                    "weight": details["weight"],
+                    "risk_contribution_share": details["risk_contribution_share"],
+                }
+                for symbol, details in contributions.items()
+            },
+            "emergency_overlay_state": dict(overlay_state),
+            "binding_risk_constraint": binding,
+            "risk_caps": {
+                name: (value if value is None else min(value, raw_risky_total if raw_risky_total > 0 else value))
+                for name, value in cap_candidates.items()
+            },
+        }
+        stable_target = 1.0 - sum(final_risky.values())
+        for symbol, details in deployment_allowances.items():
+            scaled = satellite_weights.get(symbol, 0.0)
+            details["strategic_target_weight"] = scaled
+            details["max_immediate_increase_weight"] = scaled * details["deployment_factor"]
+    else:
+        stable_target += residual_core
+        risk_engine_block = {
+            "mode": risk_mode,
+            "emergency_overlay_state": dict(overlay_state),
+        }
 
     target: dict[str, float] = _stable_targets(
         resolved.stable_symbols, stable_target, current_weights
@@ -862,6 +975,7 @@ def build_target_allocation(
     return AllocationResult(
         target, tuple(reasons), tuple(constraints), stable_target, deployment_allowances,
         strategic_stable_target=strategic_stable_only,
+        risk_engine=risk_engine_block,
     )
 
 
@@ -877,6 +991,7 @@ def allocate(
     decision_confidence: Any | None = None,
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
+    risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
 ) -> AllocationResult:
     return build_target_allocation(
         policy, regime, assessments, current_weights,
@@ -884,6 +999,7 @@ def allocate(
         decision_confidence=decision_confidence,
         portfolio_drawdown=portfolio_drawdown,
         market_recovery_streak=market_recovery_streak,
+        risk_inputs=risk_inputs,
     )
 
 

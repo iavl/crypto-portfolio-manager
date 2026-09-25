@@ -29,12 +29,88 @@
       "LINK"
     ]
   },
-  "stress_scenario": {
-    "BTC": -0.2,
-    "ETH": -0.3,
-    "SOL": -0.4,
-    "AAVE": -0.4,
-    "BNB": -0.35
+  "stress_scenarios": {
+    "moderate": {
+      "BTC": -0.2,
+      "ETH": -0.3,
+      "SOL": -0.4,
+      "AAVE": -0.4,
+      "BNB": -0.35
+    },
+    "severe_crypto_crash": {
+      "BTC": -0.4,
+      "ETH": -0.55,
+      "SOL": -0.65,
+      "AAVE": -0.65,
+      "BNB": -0.55
+    },
+    "liquidity_shock": {
+      "BTC": -0.25,
+      "ETH": -0.35,
+      "SOL": -0.5,
+      "AAVE": -0.55,
+      "BNB": -0.4
+    },
+    "correlation_one": {
+      "BTC": -0.4,
+      "ETH": -0.4,
+      "SOL": -0.4,
+      "AAVE": -0.4,
+      "BNB": -0.4
+    },
+    "btc_gap_down": {
+      "BTC": -0.3,
+      "ETH": -0.35,
+      "SOL": -0.4,
+      "AAVE": -0.4,
+      "BNB": -0.35
+    },
+    "eth_alt_crash": {
+      "BTC": -0.1,
+      "ETH": -0.45,
+      "SOL": -0.5,
+      "AAVE": -0.55,
+      "BNB": -0.45
+    },
+    "stablecoin_depeg": {
+      "BTC": 0.0,
+      "ETH": 0.0,
+      "SOL": 0.0,
+      "AAVE": 0.0,
+      "BNB": 0.0,
+      "USDT": -0.05,
+      "USDC": -0.05,
+      "DAI": -0.02,
+      "FDUSD": -0.05,
+      "TUSD": -0.1,
+      "USD": 0.0,
+      "CASH": 0.0,
+      "U": -0.05,
+      "USD1": -0.05
+    }
+  },
+  "risk_engine": {
+    "mode": "legacy_drawdown",
+    "portfolio_risk": {
+      "target_volatility": 0.25,
+      "max_volatility": 0.35,
+      "volatility_window_weights": {
+        "30d": 0.4,
+        "90d": 0.6
+      },
+      "correlation_window_days": 90,
+      "beta_window_days": 90,
+      "annualization_days": 365,
+      "minimum_history_days": 100
+    },
+    "emergency_overlay": {
+      "caution_fraction": 0.6,
+      "emergency_fraction": 0.8,
+      "breach_fraction": 1.0,
+      "caution_risky_cap": 0.9,
+      "emergency_risky_cap": 0.6,
+      "breach_risky_cap": 0.25
+    }
   },
   "risk": {
     "min_stablecoin_weight": 0.15,

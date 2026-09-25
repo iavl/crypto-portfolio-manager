@@ -26,7 +26,10 @@ from crypto_portfolio.research.historical_builder import (  # noqa: E402
     apply_semantic_scenario, build_historical_reviews, rebind_initial_weights,
     review_gap_diagnostics,
 )
-from crypto_portfolio.research.orchestrator import run_historical_backtest  # noqa: E402
+from crypto_portfolio.research.orchestrator import (  # noqa: E402
+    build_risk_inputs_for_reviews,
+    run_historical_backtest,
+)
 from crypto_portfolio.research.reporting import render_run_report  # noqa: E402
 from crypto_portfolio.research.score_evaluation import evaluate_scores  # noqa: E402
 from crypto_portfolio.research.stress import drawdown_boundary_stress, drawdown_budget_stress  # noqa: E402
@@ -157,6 +160,18 @@ def command_run(args):
     harvested = load_evidence_series(root)
     evidence = EvidenceContext.from_series(harvested) if harvested else None
     policies = {"core": _core_policy(), "full": load_policy()}
+    if args.risk_engine_mode:
+        policies = {
+            name: policy_from_mapping({
+                **policy.as_dict(),
+                "risk_engine": {
+                    **(policy.as_dict().get("risk_engine") or {}),
+                    "mode": args.risk_engine_mode,
+                },
+            })
+            for name, policy in policies.items()
+        }
+        run["risk_engine_mode_override"] = args.risk_engine_mode
     for scope_name, scope_symbols in spec.asset_scopes.items():
         policy = policies[scope_name]
         run["policy_hashes"][scope_name] = policy_hash(policy)
@@ -181,6 +196,11 @@ def command_run(args):
             daily, symbols=scope_symbols, start_at=spec.start_at, end_at=spec.end_at,
             produced_reviews=len(base_reviews),
         )
+        scope_risk_inputs = None
+        if (policy.risk_engine or {}).get("mode") == "volatility_budget":
+            scope_risk_inputs = build_risk_inputs_for_reviews(
+                base_reviews, daily_by_symbol=daily, policy=policy,
+            )
         score_observations = []
         for review in base_reviews:
             for symbol, raw_assessment in review.assessments.items():
@@ -208,6 +228,7 @@ def command_run(args):
                         ),
                         "result": run_historical_backtest(
                             reviews, policy=policy, fee_bps=spec.fee_bps, slippage_bps=spec.slippage_bps,
+                            risk_inputs_by_review=scope_risk_inputs,
                         ),
                     }
                     if semantic is None:
@@ -217,6 +238,7 @@ def command_run(args):
                             "result": run_historical_backtest(
                                 reviews, policy=policy, fee_bps=spec.fee_bps,
                                 slippage_bps=spec.slippage_bps, ordinary_review_weekday=0,
+                                risk_inputs_by_review=scope_risk_inputs,
                             ),
                         }
                         for cost in spec.cost_sensitivity_bps:
@@ -225,6 +247,7 @@ def command_run(args):
                                 "status": "COMPLETED", "validation_mode": "COST_SENSITIVITY",
                                 "result": run_historical_backtest(
                                     reviews, policy=policy, fee_bps=cost, slippage_bps=0.0,
+                                    risk_inputs_by_review=scope_risk_inputs,
                                 ),
                             }
                 except Exception as exc:
@@ -332,6 +355,13 @@ def parse_args(argv=None):
     run = sub.add_parser("run")
     run.add_argument("dataset")
     run.add_argument("--allow-usdt-approximation", action="store_true")
+    run.add_argument(
+        "--risk-engine-mode",
+        choices=["legacy_drawdown", "volatility_budget"],
+        default=None,
+        help="research-only override of risk_engine.mode for A/B replay; "
+        "the canonical policy file is never rewritten",
+    )
     run.set_defaults(handler=command_run)
     decisions = sub.add_parser("evaluate-decisions")
     decisions.add_argument("dataset")

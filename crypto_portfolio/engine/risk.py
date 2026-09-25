@@ -270,6 +270,98 @@ def drawdown_budget_overlay_floor(
     return 1.0 - risky_cap, reason
 
 
+def emergency_drawdown_overlay_floor(
+    policy: Policy | None = None,
+    portfolio_drawdown: float | None = None,
+    market_recovery_streak: int = 0,
+) -> tuple[float, str | None, dict[str, Any]]:
+    """Staged emergency-brake stable floor (volatility-budget mode).
+
+    Unlike the legacy ladder, drawdown no longer scales normal sizing: the
+    book runs at its volatility-budget target until the budget consumed by
+    drawdown crosses a configured stage boundary (CAUTION, EMERGENCY), and
+    only then does the brake cut risky weight in steps. The confirmed
+    market-recovery re-risk floor from ``risk.drawdown_budget_overlay``
+    applies unchanged. Returns ``(floor, reason, state)``.
+    """
+    from .portfolio_risk import emergency_drawdown_state
+
+    resolved = policy or resolve_policy()
+    engine = resolved.risk_engine or {}
+    overlay = resolved.drawdown_budget_overlay or {}
+    if not overlay.get("enabled", False) or portfolio_drawdown is None:
+        return 0.0, None, {"state": "NORMAL", "budget_consumed": 0.0, "risky_cap": 1.0}
+    if isinstance(portfolio_drawdown, bool) or not isinstance(portfolio_drawdown, (int, float)):
+        raise ValueError("portfolio_drawdown must be numeric")
+    drawdown = float(portfolio_drawdown)
+    if not math.isfinite(drawdown) or drawdown > 0:
+        raise ValueError("portfolio_drawdown must be finite and <= 0")
+    if isinstance(market_recovery_streak, bool) or not isinstance(market_recovery_streak, int):
+        raise ValueError("market_recovery_streak must be an integer")
+    if market_recovery_streak < 0:
+        raise ValueError("market_recovery_streak must be >= 0")
+    bands = engine.get("emergency_overlay") or {}
+    state = emergency_drawdown_state(
+        drawdown,
+        budget=float(resolved.max_portfolio_drawdown),
+        caution_fraction=float(bands["caution_fraction"]),
+        emergency_fraction=float(bands["emergency_fraction"]),
+        breach_fraction=float(bands["breach_fraction"]),
+        caution_risky_cap=float(bands["caution_risky_cap"]),
+        emergency_risky_cap=float(bands["emergency_risky_cap"]),
+        breach_risky_cap=float(bands["breach_risky_cap"]),
+    )
+    risky_cap = float(state["risky_cap"])
+    reason: str | None = None
+    if state["state"] != "NORMAL":
+        reason = (
+            f"emergency drawdown overlay state {state['state']} "
+            f"({state['budget_consumed']:.0%} of the {resolved.max_portfolio_drawdown:.2%} "
+            f"budget consumed) caps risky weight at {risky_cap:.2%}"
+        )
+    recovery_floor = float(overlay.get("recovery_risky_floor", 0.0))
+    recovery_reviews = int(overlay.get("recovery_reviews", 1))
+    if market_recovery_streak >= recovery_reviews and recovery_floor > risky_cap:
+        risky_cap = recovery_floor
+        reason = (
+            f"market recovery for {market_recovery_streak} reviews re-risks up to "
+            f"{risky_cap:.2%} despite the emergency drawdown overlay"
+        )
+        state = {**state, "recovery_floor_applied": True}
+    return 1.0 - risky_cap, reason, dict(state)
+
+
+def risk_overlay_floor(
+    policy: Policy | None = None,
+    portfolio_drawdown: float | None = None,
+    market_recovery_streak: int = 0,
+) -> tuple[float, str | None, dict[str, Any]]:
+    """Dispatch the drawdown overlay floor on the configured risk-engine mode.
+
+    ``legacy_drawdown`` reproduces the Strategy V1 continuous ladder exactly;
+    ``volatility_budget`` uses the staged emergency brake. The returned state
+    block names the active mechanism so reports can distinguish them.
+    """
+    resolved = policy or resolve_policy()
+    mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
+    if mode == "volatility_budget":
+        return emergency_drawdown_overlay_floor(
+            resolved, portfolio_drawdown, market_recovery_streak
+        )
+    floor, reason = drawdown_budget_overlay_floor(
+        resolved, portfolio_drawdown, market_recovery_streak
+    )
+    consumed = 0.0
+    if portfolio_drawdown is not None and float(resolved.max_portfolio_drawdown) > 0:
+        consumed = min(1.0, max(0.0, -float(portfolio_drawdown) / float(resolved.max_portfolio_drawdown)))
+    state = {
+        "state": "LEGACY_LADDER",
+        "budget_consumed": consumed,
+        "risky_cap": 1.0 - floor,
+    }
+    return floor, reason, state
+
+
 def drawdown_budget_ladder_path(
     policy: Policy | None = None,
     *,
@@ -367,7 +459,7 @@ def run_risk_gate(
     regime_name = regime.regime if hasattr(regime, "regime") else str(regime).upper()
     limits = resolved.regime(regime_name)
     stable_weight = sum(weights.get(symbol, 0.0) for symbol in resolved.stable_symbols)
-    overlay_floor, _overlay_reason = drawdown_budget_overlay_floor(
+    overlay_floor, _overlay_reason, _overlay_state = risk_overlay_floor(
         resolved, current_drawdown, market_recovery_streak
     )
     required_stable = max(
@@ -754,9 +846,11 @@ __all__ = [
     "chain_liveness_deployment_factor",
     "drawdown_budget_ladder_path",
     "drawdown_budget_overlay_floor",
+    "emergency_drawdown_overlay_floor",
     "event_risk_deployment_factor",
     "projected_peak_drawdown",
     "remaining_drawdown_capacity",
+    "risk_overlay_floor",
     "run_risk_gate",
     "scenario_portfolio_return",
     "stress_diagnostic",

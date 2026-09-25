@@ -90,7 +90,7 @@ def drawdown_budget_stress(policy: Policy | None = None) -> dict[str, Any]:
         })
 
     severe = min(
-        float(value) for symbol, value in resolved.stress_scenario.items()
+        float(value) for symbol, value in resolved.stress_scenarios["moderate"].items()
         if symbol not in resolved.stable_symbols and not resolved.is_excluded(symbol)
     )
     # The severest configured single-asset decline applied to the whole risky

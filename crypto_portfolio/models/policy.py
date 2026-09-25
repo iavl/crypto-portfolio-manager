@@ -43,7 +43,8 @@ _TOP_LEVEL_FIELDS = {
     "investment_horizon_months",
     "universe",
     "risk",
-    "stress_scenario",
+    "stress_scenarios",
+    "risk_engine",
     "chain_liveness",
     "benchmarks",
     "rebalance",
@@ -95,6 +96,37 @@ _DEFAULT_REGIME_MODEL: dict[str, Any] = {
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown", "drawdown_budget_overlay"}
+# Canonical multi-scenario stress framework. Scenario returns are mechanism
+# placeholders pending Strategy V2 Phase 6 walk-forward calibration; only
+# ``moderate`` preserves the Strategy V1 single-scenario values exactly.
+_STRESS_SCENARIO_NAMES = {
+    "moderate",
+    "severe_crypto_crash",
+    "liquidity_shock",
+    "correlation_one",
+    "btc_gap_down",
+    "eth_alt_crash",
+    "stablecoin_depeg",
+}
+_RISK_ENGINE_MODES = {"legacy_drawdown", "volatility_budget"}
+_RISK_ENGINE_FIELDS = {"mode", "portfolio_risk", "emergency_overlay"}
+_RISK_ENGINE_PORTFOLIO_FIELDS = {
+    "target_volatility",
+    "max_volatility",
+    "volatility_window_weights",
+    "correlation_window_days",
+    "beta_window_days",
+    "annualization_days",
+    "minimum_history_days",
+}
+_RISK_ENGINE_EMERGENCY_FIELDS = {
+    "caution_fraction",
+    "emergency_fraction",
+    "breach_fraction",
+    "caution_risky_cap",
+    "emergency_risky_cap",
+    "breach_risky_cap",
+}
 _OVERLAY_FIELDS = {"enabled", "recovery_reviews", "recovery_risky_floor"}
 _CHAIN_LIVENESS_FIELDS = {"degraded_deployment_factor", "BTC", "ETH", "BNB", "SOL"}
 _CHAIN_HEAD_FIELDS = {
@@ -523,6 +555,112 @@ def _parse_regime_transitions(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_notches_per_review": max_notches}
 
 
+def _parse_risk_engine(value: Any) -> dict[str, Any]:
+    """Parse the ``risk_engine`` block selecting the sizing mechanism.
+
+    ``legacy_drawdown`` keeps the continuous ``risky_cap = 1 - |drawdown| /
+    budget`` ladder as the normal sizing engine (Strategy V1 behavior, byte
+    for byte). ``volatility_budget`` derives normal sizing from portfolio
+    volatility and demotes drawdown to the staged emergency brake. The
+    numeric targets are mechanism placeholders until walk-forward calibration
+    (Strategy V2 Phase 6); nothing here is tuned against a backtest.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("risk_engine must be an object")
+    _unknown_fields(value, _RISK_ENGINE_FIELDS, "risk_engine")
+    if set(value) != _RISK_ENGINE_FIELDS:
+        raise PolicyError("risk_engine fields are incomplete")
+    mode = value["mode"]
+    if mode not in _RISK_ENGINE_MODES:
+        raise PolicyError(
+            "risk_engine.mode must be one of " + ", ".join(sorted(_RISK_ENGINE_MODES))
+        )
+
+    portfolio = value["portfolio_risk"]
+    if not isinstance(portfolio, dict):
+        raise PolicyError("risk_engine.portfolio_risk must be an object")
+    _unknown_fields(portfolio, _RISK_ENGINE_PORTFOLIO_FIELDS, "risk_engine.portfolio_risk")
+    if set(portfolio) != _RISK_ENGINE_PORTFOLIO_FIELDS:
+        raise PolicyError("risk_engine.portfolio_risk fields are incomplete")
+    target_volatility = _fraction(
+        portfolio["target_volatility"], "risk_engine.portfolio_risk.target_volatility"
+    )
+    max_volatility = _fraction(
+        portfolio["max_volatility"], "risk_engine.portfolio_risk.max_volatility"
+    )
+    if target_volatility > max_volatility:
+        raise PolicyError(
+            "risk_engine.portfolio_risk.target_volatility must not exceed max_volatility"
+        )
+    weights = portfolio["volatility_window_weights"]
+    if not isinstance(weights, dict) or not weights:
+        raise PolicyError("risk_engine.portfolio_risk.volatility_window_weights must be an object")
+    parsed_weights: dict[str, float] = {}
+    for label, weight in weights.items():
+        text = str(label).strip().lower()
+        if not text.endswith("d") or not text[:-1].isdigit() or int(text[:-1]) < 2:
+            raise PolicyError(
+                "risk_engine.portfolio_risk.volatility_window_weights keys must look like '30d'"
+            )
+        parsed_weights[text] = _fraction(weight, f"risk_engine.portfolio_risk.volatility_window_weights[{label}]")
+    if not math.isclose(sum(parsed_weights.values()), 1.0, abs_tol=1e-9):
+        raise PolicyError(
+            "risk_engine.portfolio_risk.volatility_window_weights must sum to 1"
+        )
+    positive_ints = {}
+    for field in ("correlation_window_days", "beta_window_days", "annualization_days", "minimum_history_days"):
+        raw = portfolio[field]
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 2:
+            raise PolicyError(f"risk_engine.portfolio_risk.{field} must be an integer >= 2")
+        positive_ints[field] = raw
+    if positive_ints["minimum_history_days"] < max(int(days[:-1]) for days in parsed_weights):
+        raise PolicyError(
+            "risk_engine.portfolio_risk.minimum_history_days must cover the longest volatility window"
+        )
+
+    overlay = value["emergency_overlay"]
+    if not isinstance(overlay, dict):
+        raise PolicyError("risk_engine.emergency_overlay must be an object")
+    _unknown_fields(overlay, _RISK_ENGINE_EMERGENCY_FIELDS, "risk_engine.emergency_overlay")
+    if set(overlay) != _RISK_ENGINE_EMERGENCY_FIELDS:
+        raise PolicyError("risk_engine.emergency_overlay fields are incomplete")
+    caution_fraction = _fraction(overlay["caution_fraction"], "risk_engine.emergency_overlay.caution_fraction")
+    emergency_fraction = _fraction(
+        overlay["emergency_fraction"], "risk_engine.emergency_overlay.emergency_fraction"
+    )
+    breach_fraction = _fraction(overlay["breach_fraction"], "risk_engine.emergency_overlay.breach_fraction")
+    if not 0 < caution_fraction < emergency_fraction < breach_fraction <= 1:
+        raise PolicyError(
+            "risk_engine.emergency_overlay fractions must satisfy 0 < caution < emergency < breach <= 1"
+        )
+    caution_cap = _fraction(overlay["caution_risky_cap"], "risk_engine.emergency_overlay.caution_risky_cap")
+    emergency_cap = _fraction(
+        overlay["emergency_risky_cap"], "risk_engine.emergency_overlay.emergency_risky_cap"
+    )
+    breach_cap = _fraction(overlay["breach_risky_cap"], "risk_engine.emergency_overlay.breach_risky_cap")
+    if not caution_cap > emergency_cap > breach_cap:
+        raise PolicyError(
+            "risk_engine.emergency_overlay risky caps must satisfy caution > emergency > breach"
+        )
+    return {
+        "mode": mode,
+        "portfolio_risk": {
+            "target_volatility": target_volatility,
+            "max_volatility": max_volatility,
+            "volatility_window_weights": parsed_weights,
+            **positive_ints,
+        },
+        "emergency_overlay": {
+            "caution_fraction": caution_fraction,
+            "emergency_fraction": emergency_fraction,
+            "breach_fraction": breach_fraction,
+            "caution_risky_cap": caution_cap,
+            "emergency_risky_cap": emergency_cap,
+            "breach_risky_cap": breach_cap,
+        },
+    }
+
+
 def _parse_drawdown_budget_overlay(value: Any) -> dict[str, Any]:
     """Parse the ``risk.drawdown_budget_overlay`` block.
 
@@ -759,7 +897,8 @@ class Policy:
     regimes: Mapping[str, RegimeLimits]
     allocation: Mapping[str, Any]
     event_risk_multipliers: Mapping[str, float]
-    stress_scenario: Mapping[str, float] = dataclass_field(default_factory=dict)
+    stress_scenarios: Mapping[str, Mapping[str, float]] = dataclass_field(default_factory=dict)
+    risk_engine: Mapping[str, Any] = dataclass_field(default_factory=dict)
     core_allocation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
@@ -851,7 +990,11 @@ class Policy:
             },
             "allocation": dict(self.allocation),
         }
-        result["stress_scenario"] = dict(self.stress_scenario)
+        result["stress_scenarios"] = {
+            name: dict(returns) for name, returns in self.stress_scenarios.items()
+        }
+        if self.risk_engine:
+            result["risk_engine"] = _copy_mapping(self.risk_engine)
         result["scoring_profiles"] = {
             name: dict(weights) for name, weights in self.scoring_profiles.items()
         }
@@ -1998,24 +2141,65 @@ def _parse_policy(
     excluded = _symbols(universe["excluded"], "universe.excluded")
     _check_overlaps(core, satellites, stable, excluded)
 
-    scenario = data["stress_scenario"]
-    if not isinstance(scenario, dict):
-        raise PolicyError("stress_scenario must be an object")
-    if any(not isinstance(k, str) or not k or k != k.strip().upper() for k in scenario):
-        raise PolicyError("stress_scenario requires uppercase asset symbols")
-    parsed_scenario = {k: _number(v, f"stress_scenario.{k}", minimum=-1.0, maximum=0.0) for k, v in scenario.items()}
-    if any(k in stable and v != 0 for k, v in parsed_scenario.items()):
-        raise PolicyError("stable stress assumption must be zero in this diagnostic")
-    # A managed risky asset with no scenario return makes the whole stress
-    # diagnostic unavailable, so the universe and the scenario are one
-    # contract: adding a satellite without its scenario return is a policy
-    # error rather than a silently skipped exposure.
-    missing_scenario = sorted((set(core) | set(satellites)) - set(parsed_scenario))
-    if missing_scenario:
+    stress_scenarios = data["stress_scenarios"]
+    if not isinstance(stress_scenarios, dict):
+        raise PolicyError("stress_scenarios must be an object")
+    if set(stress_scenarios) != _STRESS_SCENARIO_NAMES:
+        missing = sorted(_STRESS_SCENARIO_NAMES - set(stress_scenarios))
+        unknown = sorted(set(stress_scenarios) - _STRESS_SCENARIO_NAMES)
+        detail = []
+        if missing:
+            detail.append("missing: " + ", ".join(missing))
+        if unknown:
+            detail.append("unknown: " + ", ".join(unknown))
         raise PolicyError(
-            "stress_scenario must cover every core and satellite asset: "
-            + ", ".join(missing_scenario)
+            "stress_scenarios must define exactly the canonical scenario set ("
+            + ", ".join(sorted(_STRESS_SCENARIO_NAMES)) + "); " + "; ".join(detail)
         )
+    parsed_scenarios: dict[str, dict[str, float]] = {}
+    for name, scenario in stress_scenarios.items():
+        if not isinstance(scenario, dict):
+            raise PolicyError(f"stress_scenarios.{name} must be an object")
+        if any(not isinstance(k, str) or not k or k != k.strip().upper() for k in scenario):
+            raise PolicyError(f"stress_scenarios.{name} requires uppercase asset symbols")
+        parsed_scenarios[name] = {
+            k: _number(v, f"stress_scenarios.{name}.{k}", minimum=-1.0, maximum=0.0)
+            for k, v in scenario.items()
+        }
+        # The drawdown-budget stress math treats stables as the safe sleeve,
+        # so a stable return is only meaningful in the depeg scenario, which
+        # exists precisely to price that sleeve's tail.
+        if name != "stablecoin_depeg":
+            unstable = {
+                k: v for k, v in parsed_scenarios[name].items()
+                if k in stable and v != 0
+            }
+            if unstable:
+                raise PolicyError(
+                    f"stress_scenarios.{name} stable returns must be zero "
+                    "(only stablecoin_depeg may stress the stable sleeve)"
+                )
+        # A managed risky asset with no scenario return makes the whole stress
+        # diagnostic unavailable, so the universe and every scenario are one
+        # contract: adding a satellite without its scenario return is a policy
+        # error rather than a silently skipped exposure.
+        missing_scenario = sorted((set(core) | set(satellites)) - set(parsed_scenarios[name]))
+        if missing_scenario:
+            raise PolicyError(
+                f"stress_scenarios.{name} must cover every core and satellite asset: "
+                + ", ".join(missing_scenario)
+            )
+    # correlation_one models diversification failure: every risky asset takes
+    # the same loss, so no pairwise structure can soften the portfolio hit.
+    correlation_one = parsed_scenarios["correlation_one"]
+    risky_symbols = sorted(set(core) | set(satellites))
+    if len({correlation_one[symbol] for symbol in risky_symbols}) != 1:
+        raise PolicyError(
+            "stress_scenarios.correlation_one must assign every core and satellite "
+            "asset the same return"
+        )
+
+    risk_engine = _parse_risk_engine(data["risk_engine"])
 
     risk = data["risk"]
     if not isinstance(risk, dict):
@@ -2343,7 +2527,8 @@ def _parse_policy(
             "risk.max_portfolio_drawdown",
             exclusive_minimum=True,
         ),
-        stress_scenario=parsed_scenario,
+        stress_scenarios=parsed_scenarios,
+        risk_engine=risk_engine,
         benchmarks=parsed_benchmarks,
         rebalance=parsed_rebalance,
         scoring_profiles=parsed_profiles,

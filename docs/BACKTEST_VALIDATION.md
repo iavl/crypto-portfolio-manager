@@ -83,6 +83,7 @@ python3 scripts/backtest.py build-dataset --run-id strategy-validation-2021-2023
 python3 scripts/backtest.py audit-data ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py run ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py run ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present --allow-usdt-approximation
+python3 scripts/backtest.py run ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present --risk-engine-mode volatility_budget
 python3 scripts/backtest.py evaluate-decisions ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py evaluate-scores ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present
 python3 scripts/backtest.py report ~/.local/share/crypto-portfolio-manager/research/backtests/strategy-validation-2024-present/run.json
@@ -106,6 +107,16 @@ run can claim.
 The first `run` command emits `BLOCKED_BY_DATA_MANIFEST` when formal USD or
 point-in-time requirements are not met. The explicit approximation flag runs
 the same frozen experiment and keeps the limitation in every artifact.
+
+`--risk-engine-mode` is a research-only A/B override of
+`risk_engine.mode` (`legacy_drawdown` vs `volatility_budget`): it re-parses
+the policy with the overridden mode (the policy hash changes accordingly,
+stamping the run envelope with `risk_engine_mode_override`) and, in
+`volatility_budget` mode, builds point-in-time portfolio risk inputs (30/90D
+realized volatility, 90D correlations) from the same frozen daily series the
+reviews use. Each experiment result then carries `risk_engine_diagnostics`
+(estimated portfolio volatility, binding risk constraint, emergency overlay
+states). The canonical `config/policy.json` is never rewritten.
 
 `summary.json`, valuation/trade CSVs, Chinese Markdown/HTML, and SVG equity
 curves are generated from finalized result values. The renderer does not

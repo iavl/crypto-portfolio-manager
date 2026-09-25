@@ -16,9 +16,10 @@ from ..engine.benchmark import exposure_timing_contribution, vol_matched_cash_we
 from ..engine.entry import build_entry_plan
 from ..engine.execution_replay import simulate_execution_plan
 from ..engine.operation import build_final_operation
+from ..engine.portfolio_risk import PortfolioRiskInputs, build_portfolio_risk_inputs_from_closes
 from ..engine.rebalance import direction_history_from_decisions, recommend_rebalance
 from ..engine.regime import RegimeInputs, determine_regime, market_only_regime
-from ..engine.risk import drawdown_budget_overlay_floor, run_risk_gate
+from ..engine.risk import risk_overlay_floor, run_risk_gate
 from ..engine.strategy_replay import ReplayReview
 from ..models.evidence import AssetAssessment
 from ..models.market import TechnicalSnapshot
@@ -151,6 +152,68 @@ def _cash_yield_sensitivity(
     return {"status": "AVAILABLE", "window_years": years, "scenarios": scenarios}
 
 
+def build_risk_inputs_for_reviews(
+    reviews: Sequence[ReplayReview],
+    *,
+    daily_by_symbol: Mapping[str, Any],
+    policy: Policy,
+) -> list[PortfolioRiskInputs]:
+    """Point-in-time portfolio risk inputs for every review boundary.
+
+    Mirrors the historical builder's convention exactly: only candles
+    completed strictly before the review's as-of day enter the trailing
+    window, so the volatility/correlation estimates are as knowable at the
+    boundary as the assessments that consume them.
+    """
+    from bisect import bisect_right
+    from datetime import timedelta
+
+    from ..models.market import OHLCVSeries
+
+    engine = policy.risk_engine or {}
+    config = engine.get("portfolio_risk") or {}
+    if not config:
+        raise ValueError("risk engine portfolio_risk configuration is required")
+    usable = {
+        symbol: series
+        for symbol, series in daily_by_symbol.items()
+        if isinstance(series, OHLCVSeries)
+    }
+    symbols = sorted(
+        {symbol for review in reviews for symbol in review.current_prices}
+        - {symbol for symbol in policy.stable_symbols}
+    )
+    missing = [symbol for symbol in symbols if symbol not in usable]
+    if missing:
+        raise ValueError("portfolio risk inputs are missing daily series for: " + ", ".join(missing))
+    caches = {
+        symbol: tuple(series.completed_candles()) for symbol, series in usable.items() if symbol in symbols
+    }
+    times = {
+        symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
+        for symbol, candles in caches.items()
+    }
+    result: list[PortfolioRiskInputs] = []
+    for review in reviews:
+        moment = parse_timestamp(review.as_of)
+        boundary = moment - timedelta(days=1)
+        closes_by_symbol: dict[str, list[float]] = {}
+        for symbol in symbols:
+            candles = caches[symbol]
+            available = bisect_right(times[symbol], boundary)
+            closes_by_symbol[symbol] = [float(item.close) for item in candles[:available]]
+        result.append(
+            build_portfolio_risk_inputs_from_closes(
+                closes_by_symbol,
+                window_weights=config["volatility_window_weights"],
+                correlation_window_days=int(config["correlation_window_days"]),
+                annualization_days=int(config["annualization_days"]),
+                minimum_history_days=int(config["minimum_history_days"]),
+            )
+        )
+    return result
+
+
 def run_historical_backtest(
     reviews: Sequence[ReplayReview],
     *,
@@ -158,6 +221,7 @@ def run_historical_backtest(
     fee_bps: float = 10.0,
     slippage_bps: float = 5.0,
     ordinary_review_weekday: int | None = None,
+    risk_inputs_by_review: Sequence[PortfolioRiskInputs | None] | None = None,
 ) -> dict[str, Any]:
     """Run the shared decision engines with an exact quantity/cash ledger."""
     if not reviews:
@@ -165,6 +229,8 @@ def run_historical_backtest(
     resolved = policy or resolve_policy()
     if ordinary_review_weekday is not None and ordinary_review_weekday not in range(7):
         raise ValueError("ordinary_review_weekday must be 0..6 or null")
+    if risk_inputs_by_review is not None and len(risk_inputs_by_review) != len(reviews):
+        raise ValueError("risk_inputs_by_review must align one-to-one with reviews")
     if any(not review.current_prices for review in reviews):
         raise ValueError("historical quantity replay requires current_prices on every review")
     moments = [review.moment for review in reviews]
@@ -187,6 +253,10 @@ def run_historical_backtest(
     risky_weights: list[float] = []
     floor_pin = Counter()
     overlay_binding_reviews = 0
+    risk_engine_volatilities: list[float] = []
+    risk_engine_states: Counter[str] = Counter()
+    risk_engine_bindings: Counter[str] = Counter()
+    risk_engine_mode: str | None = None
 
     for index, review in enumerate(reviews):
         if index > 0:
@@ -232,7 +302,7 @@ def run_historical_backtest(
             floor_pin["drawdown_at_or_below_cp_floor"] += 1
         if label_level > floor_level:
             floor_pin["market_driven_defensive_reviews"] += 1
-        overlay_floor, _ = drawdown_budget_overlay_floor(
+        overlay_floor, _, _ = risk_overlay_floor(
             resolved, point.drawdown, market_recovery_streak
         )
         if overlay_floor > max(
@@ -245,6 +315,11 @@ def run_historical_backtest(
             current_weights=point.weights,
             portfolio_drawdown=point.drawdown,
             market_recovery_streak=market_recovery_streak,
+            risk_inputs=(
+                risk_inputs_by_review[index]
+                if risk_inputs_by_review is not None and risk_inputs_by_review[index] is not None
+                else None
+            ),
         )
         risk = run_risk_gate(
             allocation, policy=resolved, regime=regime.regime, assessments=assessments,
@@ -363,6 +438,18 @@ def run_historical_backtest(
         replayed_decisions.append({
             "timestamp": review.as_of, "actions": [action.as_dict() for action in rebalance.actions],
         })
+        engine_block = allocation.risk_engine or {}
+        if engine_block:
+            risk_engine_mode = str(engine_block.get("mode"))
+            volatility = engine_block.get("portfolio_volatility")
+            if isinstance(volatility, (int, float)) and volatility > 0:
+                risk_engine_volatilities.append(float(volatility))
+            emergency = engine_block.get("emergency_overlay_state") or {}
+            if isinstance(emergency, Mapping) and emergency.get("state") is not None:
+                risk_engine_states[str(emergency["state"])] += 1
+            binding = engine_block.get("binding_risk_constraint")
+            if binding is not None:
+                risk_engine_bindings[str(binding)] += 1
         review_rows.append({
             "as_of": review.as_of, "period_end": review.period_end,
             "regime": regime.as_dict(), "drawdown_input": point.drawdown,
@@ -440,6 +527,19 @@ def run_historical_backtest(
         "total_cost_usd": sum(row["cost_usd"] for row in review_rows),
         "average_cash_weight": sum(item.weights.get("USD", 0.0) for item in ledger.valuations) / len(ledger.valuations),
         "regime_counts": dict(regime_counts), "plan_status_counts": dict(plan_counts),
+        "risk_engine_diagnostics": {
+            "mode": risk_engine_mode,
+            "average_estimated_portfolio_volatility": (
+                sum(risk_engine_volatilities) / len(risk_engine_volatilities)
+                if risk_engine_volatilities else None
+            ),
+            "max_estimated_portfolio_volatility": (
+                max(risk_engine_volatilities) if risk_engine_volatilities else None
+            ),
+            "estimated_volatility_reviews": len(risk_engine_volatilities),
+            "emergency_overlay_states": dict(risk_engine_states),
+            "binding_constraint_counts": dict(risk_engine_bindings),
+        },
         "constraint_violation_counts": dict(constraint_violations),
         "regime_floor_diagnostics": {
             "reviews": len(review_rows),

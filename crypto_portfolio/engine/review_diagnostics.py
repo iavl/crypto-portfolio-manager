@@ -19,7 +19,10 @@ def _amount(value: Any, name: str) -> float:
 def portfolio_stress(weights: Mapping[str, float], *, policy: Policy,
                      drawdown: float | None = None) -> dict[str, Any]:
     weights = _weights(weights, "stress weights")
-    scenario = {**policy.stress_scenario, **{s: 0.0 for s in policy.stable_symbols}}
+    scenario = {
+        **policy.stress_scenarios["moderate"],
+        **{s: 0.0 for s in policy.stable_symbols},
+    }
     missing = sorted(s for s, w in weights.items() if w > 0 and s not in scenario)
     base = {"status": "DIAGNOSTIC_ONLY", "stable_assumption": "zero return, not risk-free",
             "scenario_returns": {s: scenario.get(s) for s, w in weights.items() if w > 0}}

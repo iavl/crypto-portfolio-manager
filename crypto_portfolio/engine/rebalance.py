@@ -11,7 +11,7 @@ from ..models.decision_packet import NoTradeAttribution
 from ..models.confidence import DEFAULT_HIGH_MIN, DEFAULT_MEDIUM_MIN
 from ..models.policy import Policy, resolve_policy
 from .confidence import compose_deployment_factors, confidence_deployment_factor
-from .risk import drawdown_budget_overlay_floor
+from .risk import risk_overlay_floor
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "HOLD", "EXIT", "WAIT", "NO_TRADE"}
@@ -873,7 +873,7 @@ def recommend_rebalance(
     regime_name = str(regime).strip().upper()
     if regime_name not in _REGIMES:
         raise ValueError(f"regime must be one of {sorted(_REGIMES)}")
-    overlay_floor, _overlay_reason = drawdown_budget_overlay_floor(
+    overlay_floor, _overlay_reason, _overlay_state = risk_overlay_floor(
         resolved, portfolio_drawdown, market_recovery_streak
     )
     required_stable = max(

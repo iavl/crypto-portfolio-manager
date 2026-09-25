@@ -546,12 +546,13 @@ def drawdown_budget_feasibility(
 ) -> tuple[tuple[Mapping[str, Any], ...], tuple[Finding, ...]]:
     """Per-regime implied drawdown vs the configured risk budget.
 
-    The scenario defaults to ``policy.stress_scenario``. Every scenario assumes
+    The scenario defaults to the ``moderate`` entry of ``policy.stress_scenarios``
+    (the Strategy V1 single-scenario values). Every scenario assumes
     stables return zero, which is the existing diagnostic convention, not a
     claim that a peg is risk-free.
     """
     resolved = policy or resolve_policy()
-    active = dict(resolved.stress_scenario if scenario is None else scenario)
+    active = dict(resolved.stress_scenarios["moderate"] if scenario is None else scenario)
     rows: list[dict[str, Any]] = []
     findings: list[Finding] = []
     for regime in sorted(resolved.regimes):

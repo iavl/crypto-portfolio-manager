@@ -169,9 +169,67 @@ breach. Allocation, the risk gate, and the rebalance engine all require the
 stable sleeve to be at least the larger of the global minimum, the selected
 regime target, and the drawdown budget overlay floor below.
 
-## Drawdown budget overlay
+## Risk engine modes (Strategy V2)
 
-The response bands above relabel the regime; they cannot by themselves keep a
+`risk_engine.mode` selects which mechanism owns normal risk sizing. The
+numeric targets in `risk_engine.portfolio_risk` (`target_volatility` 25%,
+`max_volatility` 35%, 30D/90D blend 40%/60%, 90D correlation/beta windows)
+are mechanism placeholders frozen before calibration; Phase 6 walk-forward
+validation calibrates them, and nothing in between may tune them against a
+backtest.
+
+- **`legacy_drawdown` (default, Strategy V1 behavior)**: the drawdown budget
+  overlay ladder below is the normal sizing engine, exactly as before. The
+  mode exists so the two engines remain A/B replayable
+  (`scripts/backtest.py run --risk-engine-mode ...`) against the same frozen
+  dataset while V2 is built.
+- **`volatility_budget`**: normal sizing derives from portfolio risk, not
+  drawdown. `engine.portfolio_risk.py` computes 30D/90D blended realized
+  volatility, 90D daily-return correlations, beta to BTC,
+  `sigma_p = sqrt(w' Sigma w)`, and per-asset marginal risk contributions
+  `w_i (Sigma w)_i / sigma_p`. The raw strategic target is scaled by
+  `min(1, target_volatility / sigma_p)`; the freed weight lands in the
+  stable sleeve. Stables are outside the covariance model by construction
+  (zero variance), and a positive weight on an asset without covariance
+  inputs is a hard error, never a zero fill. This mode requires explicit
+  point-in-time risk inputs at every review; it refuses to fall back to the
+  drawdown ladder.
+
+In `volatility_budget` mode the final risky sleeve is the tightest of the
+candidate caps — volatility budget, emergency drawdown brake, and the
+policy/regime stable floor — taken as a **minimum, never a product**, so
+stacked layers cannot shrink a book `0.7 x 0.75 x 0.5`. The allocation
+result reports the estimated portfolio volatility, the risk scaling factor,
+per-asset risk contribution shares, the emergency overlay state, and the
+binding risk constraint; the backtest aggregates these per experiment as
+`risk_engine_diagnostics`.
+
+## Emergency drawdown overlay (volatility_budget mode)
+
+In `volatility_budget` mode drawdown is demoted from the normal sizing
+engine to a staged emergency brake (`risk_engine.emergency_overlay`). The
+budget consumed `|drawdown| / D` selects the stage:
+
+- below the caution fraction: `NORMAL`, no drawdown scaling at all;
+- `CAUTION` (default 0.60D, aligned with the mandatory defensive floor):
+  risky weight capped at `caution_risky_cap` (default 90%);
+- `EMERGENCY` (default 0.80D, aligned with the mandatory capital-preservation
+  floor): capped at `emergency_risky_cap` (default 60%);
+- `BREACH` (strictly beyond `-D`): capped at `breach_risky_cap`
+  (default 25%) and reported as a hard budget breach by the risk gate.
+
+The stage caps are placeholders pending Phase 6 calibration. The mandatory
+regime floors above are unchanged: `-0.60D` still cannot remain `NORMAL`,
+`-0.80D` still cannot remain below `CAPITAL_PRESERVATION`, and the
+confirmed market-recovery re-risk floor from
+`risk.drawdown_budget_overlay` applies to the staged brake exactly as it
+applies to the legacy ladder. Worsening drawdown never produces a less
+defensive result in either mode.
+
+## Drawdown budget overlay (legacy_drawdown mode)
+
+This is the Strategy V1 sizing engine, active when
+`risk_engine.mode = legacy_drawdown` (the default). The response bands above relabel the regime; they cannot by themselves keep a
 portfolio inside `D`; a `CAPITAL_PRESERVATION` target of 50% stable still
 implies roughly a 30% portfolio drawdown when core assets fall 60%, which is
 twice the default budget. The drawdown budget overlay (`risk.drawdown_budget_overlay`)
@@ -246,8 +304,17 @@ At minimum consider:
 
 Do not present a stress test as a probability forecast. Its purpose is to expose hidden concentration and beta.
 
-The canonical policy includes a fixed diagnostic scenario for reproducible
-reviews. Stable assets use an explicit zero-return assumption; this is a
+The canonical policy includes a fixed diagnostic scenario set for
+reproducible reviews (`stress_scenarios`). The V1 single scenario is
+preserved byte-for-byte as `moderate`; the additional scenarios
+(`severe_crypto_crash`, `liquidity_shock`, `correlation_one`, `btc_gap_down`,
+`eth_alt_crash`, `stablecoin_depeg`) are the Strategy V2 framework: their
+values are mechanism placeholders pending Phase 6 calibration, not claims
+about tail probabilities. `correlation_one` assigns every risky asset the
+same decline so diversification provides no benefit; `stablecoin_depeg` is
+the only scenario allowed to assign non-zero returns to stable assets, and
+it prices the stable sleeve instead of assuming it away. Stable assets use
+an explicit zero-return assumption in every other scenario; this is a
 calculation convention, not a claim that stablecoins are risk-free.
 
 Python owns the arithmetic through `engine.risk.stress_diagnostic`: scenario
