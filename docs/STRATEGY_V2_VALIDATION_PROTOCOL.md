@@ -30,14 +30,17 @@ it tests mechanism only.
 
 ## Dynamic universe (6.3)
 
-`dynamic_universe_eligibility` builds the point-in-time universe from
-trailing data only: at least `minimum_history_days` (365) of daily
-observations and a median dollar volume at or above the floor
-($1M placeholder). An asset absent from a boundary's eligible set was not
- investable at that boundary under the rule — the anti-survivorship
-constraint. Survivor-bias-free universe *construction* (rebuilding the
-backtest with dynamic membership) is the remaining open item; the
-eligibility timeline in `validation.json` is the audit surface for it.
+Universe membership is point-in-time and enforced in the replay itself
+(`dynamic_universe` policy block, enabled by default): BTC is the anchor
+member; every other asset must show at least `minimum_history_days` (365)
+of completed daily observations and a median dollar volume at or above
+`minimum_median_volume_usd` ($1M placeholder) at THAT boundary, computed
+from trailing data only. A non-member receives no assessment and no
+technical snapshot — no new entries — while prices and returns keep
+flowing so held positions stay marked and reducible. This is the
+anti-survivorship constraint: no asset is investable before its own
+history qualifies it. `dynamic_universe_eligibility` in
+`research/validation.py` reports the same rule for the audit timeline.
 
 ## Validation windows (6.4)
 

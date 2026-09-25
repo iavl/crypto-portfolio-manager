@@ -140,6 +140,41 @@ Full suite 1321 tests passing; `ruff check .` and `compileall` clean.
    headline policy decision, now with numbers on both sides.
 3. Issuer/venue caps for the stable sleeve (live USDT concentration).
 
+## Addendum (2026-09-26): completion round
+
+Four gaps found in a plan-vs-implementation audit were closed:
+
+1. **Phase 1 acceptance — rendered report**: the backtest report now
+   carries a 风险引擎诊断 table (mode, average/maximum estimated portfolio
+   volatility, binding-constraint distribution, emergency-state
+   distribution) per experiment; previously the data existed only in
+   `run.json`.
+2. **6.8 benchmark B**: `vol_matched_btc_eth_70_30_cash_investable` — a
+   static 70/30 BTC/ETH sleeve whose weight is solved in closed form to
+   the strategy's own volatility — joins the comparison set directly after
+   the single-asset risk-matched benchmark. (An inverted ETH return in the
+   first sleeve implementation was caught by its own risk-match assertion
+   and fixed.)
+3. **6.3 dynamic membership enforced in replay**: a new
+   `dynamic_universe` policy block (enabled by default; BTC is the anchor
+   member) gates universe membership per boundary on 365 trailing days of
+   history and $1M median dollar volume. Non-members get no assessment and
+   no entry plan; prices keep flowing for marking. The 2024 window is
+   unaffected (every asset has 2+ years of warmup). On the bear window the
+   frozen dataset's 8-month warmup means ETH and the satellites are
+   non-members for the first ~4 months — an honest consequence of the
+   frozen data, and exactly the audit surface the rule exists to expose.
+4. **Bear window, V2-current engine (Phases 2–5 + membership)**: strict
+   full/core_existing CAGR 3.85% (V1 baseline 0.72%), MaxDD **−17.04%**
+   (baseline −15.00% — the budget is breached under the current
+   placeholder parameters), vol 15.50%, Sharpe 0.322, 120 trades, average
+   cash 89.9%, regimes CP 727 / DEF 69 / NOR 117. Consistent with this
+   report's bootstrap finding (36% breach frequency): the normalized
+   threshold space lets more risk in, and the placeholder emergency
+   parameters do not hold D = 15% on the bear path. No parameter was
+   adjusted; the numbers are recorded for the standing calibration
+   decisions.
+
 ## Ready for next phase?
 
 YES — Phase 6 is the final phase of the plan. All six phases are

@@ -119,6 +119,66 @@ def _vol_matched_benchmark(
     return result
 
 
+def _vol_matched_btc_eth_benchmark(
+    prices_by_time: Sequence[tuple[str, Mapping[str, float]]],
+    *,
+    metrics: Mapping[str, Any],
+    initial_value_usd: float,
+    fee_bps: float,
+    slippage_bps: float,
+    btc_weight: float = 0.7,
+    eth_weight: float = 0.3,
+) -> dict[str, Any] | None:
+    """Size a static 70/30 BTC/ETH sleeve-plus-cash mix to the strategy's vol.
+
+    The ablation question this answers (Strategy V2 Phase 6 benchmark B):
+    would a two-asset volatility-targeting mix have used the same risk
+    budget better than the full strategy? The sleeve weight is solved in
+    closed form over the sleeve's own return series; the sleeve keeps the
+    static 70/30 internal split. Returns None when either leg's prices are
+    missing or the solve degenerates (the single-asset benchmark covers
+    those cases).
+    """
+    target = metrics.get("annualized_volatility")
+    mean_period_days = metrics.get("mean_period_days")
+    if not target or not mean_period_days or target <= 0 or mean_period_days <= 0:
+        return None
+    btc_prices = [prices.get("BTC") for _, prices in prices_by_time]
+    eth_prices = [prices.get("ETH") for _, prices in prices_by_time]
+    if any(price is None for price in btc_prices) or any(price is None for price in eth_prices):
+        return None
+    if btc_prices[0] <= 0 or eth_prices[0] <= 0:
+        return None
+    sleeve_returns = [
+        btc_weight * (b / a - 1.0) + eth_weight * (f / e - 1.0)
+        for a, b, e, f in zip(btc_prices, btc_prices[1:], eth_prices, eth_prices[1:])
+    ]
+    try:
+        sleeve_weight = vol_matched_cash_weight(
+            btc_returns=sleeve_returns,
+            target_volatility=float(target),
+            periods_per_year=365.25 / float(mean_period_days),
+        )
+    except ValueError:
+        return None
+    if sleeve_weight <= 0:
+        return None
+    weights = {
+        "BTC": btc_weight * sleeve_weight,
+        "ETH": eth_weight * sleeve_weight,
+        "USD": 1.0 - sleeve_weight,
+    }
+    result = constant_weight_rebalanced_benchmark(
+        prices_by_time=prices_by_time, weights=weights,
+        initial_value_usd=initial_value_usd, fee_bps=fee_bps, slippage_bps=slippage_bps,
+    )
+    result["methodology"] = (
+        f"{result['methodology']}; 70/30 BTC/ETH sleeve weight {sleeve_weight:.4f} "
+        f"solved to match the strategy's {float(target):.4%} annualized volatility"
+    )
+    return result
+
+
 def _cash_yield_sensitivity(
     valuations: Sequence[Any], *, stable_symbols: Sequence[str], yields: tuple[float, ...] = (0.04, 0.05),
 ) -> dict[str, Any]:
@@ -515,6 +575,14 @@ def run_historical_backtest(
     )
     if vol_matched is not None:
         benchmarks["vol_matched_btc_cash_investable"] = vol_matched
+    # Ablation benchmark B (Strategy V2 Phase 6): the same risk budget in a
+    # static two-asset volatility-targeting mix, joining the comparison set.
+    vol_matched_btc_eth = _vol_matched_btc_eth_benchmark(
+        aligned_prices, metrics=metrics, initial_value_usd=first.portfolio_value,
+        fee_bps=fee_bps, slippage_bps=slippage_bps,
+    )
+    if vol_matched_btc_eth is not None:
+        benchmarks["vol_matched_btc_eth_70_30_cash_investable"] = vol_matched_btc_eth
     # Exposure-matched fair comparison: the same constant average exposure the
     # strategy realized, held passively in BTC/cash.  Together with the signed
     # timing contribution below it separates "what did the exposure path earn"

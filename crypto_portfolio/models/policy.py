@@ -46,6 +46,7 @@ _TOP_LEVEL_FIELDS = {
     "stress_scenarios",
     "risk_engine",
     "risk_tier_estimation",
+    "dynamic_universe",
     "chain_liveness",
     "benchmarks",
     "rebalance",
@@ -120,6 +121,7 @@ _RISK_ENGINE_PORTFOLIO_FIELDS = {
     "annualization_days",
     "minimum_history_days",
 }
+_DYNAMIC_UNIVERSE_FIELDS = {"enabled", "minimum_history_days", "minimum_median_volume_usd"}
 _RISK_TIER_ESTIMATION_FIELDS = {
     "beta_enter",
     "beta_exit",
@@ -564,6 +566,33 @@ def _parse_regime_transitions(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_notches_per_review": max_notches}
 
 
+def _parse_dynamic_universe(value: Any) -> dict[str, Any]:
+    """Parse ``dynamic_universe`` (Strategy V2 Phase 6).
+
+    Point-in-time universe membership: an asset joins the investable set
+    only after ``minimum_history_days`` of daily observations and a median
+    dollar volume at or above the floor, evaluated at every decision
+    boundary from trailing data only (the anti-survivorship rule).
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("dynamic_universe must be an object")
+    _unknown_fields(value, _DYNAMIC_UNIVERSE_FIELDS, "dynamic_universe")
+    if set(value) != _DYNAMIC_UNIVERSE_FIELDS:
+        raise PolicyError("dynamic_universe fields are incomplete")
+    enabled = value["enabled"]
+    if not isinstance(enabled, bool):
+        raise PolicyError("dynamic_universe.enabled must be boolean")
+    history = value["minimum_history_days"]
+    if isinstance(history, bool) or not isinstance(history, int) or history < 30:
+        raise PolicyError("dynamic_universe.minimum_history_days must be an integer >= 30")
+    volume = _number(value["minimum_median_volume_usd"], "dynamic_universe.minimum_median_volume_usd", minimum=0.0)
+    return {
+        "enabled": enabled,
+        "minimum_history_days": history,
+        "minimum_median_volume_usd": volume,
+    }
+
+
 def _parse_risk_tier_estimation(value: Any) -> dict[str, Any]:
     """Parse ``risk_tier_estimation`` (Strategy V2 Phase 4).
 
@@ -935,6 +964,7 @@ class Policy:
     stress_scenarios: Mapping[str, Mapping[str, float]] = dataclass_field(default_factory=dict)
     risk_engine: Mapping[str, Any] = dataclass_field(default_factory=dict)
     risk_tier_estimation: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    dynamic_universe: Mapping[str, Any] = dataclass_field(default_factory=dict)
     core_allocation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
@@ -1033,6 +1063,8 @@ class Policy:
             result["risk_engine"] = _copy_mapping(self.risk_engine)
         if self.risk_tier_estimation:
             result["risk_tier_estimation"] = _copy_mapping(self.risk_tier_estimation)
+        if self.dynamic_universe:
+            result["dynamic_universe"] = _copy_mapping(self.dynamic_universe)
         result["scoring_profiles"] = {
             name: dict(weights) for name, weights in self.scoring_profiles.items()
         }
@@ -2250,6 +2282,7 @@ def _parse_policy(
 
     risk_engine = _parse_risk_engine(data["risk_engine"])
     risk_tier_estimation = _parse_risk_tier_estimation(data["risk_tier_estimation"])
+    dynamic_universe = _parse_dynamic_universe(data["dynamic_universe"])
 
     risk = data["risk"]
     if not isinstance(risk, dict):
@@ -2604,6 +2637,7 @@ def _parse_policy(
         stress_scenarios=parsed_scenarios,
         risk_engine=risk_engine,
         risk_tier_estimation=risk_tier_estimation,
+        dynamic_universe=dynamic_universe,
         benchmarks=parsed_benchmarks,
         rebalance=parsed_rebalance,
         scoring_profiles=parsed_profiles,

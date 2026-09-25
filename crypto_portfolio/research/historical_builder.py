@@ -275,6 +275,10 @@ def build_historical_reviews(
             # history) leaves the tier unmeasured at this boundary: the
             # assessment keeps the policy default, never a fabricated tier.
             boundary_tiers = {}
+        universe_config = policy.dynamic_universe or {}
+        universe_membership = bool(universe_config.get("enabled", False))
+        universe_history = int(universe_config.get("minimum_history_days", 365))
+        universe_volume_floor = float(universe_config.get("minimum_median_volume_usd", 0.0))
         usable = True
         for symbol in risk_symbols:
             series = daily_by_symbol[symbol]
@@ -286,9 +290,35 @@ def build_historical_reviews(
             if not completed or len(next_completed) <= len(completed):
                 usable = False
                 break
+            # Point-in-time universe membership (Strategy V2 Phase 6): BTC is
+            # the anchor asset and always a member; every other asset must
+            # qualify on trailing history and liquidity at THIS boundary or
+            # it receives no assessment and no technical snapshot - no new
+            # entries - while prices and bars keep flowing so held positions
+            # stay marked and can still be reduced.
+            universe_eligible = True
+            if universe_membership and symbol != "BTC":
+                if len(completed) < universe_history:
+                    universe_eligible = False
+                elif universe_volume_floor > 0:
+                    window = completed[-universe_history:]
+                    dollar_volumes = sorted(
+                        float(item.volume) * float(item.close) for item in window
+                    )
+                    median = dollar_volumes[len(dollar_volumes) // 2]
+                    if median < universe_volume_floor:
+                        universe_eligible = False
             current_close = completed[-1].close
             current_prices[symbol] = current_close
             next_close = next_completed[-1].close
+            # Prices and returns keep flowing for every listed symbol so held
+            # positions stay marked and reducible regardless of membership.
+            next_returns[symbol] = next_close / current_close - 1.0
+            if not universe_eligible:
+                # Not a universe member at this boundary: no technical
+                # snapshot and no assessment, so the allocation layer cannot
+                # give it a target or a new entry this review.
+                continue
             spot = SpotPrice(
                 symbol, current_close, as_of, series.source,
                 fetched_at=series.fetched_at, venue=series.venue,
@@ -322,7 +352,6 @@ def build_historical_reviews(
                     measured_tier["source"] if measured_tier is not None else "POLICY_DEFAULT"
                 ),
             ).as_dict()
-            next_returns[symbol] = next_close / current_close - 1.0
             bars = []
             if execution_timeframe == "1D":
                 start_index = bisect_right(execution_times[symbol], as_of_moment - timedelta(microseconds=1))

@@ -93,5 +93,34 @@ class StrategyAttributionTests(unittest.TestCase):
         self.assertIn("vol_matched_excess_return_annualized", attribution)
 
 
+class VolMatchedBtcEthBenchmarkTests(unittest.TestCase):
+    """Ablation benchmark B (Phase 6.8): two-asset volatility targeting."""
+
+    def test_benchmark_b_joins_the_comparison_set(self):
+        from tests.test_benchmarks import OrchestratorBenchmarkWiringTests
+
+        result = OrchestratorBenchmarkWiringTests._result()
+        benchmarks = result["benchmarks"]
+        self.assertIn("vol_matched_btc_eth_70_30_cash_investable", benchmarks)
+        comparison = result["benchmark_comparison"]["vol_matched_btc_eth_70_30_cash_investable"]
+        self.assertIn("excess_return_annualized", comparison)
+        # The solved mix carries the strategy's risk or the closest reachable
+        # risk below it (the closed-form solve caps at the riskiest mix when
+        # the strategy out-volatilizes both legs - the report's risk-match
+        # warning covers that case for readers).
+        strategy_vol = result["metrics"]["annualized_volatility"]
+        benchmark_vol = benchmarks["vol_matched_btc_eth_70_30_cash_investable"]["metrics"]["annualized_volatility"]
+        self.assertLessEqual(benchmark_vol, strategy_vol + 0.02 + 1e-9)
+        # The internal split of the risky sleeve stays 70/30.
+        weights = benchmarks["vol_matched_btc_eth_70_30_cash_investable"]["valuations"][-1]["weights"]
+        btc, eth = weights.get("BTC", 0.0), weights.get("ETH", 0.0)
+        if btc + eth > 1e-9:
+            # Mark drift between rebalances moves the realized split a few
+            # basis points off the 70/30 target; only the gross shape is
+            # being asserted here.
+            self.assertAlmostEqual(btc / (btc + eth), 0.7, places=2)
+        self.assertIn("70/30 BTC/ETH sleeve weight", benchmarks["vol_matched_btc_eth_70_30_cash_investable"]["methodology"])
+
+
 if __name__ == "__main__":
     unittest.main()

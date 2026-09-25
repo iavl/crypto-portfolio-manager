@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from crypto_portfolio.models.policy import load_policy
+from crypto_portfolio.models.policy import load_policy, policy_from_mapping
 from crypto_portfolio.research.evidence_series import (
     EvidenceContext,
     EvidencePoint,
@@ -260,6 +260,15 @@ class BuilderEvidenceIntegrationTests(unittest.TestCase):
 
     def test_btc_critical_data_completes_with_harvested_evidence(self):
         policy = load_policy()
+        # This fixture exercises evidence harvesting, not universe
+        # membership; its 120-day synthetic history would fail the 365-day
+        # point-in-time membership rule that ships enabled by default.
+        policy = policy_from_mapping({
+            **policy.as_dict(),
+            "dynamic_universe": {
+                **policy.as_dict()["dynamic_universe"], "enabled": False,
+            },
+        })
         btc = self._candles("BTC", "binance")
         eth = self._candles("ETH", "binance")
         rows = [

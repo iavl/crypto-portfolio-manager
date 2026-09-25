@@ -59,6 +59,7 @@ _SKIPPED_BENCHMARK_NOTES = (
 # opportunity-cost reference. Unlisted families fall to the end alphabetically.
 _BENCHMARK_ORDER = (
     "vol_matched_btc_cash",
+    "vol_matched_btc_eth_70_30_cash",
     "static_initial_weights",
     "exposure_matched_btc_cash",
     "btc_eth_70_30",
@@ -608,6 +609,45 @@ def _diagnostics_blocks(run: Mapping[str, Any], validity: Any) -> list[Block]:
             "这里按假设年化收益重记策略自身路径，不改变任何引擎记账，也不与零收益基准直接比较。"))
     else:
         blocks.append(("p", "本运行没有择时诊断数据。"))
+
+    # Risk-engine diagnostics (Strategy V2 Phase 1 acceptance): which
+    # mechanism owned sizing, at what estimated portfolio volatility, and
+    # which constraint bound each experiment.
+    engine_rows: list[list[str]] = []
+    for name, result in runs.items():
+        if result.get("status") != "COMPLETED":
+            continue
+        diagnostics = (result["result"] or {}).get("risk_engine_diagnostics")
+        if not diagnostics or not diagnostics.get("mode"):
+            continue
+        states = diagnostics.get("emergency_overlay_states") or {}
+        state_text = " / ".join(
+            f"{state}:{count}" for state, count in sorted(states.items())
+        ) or "-"
+        bindings = diagnostics.get("binding_constraint_counts") or {}
+        binding_text = " / ".join(
+            f"{constraint}:{count}" for constraint, count in sorted(bindings.items(), key=lambda item: -item[1])
+        ) or "-"
+        engine_rows.append([
+            name,
+            str(diagnostics.get("mode")),
+            _fmt(diagnostics.get("average_estimated_portfolio_volatility"), percent=True),
+            _fmt(diagnostics.get("max_estimated_portfolio_volatility"), percent=True),
+            binding_text,
+            state_text,
+        ])
+    if engine_rows:
+        blocks.append(("h3", "风险引擎诊断"))
+        blocks.append(("table", (
+            ["实验", "模式", "平均估计组合波动率", "最大估计组合波动率",
+             "约束生效分布", "应急状态分布"], engine_rows,
+        )))
+        blocks.append(("p",
+            "「约束生效分布」回答本窗口内谁在主导仓位（volatility_budget=波动率预算、"
+            "emergency_overlay=应急刹车、strategic_target=战略目标自身）；"
+            "「应急状态分布」是分段刹车 NORMAL/CAUTION/EMERGENCY/BREACH 的评审计数"
+            "（legacy 模式下为 LEGACY_LADDER 连续梯子）。估计组合波动率来自评审时点"
+            "的点时协方差，与事后实现波动率互相独立。"))
     return blocks
 
 
