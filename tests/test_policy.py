@@ -165,7 +165,7 @@ class PolicyTests(unittest.TestCase):
         original = load_policy().as_dict()
         cases = []
         invalid_benchmark = json.loads(json.dumps(original))
-        invalid_benchmark["benchmarks"]["primary"]["BTC"] = 0.9
+        invalid_benchmark["benchmarks"]["opportunity_cost_btc"]["BTC"] = 0.9
         cases.append(invalid_benchmark)
         invalid_scoring = json.loads(json.dumps(original))
         invalid_scoring["scoring_profiles"]["default"]["trend"] = 0.9

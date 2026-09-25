@@ -24,7 +24,7 @@ class EngineMetricsTests(unittest.TestCase):
     def test_primary_and_secondary_benchmarks(self):
         self.assertAlmostEqual(benchmark_return({"BTC": 0.1}), 0.1)
         self.assertAlmostEqual(secondary_benchmark_return(0.1, 0.2), 0.13)
-        self.assertAlmostEqual(benchmark_return({"BTC": 0.1, "ETH": 0.2}, benchmark="secondary"), 0.13)
+        self.assertAlmostEqual(benchmark_return({"BTC": 0.1, "ETH": 0.2}, benchmark="secondary_static"), 0.13)
 
     def test_benchmark_cash_flow_is_neutral(self):
         self.assertAlmostEqual(
@@ -57,7 +57,7 @@ class EngineMetricsTests(unittest.TestCase):
     def test_secondary_benchmark_is_buy_and_hold(self):
         result = benchmark_return_from_prices(
             {"BTC": [100, 110, 121], "ETH": [100, 200, 200]},
-            benchmark="secondary",
+            benchmark="secondary_static",
         )
         self.assertAlmostEqual(result, 0.447)
 
@@ -75,11 +75,11 @@ class EngineMetricsTests(unittest.TestCase):
         # and silently rebalance the drifted composition back to exactly 70/30.
         prices = {"BTC": [100, 200, 200], "ETH": [100, 50, 100]}
         scaled = benchmark_return_from_prices(
-            prices, benchmark="secondary", cash_flows=[5000.0, 0.0], initial_value=20000.0,
+            prices, benchmark="secondary_static", cash_flows=[5000.0, 0.0], initial_value=20000.0,
         )
         self.assertAlmostEqual(scaled, 40500 / (20000 + 5000 / 1.55) - 1, places=10)
         unscaled = benchmark_return_from_prices(
-            prices, benchmark="secondary", cash_flows=[5000.0, 0.0],
+            prices, benchmark="secondary_static", cash_flows=[5000.0, 0.0],
         )
         self.assertAlmostEqual(unscaled, 6501.7 / (1 + 5000 / 1.55) - 1, places=10)
         self.assertNotAlmostEqual(scaled, unscaled, places=3)

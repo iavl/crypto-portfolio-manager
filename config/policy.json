@@ -159,10 +159,13 @@
     }
   },
   "benchmarks": {
-    "primary": {
+    "risk_matched_primary": {
+      "type": "VOL_MATCHED_BTC_CASH"
+    },
+    "opportunity_cost_btc": {
       "BTC": 1.0
     },
-    "secondary": {
+    "secondary_static": {
       "BTC": 0.7,
       "ETH": 0.3
     }

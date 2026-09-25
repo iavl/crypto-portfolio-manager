@@ -35,8 +35,17 @@ and [risk model](risk-model.md).
 
 BTC has two strategic roles:
 
-- It is the primary benchmark for comparable portfolio performance.
-- It is the default crypto opportunity-cost asset for risky capital.
+- It anchors the primary risk-matched comparison: a static BTC/cash mix
+  sized to the strategy's own realized volatility (vol-matched BTC/cash)
+  is the primary benchmark for comparable portfolio performance.
+- It is the default crypto opportunity-cost asset for risky capital;
+  100% BTC buy-and-hold is reported as that reference, not as a
+  risk-matched benchmark.
+
+The objective hierarchy (Strategy V2): primary — improve risk-adjusted
+return versus the vol-matched BTC/cash benchmark; secondary — positive
+absolute return; constraint — respect the configured portfolio risk
+budget; reference — track opportunity cost versus BTC.
 
 An ETH or satellite increase should answer: “Why take this additional,
 asset-specific risk instead of increasing BTC?” A positive absolute return is

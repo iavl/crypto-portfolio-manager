@@ -20,7 +20,13 @@ These objectives can conflict. Capital preservation has priority when the risk m
 - Default core assets: BTC and ETH.
 - The user may replace the core asset list in the snapshot `config`.
 
-BTC is the primary benchmark and default risk asset. The configured core list controls core classification and risk tiering; the benchmark remains BTC unless separately changed.
+BTC is the default risk asset and the opportunity-cost reference. The
+primary performance comparison is the vol-matched BTC/cash benchmark (a
+constant BTC weight solved to the strategy's own realized volatility);
+100% BTC buy-and-hold is reported as the opportunity-cost reference, not as
+a risk-matched benchmark. The configured core list controls core
+classification and risk tiering; the benchmark hierarchy changes only with
+an explicit policy decision.
 
 ### Satellite / tactical large-cap universe
 

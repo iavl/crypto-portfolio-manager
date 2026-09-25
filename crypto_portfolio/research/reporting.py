@@ -53,15 +53,16 @@ _SKIPPED_BENCHMARK_NOTES = (
     "尾部休眠的实验保留在表中，但状态列会标出 `TRADING_STALLED`。"
 )
 
-# Reading order for benchmark families: the two policy anchors first, then the
-# two fair comparisons, so the decisive rows are not buried among mechanical
-# variations. Unlisted families fall to the end alphabetically.
+# Reading order for benchmark families (Strategy V2 Phase 5): the primary
+# risk-matched comparison leads, then the untouched-start and exposure-matched
+# fair comparisons, then the secondary static anchor, and finally the BTC
+# opportunity-cost reference. Unlisted families fall to the end alphabetically.
 _BENCHMARK_ORDER = (
-    "btc_buy_and_hold",
-    "btc_eth_70_30",
-    "static_initial_weights",
     "vol_matched_btc_cash",
+    "static_initial_weights",
     "exposure_matched_btc_cash",
+    "btc_eth_70_30",
+    "btc_buy_and_hold",
 )
 
 _DECISION_LEGEND = (
@@ -72,10 +73,11 @@ _DECISION_LEGEND = (
 )
 
 _DECISION_NOTES = (
+    "主基准是「同风险」（vol-matched BTC/cash）：把基准波动率压到与策略相同后再比收益，"
+    "回答「这套复杂策略在承担相近风险时是否值得」。"
     "「不动起点」回答「主动决策相对『什么都不做』是否创造了价值」；"
-    "「同风险」回答「承担这些风险是否值得」——它把基准的波动率压到与策略相同后再比收益。"
-    "两者都不可省略：一个以降险为目标的策略可以合理地输掉前者而赢下后者，"
-    "只看 100% BTC 会把降险本身误读成失败。"
+    "100% BTC 只是机会成本参考，不是风险匹配基准——"
+    "一个以降险为目标的策略可以合理地输给它而赢下同风险口径，只看 100% BTC 会把降险本身误读成失败。"
     "「年化超额」= 策略 CAGR − 基准 CAGR，为正才表示该口径下主动决策创造了价值；"
     "累计收益跨整个窗口，不能与年化数混用。"
 )

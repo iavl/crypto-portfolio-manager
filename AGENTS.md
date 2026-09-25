@@ -122,9 +122,13 @@ pre-flow value, units, and NAV. Preserve timestamped flow events or remove the
 timestamped API; never expose an ignored timestamp.
 
 Portfolio and benchmark evaluation periods and flow timing must match. The
-primary benchmark is 100% BTC buy-and-hold. The secondary benchmark is 70/30
-BTC/ETH buy-and-hold, with each external contribution/withdrawal allocated
-70/30 at its event. Do not silently use a daily-rebalanced methodology.
+primary comparison is the vol-matched BTC/cash benchmark (a constant BTC
+weight solved in closed form to the strategy's own annualized volatility);
+it answers whether the strategy was worth the risk actually taken. 100%
+BTC buy-and-hold is the opportunity-cost reference, not a risk-matched
+benchmark. The secondary static benchmark is 70/30 BTC/ETH buy-and-hold,
+with each external contribution/withdrawal allocated 70/30 at its event.
+Do not silently use a daily-rebalanced methodology.
 
 Held-asset return data must be complete; never renormalize remaining portfolio
 weights when a held return is missing. Portfolio weighted-return functions

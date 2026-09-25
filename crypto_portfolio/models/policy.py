@@ -924,7 +924,7 @@ class Policy:
     excluded_symbols: tuple[str, ...]
     min_stablecoin_weight: float
     max_portfolio_drawdown: float
-    benchmarks: Mapping[str, Mapping[str, float]]
+    benchmarks: Mapping[str, Mapping[str, Any]]
     rebalance: Mapping[str, float]
     scoring_profiles: Mapping[str, Mapping[str, float]]
     asset_scoring_profiles: Mapping[str, str]
@@ -2265,11 +2265,28 @@ def _parse_policy(
     benchmarks = data["benchmarks"]
     if not isinstance(benchmarks, dict) or not benchmarks:
         raise PolicyError("benchmarks must be a non-empty object")
-    parsed_benchmarks: dict[str, dict[str, float]] = {}
-    for name, weights in benchmarks.items():
-        if not isinstance(name, str) or not name.strip():
-            raise PolicyError("benchmark names must be non-empty strings")
-        parsed_benchmarks[name] = _weighted_map(weights, "benchmarks")
+    # Strategy V2 Phase 5: the primary comparison is the vol-matched
+    # BTC/cash benchmark (a strategy-dependent weight solved in closed
+    # form, declared by type marker); 100% BTC is the opportunity-cost
+    # reference and 70/30 the secondary static benchmark.
+    if set(benchmarks) != {"risk_matched_primary", "opportunity_cost_btc", "secondary_static"}:
+        raise PolicyError(
+            "benchmarks must define exactly risk_matched_primary, "
+            "opportunity_cost_btc, and secondary_static"
+        )
+    primary = benchmarks["risk_matched_primary"]
+    if not isinstance(primary, dict) or set(primary) != {"type"} or primary["type"] != "VOL_MATCHED_BTC_CASH":
+        raise PolicyError(
+            "benchmarks.risk_matched_primary must be the type marker "
+            "VOL_MATCHED_BTC_CASH"
+        )
+    parsed_benchmarks: dict[str, dict[str, Any]] = {
+        # Keep the marker so canonical records round-trip; weight-map
+        # consumers reject it explicitly instead of misreading it.
+        "risk_matched_primary": {"type": "VOL_MATCHED_BTC_CASH"},
+    }
+    for name in ("opportunity_cost_btc", "secondary_static"):
+        parsed_benchmarks[name] = _weighted_map(benchmarks[name], f"benchmarks.{name}")
 
     rebalance = data["rebalance"]
     if not isinstance(rebalance, dict):

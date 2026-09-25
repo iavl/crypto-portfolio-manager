@@ -28,13 +28,18 @@ def benchmark_return(
     asset_returns: Mapping[str, float],
     weights: Mapping[str, float] | None = None,
     *,
-    benchmark: str = "primary",
+    benchmark: str = "opportunity_cost_btc",
     policy: Policy | None = None,
 ) -> float:
     resolved = policy or resolve_policy()
     selected = dict(weights) if weights is not None else resolved.benchmarks.get(benchmark)
     if selected is None:
         raise ValueError(f"unknown benchmark: {benchmark}")
+    if "type" in selected:
+        raise ValueError(
+            "the vol-matched primary comparison is strategy-dependent and has "
+            "no static weight map; compare through its own benchmark path"
+        )
     normalized = {str(symbol).strip().upper(): value for symbol, value in selected.items()}
     returns = {str(symbol).strip().upper(): value for symbol, value in asset_returns.items()}
     return portfolio_weighted_return(normalized, returns)
@@ -96,7 +101,9 @@ def benchmark_return_with_cash_flows(
     if timestamps is not None and len(timestamps) != len(period_returns_by_asset) + 1:
         raise ValueError("timestamps must contain one more item than period returns")
     resolved = policy or resolve_policy()
-    selected = dict(weights) if weights is not None else resolved.benchmarks["primary"]
+    # The static per-period anchor is the BTC opportunity-cost reference;
+    # the risk-matched primary comparison has no static weight map.
+    selected = dict(weights) if weights is not None else resolved.benchmarks["opportunity_cost_btc"]
     normalized_weights = {
         str(symbol).strip().upper(): _finite(weight, f"weight for {symbol}")
         for symbol, weight in selected.items()
@@ -185,6 +192,11 @@ def benchmark_return_from_prices(
         selected_weights = resolved.benchmarks.get(benchmark)
         if selected_weights is None:
             raise ValueError(f"unknown benchmark: {benchmark}")
+        if "type" in selected_weights:
+            raise ValueError(
+                "the vol-matched primary comparison is strategy-dependent and "
+                "has no static weight map"
+            )
     return benchmark_return_with_cash_flows(
         periods,
         flows,
@@ -235,7 +247,7 @@ def build_aligned_benchmark_result(
         cash_flows=flows,
         timestamps=timestamps,
         initial_value=initial_value,
-        benchmark="primary",
+        benchmark="opportunity_cost_btc",
         policy=policy,
     )
     secondary = None
@@ -247,7 +259,7 @@ def build_aligned_benchmark_result(
             cash_flows=flows,
             timestamps=timestamps,
             initial_value=initial_value,
-            benchmark="secondary",
+            benchmark="secondary_static",
             policy=policy,
         )
     return replace(

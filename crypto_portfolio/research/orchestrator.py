@@ -59,9 +59,14 @@ def _metric_delta(strategy: Mapping[str, Any], benchmark: Mapping[str, Any], fie
 
 def _benchmark_comparison(strategy: Mapping[str, Any], benchmark: Mapping[str, Any]) -> dict[str, Any]:
     """Pair a strategy with one benchmark on cumulative and annualized terms."""
+    tracking_difference = strategy["total_return"] - benchmark["total_return"]
     return {
         "total_return": benchmark["total_return"],
-        "excess_return": strategy["total_return"] - benchmark["total_return"],
+        "excess_return": tracking_difference,
+        # Strategy V2 Phase 5: tracking difference is the named cumulative
+        # gap against the comparison benchmark (primary reading against the
+        # vol-matched BTC/cash mix).
+        "tracking_difference": tracking_difference,
         "maximum_drawdown": benchmark["maximum_drawdown"],
         "cagr": benchmark.get("cagr"),
         "annualized_volatility": benchmark.get("annualized_volatility"),
@@ -70,6 +75,7 @@ def _benchmark_comparison(strategy: Mapping[str, Any], benchmark: Mapping[str, A
         "volatility_delta": _metric_delta(strategy, benchmark, "annualized_volatility"),
         "sharpe_delta": _metric_delta(strategy, benchmark, "sharpe_rf_zero"),
         "drawdown_delta": _metric_delta(strategy, benchmark, "maximum_drawdown"),
+        "sortino_delta": _metric_delta(strategy, benchmark, "sortino_target_zero"),
     }
 
 
@@ -525,7 +531,51 @@ def run_historical_backtest(
         name: _benchmark_comparison(metrics, value["metrics"])
         for name, value in benchmarks.items()
     }
+    # Strategy attribution (Strategy V2 Phase 5): holding the strategy's own
+    # time-average weights constantly is the counterfactual that isolates the
+    # value of active re-weighting (risk scaling + regime response) from the
+    # asset selection embedded in those average weights. The signed exposure
+    # timing contribution and the cash-yield sensitivity below complete the
+    # decomposition; they are diagnostics, never engine inputs.
+    average_weights: dict[str, float] = {}
+    valuation_count = len(ledger.valuations)
+    for item in ledger.valuations:
+        for symbol, weight in item.weights.items():
+            average_weights[symbol] = average_weights.get(symbol, 0.0) + weight
+    average_weights = {
+        symbol: weight / valuation_count
+        for symbol, weight in average_weights.items()
+        if weight / valuation_count > 1e-12
+    }
+    attribution: dict[str, Any] = {
+        "methodology": (
+            "risk_scaling_effect = strategy total return minus the total "
+            "return of the same average weights held constantly (with costs); "
+            "exposure timing and cash-yield sensitivity are separate blocks"
+        ),
+        "average_weights": dict(sorted(average_weights.items())),
+    }
+    if average_weights:
+        average_hold = constant_weight_rebalanced_benchmark(
+            prices_by_time=aligned_prices, weights=average_weights,
+            initial_value_usd=first.portfolio_value,
+            fee_bps=fee_bps, slippage_bps=slippage_bps,
+        )
+        hold_metrics = average_hold["metrics"]
+        attribution["average_weights_hold"] = {
+            "total_return": hold_metrics["total_return"],
+            "maximum_drawdown": hold_metrics["maximum_drawdown"],
+            "annualized_volatility": hold_metrics["annualized_volatility"],
+        }
+        attribution["risk_scaling_effect"] = (
+            metrics["total_return"] - hold_metrics["total_return"]
+        )
+    vol_matched_comparison = benchmark_comparison.get("vol_matched_btc_cash_investable") or {}
+    attribution["vol_matched_excess_return_annualized"] = (
+        vol_matched_comparison.get("excess_return_annualized")
+    )
     return {
+        "strategy_attribution": attribution,
         "engine": "quantity_cash_closed_loop", "metrics": metrics,
         "cadence": (
             "DAILY_WITH_14D_FULL" if ordinary_review_weekday is None
