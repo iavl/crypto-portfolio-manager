@@ -56,7 +56,8 @@
       "enum": [
         "PULLBACK",
         "BREAKOUT",
-        "WAIT"
+        "WAIT",
+        "MARKET_TIMEOUT"
       ]
     },
     "technical_confidence": {
@@ -140,13 +141,24 @@
         "minLength": 1
       }
     },
-    "gate_details": {"type": ["object", "null"]},
-    "planning_context": {"type": ["object", "null"]},
+    "gate_details": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "planning_context": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "reserve_policy": {
       "enum": [
         "NONE",
         "PULLBACK_RESERVE",
-        "GATE_HOLD"
+        "GATE_HOLD",
+        "TIMEOUT_RESERVE"
       ]
     }
   },

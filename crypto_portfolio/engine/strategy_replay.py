@@ -330,6 +330,8 @@ def replay_strategy(
     stables = set(resolved.stable_symbols)
     previous_regime: Any = None
     market_recovery_streak = 0
+    # Bounded WAIT lifetime tracking (Strategy V2 Phase 3).
+    entry_wait_streaks: dict[str, int] = {}
     # Dollar positions, seeded from the first frozen record.
     dollars: dict[str, float] = {
         symbol: weight * reviews[0].portfolio_value
@@ -439,7 +441,14 @@ def replay_strategy(
                 effective_plans[action.symbol] = build_entry_plan(
                     action.symbol, action.amount_usd, snapshot, regime.regime, confidence,
                     policy=resolved,
+                    wait_streak=entry_wait_streaks.get(action.symbol, 0),
                 ).as_dict()
+                plan_action = str(effective_plans[action.symbol].get("action", "")).strip().upper()
+                entry_wait_streaks[action.symbol] = (
+                    entry_wait_streaks.get(action.symbol, 0) + 1
+                    if plan_action == "WAIT"
+                    else 0
+                )
         if effective_plans:
             from dataclasses import replace as replace_action
             from .execution_replay import simulate_execution_plan

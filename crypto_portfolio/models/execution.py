@@ -13,9 +13,10 @@ from .factor_packet import freeze_packet_value, thaw_packet_value
 
 
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
-_ENTRY_MODES = {"PULLBACK", "BREAKOUT", "WAIT"}
+# MARKET_TIMEOUT: bounded execution-veto expiry (Strategy V2 Phase 3).
+_ENTRY_MODES = {"PULLBACK", "BREAKOUT", "WAIT", "MARKET_TIMEOUT"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
-_RESERVE_POLICIES = {"NONE", "PULLBACK_RESERVE", "GATE_HOLD"}
+_RESERVE_POLICIES = {"NONE", "PULLBACK_RESERVE", "GATE_HOLD", "TIMEOUT_RESERVE"}
 
 
 def _number(value: Any, field: str, *, minimum: float | None = None) -> float:

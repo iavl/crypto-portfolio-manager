@@ -1815,18 +1815,29 @@ def _parse_execution_overlay(value: Any) -> dict[str, Any]:
 
     positioning = factors(value["positioning"], "execution_overlay.positioning", _OVERLAY_RISK_STATES)
     cycle = factors(value["btc_cycle"], "execution_overlay.btc_cycle", ("NORMAL", "ELEVATED", "HIGH"))
-    wait = value.get("wait", {"enabled": True, "minimum_extension_atr": 2.0})
+    wait = value.get("wait", {"enabled": True, "minimum_extension_atr": 2.0, "expiry_reviews": 5})
     if not isinstance(wait, dict):
         raise PolicyError("execution_overlay.wait must be an object")
-    _unknown_fields(wait, {"enabled", "minimum_extension_atr"}, "execution_overlay.wait")
-    if set(wait) != {"enabled", "minimum_extension_atr"}:
+    _unknown_fields(
+        wait, {"enabled", "minimum_extension_atr", "expiry_reviews"}, "execution_overlay.wait"
+    )
+    if set(wait) != {"enabled", "minimum_extension_atr", "expiry_reviews"}:
         raise PolicyError("execution_overlay.wait fields are incomplete")
     if not isinstance(wait["enabled"], bool):
         raise PolicyError("execution_overlay.wait.enabled must be boolean")
     extension = _number(wait["minimum_extension_atr"], "execution_overlay.wait.minimum_extension_atr", minimum=0.0)
     if extension <= 0:
         raise PolicyError("execution_overlay.wait.minimum_extension_atr must be > 0")
-    return {"positioning": positioning, "btc_cycle": cycle, "wait": {"enabled": wait["enabled"], "minimum_extension_atr": extension}}
+    expiry = wait["expiry_reviews"]
+    if isinstance(expiry, bool) or not isinstance(expiry, int) or expiry < 1:
+        raise PolicyError("execution_overlay.wait.expiry_reviews must be an integer >= 1")
+    return {"positioning": positioning, "btc_cycle": cycle, "wait": {
+        "enabled": wait["enabled"],
+        "minimum_extension_atr": extension,
+        # Bounded WAIT lifetime (Strategy V2 Phase 3): a technical veto may
+        # not block a strategic approval forever. Placeholder pending Phase 6.
+        "expiry_reviews": expiry,
+    }}
 
 
 def _parse_events(value: Any) -> dict[str, Any]:

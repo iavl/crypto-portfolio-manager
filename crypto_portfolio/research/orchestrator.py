@@ -250,6 +250,10 @@ def run_historical_backtest(
     constraint_violations: Counter[str] = Counter()
     plan_counts: Counter[str] = Counter()
     market_recovery_streak = 0
+    # Consecutive reviews a strategic INCREASE waited on its entry plan
+    # (Strategy V2 Phase 3): bounded WAIT lifetime, deterministic from the
+    # replayed decision sequence alone.
+    entry_wait_streaks: dict[str, int] = {}
     risky_weights: list[float] = []
     floor_pin = Counter()
     overlay_binding_reviews = 0
@@ -383,8 +387,12 @@ def run_historical_backtest(
             plan = build_entry_plan(
                 action.symbol, action.amount_usd, snapshot, regime.regime,
                 assessment.confidence, policy=resolved,
+                wait_streak=entry_wait_streaks.get(action.symbol, 0),
             )
             effective_plans[action.symbol] = plan.as_dict()
+            entry_wait_streaks[action.symbol] = (
+                entry_wait_streaks.get(action.symbol, 0) + 1 if plan.action == "WAIT" else 0
+            )
             outcome = simulate_execution_plan(plan.as_dict(), bars, decision_as_of=review.as_of)
             entry_outcomes[action.symbol] = outcome
             plan_counts[outcome["status"]] += 1

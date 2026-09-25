@@ -24,7 +24,7 @@ from .overlays import (
 _REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _CONFIDENCE = {"HIGH", "MEDIUM", "LOW"}
 _ACTIONS = {"INCREASE", "REDUCE", "EXIT", "HOLD", "WAIT", "NO_TRADE"}
-_MODES = {"PULLBACK", "BREAKOUT", "WAIT"}
+_MODES = {"PULLBACK", "BREAKOUT", "WAIT", "MARKET_TIMEOUT"}
 
 
 def _number(value: Any, field: str, *, minimum: float = 0.0) -> float:
@@ -503,6 +503,89 @@ def _build_entry_plan(
     )
 
 
+def _execution_timeout_plan(
+    waiting_plan: ExecutionPlan,
+    technical_snapshot: TechnicalSnapshot,
+    *,
+    policy: Policy,
+    regime: str,
+    wait_streak: int,
+    positioning: PositioningFacts | Mapping[str, Any] | None = None,
+    btc_cycle: BTCCycleContext | Mapping[str, Any] | None = None,
+) -> ExecutionPlan:
+    """Bounded execution-veto expiry: partial market deployment.
+
+    A technical WAIT that has persisted for ``expiry_reviews`` consecutive
+    reviews while the strategic approval stands may no longer veto the
+    whole position: the plan deploys the configured maximum initial
+    tranche as a single market order at the current price and reserves the
+    remainder. This is an execution-timing override, never a change to the
+    strategic approval itself.
+    """
+    from dataclasses import replace
+
+    config = policy.execution
+    wait_config = policy.execution_overlay.get("wait", {})
+    tranche_config = config["max_initial_tranche"]
+    fraction = (
+        float(tranche_config)
+        if isinstance(tranche_config, (int, float)) and not isinstance(tranche_config, bool)
+        else float(tranche_config.get(regime, tranche_config.get("NORMAL", 0.5)))
+    )
+    approved = waiting_plan.approved_amount_usd
+    price = technical_snapshot.current_spot_price
+    # Overlay caps are deployment limits and still apply; the timeout floor
+    # keeps the expiry meaningful but never exceeds the configured fraction.
+    deployment_factor = effective_deployment_factor(
+        fraction, positioning=positioning, btc_cycle=btc_cycle, policy=policy,
+    )
+    deployment_factor = min(fraction, max(deployment_factor, min(fraction, 0.25)))
+    planned = approved * deployment_factor
+    planned = min(approved, max(0.0, planned))
+    if planned <= 0 or price <= 0:
+        return waiting_plan
+    tranche = ExecutionTranche(
+        sequence=1,
+        # Tranche fractions partition the planned amount (one tranche = 1.0);
+        # the deployment fraction lives in planned / approved.
+        allocation_fraction=1.0,
+        amount_usd=planned,
+        price_low=price,
+        price_high=price,
+        reference_price=price,
+        estimated_quantity=planned / price,
+        rationale=(
+            f"execution timeout after {wait_streak} consecutive WAIT reviews "
+            f"(expiry {wait_config.get('expiry_reviews')}); partial market deployment"
+        ),
+        structural_sources=("EXECUTION_TIMEOUT",),
+        zone_quality=0.0,
+    )
+    reserve = approved - planned
+    return replace(
+        waiting_plan,
+        action="INCREASE",
+        planned_amount_usd=planned,
+        reserve_amount_usd=reserve,
+        reserve_policy="TIMEOUT_RESERVE" if reserve > 1e-9 else "NONE",
+        entry_mode="MARKET_TIMEOUT",
+        tranches=(tranche,),
+        rationale=(
+            f"execution timeout: technical layer held WAIT for {wait_streak} consecutive "
+            f"reviews while the strategic approval stood; deploying {planned:.2f} USD of "
+            f"{approved:.2f} USD approved capacity at market, remainder reserved"
+        ),
+        gate_details={
+            "code": "EXECUTION_TIMEOUT_PARTIAL_DEPLOYMENT",
+            "reason": "bounded WAIT lifetime reached with the strategic thesis intact",
+            "wait_streak": wait_streak,
+            "expiry_reviews": wait_config.get("expiry_reviews"),
+            "review_required": False,
+        },
+        effective_deployment_factor=deployment_factor,
+    )
+
+
 def build_entry_plan(
     symbol: str,
     approved_amount_usd: float,
@@ -519,19 +602,45 @@ def build_entry_plan(
     positioning: PositioningFacts | Mapping[str, Any] | None = None,
     btc_cycle: BTCCycleContext | Mapping[str, Any] | None = None,
     overlays: MarketOverlays | Mapping[str, Any] | None = None,
+    wait_streak: int = 0,
 ) -> ExecutionPlan:
-    """Bind every planning option so publication can reproduce the proposal."""
+    """Bind every planning option so publication can reproduce the proposal.
+
+    ``wait_streak`` is the count of consecutive prior reviews where this
+    symbol had a strategic INCREASE approval whose entry plan returned
+    WAIT. At the configured expiry the veto is bounded: a partial market
+    deployment is planned instead of another WAIT (Strategy V2 Phase 3).
+    """
     from dataclasses import replace
     from ..models.policy import policy_hash
     resolved = policy or resolve_policy()
+    if isinstance(wait_streak, bool) or not isinstance(wait_streak, int) or wait_streak < 0:
+        raise ValueError("wait_streak must be a non-negative integer")
     options = dict(entry_mode=entry_mode, breakout_confirmed=breakout_confirmed,
                    thesis_broken=thesis_broken, relative_strength_confirmed=relative_strength_confirmed,
                    positioning=positioning, btc_cycle=btc_cycle, overlays=overlays)
     plan = _build_entry_plan(symbol, approved_amount_usd, technical_snapshot, regime,
                              portfolio_confidence, action, policy=resolved, **options)
+    wait_config = resolved.execution_overlay.get("wait", {})
+    expiry = int(wait_config.get("expiry_reviews", 0))
+    hard_veto = (
+        plan.action != "WAIT"
+        or not wait_config.get("enabled", True)
+        or expiry <= 0
+        or wait_streak < expiry
+        or thesis_broken
+        or str(regime).strip().upper() == "CAPITAL_PRESERVATION"
+    )
+    if not hard_veto:
+        plan = _execution_timeout_plan(
+            plan, technical_snapshot, policy=resolved, regime=regime,
+            wait_streak=wait_streak,
+            positioning=positioning, btc_cycle=btc_cycle,
+        )
     return replace(plan, planning_context={
         "policy_hash": policy_hash(resolved), "regime": regime,
         "portfolio_confidence": portfolio_confidence, "action": action,
+        "wait_streak": wait_streak,
         "options": {key: value.as_dict() if hasattr(value, "as_dict") else value for key, value in options.items()},
     })
 

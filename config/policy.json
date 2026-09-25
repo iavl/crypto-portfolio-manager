@@ -300,10 +300,10 @@
     "normal_max": 0.35,
     "defensive_max": 0.65,
     "domain_weights": {
-      "trend": 0.3,
-      "volatility": 0.25,
-      "flows": 0.25,
-      "breadth": 0.2
+      "trend": 0.15,
+      "volatility": 0.3,
+      "flows": 0.3,
+      "breadth": 0.25
     },
     "severity": {
       "trend": {
@@ -507,7 +507,8 @@
     },
     "wait": {
       "enabled": true,
-      "minimum_extension_atr": 2.0
+      "minimum_extension_atr": 2.0,
+      "expiry_reviews": 5
     }
   },
   "events": {

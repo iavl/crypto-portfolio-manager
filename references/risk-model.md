@@ -13,6 +13,13 @@ input.
 Semantic event risk may override the normal confirmation path, but no model
 may replace the portfolio-level risk authority.
 
+Signal ownership (Strategy V2, see `docs/SIGNAL_OWNERSHIP.md`): the regime
+answers "how much systemic risk does the whole market allow". Its domain
+weights are volatility 0.30, flows 0.30, breadth 0.25, and trend 0.15 —
+BTC's own trend is reduced context, not regime authority, and with the 0.15
+weight it alone cannot move the label out of NORMAL. The weights are a
+structural Phase 3 decision pending Phase 6 walk-forward validation.
+
 ## Core principle
 
 The configured maximum-loss preference applies to the **whole portfolio**, not each individual asset. The default `max_portfolio_drawdown` is 15%.

@@ -65,6 +65,19 @@ def _render_policy(policy, coverage) -> list[str]:
             )
     lines.append("")
 
+    from crypto_portfolio.engine.signal_ownership import signal_ownership_report
+    ownership = signal_ownership_report(policy)
+    lines.append("signal ownership")
+    lines.append(
+        f"  {'signal':<22}{'primary owner':<18}consumers"
+    )
+    for row in ownership["signals"]:
+        lines.append(
+            f"  {row['signal']:<22}{row['primary_owner']:<18}{', '.join(row['consumers'])}"
+            + ("  [MULTIPLE_POLICY_AUTHORITY]" if row["multiple_policy_authority"] else "")
+        )
+    lines.append("")
+
     lines.append("drawdown budget under each scenario")
     lines.append(
         f"  {'regime':<22}{'composition':<24}{'scenario':<18}"
