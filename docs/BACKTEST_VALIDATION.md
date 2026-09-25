@@ -115,6 +115,37 @@ rendered report and `summary.json` carry the same verdict; the gate reads the
 CSVs from that same directory, so always render into the run's own `report/`
 directory rather than a copy elsewhere.
 
+## Deterministic diagnostics (checks only, no thresholds)
+
+Every experiment result carries four read-only diagnostics; none of them
+changes engine accounting, policy, or verdicts beyond a WARNING finding.
+
+- **Exposure timing** (`exposure_timing`): compounds the BTC leg on the
+  strategy's realized risky-weight path and on the constant weight equal to
+  that path's average. The signed difference is the timing contribution —
+  positive means exposure was held when the leg moved up. A companion
+  `exposure_matched_btc_cash` benchmark (the same constant average exposure,
+  invested with costs) joins the comparison table.
+- **Regime floor pinning** (`regime_floor_diagnostics`): shares of reviews
+  with a DEFENSIVE-or-worse label vs reviews at or below the `-0.6D` own
+  drawdown floor, whether the market domains ever pushed defense beyond the
+  floor, and the drawdown budget overlay's binding share. The validity gate
+  raises `REGIME_PINNED_BY_OWN_DRAWDOWN` (WARNING) when the label sat on its
+  floor for a majority of reviews with no market-driven defense: in such a
+  window the regime engine added no information beyond the book's own P&L.
+- **Cash yield sensitivity** (`cash_yield_sensitivity`): the strategy's own
+  realized path re-credited with 4%/5% annual stable yield. The replay books
+  the stable leg at exactly zero; for a mandate that spends most of its life
+  in cash this quantifies how much of "low return" is that assumption. It is
+  a diagnostic and is not compared against the zero-yield benchmarks.
+- **Drawdown budget sensitivity** (`scripts/backtest.py budget-sensitivity`):
+  replays the strict core experiment under alternative
+  `risk.max_portfolio_drawdown` values (default 0.15/0.20/0.25) and asserts
+  the budget was held (`MaxDD <= D + tolerance`, zero breach days). With the
+  overlay enabled `MaxDD ≈ D` is a construction of
+  `risky_cap = 1 - |drawdown| / D`, so the outputs to read are the exposure
+  and return response to the budget, not the bound itself.
+
 ## Before reading any report
 
 Run `scripts/strategy_validity.py <run_dir>` first. It decides whether the run

@@ -12,13 +12,13 @@ from ..engine.backtest import (
     constant_weight_rebalanced_benchmark,
     performance_metrics,
 )
-from ..engine.benchmark import vol_matched_cash_weight
+from ..engine.benchmark import exposure_timing_contribution, vol_matched_cash_weight
 from ..engine.entry import build_entry_plan
 from ..engine.execution_replay import simulate_execution_plan
 from ..engine.operation import build_final_operation
 from ..engine.rebalance import direction_history_from_decisions, recommend_rebalance
 from ..engine.regime import RegimeInputs, determine_regime, market_only_regime
-from ..engine.risk import run_risk_gate
+from ..engine.risk import drawdown_budget_overlay_floor, run_risk_gate
 from ..engine.strategy_replay import ReplayReview
 from ..models.evidence import AssetAssessment
 from ..models.market import TechnicalSnapshot
@@ -112,6 +112,45 @@ def _vol_matched_benchmark(
     return result
 
 
+def _cash_yield_sensitivity(
+    valuations: Sequence[Any], *, stable_symbols: Sequence[str], yields: tuple[float, ...] = (0.04, 0.05),
+) -> dict[str, Any]:
+    """What the realized path would have earned if the stable sleeve yielded.
+
+    The replay books the stable leg at exactly zero, which understates a
+    mandate that spends most of its life in cash. This diagnostic re-credits
+    each valuation period with the stable share times an assumed annual
+    yield, compounded over the period's actual length. It changes no engine
+    accounting, and the zero-yield benchmarks stay the comparison basis.
+    """
+    from ..models.time import parse_timestamp
+    if len(valuations) < 2:
+        return {"status": "UNAVAILABLE", "reason": "at least two valuations are required"}
+    total_seconds = (
+        parse_timestamp(valuations[-1].timestamp) - parse_timestamp(valuations[0].timestamp)
+    ).total_seconds()
+    years = total_seconds / (365.25 * 86400.0)
+    if years <= 0:
+        return {"status": "UNAVAILABLE", "reason": "valuation span is empty"}
+    scenarios: dict[str, dict[str, float]] = {}
+    for annual_yield in yields:
+        growth = 1.0
+        for left, right in zip(valuations, valuations[1:]):
+            period_return = right.total_value_usd / left.total_value_usd - 1.0
+            stable_share = sum(left.weights.get(symbol, 0.0) for symbol in stable_symbols)
+            span_years = (
+                parse_timestamp(right.timestamp) - parse_timestamp(left.timestamp)
+            ).total_seconds() / (365.25 * 86400.0)
+            growth *= 1.0 + period_return + stable_share * ((1.0 + annual_yield) ** span_years - 1.0)
+        total = growth - 1.0
+        scenarios[f"yield_{annual_yield:.2%}"] = {
+            "annual_yield": annual_yield,
+            "total_return": total,
+            "cagr": (1.0 + total) ** (1.0 / years) - 1.0,
+        }
+    return {"status": "AVAILABLE", "window_years": years, "scenarios": scenarios}
+
+
 def run_historical_backtest(
     reviews: Sequence[ReplayReview],
     *,
@@ -145,6 +184,9 @@ def run_historical_backtest(
     constraint_violations: Counter[str] = Counter()
     plan_counts: Counter[str] = Counter()
     market_recovery_streak = 0
+    risky_weights: list[float] = []
+    floor_pin = Counter()
+    overlay_binding_reviews = 0
 
     for index, review in enumerate(reviews):
         if index > 0:
@@ -171,6 +213,33 @@ def run_historical_backtest(
         regime = determine_regime(RegimeInputs(**regime_values), policy=resolved, previous=previous_regime)
         previous_regime = regime
         regime_counts[regime.regime] += 1
+        # Deterministic diagnostics: the exposure the strategy carried into
+        # the period, whether the regime label sat on its own-drawdown floor,
+        # and whether the drawdown budget overlay raised the stable floor
+        # beyond the regime's own target.
+        risky_weights.append(max(0.0, 1.0 - sum(
+            point.weights.get(symbol, 0.0) for symbol in resolved.stable_symbols
+        )))
+        defensive_floor = -0.6 * resolved.max_portfolio_drawdown
+        cp_floor = -0.8 * resolved.max_portfolio_drawdown
+        label_level = {"NORMAL": 0, "DEFENSIVE": 1, "CAPITAL_PRESERVATION": 2}[regime.regime]
+        floor_level = 0 if point.drawdown > defensive_floor else 1 if point.drawdown > cp_floor else 2
+        if label_level >= 1:
+            floor_pin["label_defensive_or_worse"] += 1
+        if floor_level >= 1:
+            floor_pin["drawdown_at_or_below_defensive_floor"] += 1
+        if floor_level >= 2:
+            floor_pin["drawdown_at_or_below_cp_floor"] += 1
+        if label_level > floor_level:
+            floor_pin["market_driven_defensive_reviews"] += 1
+        overlay_floor, _ = drawdown_budget_overlay_floor(
+            resolved, point.drawdown, market_recovery_streak
+        )
+        if overlay_floor > max(
+            resolved.min_stablecoin_weight,
+            resolved.regime(regime.regime).stablecoin_target,
+        ) + 1e-12:
+            overlay_binding_reviews += 1
         allocation = build_target_allocation(
             policy=resolved, regime=regime.regime, assessments=assessments,
             current_weights=point.weights,
@@ -345,6 +414,18 @@ def run_historical_backtest(
     )
     if vol_matched is not None:
         benchmarks["vol_matched_btc_cash_investable"] = vol_matched
+    # Exposure-matched fair comparison: the same constant average exposure the
+    # strategy realized, held passively in BTC/cash.  Together with the signed
+    # timing contribution below it separates "what did the exposure path earn"
+    # from "what did the average exposure alone earn".
+    exposure_timing = exposure_timing_contribution(risky_weights, aligned_prices)
+    average_risky = exposure_timing["realized_average_risky_weight"]
+    if average_risky > 0:
+        benchmarks["exposure_matched_btc_cash_investable"] = constant_weight_rebalanced_benchmark(
+            prices_by_time=aligned_prices,
+            weights={"BTC": average_risky, "USD": 1.0 - average_risky},
+            initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        )
     benchmark_comparison = {
         name: _benchmark_comparison(metrics, value["metrics"])
         for name, value in benchmarks.items()
@@ -360,6 +441,22 @@ def run_historical_backtest(
         "average_cash_weight": sum(item.weights.get("USD", 0.0) for item in ledger.valuations) / len(ledger.valuations),
         "regime_counts": dict(regime_counts), "plan_status_counts": dict(plan_counts),
         "constraint_violation_counts": dict(constraint_violations),
+        "regime_floor_diagnostics": {
+            "reviews": len(review_rows),
+            "label_defensive_or_worse_share": floor_pin["label_defensive_or_worse"] / len(review_rows),
+            "drawdown_at_or_below_defensive_floor_share": (
+                floor_pin["drawdown_at_or_below_defensive_floor"] / len(review_rows)
+            ),
+            "drawdown_at_or_below_cp_floor_share": (
+                floor_pin["drawdown_at_or_below_cp_floor"] / len(review_rows)
+            ),
+            "market_driven_defensive_reviews": floor_pin["market_driven_defensive_reviews"],
+            "overlay_binding_share": overlay_binding_reviews / len(review_rows),
+        },
+        "exposure_timing": exposure_timing,
+        "cash_yield_sensitivity": _cash_yield_sensitivity(
+            ledger.valuations, stable_symbols=tuple(resolved.stable_symbols),
+        ),
         "benchmarks": benchmarks, "benchmark_comparison": benchmark_comparison, "reviews": review_rows,
         "trades": [item.as_dict() for item in ledger.trades],
         "valuations": [item.as_dict() for item in ledger.valuations],

@@ -61,12 +61,14 @@ _BENCHMARK_ORDER = (
     "btc_eth_70_30",
     "static_initial_weights",
     "vol_matched_btc_cash",
+    "exposure_matched_btc_cash",
 )
 
 _DECISION_LEGEND = (
     "`btc_buy_and_hold` = 100% BTC 买入持有（策略主基准）；`btc_eth_70_30` = 70/30 BTC/ETH 买入持有（次基准）；"
     "`static_initial_weights` = 用该实验自己的起始权重买入后不再调整；"
-    "`vol_matched_btc_cash` = 按策略自身波动率解出的 BTC/现金固定比例，每日再平衡。"
+    "`vol_matched_btc_cash` = 按策略自身波动率解出的 BTC/现金固定比例，每日再平衡；"
+    "`exposure_matched_btc_cash` = 按策略实现的平均风险仓持有的 BTC/现金固定比例，每日再平衡。"
 )
 
 _DECISION_NOTES = (
@@ -562,6 +564,51 @@ def _benchmark_blocks(run: Mapping[str, Any], validity: Any) -> list[Block]:
     return blocks
 
 
+def _diagnostics_blocks(run: Mapping[str, Any], validity: Any) -> list[Block]:
+    """Exposure timing, floor pinning, and cash-yield sensitivity diagnostics."""
+    runs = run.get("runs") or {}
+    blocks: list[Block] = [("h2", "风险与择时诊断")]
+    timing_rows: list[list[str]] = []
+    for name, result in runs.items():
+        if result.get("status") != "COMPLETED":
+            continue
+        payload = result["result"]
+        timing = payload.get("exposure_timing")
+        if not timing:
+            continue
+        floor = payload.get("regime_floor_diagnostics") or {}
+        cash = payload.get("cash_yield_sensitivity") or {}
+        scenarios = cash.get("scenarios") or {}
+        timing_rows.append([
+            name,
+            _fmt(timing.get("realized_average_risky_weight"), percent=True),
+            _fmt(timing.get("path_total_return"), percent=True),
+            _fmt(timing.get("constant_total_return"), percent=True),
+            _fmt(timing.get("timing_contribution"), percent=True),
+            _fmt(floor.get("overlay_binding_share"), percent=True),
+            _fmt(floor.get("label_defensive_or_worse_share"), percent=True),
+            _fmt(floor.get("drawdown_at_or_below_defensive_floor_share"), percent=True),
+            _fmt((scenarios.get("yield_4.00%") or {}).get("cagr"), percent=True),
+            _fmt((scenarios.get("yield_5.00%") or {}).get("cagr"), percent=True),
+        ])
+    if timing_rows:
+        blocks.append(("h3", "择时贡献与地板钉住"))
+        blocks.append(("table", (
+            ["实验", "平均风险仓", "路径累计", "同均仓累计", "择时贡献",
+             "overlay 生效占比", "标签≥防御占比", "回撤≤地板占比",
+             "现金4%时CAGR", "现金5%时CAGR"], timing_rows,
+        )))
+        blocks.append(("p",
+            "「择时贡献」= 按策略实际风险仓路径持有 BTC 腿的累计收益 − 按其平均风险仓常数持有的累计收益，"
+            "带符号：正数说明持仓时机在均值之上，负数说明把敞口加在了腿下跌的时段。"
+            "「标签≥防御占比」与「回撤≤地板占比」接近相等即 `REGIME_PINNED_BY_OWN_DRAWDOWN`："
+            "regime 标签跟随账面回撤而非市场。现金收益敏感性是诊断口径：回放把稳定腿记为零收益，"
+            "这里按假设年化收益重记策略自身路径，不改变任何引擎记账，也不与零收益基准直接比较。"))
+    else:
+        blocks.append(("p", "本运行没有择时诊断数据。"))
+    return blocks
+
+
 def _exposure_blocks(run: Mapping[str, Any], validity: Any) -> list[Block]:
     runs = run.get("runs") or {}
     status = _experiment_status(validity, list(runs)) if validity is not None else {}
@@ -737,6 +784,7 @@ def render_run_report(
     blocks.extend(_readiness_blocks(validity))
     blocks.extend(_summary_blocks(run, validity))
     blocks.extend(_benchmark_blocks(run, validity))
+    blocks.extend(_diagnostics_blocks(run, validity))
     blocks.extend(_exposure_blocks(run, validity))
     blocks.extend(_evaluation_blocks(resolved_run_dir if resolved_run_dir.is_dir() else None))
 

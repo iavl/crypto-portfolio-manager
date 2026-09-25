@@ -296,6 +296,24 @@ def command_report(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def command_budget_sensitivity(args):
+    from crypto_portfolio.research.sensitivity import drawdown_budget_sensitivity
+    budgets = tuple(float(item) for item in str(args.budgets).split(",") if item.strip())
+    result = drawdown_budget_sensitivity(
+        args.dataset, budgets=budgets, scope=args.scope, portfolio=args.portfolio,
+    )
+    output = Path(args.output) if args.output else Path(args.dataset) / "budget-sensitivity.json"
+    _write(output, result)
+    for row in result["rows"]:
+        print(
+            f"D={row['budget']:.2f}: cagr={row['cagr']:+.4f} total={row['total_return']:+.4f} "
+            f"maxdd={row['maximum_drawdown']:.4f} avg_cash={row['average_cash_weight']:.3f} "
+            f"trades={row['trades']}({row['buys']}B/{row['sells']}S) "
+            f"breach_days={row['breach_days']} budget_held={row['budget_held']}"
+        )
+    print(json.dumps({"output": str(output), "mechanism_note": result["mechanism_note"]}, ensure_ascii=False))
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -330,6 +348,13 @@ def parse_args(argv=None):
     report.add_argument("run")
     report.add_argument("--output")
     report.set_defaults(handler=command_report)
+    sensitivity = sub.add_parser("budget-sensitivity")
+    sensitivity.add_argument("dataset")
+    sensitivity.add_argument("--budgets", default="0.15,0.20,0.25")
+    sensitivity.add_argument("--scope", default="core")
+    sensitivity.add_argument("--portfolio", default="core_existing")
+    sensitivity.add_argument("--output")
+    sensitivity.set_defaults(handler=command_budget_sensitivity)
     return parser.parse_args(argv)
 
 

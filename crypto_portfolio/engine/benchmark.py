@@ -385,11 +385,80 @@ def vol_matched_cash_weight(
     return weight
 
 
+def exposure_timing_contribution(
+    risky_weights: Sequence[float],
+    prices_by_time: Sequence[tuple[Any, Mapping[str, float]]],
+    *,
+    leg_weights: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    """Signed exposure-timing contribution of a realized risky-weight path.
+
+    Compounds the same static leg (default 100% BTC) twice over the same
+    period returns: once on the strategy's realized risky weight entering
+    each period, once on the constant weight equal to that path's average.
+    The difference is a signed number for "did holding risk when the leg
+    moved beat holding the average exposure constantly":
+
+        path_total     = prod(1 + w_t * r_leg_t) - 1
+        constant_total = prod(1 + wbar * r_leg_t) - 1
+        contribution   = path_total - constant_total
+
+    ``risky_weights`` holds the exposure known at each period's decision
+    boundary (pre-trade); ``prices_by_time`` carries one price map per
+    boundary plus one at the final period end, so its length is exactly one
+    greater. Zero costs on both legs by construction — this isolates the
+    timing covariance, it is not an investable benchmark.
+    """
+    weights = [_finite(weight, f"risky_weights[{index}]") for index, weight in enumerate(risky_weights)]
+    if not weights:
+        raise ValueError("risky_weights needs at least one observation")
+    if any(weight < 0 or weight > 1 for weight in weights):
+        raise ValueError("risky_weights must be in [0, 1]")
+    if len(prices_by_time) != len(weights) + 1:
+        raise ValueError("prices_by_time must contain exactly one more boundary than risky_weights")
+    leg = {"BTC": 1.0} if leg_weights is None else {
+        str(symbol).strip().upper(): _finite(weight, f"leg_weights for {symbol}")
+        for symbol, weight in leg_weights.items()
+    }
+    if not leg or any(weight < 0 for weight in leg.values()):
+        raise ValueError("leg_weights must be non-negative and non-empty")
+    if not math.isclose(sum(leg.values()), 1.0, abs_tol=1e-9):
+        raise ValueError("leg_weights must sum to 1")
+    leg_returns: list[float] = []
+    for index in range(len(weights)):
+        previous = prices_by_time[index][1]
+        current = prices_by_time[index + 1][1]
+        period = 0.0
+        for symbol, weight in leg.items():
+            if symbol not in previous or symbol not in current:
+                raise ValueError(f"prices are missing leg symbol {symbol}")
+            before = _finite(previous[symbol], f"price for {symbol}")
+            after = _finite(current[symbol], f"price for {symbol}")
+            if before <= 0 or after <= 0:
+                raise ValueError(f"price for {symbol} must be positive")
+            period += weight * (after / before - 1.0)
+        leg_returns.append(period)
+    average = sum(weights) / len(weights)
+    path_total = 1.0
+    constant_total = 1.0
+    for weight, period in zip(weights, leg_returns):
+        path_total *= 1.0 + weight * period
+        constant_total *= 1.0 + average * period
+    return {
+        "realized_average_risky_weight": average,
+        "path_total_return": path_total - 1.0,
+        "constant_total_return": constant_total - 1.0,
+        "timing_contribution": (path_total - 1.0) - (constant_total - 1.0),
+        "periods": len(weights),
+    }
+
+
 __all__ = [
     "benchmark_return",
     "benchmark_return_from_prices",
     "benchmark_return_with_cash_flows",
     "compare_portfolio_to_benchmark",
+    "exposure_timing_contribution",
     "primary_benchmark_return",
     "require_aligned_period",
     "secondary_benchmark_return",

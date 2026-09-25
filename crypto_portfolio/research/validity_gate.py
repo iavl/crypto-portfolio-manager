@@ -38,6 +38,7 @@ __all__ = [
     "MANIFEST_MISSING",
     "NO_TRADES_IN_WINDOW",
     "ONE_WAY_RATCHER",
+    "REGIME_PINNED_BY_OWN_DRAWDOWN",
     "SORTING_UNDERPOWERED",
     "TRADING_STALLED",
     "RunValidityReport",
@@ -73,6 +74,17 @@ STALL_GAP_DAYS = 60
 VERDICT_NOT_A_TEST = "DEGENERATE_NOT_A_TEST_OF_THE_STRATEGY"
 VERDICT_UNDERPOWERED = "VALID_RUN_UNDERPOWERED_INFERENCE"
 VERDICT_OK = "NO_STRUCTURAL_OBJECTION_FOUND"
+
+REGIME_PINNED_BY_OWN_DRAWDOWN = "REGIME_PINNED_BY_OWN_DRAWDOWN"
+# The label counts as pinned when it sat at DEFENSIVE or worse for a majority
+# of reviews, that share coincides with the own-drawdown floor's active share,
+# and the market domains essentially never pushed defense beyond the floor:
+# in such a window the regime engine added no information beyond the book's
+# own P&L. A small nonzero allowance keeps isolated noisy reviews from
+# masking a materially pinned label.
+PIN_MIN_FLOOR_SHARE = 0.5
+PIN_SHARE_GAP = 0.02
+PIN_MAX_MARKET_DRIVEN_SHARE = 0.02
 
 
 def _load_json(path: Path) -> Any:
@@ -474,6 +486,39 @@ def _decision_findings(decision_evaluation: Any) -> tuple[Finding, ...]:
     return ()
 
 
+def _regime_floor_findings(run_json: Any) -> tuple[Finding, ...]:
+    """Flag experiments whose regime label never left its own-drawdown floor."""
+    findings: list[Finding] = []
+    runs = (run_json or {}).get("runs") or {}
+    for name, result in runs.items():
+        diagnostics = ((result or {}).get("result") or {}).get("regime_floor_diagnostics")
+        if not isinstance(diagnostics, Mapping) or diagnostics.get("reviews", 0) <= 0:
+            continue
+        label_share = float(diagnostics["label_defensive_or_worse_share"])
+        floor_share = float(diagnostics["drawdown_at_or_below_defensive_floor_share"])
+        market_driven = int(diagnostics.get("market_driven_defensive_reviews", 0))
+        reviews = max(1, int(diagnostics["reviews"]))
+        if (
+            floor_share >= PIN_MIN_FLOOR_SHARE
+            and abs(label_share - floor_share) <= PIN_SHARE_GAP
+            and market_driven / reviews <= PIN_MAX_MARKET_DRIVEN_SHARE
+        ):
+            findings.append(Finding(
+                code=REGIME_PINNED_BY_OWN_DRAWDOWN,
+                severity=SEVERITY_WARNING,
+                subject=name,
+                message=(
+                    f"regime label was DEFENSIVE or worse on {label_share:.1%} of reviews "
+                    f"while the portfolio's own drawdown sat at or below its floor on "
+                    f"{floor_share:.1%}; market domains pushed defense beyond the floor on "
+                    f"only {market_driven} of {reviews} reviews, so the label tracked the "
+                    "book's own P&L, not the market"
+                ),
+                values=dict(diagnostics),
+            ))
+    return tuple(findings)
+
+
 def build_validity_report(
     directory: str | Path,
     *,
@@ -533,6 +578,9 @@ def build_validity_report(
     findings.extend(trade_findings)
     findings.extend(_decision_findings(decision_evaluation))
     findings.extend(feasibility.findings)
+    run_json = _load_json(root / "run.json")
+    if run_json is not None:
+        findings.extend(_regime_floor_findings(run_json))
 
     return RunValidityReport(
         run_id=str(spec.get("run_id") or root.name),
