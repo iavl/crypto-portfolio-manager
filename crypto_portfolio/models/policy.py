@@ -45,6 +45,7 @@ _TOP_LEVEL_FIELDS = {
     "risk",
     "stress_scenarios",
     "risk_engine",
+    "risk_tier_estimation",
     "chain_liveness",
     "benchmarks",
     "rebalance",
@@ -117,6 +118,13 @@ _RISK_ENGINE_PORTFOLIO_FIELDS = {
     "correlation_window_days",
     "beta_window_days",
     "annualization_days",
+    "minimum_history_days",
+}
+_RISK_TIER_ESTIMATION_FIELDS = {
+    "beta_enter",
+    "beta_exit",
+    "relative_vol_enter",
+    "relative_vol_exit",
     "minimum_history_days",
 }
 _RISK_ENGINE_EMERGENCY_FIELDS = {
@@ -556,6 +564,32 @@ def _parse_regime_transitions(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_notches_per_review": max_notches}
 
 
+def _parse_risk_tier_estimation(value: Any) -> dict[str, Any]:
+    """Parse ``risk_tier_estimation`` (Strategy V2 Phase 4).
+
+    Entry/exit threshold pairs create the hysteresis band that keeps a
+    threshold-crossing asset from flipping tiers daily. Values are
+    structural placeholders pending Phase 6 walk-forward calibration.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("risk_tier_estimation must be an object")
+    _unknown_fields(value, _RISK_TIER_ESTIMATION_FIELDS, "risk_tier_estimation")
+    if set(value) != _RISK_TIER_ESTIMATION_FIELDS:
+        raise PolicyError("risk_tier_estimation fields are incomplete")
+    parsed = {
+        key: _number(value[key], f"risk_tier_estimation.{key}", minimum=0.0)
+        for key in ("beta_enter", "beta_exit", "relative_vol_enter", "relative_vol_exit")
+    }
+    if not 0 < parsed["beta_exit"] < parsed["beta_enter"]:
+        raise PolicyError("risk_tier_estimation beta thresholds must satisfy 0 < exit < enter")
+    if not 0 < parsed["relative_vol_exit"] < parsed["relative_vol_enter"]:
+        raise PolicyError("risk_tier_estimation volatility thresholds must satisfy 0 < exit < enter")
+    history = value["minimum_history_days"]
+    if isinstance(history, bool) or not isinstance(history, int) or history < 2:
+        raise PolicyError("risk_tier_estimation.minimum_history_days must be an integer >= 2")
+    return {**parsed, "minimum_history_days": history}
+
+
 def _parse_risk_engine(value: Any) -> dict[str, Any]:
     """Parse the ``risk_engine`` block selecting the sizing mechanism.
 
@@ -900,6 +934,7 @@ class Policy:
     event_risk_multipliers: Mapping[str, float]
     stress_scenarios: Mapping[str, Mapping[str, float]] = dataclass_field(default_factory=dict)
     risk_engine: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    risk_tier_estimation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     core_allocation: Mapping[str, Any] = dataclass_field(default_factory=dict)
     execution: Mapping[str, Any] = dataclass_field(default_factory=dict)
     volume_profile: Mapping[str, Any] = dataclass_field(default_factory=dict)
@@ -996,6 +1031,8 @@ class Policy:
         }
         if self.risk_engine:
             result["risk_engine"] = _copy_mapping(self.risk_engine)
+        if self.risk_tier_estimation:
+            result["risk_tier_estimation"] = _copy_mapping(self.risk_tier_estimation)
         result["scoring_profiles"] = {
             name: dict(weights) for name, weights in self.scoring_profiles.items()
         }
@@ -2212,6 +2249,7 @@ def _parse_policy(
         )
 
     risk_engine = _parse_risk_engine(data["risk_engine"])
+    risk_tier_estimation = _parse_risk_tier_estimation(data["risk_tier_estimation"])
 
     risk = data["risk"]
     if not isinstance(risk, dict):
@@ -2548,6 +2586,7 @@ def _parse_policy(
         ),
         stress_scenarios=parsed_scenarios,
         risk_engine=risk_engine,
+        risk_tier_estimation=risk_tier_estimation,
         benchmarks=parsed_benchmarks,
         rebalance=parsed_rebalance,
         scoring_profiles=parsed_profiles,

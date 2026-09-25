@@ -19,6 +19,7 @@ from .portfolio_risk import (
     volatility_budget_scale,
 )
 from .risk import risk_overlay_floor
+from .risk_tier import tier_strategic_fraction
 from .scoring import low_evidence_contract, score_assessment
 
 
@@ -710,7 +711,6 @@ def build_target_allocation(
                 or risk_tier_caps.get(risk_tier.replace("-", "_"))
                 or risk_tier_caps["normal"]
             )
-            risk_tier_cap_fraction = float(tier_caps["strategic_fraction_of_satellite_envelope"])
             hard_cap_buffer_pp = float(tier_caps["hard_cap_buffer_pp"])
             asset_confidence_factor = float(
                 resolved.execution["confidence_deployment_factor"].get(confidence, 1.0)
@@ -729,6 +729,12 @@ def build_target_allocation(
                 raise ValueError(
                     "risk_tier_source must be POLICY_DEFAULT, MANUAL_ASSESSMENT, or DETERMINISTIC_ESTIMATE"
                 )
+            # Phase 4: a measured tier is a secondary constraint under the
+            # volatility-budget engine (full envelope, hard caps still bound);
+            # manual and policy-default tiers keep their configured fraction.
+            risk_tier_cap_fraction = tier_strategic_fraction(
+                risk_tier, source=risk_tier_source, policy=resolved,
+            )
             held_weight = normalized_current_weights.get(symbol, 0.0)
             state = satellite_eligibility(
                 assessment,

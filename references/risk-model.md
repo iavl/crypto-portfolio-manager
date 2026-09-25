@@ -277,6 +277,26 @@ applied to the whole risky sleeve in steps stays within `D` with the overlay
 enabled and clearly breaches with it disabled, and a confirmed recovery heals
 a budget-limit drawdown instead of locking the book in stable forever.
 
+## Deterministic risk tiers (Strategy V2 Phase 4)
+
+Long-held assets derive their tier from measurement, not from a manual
+label: 90-day realized volatility relative to BTC and 90-day beta to BTC
+(`engine.risk_tier.py`, thresholds in `risk_tier_estimation`). Entry and
+exit thresholds form a hysteresis band (beta 1.5/1.3, relative vol
+1.6/1.3 — placeholders pending Phase 6), so an asset crossing a threshold
+cannot flip tiers daily; leaving a high tier requires both signals below
+their exit thresholds. Measurement produces `high_beta` (never `high`,
+which stays reserved for explicitly supplied severity) with
+`risk_tier_source = DETERMINISTIC_ESTIMATE`; provenance travels with the
+tier through allocation and reports.
+
+Under the volatility-budget risk engine a measured tier is a secondary
+constraint: every measured tier competes for the full satellite envelope
+(portfolio risk contributions own sizing) while the hard-cap machinery
+still bounds maximum exposure. Manual and policy-default tiers keep their
+configured strategic fractions in both engines. In `legacy_drawdown` mode
+every source keeps the V1 fractions, so A/B replay semantics stay frozen.
+
 ## Concentration and volatility
 
 Dynamic single-asset limits are preferred over fixed caps.

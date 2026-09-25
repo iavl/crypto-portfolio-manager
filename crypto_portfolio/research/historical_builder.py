@@ -10,6 +10,13 @@ from typing import Any, Mapping, Sequence
 from ..engine.factors.relative_strength import calculate_relative_strength
 from ..engine.factors.trend import calculate_trend_factor
 from ..engine.regime_inputs import build_regime_inputs
+from ..engine.portfolio_risk import (
+    beta_to_btc,
+    daily_returns,
+    realized_volatility,
+    trailing_window,
+)
+from ..engine.risk_tier import estimate_risk_tiers
 from ..engine.scoring import score_assessment
 from ..engine.strategy_replay import ReplayReview
 from ..engine.technical import build_technical_snapshot, moving_average
@@ -120,6 +127,8 @@ def _assessment(
     policy: Policy,
     semantic_score: int | None,
     evidence: EvidenceContext | None = None,
+    risk_tier: str = "normal",
+    risk_tier_source: str = "POLICY_DEFAULT",
 ) -> AssetAssessment:
     trend = calculate_trend_factor(snapshot, policy=policy)
     factors: dict[str, FactorScore] = {
@@ -162,8 +171,8 @@ def _assessment(
         factor_scores=factors,
         asset_type=_asset_type(policy, symbol),
         relative_strength_vs_btc=relative_score,
-        risk_tier="normal",
-        risk_tier_source="POLICY_DEFAULT",
+        risk_tier=risk_tier,
+        risk_tier_source=risk_tier_source,
         critical_data_complete=semantic_score is not None or not missing_critical,
         event_risk=EventRiskAssessment(
             "NORMAL", reasons=("historical event state is unresolved",) if semantic_score is None and missing_critical else (),
@@ -211,6 +220,9 @@ def build_historical_reviews(
     execution_times = {symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
                        for symbol, candles in execution_cache.items()}
     btc_candles = daily_cache["BTC"]
+    tier_config = policy.risk_tier_estimation or {}
+    tier_history = int(tier_config.get("minimum_history_days", 100)) if tier_config else 100
+    previous_tiers: dict[str, str] = {}
     reviews: list[ReplayReview] = []
     for as_of_moment, period_end in _candidate_boundaries(btc_candles, start=start, end=end):
         as_of = as_of_moment.isoformat().replace("+00:00", "Z")
@@ -221,6 +233,48 @@ def build_historical_reviews(
         current_prices: dict[str, float] = {}
         execution_bars: dict[str, tuple[Mapping[str, Any], ...]] = {}
         completed_by_symbol: dict[str, tuple[Candle, ...]] = {}
+        # Deterministic risk tiers (Strategy V2 Phase 4): measured from the
+        # same completed candles the assessments use, with the hysteresis
+        # carried across boundaries through previous_tiers.
+        boundary_tiers: dict[str, dict[str, Any]] = {}
+        try:
+            boundary = as_of_moment - timedelta(days=1)
+            returns_by_symbol: dict[str, list[float]] = {}
+            for tier_symbol in risk_symbols:
+                times = daily_times.get(tier_symbol)
+                candles = daily_cache.get(tier_symbol)
+                if times is None or candles is None:
+                    continue
+                available = bisect_right(times, boundary)
+                window = candles[max(0, available - tier_history):available]
+                if len(window) < tier_history:
+                    continue
+                returns_by_symbol[tier_symbol] = daily_returns(
+                    [float(item.close) for item in window]
+                )
+            if "BTC" in returns_by_symbol and len(returns_by_symbol) > 1:
+                vols = {
+                    tier_symbol: realized_volatility(
+                        list(trailing_window(values, 90)), annualization_days=365,
+                    )
+                    for tier_symbol, values in returns_by_symbol.items()
+                }
+                betas = beta_to_btc(returns_by_symbol, window=90)
+                measured = estimate_risk_tiers(
+                    annualized_volatility=vols,
+                    beta=betas,
+                    btc_symbol="BTC",
+                    previous_tiers=previous_tiers or None,
+                    policy=policy,
+                )
+                for tier_symbol, row in measured.items():
+                    boundary_tiers[tier_symbol] = row
+                    previous_tiers[tier_symbol] = row["tier"]
+        except ValueError:
+            # An undefined measurement (constant series, insufficient BTC
+            # history) leaves the tier unmeasured at this boundary: the
+            # assessment keeps the policy default, never a fabricated tier.
+            boundary_tiers = {}
         usable = True
         for symbol in risk_symbols:
             series = daily_by_symbol[symbol]
@@ -255,11 +309,18 @@ def build_historical_reviews(
                 "BTC", "1D", tuple(daily_cache["BTC"][:available_index][-400:]), btc.source,
                 btc.fetched_at, btc.venue, btc.market, btc.quote_currency,
             )
+            measured_tier = boundary_tiers.get(symbol)
             assessments[symbol] = _assessment(
                 symbol=symbol, snapshot=snapshot, daily=asset_assessment_series,
                 btc_daily=btc_assessment_series,
                 as_of=as_of, policy=policy, semantic_score=semantic_score,
                 evidence=evidence,
+                risk_tier=(
+                    measured_tier["tier"] if measured_tier is not None else "normal"
+                ),
+                risk_tier_source=(
+                    measured_tier["source"] if measured_tier is not None else "POLICY_DEFAULT"
+                ),
             ).as_dict()
             next_returns[symbol] = next_close / current_close - 1.0
             bars = []

@@ -112,6 +112,13 @@
       "breach_risky_cap": 0.25
     }
   },
+  "risk_tier_estimation": {
+    "beta_enter": 1.5,
+    "beta_exit": 1.3,
+    "relative_vol_enter": 1.6,
+    "relative_vol_exit": 1.3,
+    "minimum_history_days": 100
+  },
   "risk": {
     "min_stablecoin_weight": 0.15,
     "max_portfolio_drawdown": 0.15,
