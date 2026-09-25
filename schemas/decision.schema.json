@@ -342,6 +342,14 @@
             "minimum": 0,
             "maximum": 1
           },
+          "normalized_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
           "confidence_score": {
             "type": [
               "number",

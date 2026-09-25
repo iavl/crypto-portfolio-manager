@@ -63,7 +63,7 @@ def evaluate_scores(
     history = _price_history(prices)
     rows: list[dict[str, Any]] = []
     for raw in observations:
-        allowed = {"timestamp", "symbol", "score", "coverage", "factor_scores", "synthetic"}
+        allowed = {"timestamp", "symbol", "score", "normalized_score", "coverage", "factor_scores", "synthetic"}
         if not isinstance(raw, Mapping) or set(raw) - allowed:
             raise ValueError("score observation contains unsupported fields")
         if raw.get("synthetic") is True:
@@ -80,6 +80,7 @@ def evaluate_scores(
         btc_base = _first_at_or_after(history.get("BTC", ()), moment)
         result = {
             "timestamp": raw["timestamp"], "symbol": symbol, "score": score,
+            "normalized_score": raw.get("normalized_score"),
             "factor_scores": dict(raw.get("factor_scores", {})), "coverage": coverage,
             "coverage_band": _coverage_band(coverage), "decile": min(9, int(score // 10)),
             "labels": {},

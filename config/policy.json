@@ -233,7 +233,8 @@
   "scoring": {
     "high_confidence_min_coverage": 0.9,
     "medium_confidence_min_coverage": 0.7,
-    "minimum_investable_coverage": 0.6
+    "minimum_investable_coverage": 0.6,
+    "minimum_normalization_coverage": 0.6
   },
   "factor_rules": {
     "trend": {

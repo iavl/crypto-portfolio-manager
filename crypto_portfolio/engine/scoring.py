@@ -107,6 +107,11 @@ class ScoreResult:
     fallback_used: bool = False
     family_weights: Mapping[str, float] | None = None
     family_contributions: Mapping[str, float] | None = None
+    normalized_score: float | None = None
+    reachable_min: float | None = None
+    reachable_max: float | None = None
+    minimum_normalization_coverage: float | None = None
+    raw_factor_scores: Mapping[str, float | None] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +137,11 @@ class ScoreResult:
             "fallback_used": self.fallback_used,
             "family_weights": dict(self.family_weights or {}),
             "family_contributions": dict(self.family_contributions or {}),
+            "normalized_score": self.normalized_score,
+            "reachable_min": self.reachable_min,
+            "reachable_max": self.reachable_max,
+            "minimum_normalization_coverage": self.minimum_normalization_coverage,
+            "raw_factor_scores": dict(self.raw_factor_scores or {}),
         }
 
     def __float__(self) -> float:
@@ -391,6 +401,91 @@ def _weight_mapping(value: Mapping[str, float]) -> dict[str, float]:
     return result
 
 
+def score_reachability(coverage: float) -> dict[str, float]:
+    """Score range the reliability shrinkage can actually reach at a coverage.
+
+    Effective factor scores live in ``[50 - 50r, 50 + 50r]`` (reliability
+    ``r`` per factor), so the weighted aggregate at coverage ``c`` lives in
+    ``[50 - 50c, 50 + 50c]`` exactly. This is the deterministic answer to
+    "can the configured thresholds be reached at all with this much
+    evidence" — a fixed threshold above ``reachable_max`` is unreachable no
+    matter how bullish the observed factors are.
+    """
+    value = _reliability(coverage, "coverage")
+    return {"reachable_min": 50.0 - 50.0 * value, "reachable_max": 50.0 + 50.0 * value}
+
+
+def coverage_normalized_score(
+    effective_score: float,
+    coverage: float,
+    *,
+    minimum_coverage: float,
+) -> dict[str, Any]:
+    """Rescale the effective score to the coverage-normalized space.
+
+    ``normalized = 50 + (effective - 50) / coverage`` clipped to [0, 100]:
+    what the asset's attractiveness would read if the observed partial
+    evidence were the whole story. The three score spaces stay distinct —
+    raw factor scores (0-100 inputs), the effective score (reliability
+    shrinkage, the diagnostic aggregate), and this normalized score
+    (relative attractiveness for threshold comparison). Coverage below
+    ``minimum_coverage`` leaves the normalized score unavailable instead of
+    amplifying a nearly-empty observation.
+    """
+    score = _score(effective_score, "effective score")
+    value = _reliability(coverage, "coverage")
+    floor = _reliability(minimum_coverage, "minimum_coverage")
+    if value < floor:
+        return {
+            "normalized": None,
+            "available": False,
+            "coverage": value,
+            "reason": "BELOW_MINIMUM_NORMALIZATION_COVERAGE",
+        }
+    normalized = 50.0 + (score - 50.0) / value
+    return {
+        "normalized": min(100.0, max(0.0, normalized)),
+        "available": True,
+        "coverage": value,
+        "reason": None,
+    }
+
+
+def low_evidence_contract(
+    *,
+    coverage: float,
+    critical_data_complete: bool,
+    policy: Policy | None = None,
+) -> dict[str, Any]:
+    """Explicit low-evidence classification: what coverage is allowed to do.
+
+    ``ACTIONABLE`` (high coverage, critical data complete) sizes normally;
+    ``LIMITED`` (investable but below the high gate) caps new deployment;
+    ``NOT_ACTIONABLE`` (not investable or critical data incomplete) blocks
+    new risk entirely. No class ever forces a REDUCE by itself: missing
+    evidence preserves a held position and blocks new risk; only hard risk,
+    a broken thesis, an event, liveness, or portfolio-risk decisions may
+    require de-risking.
+    """
+    resolved = policy or resolve_policy()
+    thresholds = resolved.scoring
+    value = _reliability(coverage, "coverage")
+    if not isinstance(critical_data_complete, bool):
+        raise ValueError("critical_data_complete must be boolean")
+    if not critical_data_complete or value < thresholds["minimum_investable_coverage"]:
+        state, basis = "NOT_ACTIONABLE", "critical data incomplete or below the investable coverage floor"
+    elif value < thresholds["high_confidence_min_coverage"]:
+        state, basis = "LIMITED", "investable coverage below the high-confidence gate; new deployment stays capped"
+    else:
+        state, basis = "ACTIONABLE", "high coverage with complete critical data"
+    return {
+        "evidence_class": state,
+        "coverage": value,
+        "basis": basis,
+        "may_force_reduce": False,
+    }
+
+
 def _coverage_gate_band(coverage: float, critical_data_complete: bool, policy: Policy) -> str:
     """Hard coverage gates from the canonical scoring policy.
 
@@ -429,6 +524,7 @@ def _score_factors(
     effective_scores: dict[str, float] = {}
     reliabilities: dict[str, float] = {}
     availability: dict[str, str] = {}
+    raw_factor_scores: dict[str, float | None] = {}
     metadata_by_factor: dict[str, _FactorMetadata] = {}
     missing: list[str] = []
     not_applicable: list[str] = []
@@ -444,6 +540,7 @@ def _score_factors(
         else:
             score, state, factor_reliability = _extract(factor_scores[factor], factor)
         metadata_by_factor[factor] = _factor_metadata(factor_scores.get(factor))
+        raw_factor_scores[factor] = score
         if normalized_symbol == "BTC" and factor == "relative_strength_btc":
             if state in {"MISSING", "NOT_APPLICABLE"}:
                 state = "NOT_APPLICABLE"
@@ -471,6 +568,15 @@ def _score_factors(
     result_score = sum(
         resolved_weights[factor] * effective_scores.get(factor, 0.0)
         for factor in resolved_weights
+    )
+    # The three score spaces stay separated and explicit: the effective
+    # aggregate above (reliability shrinkage, kept for diagnostics and
+    # reproducibility), the deterministic reachable range at this coverage,
+    # and the coverage-normalized score that threshold comparisons use.
+    reachability = score_reachability(coverage)
+    minimum_normalization = float(policy.scoring.get("minimum_normalization_coverage", 0.0))
+    normalization = coverage_normalized_score(
+        result_score, coverage, minimum_coverage=minimum_normalization
     )
     data_score = coverage
     confidence_caps: tuple[ConfidenceCap, ...] = ()
@@ -569,6 +675,11 @@ def _score_factors(
         data_confidence_score=data_score,
         data_confidence_band=confidence_band(data_score, medium_min=medium, high_min=high),
         confidence_reason_codes=tuple(sorted(reason_codes)),
+        normalized_score=normalization["normalized"],
+        reachable_min=reachability["reachable_min"],
+        reachable_max=reachability["reachable_max"],
+        minimum_normalization_coverage=minimum_normalization,
+        raw_factor_scores=dict(raw_factor_scores),
     )
 
 
@@ -665,6 +776,7 @@ def score_assessment(
         event_risk=assessment.event_risk,
         scoring_profile_name=result.profile_name,
         score_coverage=result.coverage,
+        normalized_score=result.normalized_score,
         confidence_score=result.data_confidence_score,
         confidence_explanation=result.factor_data_confidence.as_dict() if result.factor_data_confidence else None,
         data_confidence=result.factor_data_confidence,
@@ -694,8 +806,11 @@ def weighted_score(
 __all__ = [
     "ScoreResult",
     "calculate_factor_reliability",
+    "coverage_normalized_score",
     "ensure_acquisition_ready",
+    "low_evidence_contract",
     "score_assessment",
     "score_factors",
+    "score_reachability",
     "weighted_score",
 ]

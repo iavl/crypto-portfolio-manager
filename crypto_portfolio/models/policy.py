@@ -208,6 +208,7 @@ _SCORING_FIELDS = {
     "high_confidence_min_coverage",
     "medium_confidence_min_coverage",
     "minimum_investable_coverage",
+    "minimum_normalization_coverage",
 }
 _FACTOR_RULE_FIELDS = {"trend", "relative_strength", "flows"}
 _TREND_RULE_FIELDS = {
@@ -2339,6 +2340,13 @@ def _parse_policy(
         <= parsed_scoring["high_confidence_min_coverage"]
     ):
         raise PolicyError("scoring coverage thresholds must be ordered")
+    if not (
+        0 < parsed_scoring["minimum_normalization_coverage"]
+        <= parsed_scoring["medium_confidence_min_coverage"]
+    ):
+        raise PolicyError(
+            "scoring.minimum_normalization_coverage must be in (0, medium_confidence_min_coverage]"
+        )
 
     parsed_factor_rules = _parse_factor_rules(
         data.get("factor_rules"),

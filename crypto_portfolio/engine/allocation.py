@@ -19,7 +19,7 @@ from .portfolio_risk import (
     volatility_budget_scale,
 )
 from .risk import risk_overlay_floor
-from .scoring import score_assessment
+from .scoring import low_evidence_contract, score_assessment
 
 
 @dataclass(frozen=True)
@@ -73,13 +73,27 @@ class AllocationResult:
 
 
 def _score(value: Any, symbol: str) -> float:
+    """Comparison score for threshold decisions (Strategy V2 Phase 2).
+
+    Thresholds live in the coverage-normalized space: when a normalized
+    score is available it answers "how attractive is what we actually
+    observed", and coverage separately gates deployment as evidence
+    confidence. The effective (reliability-shrunk) score remains the
+    diagnostic aggregate and the fallback when normalization is
+    unavailable — the two spaces are never mixed inside one comparison.
+    """
     if isinstance(value, AssetAssessment):
-        if value.weighted_score is not None:
-            return value.weighted_score
-        raise ValueError("typed assessment must be scored before allocation")
+        if value.normalized_score is not None:
+            raw = value.normalized_score
+        elif value.weighted_score is not None:
+            raw = value.weighted_score
+        else:
+            raise ValueError("typed assessment must be scored before allocation")
     else:
         if isinstance(value, Mapping):
-            raw = value.get("weighted_score", 50.0)
+            raw = value.get("normalized_score")
+            if raw is None:
+                raw = value.get("weighted_score", 50.0)
             if raw is None:
                 raw = 50.0
         else:
@@ -757,6 +771,28 @@ def build_target_allocation(
                 "profile_name": resolved.scoring_profile_name(symbol),
                 "satellite_cap": satellite_cap,
                 "score": score,
+                "effective_score": (
+                    float(_field(assessment, "weighted_score"))
+                    if assessment is not None and _field(assessment, "weighted_score") is not None
+                    else None
+                ),
+                "normalized_score": (
+                    float(_field(assessment, "normalized_score"))
+                    if assessment is not None and _field(assessment, "normalized_score") is not None
+                    else None
+                ),
+                "evidence_class": low_evidence_contract(
+                    coverage=(
+                        float(_field(assessment, "score_coverage"))
+                        if assessment is not None and _field(assessment, "score_coverage") is not None
+                        else 1.0
+                    ),
+                    critical_data_complete=(
+                        _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+                        if assessment is not None else True
+                    ),
+                    policy=resolved,
+                )["evidence_class"],
                 "curve_fraction": curve_fraction,
                 "current_weight": held_weight,
                 "eligibility_state": state,

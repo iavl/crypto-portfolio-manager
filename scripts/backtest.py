@@ -208,6 +208,7 @@ def command_run(args):
                 score_observations.append({
                     "timestamp": review.as_of, "symbol": symbol,
                     "score": assessment["weighted_score"],
+                    "normalized_score": assessment.get("normalized_score"),
                     "coverage": assessment.get("score_coverage") or 0.0,
                     "factor_scores": assessment.get("factor_scores", {}),
                     "synthetic": False,
@@ -299,6 +300,7 @@ def command_evaluate_scores(args):
                 observations.append({
                     "timestamp": review.as_of, "symbol": symbol,
                     "score": assessment["weighted_score"],
+                    "normalized_score": assessment.get("normalized_score"),
                     "coverage": assessment.get("score_coverage") or 0.0,
                     "factor_scores": assessment.get("factor_scores", {}), "synthetic": False,
                 })

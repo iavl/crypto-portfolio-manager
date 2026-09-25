@@ -174,6 +174,53 @@ never labeled: the coverage gate and the numeric data-confidence band
 (0.80/0.60 thresholds) both apply and the more defensive one wins, so no
 caller-supplied label can contradict the evidence the score was built from.
 
+## The three score spaces (Strategy V2)
+
+Scores live in three distinct spaces that must never be mixed inside one
+comparison:
+
+1. **Raw factor scores** — the 0-100 per-factor inputs, preserved verbatim on
+   the scoring result (`raw_factor_scores`) for diagnostics.
+2. **Effective score** — the reliability-shrunk aggregate above
+   (`weighted_score`). This is the reproducible diagnostic aggregate; it
+   answers "what does the partially observed evidence read".
+3. **Coverage-normalized score** — `50 + (effective - 50) / coverage`,
+   clipped to [0, 100]. This is the relative-attractiveness reading that
+   threshold comparisons use; it answers "what would the observed partial
+   evidence read if it were the whole story".
+
+The deterministic reachable range at coverage `c` is exactly
+`[50 - 50c, 50 + 50c]` (`score_reachability`): a fixed threshold above
+`reachable_max` is unreachable at that coverage no matter how bullish the
+observed factors are. At coverage 1.0 the normalized and effective spaces
+coincide, so fully evidenced behavior is unchanged. Below
+`scoring.minimum_normalization_coverage` (placeholder 0.6, aligned with the
+investable floor pending Phase 6 calibration) the normalized score is
+unavailable rather than amplifying a nearly-empty observation, and threshold
+comparisons fall back to the effective score.
+
+Satellite thresholds (57/62/67/85) and the ETH core gates (55/45 and the
+relative bands) all compare the coverage-normalized score, so a degraded but
+complete evidence set competes on attractiveness while coverage separately
+gates how much of the target may deploy.
+
+### Low-evidence contract
+
+`low_evidence_contract` classifies what coverage is allowed to do:
+
+- `ACTIONABLE` — coverage at or above the high gate (0.9) with complete
+  critical data: normal sizing.
+- `LIMITED` — investable coverage below the high gate: new deployment stays
+  capped (the confidence deployment factor).
+- `NOT_ACTIONABLE` — below the investable floor or critical data incomplete:
+  no new risk.
+
+No class ever forces a REDUCE by itself (`may_force_reduce` is false): missing
+or degraded evidence preserves a held position and blocks new risk; only hard
+risk, a broken thesis, an event, liveness, or portfolio-risk decisions may
+require de-risking. Allocation reports the per-asset `evidence_class` next to
+both score spaces in the deployment allowances.
+
 ## Relative strength versus BTC
 
 Raw 30D, 90D and 180D excess returns, relative drawdown, pair trend and

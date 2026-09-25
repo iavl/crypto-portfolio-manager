@@ -29,7 +29,12 @@ def _bool(value: Any, field: str) -> bool:
 
 
 def _score(assessment: Any) -> float:
-    raw = _field(assessment, "weighted_score", 50.0)
+    # Threshold comparisons live in the coverage-normalized space (Strategy
+    # V2 Phase 2); the effective score is the fallback when normalization is
+    # unavailable, so ETH gates and satellite gates never mix score spaces.
+    raw = _field(assessment, "normalized_score", None)
+    if raw is None:
+        raw = _field(assessment, "weighted_score", 50.0)
     if raw is None:
         raw = 50.0
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):

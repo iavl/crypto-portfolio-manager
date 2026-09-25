@@ -402,6 +402,7 @@ class AssetAssessment:
     event_risk: EventRiskAssessment | Mapping[str, Any] | None = None
     scoring_profile_name: str | None = None
     score_coverage: float | None = None
+    normalized_score: float | None = None
     confidence_score: float | None = None
     confidence_explanation: Mapping[str, Any] | None = None
     data_confidence: ConfidenceResult | Mapping[str, Any] | None = None
@@ -533,6 +534,11 @@ class AssetAssessment:
             if not math.isfinite(coverage) or not 0 <= coverage <= 1:
                 raise ValueError("score_coverage must be finite and in [0, 1] or null")
             object.__setattr__(self, "score_coverage", coverage)
+        if self.normalized_score is not None:
+            normalized = float(self.normalized_score)
+            if not math.isfinite(normalized) or not 0 <= normalized <= 100:
+                raise ValueError("normalized_score must be finite and in [0, 100] or null")
+            object.__setattr__(self, "normalized_score", normalized)
         risk_tier = _text(self.risk_tier, "risk_tier").lower()
         if risk_tier not in _RISK_TIERS:
             raise ValueError(f"risk_tier must be one of {sorted(_RISK_TIERS)}")
@@ -557,8 +563,8 @@ class AssetAssessment:
         allowed = {
             "symbol", "factor_scores", "weighted_score", "confidence", "asset_type",
             "relative_strength_vs_btc", "risk_tier", "risk_tier_source", "thesis_broken", "critical_data_complete",
-            "event_risk", "scoring_profile_name", "score_coverage", "confidence_score",
-            "confidence_explanation", "data_confidence",
+            "event_risk", "scoring_profile_name", "score_coverage", "normalized_score",
+            "confidence_score", "confidence_explanation", "data_confidence",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -584,6 +590,7 @@ class AssetAssessment:
             "event_risk": self.event_risk.as_dict() if self.event_risk is not None else None,
             "scoring_profile_name": self.scoring_profile_name,
             "score_coverage": self.score_coverage,
+            "normalized_score": self.normalized_score,
             "confidence_score": self.confidence_score,
             "confidence_explanation": dict(self.confidence_explanation) if self.confidence_explanation is not None else None,
             "data_confidence": self.data_confidence.as_dict() if isinstance(self.data_confidence, ConfidenceResult) else self.data_confidence,
