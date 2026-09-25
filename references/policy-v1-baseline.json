@@ -1,0 +1,691 @@
+{
+  "investment_horizon_months": {
+    "min": 3,
+    "max": 6
+  },
+  "universe": {
+    "core": [
+      "BTC",
+      "ETH"
+    ],
+    "satellites": [
+      "SOL",
+      "BNB",
+      "AAVE"
+    ],
+    "stable": [
+      "USDT",
+      "USDC",
+      "DAI",
+      "FDUSD",
+      "TUSD",
+      "USD",
+      "CASH",
+      "U",
+      "USD1"
+    ],
+    "excluded": [
+      "LUNC",
+      "LINK"
+    ]
+  },
+  "stress_scenario": {
+    "BTC": -0.2,
+    "ETH": -0.3,
+    "SOL": -0.4,
+    "AAVE": -0.4,
+    "BNB": -0.35
+  },
+  "risk": {
+    "min_stablecoin_weight": 0.15,
+    "max_portfolio_drawdown": 0.15,
+    "drawdown_budget_overlay": {
+      "enabled": true,
+      "recovery_reviews": 5,
+      "recovery_risky_floor": 0.25
+    }
+  },
+  "chain_liveness": {
+    "degraded_deployment_factor": 0.25,
+    "BTC": {
+      "healthy_head_age_seconds": 3600,
+      "degraded_head_age_seconds": 10800,
+      "halted_head_age_seconds": 10800,
+      "halted_minimum_independent_sources": 2
+    },
+    "ETH": {
+      "healthy_head_age_seconds": 120,
+      "degraded_head_age_seconds": 600,
+      "halted_head_age_seconds": 600,
+      "healthy_finalized_age_seconds": 1200,
+      "degraded_finalized_age_seconds": 2700,
+      "halted_finalized_age_seconds": 2700,
+      "halted_minimum_independent_sources": 2
+    },
+    "BNB": {
+      "healthy_head_age_seconds": 120,
+      "degraded_head_age_seconds": 600,
+      "halted_head_age_seconds": 600,
+      "halted_minimum_independent_sources": 2
+    },
+    "SOL": {
+      "healthy_finalized_age_seconds": 120,
+      "degraded_finalized_age_seconds": 600,
+      "halted_finalized_age_seconds": 600,
+      "halted_minimum_independent_sources": 2
+    }
+  },
+  "benchmarks": {
+    "primary": {
+      "BTC": 1.0
+    },
+    "secondary": {
+      "BTC": 0.7,
+      "ETH": 0.3
+    }
+  },
+  "rebalance": {
+    "hold_below_pp": 2,
+    "watch_below_pp": 4,
+    "high_priority_above_pp": 8,
+    "relative_target_floor": 0.02,
+    "relative_watch": 0.5,
+    "relative_high": 1.0,
+    "staging": {
+      "enabled": true,
+      "max_gap_close_fraction": 0.5,
+      "max_step_pp": 4.0,
+      "bypass_reasons": [
+        "THESIS_BROKEN",
+        "EVENT_RISK",
+        "HARD_EXIT_SCORE",
+        "RISK_BUDGET_BREACH"
+      ]
+    },
+    "direction_flip_confirmation": {
+      "enabled": true,
+      "required_closes": 2,
+      "immediate_overshoot_pp": 2.0,
+      "bypass_reasons": [
+        "THESIS_BROKEN",
+        "EVENT_RISK",
+        "HARD_EXIT_SCORE",
+        "RISK_BUDGET_BREACH"
+      ]
+    }
+  },
+  "high_impact_review": {
+    "material_reduce_pp": 5,
+    "material_target_change_pp": 10
+  },
+  "scoring_profiles": {
+    "default": {
+      "trend": 0.3,
+      "valuation": 0.15,
+      "fundamentals": 0.2,
+      "onchain": 0.1,
+      "capital_flows": 0.1,
+      "relative_strength_btc": 0.15,
+      "btc_valuation": 0.0,
+      "macro_liquidity": 0.0
+    },
+    "btc": {
+      "trend": 0.35,
+      "valuation": 0.0,
+      "fundamentals": 0.0,
+      "onchain": 0.0,
+      "capital_flows": 0.25,
+      "relative_strength_btc": 0.0,
+      "btc_valuation": 0.2,
+      "macro_liquidity": 0.2
+    },
+    "defi_protocol": {
+      "trend": 0.3,
+      "valuation": 0.2,
+      "fundamentals": 0.35,
+      "onchain": 0.0,
+      "capital_flows": 0.0,
+      "relative_strength_btc": 0.15,
+      "btc_valuation": 0.0,
+      "macro_liquidity": 0.0
+    }
+  },
+  "asset_scoring_profiles": {
+    "BTC": "btc",
+    "AAVE": "defi_protocol"
+  },
+  "scoring": {
+    "high_confidence_min_coverage": 0.9,
+    "medium_confidence_min_coverage": 0.7,
+    "minimum_investable_coverage": 0.6
+  },
+  "factor_rules": {
+    "trend": {
+      "base_score": 50,
+      "ma_points": {
+        "20": 6,
+        "50": 8,
+        "100": 6,
+        "200": 2
+      },
+      "alignment_windows": [
+        20,
+        50,
+        100
+      ],
+      "alignment_points": 10,
+      "momentum": {
+        "horizon_weights": {
+          "30d": 0.2,
+          "90d": 0.4,
+          "180d": 0.4
+        },
+        "neutral_abs": {
+          "30d": 0.02,
+          "90d": 0.05,
+          "180d": 0.1
+        },
+        "saturation_abs": {
+          "30d": 0.15,
+          "90d": 0.3,
+          "180d": 0.5
+        },
+        "max_points": 24
+      },
+      "support_points": 4,
+      "volume_points": 5,
+      "extension_threshold_atr": 2,
+      "extension_penalty": 8,
+      "volume_weakness_confirmation_closes": 2
+    },
+    "relative_strength": {
+      "horizon_weights": {
+        "30d": 0.2,
+        "90d": 0.4,
+        "180d": 0.4
+      },
+      "risk_adjusted_neutral_band": 0.1,
+      "risk_adjusted_saturation": 1.0
+    },
+    "flows": {
+      "neutral_abs_max": 0.001,
+      "strong_abs": 0.01,
+      "supply_change_horizon_weights": {
+        "7d": 0.2,
+        "30d": 0.4,
+        "90d": 0.4
+      }
+    }
+  },
+  "scoring_families": {},
+  "regime_model": {
+    "mode": "weighted",
+    "normal_max": 0.35,
+    "defensive_max": 0.65,
+    "domain_weights": {
+      "trend": 0.3,
+      "volatility": 0.25,
+      "flows": 0.25,
+      "breadth": 0.2
+    },
+    "severity": {
+      "trend": {
+        "BULLISH": 0.0,
+        "NEUTRAL": 0.25,
+        "BEARISH": 1.0
+      },
+      "volatility": {
+        "LOW": 0.0,
+        "NORMAL": 0.0,
+        "ELEVATED": 0.7,
+        "HIGH": 0.85,
+        "EXTREME": 1.0
+      },
+      "flows": {
+        "POSITIVE": 0.0,
+        "NEUTRAL": 0.25,
+        "NEGATIVE": 1.0
+      },
+      "breadth": {
+        "HEALTHY": 0.0,
+        "NEUTRAL": 0.25,
+        "WEAK": 1.0
+      }
+    }
+  },
+  "regime_transitions": {
+    "enabled": true,
+    "max_notches_per_review": 1
+  },
+  "event_risk_multipliers": {
+    "NORMAL": 1.0,
+    "ELEVATED": 0.75,
+    "HIGH": 0.5,
+    "SEVERE": 0.0,
+    "CRITICAL": 0.0
+  },
+  "regimes": {
+    "NORMAL": {
+      "stablecoin_target": 0.15,
+      "satellite_max": 0.25,
+      "core_risky_min": 0.5,
+      "single_asset_max": 0.5
+    },
+    "DEFENSIVE": {
+      "stablecoin_target": 0.3,
+      "satellite_max": 0.15,
+      "core_risky_min": 0.5,
+      "single_asset_max": 0.5
+    },
+    "CAPITAL_PRESERVATION": {
+      "stablecoin_target": 0.5,
+      "satellite_max": 0.05,
+      "core_risky_min": 0.0,
+      "single_asset_max": 0.4
+    }
+  },
+  "allocation": {
+    "satellite_entry_score": 67,
+    "satellite_exit_score": 62,
+    "satellite_soft_exit_score": 57,
+    "satellite_full_score": 85,
+    "satellite_target_curve": {
+      "soft_exit_fraction": 0.0,
+      "exit_fraction": 0.2,
+      "entry_fraction": 0.4,
+      "full_fraction": 1.0
+    },
+    "risk_tier_caps": {
+      "normal": {
+        "strategic_fraction_of_satellite_envelope": 1.0,
+        "hard_cap_buffer_pp": 3.0
+      },
+      "high_beta": {
+        "strategic_fraction_of_satellite_envelope": 0.5,
+        "hard_cap_buffer_pp": 3.0
+      },
+      "high": {
+        "strategic_fraction_of_satellite_envelope": 0.5,
+        "hard_cap_buffer_pp": 3.0
+      }
+    },
+    "relative_strength": {
+      "increase_min_score": 50,
+      "hard_block_below_score": 30
+    }
+  },
+  "core_allocation": {
+    "anchor": {
+      "BTC": 0.7,
+      "ETH": 0.3
+    },
+    "eth": {
+      "increase_min_score": 55,
+      "hold_min_score": 45,
+      "relative_increase_min_score": 45,
+      "relative_reduce_below_score": 30,
+      "max_core_sleeve_share": 0.4
+    },
+    "confidence_multipliers": {
+      "HIGH": 1.0,
+      "MEDIUM": 0.75,
+      "LOW": 0.25
+    }
+  },
+  "volume_profile": {
+    "enabled": true,
+    "preferred_timeframe": "4H",
+    "fallback_timeframe": "1D",
+    "lookback_days": [
+      60,
+      120
+    ],
+    "preferred_lookback_days": 120,
+    "price_bins": 64,
+    "value_area_fraction": 0.7,
+    "hvn_percentile": 0.75,
+    "max_hvn_nodes": 6,
+    "minimum_node_separation_atr": 0.5,
+    "zone_half_width_atr": 0.2,
+    "allow_daily_approximation": true,
+    "daily_approximation_confidence_cap": "MEDIUM"
+  },
+  "positioning": {
+    "enabled": true,
+    "minimum_derivatives_confirmations_for_crowded": 2,
+    "minimum_derivatives_confirmations_for_extreme": 3,
+    "funding_rate": {
+      "elevated_positive": 0.0003,
+      "extreme_positive": 0.001,
+      "elevated_negative": -0.0003,
+      "extreme_negative": -0.001
+    },
+    "open_interest_change_7d": {
+      "building": 0.2,
+      "rapid": 0.4
+    },
+    "long_short_ratio": {
+      "long_crowded": 1.5,
+      "short_crowded": 0.67,
+      "long_extreme": 1.75,
+      "short_extreme": 0.57
+    },
+    "futures_basis": {
+      "elevated_positive": 0.1,
+      "extreme_positive": 0.2,
+      "elevated_negative": -0.1,
+      "extreme_negative": -0.2
+    },
+    "social": {
+      "fearful_bullish_share": 0.2,
+      "optimistic_bullish_share": 0.6,
+      "euphoric_bullish_share": 0.8,
+      "attention_growth_extreme": 2.0
+    }
+  },
+  "btc_cycle": {
+    "enabled": true,
+    "halving_context_days": {
+      "early_post_halving_max": 180,
+      "mid_epoch_max": 730,
+      "late_epoch_min": 900
+    },
+    "minimum_non_clock_confirmations_for_elevated_risk": 2,
+    "minimum_non_clock_confirmations_for_high_risk": 3,
+    "allow_halving_clock_as_trade_trigger": false,
+    "allow_cycle_context_to_change_base_score": false,
+    "allow_cycle_context_to_increase_exposure": false,
+    "valuation": {
+      "mvrv_zscore_elevated": 3.5,
+      "mvrv_zscore_extreme": 7.0,
+      "market_to_realized_price_elevated": 1.5,
+      "market_to_realized_price_extreme": 2.0
+    },
+    "price": {
+      "extension_atr": 2.0,
+      "drawdown_reset": 0.5
+    },
+    "holder": {
+      "lth_distribution_threshold": -0.05,
+      "lth_accumulation_threshold": 0.05,
+      "sopr_distribution_threshold": 1.05
+    },
+    "flows": {
+      "weakening_threshold": -0.05
+    }
+  },
+  "execution_overlay": {
+    "positioning": {
+      "NORMAL": 1.0,
+      "ELEVATED": 0.75,
+      "HIGH": 0.5,
+      "EXTREME": 0.25,
+      "UNKNOWN": 1.0
+    },
+    "btc_cycle": {
+      "NORMAL": 1.0,
+      "ELEVATED": 0.8,
+      "HIGH": 0.5,
+      "UNKNOWN": 1.0
+    },
+    "wait": {
+      "enabled": true,
+      "minimum_extension_atr": 2.0
+    }
+  },
+  "events": {
+    "lookback_days": {
+      "SNAPSHOT_REVIEW": {
+        "security": 30,
+        "regulatory": 30
+      },
+      "FULL_REVIEW": {
+        "security": 90,
+        "regulatory": 90
+      },
+      "EVENT_REVIEW": {
+        "security": 30,
+        "regulatory": 30
+      }
+    },
+    "coverage": {
+      "medium_minimum": 0.5,
+      "high_minimum": 1.0
+    }
+  },
+  "execution": {
+    "timeframe": "1D",
+    "preferred_history_days": 240,
+    "minimum_history_days": 200,
+    "max_fetched_age_days": 7,
+    "maximum_daily_candle_lag_days": 1,
+    "minimum_daily_coverage_ratio": 0.9,
+    "maximum_daily_gap_days": 3,
+    "moving_average_windows": [
+      20,
+      50,
+      100,
+      200
+    ],
+    "atr_period": 14,
+    "realized_volatility_windows": [
+      30,
+      90
+    ],
+    "volatility_annualization_days": 365,
+    "volume_average_window": 20,
+    "swing_window": 5,
+    "max_tranches": 3,
+    "zone_half_width_atr": 0.25,
+    "minimum_zone_separation_atr": 0.75,
+    "maximum_zone_span_atr": 1.0,
+    "maximum_spot_close_gap_atr": 4.0,
+    "zone_quality": {
+      "minimum_for_entry": 55,
+      "high_quality": 75
+    },
+    "volatility_atr_percent": {
+      "low_max": 0.03,
+      "normal_max": 0.06,
+      "high_max": 0.1
+    },
+    "confidence_deployment_factor": {
+      "HIGH": 1.0,
+      "MEDIUM": 0.7,
+      "LOW": 0.0
+    },
+    "deployment_factor_composition": "minimum_cap",
+    "max_initial_tranche": {
+      "NORMAL": 0.5,
+      "DEFENSIVE": 0.35,
+      "CAPITAL_PRESERVATION": 0.2
+    },
+    "tranche_templates": {
+      "NORMAL_LOW_VOL": [
+        0.5,
+        0.3,
+        0.2
+      ],
+      "NORMAL_HIGH_VOL": [
+        0.3,
+        0.35,
+        0.35
+      ],
+      "DEFENSIVE": [
+        0.2,
+        0.3,
+        0.5
+      ],
+      "CAPITAL_PRESERVATION": [
+        0.2,
+        0.3,
+        0.5
+      ]
+    },
+    "breakout": {
+      "minimum_relative_volume": 1.2,
+      "max_atr_extension": 2.0,
+      "max_initial_tranche": 0.2
+    }
+  },
+  "confidence": {
+    "band_thresholds": {
+      "medium_min": 0.6,
+      "high_min": 0.8
+    },
+    "data_dimension_weights": {
+      "coverage": 0.3,
+      "freshness": 0.2,
+      "source_quality": 0.2,
+      "redundancy": 0.3
+    },
+    "regime_domain_weights": {
+      "trend": 0.2,
+      "volatility": 0.15,
+      "breadth": 0.15,
+      "flows": 0.15,
+      "portfolio_drawdown": 0.15,
+      "systemic_risk": 0.2
+    },
+    "decision_component_weights": {
+      "portfolio_data": 0.3,
+      "regime_confidence": 0.2,
+      "asset_evidence": 0.2,
+      "portfolio_accounting": 0.15,
+      "signal_agreement": 0.15
+    },
+    "factor_sufficiency": {
+      "trend": {
+        "min_primary_available": 2,
+        "min_total_available": 3
+      },
+      "valuation": {
+        "min_primary_available": 1,
+        "min_total_available": 1
+      },
+      "fundamentals": {
+        "min_primary_available": 2,
+        "min_total_available": 2
+      },
+      "onchain": {
+        "min_primary_available": 1,
+        "min_total_available": 2
+      },
+      "capital_flows": {
+        "min_primary_available": 1,
+        "min_total_available": 1
+      },
+      "relative_strength_btc": {
+        "min_primary_available": 1,
+        "min_total_available": 2
+      },
+      "btc_valuation": {
+        "min_primary_available": 1,
+        "min_total_available": 1
+      },
+      "macro_liquidity": {
+        "min_primary_available": 1,
+        "min_total_available": 1
+      }
+    },
+    "asset_evidence": {
+      "aggregation": "exposure_weighted",
+      "low_confidence_position_floor": 0.6,
+      "material_exposure_threshold": 0.1
+    },
+    "caps": {
+      "hard_critical_missing": 0.59,
+      "hard_critical_stale": 0.59,
+      "regime_unknown_critical": 0.79,
+      "regime_drawdown_systemic_unknown": 0.59,
+      "event_partial": 0.59,
+      "security_unknown": 0.59,
+      "security_critical": 0.39,
+      "liveness_degraded": 0.79,
+      "liveness_unknown": 0.59,
+      "liveness_halted": 0.39,
+      "valuation_low": 0.59,
+      "drawdown_provisional": 0.79,
+      "signal_consistency_low": 0.79
+    }
+  },
+  "freshness_policy": {
+    "domain_defaults": {
+      "trend": {
+        "max_age_seconds": 604800,
+        "half_life_seconds": 259200
+      },
+      "volatility": {
+        "max_age_seconds": 604800,
+        "half_life_seconds": 259200
+      },
+      "breadth": {
+        "max_age_seconds": 432000,
+        "half_life_seconds": 172800
+      },
+      "flows": {
+        "max_age_seconds": 604800,
+        "half_life_seconds": 259200
+      },
+      "portfolio_drawdown": {
+        "max_age_seconds": 2592000,
+        "half_life_seconds": 1209600
+      },
+      "systemic_risk": {
+        "max_age_seconds": 259200,
+        "half_life_seconds": 86400
+      }
+    },
+    "metric_overrides": {
+      "market.spot_price": {
+        "max_age_seconds": 86400,
+        "half_life_seconds": 21600
+      },
+      "risk.chain_liveness_status": {
+        "max_age_seconds": 86400,
+        "half_life_seconds": 21600
+      },
+      "risk.security_event_status": {
+        "max_age_seconds": 86400,
+        "half_life_seconds": 21600
+      }
+    },
+    "dimension_weights": {
+      "coverage": 0.3,
+      "freshness": 0.2,
+      "source_quality": 0.2,
+      "redundancy": 0.3
+    }
+  },
+  "source_quality": {
+    "tier_scores": {
+      "1": 1.0,
+      "2": 0.75,
+      "3": 0.5,
+      "unknown": 0.25
+    },
+    "redundancy_scores": {
+      "0": 0.0,
+      "1": 0.5,
+      "2": 0.8,
+      "3_plus": 1.0
+    }
+  },
+  "event_severity": {
+    "states": [
+      "CLEAR",
+      "WATCH",
+      "ELEVATED",
+      "CRITICAL"
+    ],
+    "coverage_state": {
+      "partial": "WATCH",
+      "unreachable": "WATCH",
+      "unknown": "WATCH"
+    }
+  },
+  "nav_history": {
+    "unresolved_flow_cap": 0.79,
+    "provisional_cap": 0.79
+  }
+}
