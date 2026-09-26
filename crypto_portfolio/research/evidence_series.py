@@ -239,19 +239,21 @@ def parse_chain_fees_history(payload: Any) -> tuple[EvidencePoint, ...]:
 _DERIVED_CHAIN_KEYS = ("borrowed", "staking", "pool2")
 
 
-def _day_after(stamp: float) -> str:
+def _day_after(stamp: float) -> tuple[int, str, str]:
     """DeFiLlama daily aggregates publish at the end of their UTC day.
 
-    A row stamped day D aggregates activity through D 23:59:59 UTC and is
-    therefore only knowable from D+1 onwards; that publication lag is the
-    ``available_at`` contract for every structural series here.
+    Recent llama rows can carry intraday snapshots instead of midnight
+    stamps, so the day index is the floored UTC day. A row stamped day D
+    aggregates activity through D 23:59:59 UTC and is therefore only
+    knowable from D+1 onwards; that publication lag is the ``available_at``
+    contract for every structural series here.
     """
     moment = datetime.fromtimestamp(stamp, tz=timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0,
     )
     observed = moment.isoformat().replace("+00:00", "Z")
     available = (moment + timedelta(days=1)).isoformat().replace("+00:00", "Z")
-    return observed, available
+    return int(moment.timestamp()), observed, available
 
 
 def _is_base_chain(key: str) -> bool:
@@ -281,6 +283,9 @@ def _aggregate_protocol_series(
         rows = entry.get("tvl") if isinstance(entry, Mapping) else None
         if not isinstance(rows, list):
             continue
+        # Per chain, a day keeps the LAST snapshot (intraday rows are
+        # snapshots, never additive); chains then sum into protocol totals.
+        chain_daily: dict[int, float] = {}
         for row in rows:
             try:
                 stamp = float(row["date"])
@@ -289,11 +294,14 @@ def _aggregate_protocol_series(
                 continue
             if not math.isfinite(value):
                 continue
-            daily[int(stamp)] = daily.get(int(stamp), 0.0) + value
+            day, _, _ = _day_after(stamp)
+            chain_daily[day] = value
+        for day, value in chain_daily.items():
+            daily[day] = daily.get(day, 0.0) + value
     points = []
-    for stamp in sorted(daily):
-        observed, available = _day_after(stamp)
-        points.append(EvidencePoint(observed, daily[stamp], available))
+    for day in sorted(daily):
+        _, observed, available = _day_after(day)
+        points.append(EvidencePoint(observed, daily[day], available))
     if not points:
         raise ValueError("protocol chainTvls response has no usable rows")
     return tuple(points)
@@ -317,7 +325,7 @@ def parse_chain_tvl_history(payload: Any) -> tuple[EvidencePoint, ...]:
     """/v2/historicalChainTvl rows to daily chain TVL points."""
     if not isinstance(payload, list):
         raise ValueError("chain TVL response must be a list")
-    points: list[EvidencePoint] = []
+    daily: dict[int, float] = {}
     for index, row in enumerate(payload):
         if not isinstance(row, Mapping) or row.get("tvl") is None:
             raise ValueError(f"chain TVL row {index} is malformed")
@@ -325,8 +333,12 @@ def parse_chain_tvl_history(payload: Any) -> tuple[EvidencePoint, ...]:
         value = float(row["tvl"])
         if not math.isfinite(value):
             continue
-        observed, available = _day_after(stamp)
-        points.append(EvidencePoint(observed, value, available))
+        day, _, _ = _day_after(stamp)
+        daily[day] = value  # last snapshot of the day wins
+    points = []
+    for day in sorted(daily):
+        _, observed, available = _day_after(day)
+        points.append(EvidencePoint(observed, daily[day], available))
     if not points:
         raise ValueError("chain TVL response has no usable rows")
     return tuple(points)
@@ -956,7 +968,11 @@ def acquire_evidence_series(
 
     aave_slug = "aave"
     try:
-        aave_protocol_payload = client.get_json(f"{LLAMA_BASE}/protocol/{aave_slug}")
+        # The protocol payload carries per-chain token tables (10+ MB);
+        # only this one fetch widens the response bound.
+        aave_protocol_payload = client.get_json(
+            f"{LLAMA_BASE}/protocol/{aave_slug}", max_response_bytes=20_000_000,
+        )
     except Exception as exc:
         aave_protocol_payload = None
         for series_id, metric in (
@@ -978,9 +994,11 @@ def acquire_evidence_series(
                       limitations=("BASE_CHAIN_AGGREGATE_NO_STAKING_POOL2",))
             except Exception as exc:
                 fail(series_id, metric, "AAVE", f"{exc.__class__.__name__}: {exc}")
+    # /overview/fees/aave 500s server-side; /summary/fees serves the same
+    # totalDataChart shape for protocol-level fee history.
     structural(
         "defillama:fees:aave", "fundamentals.protocol_fees", "AAVE",
-        f"{LLAMA_BASE}{CHAIN_FEES_PATH}/{aave_slug}?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=true",
+        f"{LLAMA_BASE}/summary/fees/{aave_slug}?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=true",
         parse_chain_fees_history_published,
     )
     for symbol, chain, metric_prefix in (("SOL", "Solana", "chain"), ("BNB", "BSC", "chain")):
