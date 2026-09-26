@@ -111,8 +111,16 @@ _STRESS_SCENARIO_NAMES = {
     "stablecoin_depeg",
 }
 _RISK_ENGINE_MODES = {"legacy_drawdown", "volatility_budget"}
-_RISK_ENGINE_FIELDS = {"mode", "portfolio_risk", "emergency_overlay", "regime_risk_scaling"}
+_RISK_ENGINE_FIELDS = {"mode", "portfolio_risk", "emergency_overlay", "regime_risk_scaling", "recovery"}
 _REGIME_RISK_SCALING_REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
+_RISK_ENGINE_RECOVERY_FIELDS = {
+    "stage_1_reviews",
+    "stage_1_risky_cap",
+    "stage_2_reviews",
+    "stage_2_risky_cap",
+    "release_reviews",
+    "max_portfolio_volatility",
+}
 _RISK_ENGINE_PORTFOLIO_FIELDS = {
     "target_volatility",
     "max_volatility",
@@ -737,6 +745,44 @@ def _parse_risk_engine(value: Any) -> dict[str, Any]:
             "risk_engine.regime_risk_scaling multipliers must satisfy "
             "NORMAL >= DEFENSIVE >= CAPITAL_PRESERVATION > 0"
         )
+    recovery = value["recovery"]
+    if not isinstance(recovery, dict):
+        raise PolicyError("risk_engine.recovery must be an object")
+    _unknown_fields(recovery, _RISK_ENGINE_RECOVERY_FIELDS, "risk_engine.recovery")
+    if set(recovery) != _RISK_ENGINE_RECOVERY_FIELDS:
+        raise PolicyError("risk_engine.recovery fields are incomplete")
+    stage_1_reviews = recovery["stage_1_reviews"]
+    stage_2_reviews = recovery["stage_2_reviews"]
+    release_reviews = recovery["release_reviews"]
+    for name, raw in (
+        ("stage_1_reviews", stage_1_reviews),
+        ("stage_2_reviews", stage_2_reviews),
+        ("release_reviews", release_reviews),
+    ):
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+            raise PolicyError(f"risk_engine.recovery.{name} must be an integer >= 1")
+    if not stage_1_reviews <= stage_2_reviews <= release_reviews:
+        raise PolicyError(
+            "risk_engine.recovery review thresholds must satisfy "
+            "stage_1 <= stage_2 <= release"
+        )
+    stage_1_cap = _fraction(recovery["stage_1_risky_cap"], "risk_engine.recovery.stage_1_risky_cap")
+    stage_2_cap = _fraction(recovery["stage_2_risky_cap"], "risk_engine.recovery.stage_2_risky_cap")
+    breach_cap_parsed = breach_cap
+    if not breach_cap_parsed < stage_1_cap < stage_2_cap < 1.0:
+        raise PolicyError(
+            "risk_engine.recovery risky caps must satisfy "
+            "breach_risky_cap < stage_1_risky_cap < stage_2_risky_cap < 1"
+        )
+    recovery_vol_threshold = _fraction(
+        recovery["max_portfolio_volatility"],
+        "risk_engine.recovery.max_portfolio_volatility",
+    )
+    if recovery_vol_threshold > max_volatility:
+        raise PolicyError(
+            "risk_engine.recovery.max_portfolio_volatility must not exceed "
+            "risk_engine.portfolio_risk.max_volatility"
+        )
     return {
         "mode": mode,
         "portfolio_risk": {
@@ -756,6 +802,14 @@ def _parse_risk_engine(value: Any) -> dict[str, Any]:
         "regime_risk_scaling": {
             name: {"target_volatility_multiplier": multipliers[name]}
             for name in sorted(multipliers)
+        },
+        "recovery": {
+            "stage_1_reviews": stage_1_reviews,
+            "stage_1_risky_cap": stage_1_cap,
+            "stage_2_reviews": stage_2_reviews,
+            "stage_2_risky_cap": stage_2_cap,
+            "release_reviews": release_reviews,
+            "max_portfolio_volatility": recovery_vol_threshold,
         },
     }
 

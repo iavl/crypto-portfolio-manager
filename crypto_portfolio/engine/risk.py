@@ -274,15 +274,20 @@ def emergency_drawdown_overlay_floor(
     policy: Policy | None = None,
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
+    recovery_state: Any = None,
 ) -> tuple[float, str | None, dict[str, Any]]:
     """Staged emergency-brake stable floor (volatility-budget mode).
 
     Unlike the legacy ladder, drawdown no longer scales normal sizing: the
     book runs at its volatility-budget target until the budget consumed by
     drawdown crosses a configured stage boundary (CAUTION, EMERGENCY), and
-    only then does the brake cut risky weight in steps. The confirmed
-    market-recovery re-risk floor from ``risk.drawdown_budget_overlay``
-    applies unchanged. Returns ``(floor, reason, state)``.
+    only then does the brake cut risky weight in steps. When ``recovery_state``
+    carries the advanced Strategy V2.1 recovery FSM state, that state owns the
+    floor (including the staged RECOVERY_1/RECOVERY_2 re-risk path and its
+    release) and the legacy market-recovery streak floor is superseded;
+    without it the confirmed market-recovery re-risk floor from
+    ``risk.drawdown_budget_overlay`` applies unchanged. Returns
+    ``(floor, reason, state)``.
     """
     from .portfolio_risk import emergency_drawdown_state
 
@@ -296,6 +301,21 @@ def emergency_drawdown_overlay_floor(
     drawdown = float(portfolio_drawdown)
     if not math.isfinite(drawdown) or drawdown > 0:
         raise ValueError("portfolio_drawdown must be finite and <= 0")
+    if recovery_state is not None:
+        if not isinstance(recovery_state, Mapping) or "risky_cap" not in recovery_state:
+            raise ValueError(
+                "recovery_state must be the advanced recovery block from "
+                "advance_emergency_recovery; advance the FSM once per review and pass "
+                "its result block"
+            )
+        block = dict(recovery_state)
+        risky_cap = float(block["risky_cap"])
+        state_name = str(block.get("state", "NORMAL"))
+        reason = (
+            f"emergency recovery state {state_name} caps risky weight at {risky_cap:.2%}"
+            if risky_cap < 1.0 else None
+        )
+        return 1.0 - risky_cap, reason, block
     if isinstance(market_recovery_streak, bool) or not isinstance(market_recovery_streak, int):
         raise ValueError("market_recovery_streak must be an integer")
     if market_recovery_streak < 0:
@@ -335,18 +355,22 @@ def risk_overlay_floor(
     policy: Policy | None = None,
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
+    recovery_state: Any = None,
 ) -> tuple[float, str | None, dict[str, Any]]:
     """Dispatch the drawdown overlay floor on the configured risk-engine mode.
 
     ``legacy_drawdown`` reproduces the Strategy V1 continuous ladder exactly;
-    ``volatility_budget`` uses the staged emergency brake. The returned state
-    block names the active mechanism so reports can distinguish them.
+    ``volatility_budget`` uses the staged emergency brake, and when
+    ``recovery_state`` carries the advanced Strategy V2.1 recovery-FSM block
+    the staged recovery path owns the floor. The returned state block names
+    the active mechanism so reports can distinguish them.
     """
     resolved = policy or resolve_policy()
     mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
     if mode == "volatility_budget":
         return emergency_drawdown_overlay_floor(
-            resolved, portfolio_drawdown, market_recovery_streak
+            resolved, portfolio_drawdown, market_recovery_streak,
+            recovery_state=recovery_state,
         )
     floor, reason = drawdown_budget_overlay_floor(
         resolved, portfolio_drawdown, market_recovery_streak
@@ -430,6 +454,7 @@ def run_risk_gate(
     current_weights: Mapping[str, float] | None = None,
     decision_confidence: Any | None = None,
     market_recovery_streak: int = 0,
+    recovery_state: Any = None,
 ) -> RiskCheckResult:
     resolved = policy or resolve_policy()
     if hasattr(target_weights, "target_weights"):
@@ -460,7 +485,8 @@ def run_risk_gate(
     limits = resolved.regime(regime_name)
     stable_weight = sum(weights.get(symbol, 0.0) for symbol in resolved.stable_symbols)
     overlay_floor, _overlay_reason, _overlay_state = risk_overlay_floor(
-        resolved, current_drawdown, market_recovery_streak
+        resolved, current_drawdown, market_recovery_streak,
+        recovery_state=recovery_state,
     )
     # Legacy mode stacks the regime stable target on the global floor. The
     # volatility-budget engine gives the regime its sizing authority through

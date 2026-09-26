@@ -589,6 +589,7 @@ def build_target_allocation(
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
     risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
+    recovery_state: Mapping[str, Any] | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
     risk_mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
@@ -640,7 +641,8 @@ def build_target_allocation(
         raise ValueError("current_weights must sum to no more than 1")
 
     overlay_floor, overlay_reason, overlay_state = risk_overlay_floor(
-        resolved, portfolio_drawdown, market_recovery_streak
+        resolved, portfolio_drawdown, market_recovery_streak,
+        recovery_state=recovery_state,
     )
     strategic_stable_only = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
     # Regime authority over sizing differs by engine mode. Legacy keeps the
@@ -1056,6 +1058,7 @@ def allocate(
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
     risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
+    recovery_state: Mapping[str, Any] | None = None,
 ) -> AllocationResult:
     return build_target_allocation(
         policy, regime, assessments, current_weights,
@@ -1064,6 +1067,7 @@ def allocate(
         portfolio_drawdown=portfolio_drawdown,
         market_recovery_streak=market_recovery_streak,
         risk_inputs=risk_inputs,
+        recovery_state=recovery_state,
     )
 
 

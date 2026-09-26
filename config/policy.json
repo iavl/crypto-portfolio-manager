@@ -121,6 +121,14 @@
       "CAPITAL_PRESERVATION": {
         "target_volatility_multiplier": 0.6
       }
+    },
+    "recovery": {
+      "stage_1_reviews": 5,
+      "stage_1_risky_cap": 0.4,
+      "stage_2_reviews": 10,
+      "stage_2_risky_cap": 0.6,
+      "release_reviews": 20,
+      "max_portfolio_volatility": 0.25
     }
   },
   "risk_tier_estimation": {

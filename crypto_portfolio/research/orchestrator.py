@@ -20,6 +20,7 @@ from ..engine.portfolio_risk import PortfolioRiskInputs, build_portfolio_risk_in
 from ..engine.rebalance import direction_history_from_decisions, recommend_rebalance
 from ..engine.regime import RegimeInputs, determine_regime, market_only_regime
 from ..engine.risk import risk_overlay_floor, run_risk_gate
+from ..engine.risk_recovery import RecoveryState, advance_emergency_recovery
 from ..engine.strategy_replay import ReplayReview
 from ..models.evidence import AssetAssessment
 from ..models.market import TechnicalSnapshot
@@ -280,6 +281,101 @@ def build_risk_inputs_for_reviews(
     return result
 
 
+def _emergency_recovery_diagnostics(
+    rows: Sequence[Mapping[str, Any]], policy: Policy
+) -> dict[str, Any] | None:
+    """Phase B recovery diagnostics over the per-review emergency rows.
+
+    Durations are consecutive-review run lengths; trough-to-reentry and the
+    +30/60/90-day exposure snapshots answer whether the FSM neither bottoms
+    out too early nor stays small for too long; recovery efficiency counts
+    reviews where the market had already normalized while the book remained
+    emergency-capped.
+    """
+    if not rows:
+        return None
+    transitions: Counter[str] = Counter()
+    durations: dict[str, list[int]] = {"BREACH": [], "RECOVERY_1": [], "RECOVERY_2": []}
+    run_state = str(rows[0]["state"])
+    run_length = 1
+    for row in rows[1:]:
+        state = str(row["state"])
+        if state != run_state:
+            transitions[f"{run_state}->{state}"] += 1
+            if run_state in durations:
+                durations[run_state].append(run_length)
+            run_state = state
+            run_length = 1
+        else:
+            run_length += 1
+    if run_state in durations:
+        durations[run_state].append(run_length)
+
+    breach_cap = float((policy.risk_engine or {})["emergency_overlay"]["breach_risky_cap"])
+    troughs: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if index == 0:
+            continue
+        if float(row["last_portfolio_low"]) < float(rows[index - 1]["last_portfolio_low"]) - 1e-12:
+            moment = row["moment"]
+            reentry_days: float | None = None
+            for later in rows[index:]:
+                if float(later["risky_weight"]) > breach_cap + 1e-12:
+                    reentry_days = (later["moment"] - moment).total_seconds() / 86400.0
+                    break
+            snapshots = {}
+            for offset in (30, 60, 90):
+                target = None
+                for later in rows[index:]:
+                    if (later["moment"] - moment).total_seconds() / 86400.0 >= offset:
+                        target = later
+                        break
+                snapshots[f"risky_weight_plus_{offset}d"] = (
+                    float(target["risky_weight"]) if target is not None else None
+                )
+            troughs.append({
+                "moment": moment.isoformat().replace("+00:00", "Z"),
+                "drawdown_low": float(row["last_portfolio_low"]),
+                "time_to_reentry_days": reentry_days,
+                **snapshots,
+            })
+    inefficient = [
+        row for row in rows
+        if row["market_only_regime"] == "NORMAL" and row["state"] in {"BREACH", "EMERGENCY"}
+    ]
+    longest_inefficient = 0
+    current_inefficient = 0
+    for row in rows:
+        if row["market_only_regime"] == "NORMAL" and row["state"] in {"BREACH", "EMERGENCY"}:
+            current_inefficient += 1
+            longest_inefficient = max(longest_inefficient, current_inefficient)
+        else:
+            current_inefficient = 0
+
+    def _runs(values: list[int]) -> dict[str, Any]:
+        return {
+            "runs": len(values),
+            "average_reviews": sum(values) / len(values) if values else None,
+            "max_reviews": max(values) if values else None,
+        }
+
+    return {
+        "reviews": len(rows),
+        "state_transition_counts": dict(sorted(transitions.items())),
+        "breach_duration": _runs(durations["BREACH"]),
+        "recovery_1_duration": _runs(durations["RECOVERY_1"]),
+        "recovery_2_duration": _runs(durations["RECOVERY_2"]),
+        "trough_reentry": troughs,
+        "recovery_efficiency": {
+            "definition": "reviews where market-only regime is NORMAL while the "
+                          "emergency state is still BREACH/EMERGENCY",
+            "reviews": len(inefficient),
+            "share": len(inefficient) / len(rows),
+            "longest_consecutive_reviews": longest_inefficient,
+        },
+    }
+
+
 def run_historical_backtest(
     reviews: Sequence[ReplayReview],
     *,
@@ -329,6 +425,12 @@ def run_historical_backtest(
     risk_engine_states: Counter[str] = Counter()
     risk_engine_bindings: Counter[str] = Counter()
     risk_engine_mode: str | None = None
+    # Emergency-recovery FSM (Strategy V2.1 Phase B), volatility-budget mode
+    # only: the state advances once per review from replayed observations and
+    # the same block feeds allocation and the risk gate.
+    recovery_state: RecoveryState | None = RecoveryState()
+    previous_estimated_volatility: float | None = None
+    emergency_rows: list[dict[str, Any]] = []
 
     for index, review in enumerate(reviews):
         if index > 0:
@@ -347,9 +449,10 @@ def run_historical_backtest(
         # overlay's re-risk floor; it never touches the regime label itself,
         # so the mandatory drawdown floors stay immediate in both directions.
         market_streak_inputs = RegimeInputs(**regime_values)
+        market_label = market_only_regime(market_streak_inputs, policy=resolved)
         market_recovery_streak = (
             market_recovery_streak + 1
-            if market_only_regime(market_streak_inputs, policy=resolved) == "NORMAL"
+            if market_label == "NORMAL"
             else 0
         )
         # Volatility-budget mode removes the portfolio's own drawdown from the
@@ -361,7 +464,26 @@ def run_historical_backtest(
         )
         previous_regime = regime
         regime_counts[regime.regime] += 1
-        market_regime_counts[market_only_regime(market_streak_inputs, policy=resolved)] += 1
+        market_regime_counts[market_label] += 1
+        emergency_block: Mapping[str, Any] | None = None
+        if risk_mode == "volatility_budget":
+            # Emergency-recovery FSM (Strategy V2.1 Phase B): advance once per
+            # review from replayed observations; the returned block feeds both
+            # allocation and the risk gate, and the persisted state carries
+            # over to the next review.
+            systemic = regime_values.get("systemic_event_risk")
+            recovery_state, emergency_block = advance_emergency_recovery(
+                recovery_state,
+                portfolio_drawdown=point.drawdown,
+                market_only_regime=market_label,
+                systemic_event_severe=(
+                    systemic is True
+                    or str(systemic).strip().upper() in {"SEVERE", "CRITICAL"}
+                ),
+                chain_liveness=review.chain_liveness,
+                portfolio_volatility=previous_estimated_volatility,
+                policy=resolved,
+            )
         # Deterministic diagnostics: the exposure the strategy carried into
         # the period, whether the regime label sat on its own-drawdown floor,
         # and whether the drawdown budget overlay raised the stable floor
@@ -399,12 +521,14 @@ def run_historical_backtest(
                 if risk_inputs_by_review is not None and risk_inputs_by_review[index] is not None
                 else None
             ),
+            recovery_state=emergency_block,
         )
         risk = run_risk_gate(
             allocation, policy=resolved, regime=regime.regime, assessments=assessments,
             current_drawdown=point.drawdown, overlays=review.overlays,
             chain_liveness=review.chain_liveness, current_weights=point.weights,
             market_recovery_streak=market_recovery_streak,
+            recovery_state=emergency_block,
         )
         for violation in risk.violations:
             constraint_violations[violation.code] += 1
@@ -536,6 +660,20 @@ def run_historical_backtest(
             binding = engine_block.get("binding_risk_constraint")
             if binding is not None:
                 risk_engine_bindings[str(binding)] += 1
+        if emergency_block is not None:
+            sigma = engine_block.get("portfolio_volatility") if engine_block else None
+            previous_estimated_volatility = (
+                float(sigma) if isinstance(sigma, (int, float)) else None
+            )
+            emergency_rows.append({
+                "moment": review.moment,
+                "state": str(emergency_block["state"]),
+                "transition": str(emergency_block.get("transition", "HOLD")),
+                "risky_weight": risky_weights[-1],
+                "market_only_regime": market_label,
+                "last_portfolio_low": float(emergency_block["last_portfolio_low"]),
+                "reviews_since_new_low": int(emergency_block["reviews_since_new_low"]),
+            })
         review_rows.append({
             "as_of": review.as_of, "period_end": review.period_end,
             "regime": regime.as_dict(), "drawdown_input": point.drawdown,
@@ -694,6 +832,9 @@ def run_historical_backtest(
             "emergency_overlay_states": dict(risk_engine_states),
             "binding_constraint_counts": dict(risk_engine_bindings),
         },
+        "emergency_recovery_diagnostics": _emergency_recovery_diagnostics(
+            emergency_rows, resolved
+        ),
         "constraint_violation_counts": dict(constraint_violations),
         "regime_floor_diagnostics": {
             "reviews": len(review_rows),
