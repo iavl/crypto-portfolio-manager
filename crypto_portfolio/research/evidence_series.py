@@ -236,6 +236,130 @@ def parse_chain_fees_history(payload: Any) -> tuple[EvidencePoint, ...]:
     return tuple(points)
 
 
+_DERIVED_CHAIN_KEYS = ("borrowed", "staking", "pool2")
+
+
+def _day_after(stamp: float) -> str:
+    """DeFiLlama daily aggregates publish at the end of their UTC day.
+
+    A row stamped day D aggregates activity through D 23:59:59 UTC and is
+    therefore only knowable from D+1 onwards; that publication lag is the
+    ``available_at`` contract for every structural series here.
+    """
+    moment = datetime.fromtimestamp(stamp, tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+    observed = moment.isoformat().replace("+00:00", "Z")
+    available = (moment + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    return observed, available
+
+
+def _is_base_chain(key: str) -> bool:
+    """True for real chains; False for llama's derived component entries.
+
+    ``chainTvls`` mixes base chains with ``<chain>-borrowed`` /
+    ``<chain>-staking`` / ``<chain>-pool2`` components and chain-less
+    global ``borrowed`` / ``staking`` / ``pool2`` buckets. Protocol TVL is
+    the sum of base chains only.
+    """
+    if key in _DERIVED_CHAIN_KEYS:
+        return False
+    return not any(key.endswith(f"-{name}") for name in _DERIVED_CHAIN_KEYS)
+
+
+def _aggregate_protocol_series(
+    entries: Mapping[str, Any], *, borrowed: bool,
+) -> tuple[EvidencePoint, ...]:
+    daily: dict[int, float] = {}
+    for key, entry in entries.items():
+        if borrowed:
+            usable = key.endswith("-borrowed")
+        else:
+            usable = _is_base_chain(key)
+        if not usable:
+            continue
+        rows = entry.get("tvl") if isinstance(entry, Mapping) else None
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            try:
+                stamp = float(row["date"])
+                value = float(row["totalLiquidityUSD"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not math.isfinite(value):
+                continue
+            daily[int(stamp)] = daily.get(int(stamp), 0.0) + value
+    points = []
+    for stamp in sorted(daily):
+        observed, available = _day_after(stamp)
+        points.append(EvidencePoint(observed, daily[stamp], available))
+    if not points:
+        raise ValueError("protocol chainTvls response has no usable rows")
+    return tuple(points)
+
+
+def parse_protocol_tvl_history(payload: Any) -> tuple[EvidencePoint, ...]:
+    """Aggregate DeFiLlama protocol chainTvls to daily protocol TVL."""
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("chainTvls"), Mapping):
+        raise ValueError("protocol response has no chainTvls")
+    return _aggregate_protocol_series(payload["chainTvls"], borrowed=False)
+
+
+def parse_protocol_borrowed_history(payload: Any) -> tuple[EvidencePoint, ...]:
+    """Aggregate the ``<chain>-borrowed`` entries to daily borrowed USD."""
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("chainTvls"), Mapping):
+        raise ValueError("protocol response has no chainTvls")
+    return _aggregate_protocol_series(payload["chainTvls"], borrowed=True)
+
+
+def parse_chain_tvl_history(payload: Any) -> tuple[EvidencePoint, ...]:
+    """/v2/historicalChainTvl rows to daily chain TVL points."""
+    if not isinstance(payload, list):
+        raise ValueError("chain TVL response must be a list")
+    points: list[EvidencePoint] = []
+    for index, row in enumerate(payload):
+        if not isinstance(row, Mapping) or row.get("tvl") is None:
+            raise ValueError(f"chain TVL row {index} is malformed")
+        stamp = float(row["date"])
+        value = float(row["tvl"])
+        if not math.isfinite(value):
+            continue
+        observed, available = _day_after(stamp)
+        points.append(EvidencePoint(observed, value, available))
+    if not points:
+        raise ValueError("chain TVL response has no usable rows")
+    return tuple(points)
+
+
+def parse_chain_fees_history_published(payload: Any) -> tuple[EvidencePoint, ...]:
+    """Chain fees with the structural publication-lag contract."""
+    points = parse_chain_fees_history(payload)
+    return tuple(
+        EvidencePoint(
+            point.observed_at,
+            point.value,
+            (parse_timestamp(point.observed_at) + timedelta(days=1))
+            .isoformat().replace("+00:00", "Z"),
+        )
+        for point in points
+    )
+
+
+def parse_stablecoin_chain_history(payload: Any) -> tuple[EvidencePoint, ...]:
+    """Per-chain stablecoin chart rows to dated circulating-supply points."""
+    points = parse_stablecoin_supply_history(payload)
+    return tuple(
+        EvidencePoint(
+            point.observed_at,
+            point.value,
+            (parse_timestamp(point.observed_at) + timedelta(days=1))
+            .isoformat().replace("+00:00", "Z"),
+        )
+        for point in points
+    )
+
+
 def parse_etf_flow_history(payload: Any) -> tuple[tuple[EvidencePoint, ...], tuple[EvidencePoint, ...]]:
     """SoSoValue v2 history to (net-flow points, AUM points).
 
@@ -400,6 +524,40 @@ def etf_net_to_aum(
     return flow_sum / latest_aum.value
 
 
+_STRUCTURAL_SERIES_BY_SYMBOL = {
+    "AAVE": {
+        "tvl": "defillama:protocol:aave:tvl",
+        "borrowed": "defillama:protocol:aave:borrowed",
+        "fees": "defillama:fees:aave",
+    },
+    "SOL": {
+        "chain_tvl": "defillama:chain:tvl:SOL",
+        "fees": "defillama:fees:SOL",
+        "stablecoins": "defillama:stablecoins:SOL",
+    },
+    "BNB": {
+        "chain_tvl": "defillama:chain:tvl:BNB",
+        "fees": "defillama:fees:BNB",
+        "stablecoins": "defillama:stablecoins:BNB",
+    },
+}
+
+
+def _structural_series(
+    series: Mapping[str, ObservationSeries],
+) -> dict[str, dict[str, ObservationSeries]]:
+    result: dict[str, dict[str, ObservationSeries]] = {}
+    for symbol, ids in _STRUCTURAL_SERIES_BY_SYMBOL.items():
+        picked = {
+            name: series[series_id]
+            for name, series_id in ids.items()
+            if series_id in series
+        }
+        if picked:
+            result[symbol] = picked
+    return result
+
+
 @dataclass(frozen=True)
 class EvidenceContext:
     """Frozen evidence bundle consumed per review boundary, point-in-time."""
@@ -410,9 +568,18 @@ class EvidenceContext:
     etf_aum: Mapping[str, ObservationSeries] | None = None
     fred: Mapping[str, ObservationSeries] | None = None
     mvrv: ObservationSeries | None = None
+    # Strategy V2.2 Phase D structural series, research-gated: present only
+    # when the caller opts in, so default replay behavior never changes
+    # until the structural ranking power is validated (plan 7.8).
+    structural: Mapping[str, Mapping[str, ObservationSeries]] | None = None
 
     @classmethod
-    def from_series(cls, series: Mapping[str, ObservationSeries]) -> "EvidenceContext":
+    def from_series(
+        cls,
+        series: Mapping[str, ObservationSeries],
+        *,
+        include_structural: bool = False,
+    ) -> "EvidenceContext":
         def optional(key: str) -> ObservationSeries | None:
             return series.get(key)
 
@@ -435,6 +602,9 @@ class EvidenceContext:
                 if f"fred:{name}" in series
             } or None,
             mvrv=optional("coinmetrics:btc:CapMVRVCur"),
+            structural=(
+                _structural_series(series) if include_structural else None
+            ),
         )
 
     def factor_scores(self, symbol: str, as_of: str) -> dict[str, FactorScore]:
@@ -483,6 +653,61 @@ class EvidenceContext:
                 result["onchain"] = FactorScore(
                     "onchain", score, availability="AVAILABLE", reliability=reliability,
                 )
+        if self.structural is not None:
+            # Structural evidence never overwrites an already-available
+            # factor; it only fills gaps (plan 7.8 research gating).
+            for name, factor in self.structural_factor_scores(symbol, as_of).items():
+                if name not in result:
+                    result[name] = factor
+        return result
+
+    def structural_factor_scores(self, symbol: str, as_of: str) -> dict[str, FactorScore]:
+        """Deterministic structural factor scores from the Phase D series.
+
+        Bounded linear mappings in the established evidence style: 90-day
+        TVL growth of +/-50% moves fundamentals by +/-20 points, fee growth
+        reuses the onchain sensitivity, and chain stablecoin supply adds
+        +/-10 points at +/-20%. Research-gated: this only runs for contexts
+        built with ``include_structural`` (plan 7.8 — no position authority
+        until ranking power is validated).
+        """
+        series = (self.structural or {}).get(symbol)
+        if not series:
+            return {}
+        result: dict[str, FactorScore] = {}
+        if symbol == "AAVE":
+            tvl = series.get("tvl")
+            borrowed = series.get("borrowed")
+            growth_90 = tvl.change_over_days(as_of, 90) if tvl is not None else None
+            borrow_90 = borrowed.change_over_days(as_of, 90) if borrowed is not None else None
+            if growth_90 is not None:
+                score = 50.0 + 20.0 * growth_90 / 0.5
+                if borrow_90 is not None:
+                    score += 10.0 * borrow_90 / 0.5
+                result["fundamentals"] = FactorScore(
+                    "fundamentals", _clip_score(score),
+                    availability="AVAILABLE", reliability=0.7,
+                )
+        else:
+            chain_tvl = series.get("chain_tvl")
+            stablecoins = series.get("stablecoins")
+            growth_90 = chain_tvl.change_over_days(as_of, 90) if chain_tvl is not None else None
+            stable_90 = stablecoins.change_over_days(as_of, 90) if stablecoins is not None else None
+            if growth_90 is not None:
+                score = 50.0 + 20.0 * growth_90 / 0.5
+                if stable_90 is not None:
+                    score += 10.0 * stable_90 / 0.2
+                result["fundamentals"] = FactorScore(
+                    "fundamentals", _clip_score(score),
+                    availability="AVAILABLE", reliability=0.7,
+                )
+        fees = series.get("fees")
+        onchain = onchain_score(fees.change_over_days(as_of, 30)) if fees is not None else None
+        if onchain is not None:
+            score, reliability = onchain
+            result["onchain"] = FactorScore(
+                "onchain", score, availability="AVAILABLE", reliability=reliability * 0.7,
+            )
         return result
 
     def market_flow_state(self, as_of: str) -> str | None:
@@ -528,6 +753,15 @@ _EVIDENCE_SERIES_IDS = (
     "fred:WALCL",
     "fred:DFF",
     "coinmetrics:btc:CapMVRVCur",
+    "defillama:protocol:aave:tvl",
+    "defillama:protocol:aave:borrowed",
+    "defillama:fees:aave",
+    "defillama:chain:tvl:SOL",
+    "defillama:chain:tvl:BNB",
+    "defillama:fees:SOL",
+    "defillama:fees:BNB",
+    "defillama:stablecoins:SOL",
+    "defillama:stablecoins:BNB",
 )
 
 
@@ -703,7 +937,70 @@ def acquire_evidence_series(
         except Exception as exc:
             fail(series_id, metric, "BTC", f"{exc.__class__.__name__}: {exc}")
 
-    # 5. CoinMetrics BTC MVRV (community, no key).
+    # 5. Structural point-in-time series (Strategy V2.2 Phase D, free, no
+    # key). Every series carries the day+1 publication-lag contract: a row
+    # stamped day D aggregates through D 23:59:59 UTC and is available_at
+    # D+1. Fail-closed per series; a missing source keeps the factor
+    # MISSING, never fabricated.
+    def structural(series_id: str, metric: str, symbol: str, url: str, parser: Any,
+                   limitations: Sequence[str] = ()) -> None:
+        try:
+            series = fetch(series_id) or ObservationSeries(
+                series_id, metric, "defillama", "USD", fetched_at,
+                parser(client.get_json(url)),
+            )
+            store(series, metric, symbol, quality="PUBLISHED_AT_TIME",
+                  limitations=limitations)
+        except Exception as exc:
+            fail(series_id, metric, symbol, f"{exc.__class__.__name__}: {exc}")
+
+    aave_slug = "aave"
+    try:
+        aave_protocol_payload = client.get_json(f"{LLAMA_BASE}/protocol/{aave_slug}")
+    except Exception as exc:
+        aave_protocol_payload = None
+        for series_id, metric in (
+            ("defillama:protocol:aave:tvl", "fundamentals.protocol_tvl"),
+            ("defillama:protocol:aave:borrowed", "fundamentals.protocol_borrowed"),
+        ):
+            fail(series_id, metric, "AAVE", f"{exc.__class__.__name__}: {exc}")
+    if aave_protocol_payload is not None:
+        for series_id, metric, parser in (
+            ("defillama:protocol:aave:tvl", "fundamentals.protocol_tvl", parse_protocol_tvl_history),
+            ("defillama:protocol:aave:borrowed", "fundamentals.protocol_borrowed", parse_protocol_borrowed_history),
+        ):
+            try:
+                series = fetch(series_id) or ObservationSeries(
+                    series_id, metric, "defillama", "USD", fetched_at,
+                    parser(aave_protocol_payload),
+                )
+                store(series, metric, "AAVE", quality="PUBLISHED_AT_TIME",
+                      limitations=("BASE_CHAIN_AGGREGATE_NO_STAKING_POOL2",))
+            except Exception as exc:
+                fail(series_id, metric, "AAVE", f"{exc.__class__.__name__}: {exc}")
+    structural(
+        "defillama:fees:aave", "fundamentals.protocol_fees", "AAVE",
+        f"{LLAMA_BASE}{CHAIN_FEES_PATH}/{aave_slug}?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=true",
+        parse_chain_fees_history_published,
+    )
+    for symbol, chain, metric_prefix in (("SOL", "Solana", "chain"), ("BNB", "BSC", "chain")):
+        structural(
+            f"defillama:chain:tvl:{symbol}", f"{metric_prefix}.tvl", symbol,
+            f"{LLAMA_BASE}/v2/historicalChainTvl/{chain}",
+            parse_chain_tvl_history,
+        )
+        structural(
+            f"defillama:fees:{symbol}", "onchain.chain_fees", symbol,
+            f"{LLAMA_BASE}{CHAIN_FEES_PATH}/{chain}?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=true",
+            parse_chain_fees_history_published,
+        )
+        structural(
+            f"defillama:stablecoins:{symbol}", "market.chain_stablecoin_supply", symbol,
+            STABLECOINS_BASE_URL + STABLECOIN_CHARTS_PATH + "/" + chain,
+            parse_stablecoin_chain_history,
+        )
+
+    # 6. CoinMetrics BTC MVRV (community, no key).
     mvrv_id = "coinmetrics:btc:CapMVRVCur"
     try:
         series = fetch(mvrv_id) or ObservationSeries(
@@ -739,7 +1036,12 @@ __all__ = [
     "market_flow_state",
     "onchain_score",
     "parse_chain_fees_history",
+    "parse_chain_fees_history_published",
+    "parse_chain_tvl_history",
     "parse_coinmetrics_mvrv_history",
+    "parse_protocol_borrowed_history",
+    "parse_protocol_tvl_history",
+    "parse_stablecoin_chain_history",
     "parse_etf_flow_history",
     "parse_fred_vintage_history",
     "parse_stablecoin_supply_history",
