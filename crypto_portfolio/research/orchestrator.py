@@ -113,6 +113,7 @@ def _vol_matched_benchmark(
         prices_by_time=prices_by_time, weights={"BTC": weight, "USD": 1.0 - weight},
         initial_value_usd=initial_value_usd, fee_bps=fee_bps, slippage_bps=slippage_bps,
     )
+    result["weights"] = {"BTC": weight, "USD": 1.0 - weight}
     result["methodology"] = (
         f"{result['methodology']}; BTC weight {weight:.4f} solved to match the strategy's "
         f"{float(target):.4%} annualized volatility"
@@ -173,6 +174,7 @@ def _vol_matched_btc_eth_benchmark(
         prices_by_time=prices_by_time, weights=weights,
         initial_value_usd=initial_value_usd, fee_bps=fee_bps, slippage_bps=slippage_bps,
     )
+    result["weights"] = dict(weights)
     result["methodology"] = (
         f"{result['methodology']}; 70/30 BTC/ETH sleeve weight {sleeve_weight:.4f} "
         f"solved to match the strategy's {float(target):.4%} annualized volatility"
@@ -384,8 +386,18 @@ def run_historical_backtest(
     slippage_bps: float = 5.0,
     ordinary_review_weekday: int | None = None,
     risk_inputs_by_review: Sequence[PortfolioRiskInputs | None] | None = None,
+    cash_carry: Any | None = None,
 ) -> dict[str, Any]:
-    """Run the shared decision engines with an exact quantity/cash ledger."""
+    """Run the shared decision engines with an exact quantity/cash ledger.
+
+    ``cash_carry`` (Strategy V2.3 Phase 4) is a ``CashCarryConvention`` or
+    None: when supplied and not ZERO, the strategy path AND every
+    cash-holding benchmark path are credited with the same point-in-time
+    carry on their cash share, and the primary metrics are computed on the
+    adjusted paths (parity is the contract; the zero-carry metrics stay in
+    ``cash_carry.metrics_zero_carry``). Carry is accounting only — the
+    decision engines never see it.
+    """
     if not reviews:
         raise ValueError("at least one historical review is required")
     resolved = policy or resolve_policy()
@@ -703,22 +715,36 @@ def run_historical_backtest(
     aligned_prices = [(reviews[0].as_of, dict(reviews[0].current_prices))]
     for review in reviews:
         aligned_prices.append((review.period_end, _period_end_prices(review)))
+    benchmark_weights: dict[str, dict[str, float]] = {}
+
+    def _register_benchmark(name: str, weights: Mapping[str, float], result: dict[str, Any]) -> dict[str, Any]:
+        benchmark_weights[name] = {str(k).upper(): float(v) for k, v in weights.items()}
+        return result
+
     benchmarks = {
-        "btc_buy_and_hold_zero_cost": buy_and_hold_benchmark(
-            prices_by_time=aligned_prices, weights={"BTC": 1.0},
-            initial_value_usd=first.portfolio_value,
+        "btc_buy_and_hold_zero_cost": _register_benchmark(
+            "btc_buy_and_hold_zero_cost", {"BTC": 1.0}, buy_and_hold_benchmark(
+                prices_by_time=aligned_prices, weights={"BTC": 1.0},
+                initial_value_usd=first.portfolio_value,
+            ),
         ),
-        "btc_eth_70_30_zero_cost": buy_and_hold_benchmark(
-            prices_by_time=aligned_prices, weights={"BTC": 0.7, "ETH": 0.3},
-            initial_value_usd=first.portfolio_value,
+        "btc_eth_70_30_zero_cost": _register_benchmark(
+            "btc_eth_70_30_zero_cost", {"BTC": 0.7, "ETH": 0.3}, buy_and_hold_benchmark(
+                prices_by_time=aligned_prices, weights={"BTC": 0.7, "ETH": 0.3},
+                initial_value_usd=first.portfolio_value,
+            ),
         ),
-        "btc_buy_and_hold_investable": buy_and_hold_benchmark(
-            prices_by_time=aligned_prices, weights={"BTC": 1.0},
-            initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        "btc_buy_and_hold_investable": _register_benchmark(
+            "btc_buy_and_hold_investable", {"BTC": 1.0}, buy_and_hold_benchmark(
+                prices_by_time=aligned_prices, weights={"BTC": 1.0},
+                initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            ),
         ),
-        "btc_eth_70_30_investable": buy_and_hold_benchmark(
-            prices_by_time=aligned_prices, weights={"BTC": 0.7, "ETH": 0.3},
-            initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        "btc_eth_70_30_investable": _register_benchmark(
+            "btc_eth_70_30_investable", {"BTC": 0.7, "ETH": 0.3}, buy_and_hold_benchmark(
+                prices_by_time=aligned_prices, weights={"BTC": 0.7, "ETH": 0.3},
+                initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            ),
         ),
         # Fair comparisons.  The four BTC benchmarks above can only answer "did
         # the strategy beat the riskiest available holding"; these answer "did
@@ -726,9 +752,11 @@ def run_historical_backtest(
         # "was the risk that was taken worth it".  A risk-reducing strategy can
         # lose the first comparison by design, so judging it on that alone
         # misreads the strategy instead of testing it.
-        "static_initial_weights_investable": buy_and_hold_benchmark(
-            prices_by_time=aligned_prices, weights=dict(first.current_weights),
-            initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        "static_initial_weights_investable": _register_benchmark(
+            "static_initial_weights_investable", dict(first.current_weights), buy_and_hold_benchmark(
+                prices_by_time=aligned_prices, weights=dict(first.current_weights),
+                initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            ),
         ),
     }
     vol_matched = _vol_matched_benchmark(
@@ -737,6 +765,9 @@ def run_historical_backtest(
     )
     if vol_matched is not None:
         benchmarks["vol_matched_btc_cash_investable"] = vol_matched
+        benchmark_weights["vol_matched_btc_cash_investable"] = dict(
+            vol_matched.get("weights") or {}
+        )
     # Ablation benchmark B (Strategy V2 Phase 6): the same risk budget in a
     # static two-asset volatility-targeting mix, joining the comparison set.
     vol_matched_btc_eth = _vol_matched_btc_eth_benchmark(
@@ -745,6 +776,9 @@ def run_historical_backtest(
     )
     if vol_matched_btc_eth is not None:
         benchmarks["vol_matched_btc_eth_70_30_cash_investable"] = vol_matched_btc_eth
+        benchmark_weights["vol_matched_btc_eth_70_30_cash_investable"] = dict(
+            vol_matched_btc_eth.get("weights") or {}
+        )
     # Exposure-matched fair comparison: the same constant average exposure the
     # strategy realized, held passively in BTC/cash.  Together with the signed
     # timing contribution below it separates "what did the exposure path earn"
@@ -752,11 +786,63 @@ def run_historical_backtest(
     exposure_timing = exposure_timing_contribution(risky_weights, aligned_prices)
     average_risky = exposure_timing["realized_average_risky_weight"]
     if average_risky > 0:
-        benchmarks["exposure_matched_btc_cash_investable"] = constant_weight_rebalanced_benchmark(
-            prices_by_time=aligned_prices,
-            weights={"BTC": average_risky, "USD": 1.0 - average_risky},
-            initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+        benchmarks["exposure_matched_btc_cash_investable"] = _register_benchmark(
+            "exposure_matched_btc_cash_investable",
+            {"BTC": average_risky, "USD": 1.0 - average_risky},
+            constant_weight_rebalanced_benchmark(
+                prices_by_time=aligned_prices,
+                weights={"BTC": average_risky, "USD": 1.0 - average_risky},
+                initial_value_usd=first.portfolio_value, fee_bps=fee_bps, slippage_bps=slippage_bps,
+            ),
         )
+    # Strategy V2.3 Phase 4 cash carry: one convention, applied to the
+    # strategy path and to every benchmark that holds a cash leg. The
+    # vol-matched weight solves above ran on the zero-carry metrics so the
+    # comparison basis stays the realized risk actually taken.
+    cash_carry_block: dict[str, Any] | None = None
+    if cash_carry is not None:
+        from .cash_carry import (
+            CashCarryConvention,
+            benchmark_uses_cash,
+            carry_adjusted_valuations,
+            carry_contribution,
+        )
+        convention = (
+            cash_carry if isinstance(cash_carry, CashCarryConvention)
+            else CashCarryConvention(**dict(cash_carry))
+        )
+        cash_symbols = tuple(resolved.stable_symbols)
+        metrics_zero_carry = metrics
+        contribution = carry_contribution(
+            ledger.valuations, cash_symbols=cash_symbols, convention=convention,
+        )
+        if convention.mode != "ZERO":
+            metrics = performance_metrics(carry_adjusted_valuations(
+                ledger.valuations, cash_symbols=cash_symbols, convention=convention,
+            ))
+            for name, value in benchmarks.items():
+                weights = benchmark_weights.get(name, {})
+                if benchmark_uses_cash(weights, cash_symbols) and value.get("valuations"):
+                    value["metrics"] = performance_metrics(carry_adjusted_valuations(
+                        value["valuations"], cash_symbols=cash_symbols,
+                        convention=convention,
+                    ))
+                    value["methodology"] = (
+                        str(value.get("methodology", ""))
+                        + f"; cash leg earns the {convention.mode} carry"
+                    )
+        cash_carry_block = {
+            **contribution,
+            "benchmark_parity": (
+                "strategy and every cash-holding benchmark use the same carry "
+                "convention on their cash shares"
+            ),
+            "metrics_zero_carry": {
+                "cagr": metrics_zero_carry.get("cagr"),
+                "total_return": metrics_zero_carry.get("total_return"),
+                "maximum_drawdown": metrics_zero_carry.get("maximum_drawdown"),
+            },
+        }
     benchmark_comparison = {
         name: _benchmark_comparison(metrics, value["metrics"])
         for name, value in benchmarks.items()
@@ -865,6 +951,7 @@ def run_historical_backtest(
         "cash_yield_sensitivity": _cash_yield_sensitivity(
             ledger.valuations, stable_symbols=tuple(resolved.stable_symbols),
         ),
+        "cash_carry": cash_carry_block,
         "benchmarks": benchmarks, "benchmark_comparison": benchmark_comparison, "reviews": review_rows,
         "trades": [item.as_dict() for item in ledger.trades],
         "valuations": [item.as_dict() for item in ledger.valuations],
