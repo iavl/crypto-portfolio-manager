@@ -24,6 +24,9 @@ def _vol_policy(mode: str = "volatility_budget", **overrides):
     data = json.loads(json.dumps(load_policy().as_dict()))
     engine = data["risk_engine"]
     engine["mode"] = mode
+    # These tests document the frozen V2.1 anchor-core mechanics; the
+    # canonical V2.2 btc-baseline core has its own test files.
+    data["core_allocation"]["mode"] = "legacy_anchor"
     for key, value in overrides.items():
         if key in engine["portfolio_risk"]:
             engine["portfolio_risk"][key] = value

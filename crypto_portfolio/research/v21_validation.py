@@ -83,6 +83,10 @@ def v21_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
     """
     base = _copy(policy)
     base["risk_engine"]["mode"] = "volatility_budget"
+    # The V2.1 ladder is frozen history: it predates the Strategy V2.2
+    # btc-baseline core, so every rung pins the legacy anchor core mode to
+    # stay reproducible regardless of the canonical core_allocation.mode.
+    base["core_allocation"]["mode"] = "legacy_anchor"
     ladder: list[dict[str, Any]] = []
 
     def rung(letter: str, name: str, note: str, data: dict[str, Any], zero_cost: bool = False):
@@ -97,7 +101,7 @@ def v21_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
     # A: BTC volatility targeting only.
     data = _copy(base)
     data["universe"]["satellites"] = []
-    data["core_allocation"]["anchor"] = {"BTC": 1.0, "ETH": 0.0}
+    data["core_allocation"]["legacy_anchor"] = {"BTC": 1.0, "ETH": 0.0}
     data["risk_engine"]["regime_risk_scaling"] = {
         regime: {"target_volatility_multiplier": 1.0}
         for regime in ("NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION")
@@ -116,8 +120,8 @@ def v21_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
 
     # C: + ETH tilt.
     data = _copy(ladder[-1]["policy"])
-    data["core_allocation"]["anchor"] = json.loads(json.dumps(
-        policy.as_dict()["core_allocation"]["anchor"]
+    data["core_allocation"]["legacy_anchor"] = json.loads(json.dumps(
+        policy.as_dict()["core_allocation"]["legacy_anchor"]
     ))
     rung("C", "eth_tilt", "ETH competes for core budget via the anchor", data)
 

@@ -298,16 +298,29 @@ probabilities.
 
 ## 10. BTC / ETH Core Allocation
 
-The current/default core-sleeve anchor is 70% BTC / 30% ETH. It is a prior for
-constructing the risky core sleeve, not a fixed portfolio target and not an
-entitlement for either asset. The final mix depends on ETH score and
-confidence, ETH/BTC opportunity cost, event risk, chain liveness, regime,
-concentration, stablecoin requirements, and portfolio caps.
+Since Strategy V2.2 the core sleeve is a BTC baseline with optional ETH
+active tilts (`core_allocation.mode = btc_baseline_with_active_tilts`): the
+approved core budget belongs to BTC first, and ETH receives only the share an
+explicitly approved ETH/BTC relative-alpha tilt justifies. BTC absorbs the
+core residual by construction; only a broken thesis, a SEVERE/CRITICAL event,
+or critical chain liveness may block the baseline — ordinary low scores,
+weak coverage, or missing structural data never do, because the volatility
+budget is the risk control for the baseline sleeve.
 
-ETH can be attractive in absolute terms but still be held below its anchor or
-left `HOLD_OR_REDUCE` when its BTC-relative opportunity-cost case is weak. Missing
-ETH/BTC evidence blocks a high-conviction ETH increase; an ETH core label does
-not restore a score floor or bypass the other gates.
+The ETH tilt is discrete (`ETH_ALPHA_POSITIVE` / `ETH_ALPHA_NEUTRAL` /
+`ETH_ALPHA_NEGATIVE`) and preregistered at 20% of the core budget; it stays
+research-only (`tilt_enabled = false`) until the ETH/BTC relative-alpha
+signals pass the admission rule. ETH can be attractive in absolute terms and
+still earn no tilt when its BTC-relative case is weak or unproven. Missing
+ETH/BTC evidence blocks a high-conviction ETH increase; an ETH core label
+does not restore a score floor or bypass the other gates.
+
+The former 70% BTC / 30% ETH split is retained as
+`core_allocation.legacy_anchor` for legacy replay, benchmarking, and A/B
+comparison only. The legacy drawdown engine (the live pipeline) keeps legacy
+anchor core semantics until the live strategy itself switches to the
+volatility-budget engine; the BTC-baseline core governs the
+volatility-budget strategy path.
 
 ## 11. Market Regimes and Stablecoin Sleeve
 

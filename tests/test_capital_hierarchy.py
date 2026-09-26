@@ -16,6 +16,9 @@ from crypto_portfolio.models.policy import load_policy, policy_from_mapping
 def _policy(**hierarchy):
     data = json.loads(json.dumps(load_policy().as_dict()))
     data["risk_engine"]["mode"] = "volatility_budget"
+    # These tests document the frozen V2.1 anchor-core mechanics; the
+    # canonical V2.2 btc-baseline core has its own test files.
+    data["core_allocation"]["mode"] = "legacy_anchor"
     if hierarchy:
         data["capital_hierarchy"].update(hierarchy)
     return policy_from_mapping(data)

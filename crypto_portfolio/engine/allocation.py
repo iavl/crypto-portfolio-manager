@@ -204,6 +204,149 @@ def _btc_core_state(assessment: Any) -> str:
     return "HOLD_ONLY" if _confidence(_field(assessment, "confidence", "MEDIUM")) == "LOW" else "ELIGIBLE_INCREASE"
 
 
+ETH_ALPHA_STATES = ("ETH_ALPHA_POSITIVE", "ETH_ALPHA_NEUTRAL", "ETH_ALPHA_NEGATIVE")
+
+
+def _normalize_eth_alpha_state(value: Any) -> str:
+    """Validate the discrete ETH/BTC relative-alpha state (Strategy V2.2).
+
+    ``None`` is the research-default: without an admitted relative-alpha
+    model the state is neutral and ETH earns no tilt, so an unvalidated
+    signal can never control a position.
+    """
+    if value is None:
+        return "ETH_ALPHA_NEUTRAL"
+    state = str(value).strip().upper()
+    if state not in ETH_ALPHA_STATES:
+        raise ValueError(
+            "eth_alpha_state must be ETH_ALPHA_POSITIVE, ETH_ALPHA_NEUTRAL, or ETH_ALPHA_NEGATIVE"
+        )
+    return state
+
+
+def _core_baseline_blocked(assessment: Any, liveness_raw: Any) -> bool:
+    """Hard risk blocks for the default core asset (Strategy V2.2 Phase A).
+
+    Only a broken thesis, a SEVERE/CRITICAL event, or critical chain
+    liveness may stop the BTC baseline from absorbing approved core budget.
+    Ordinary low scores, weak coverage, or missing structural data are
+    diagnostics and never allocation blockers — the volatility budget is the
+    risk control for the baseline sleeve.
+    """
+    if _flag(_field(assessment, "thesis_broken", False), "thesis_broken"):
+        return True
+    if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"}:
+        return True
+    liveness = liveness_raw
+    if isinstance(liveness, Mapping):
+        liveness = liveness.get("status")
+    return str(liveness or "").strip().upper() in {"HALTED", "UNKNOWN", "FAILED", "CONFLICT"}
+
+
+def _allocate_core_btc_baseline(
+    policy: Policy,
+    budget: float,
+    assessments: Mapping[str, Any],
+    current_weights: Mapping[str, float],
+    single_asset_cap: float,
+    chain_liveness: Mapping[str, Any] | None = None,
+    structural_risk: Mapping[str, Any] | None = None,
+    eth_alpha_state: str | None = None,
+) -> tuple[dict[str, float], float, tuple[str, ...]]:
+    """BTC-default core with optional ETH active tilt (Strategy V2.2 Phase A).
+
+    The approved core budget is a BTC baseline first: ETH receives only the
+    share an explicitly approved relative-alpha tilt justifies, and BTC
+    absorbs the residual by construction. No fixed 70/30 prior allocates
+    core budget by asset identity.
+    """
+    config = policy.core_allocation
+    eth_cfg = config["eth"]
+    reasons: list[str] = []
+    btc_assessment = assessments.get("BTC")
+    btc_blocked = _core_baseline_blocked(
+        btc_assessment, (chain_liveness or {}).get("BTC")
+    )
+    if btc_blocked:
+        reasons.append(
+            "BTC baseline is hard-blocked (broken thesis, SEVERE/CRITICAL event, or "
+            "critical chain liveness); the approved core budget cannot flow to BTC"
+        )
+    eth_assessment = assessments.get("ETH")
+    supplied_structural = (structural_risk or {}).get("ETH")
+    if supplied_structural is None and eth_assessment is not None:
+        supplied_structural = _field(eth_assessment, "structural_risk", None)
+    eth_state = (
+        eth_core_eligibility(
+            eth_assessment,
+            policy,
+            current_weight=current_weights.get("ETH", 0.0),
+            chain_liveness=(chain_liveness or {}).get("ETH"),
+            structural_risk=supplied_structural,
+        )
+        if eth_cfg["enabled"] else "INELIGIBLE_DISABLED"
+    )
+    alpha = _normalize_eth_alpha_state(eth_alpha_state)
+    tilt_active = eth_cfg["enabled"] and eth_cfg["tilt_enabled"]
+    eth_target = 0.0
+    if (
+        tilt_active
+        and alpha == "ETH_ALPHA_POSITIVE"
+        and eth_state == "ELIGIBLE_INCREASE"
+    ):
+        eth_target = budget * float(eth_cfg["tilt_fraction_positive"])
+        reasons.append(
+            f"ETH alpha state ETH_ALPHA_POSITIVE with core state ELIGIBLE_INCREASE "
+            f"earns the preregistered active tilt {float(eth_cfg['tilt_fraction_positive']):.0%} "
+            f"of the core budget"
+        )
+    elif not tilt_active:
+        reasons.append(
+            "ETH active tilt is research-only (tilt_enabled=false): no alpha state "
+            "can allocate core budget to ETH"
+        )
+    elif alpha != "ETH_ALPHA_POSITIVE":
+        reasons.append(f"ETH alpha state {alpha} earns no core tilt")
+    else:
+        reasons.append(f"ETH core state {eth_state} does not qualify for an active tilt")
+    floor = (
+        budget * float(eth_cfg["minimum_core_sleeve_share"])
+        if eth_cfg["enabled"] and eth_state != "INELIGIBLE" and eth_state != "INELIGIBLE_DISABLED"
+        else 0.0
+    )
+    if floor > eth_target + 1e-12:
+        reasons.append(
+            f"ETH minimum core sleeve share {float(eth_cfg['minimum_core_sleeve_share']):.0%} "
+            "overrides the alpha tilt"
+        )
+        eth_target = floor
+    eth_cap = min(
+        budget * float(eth_cfg["max_core_sleeve_share"]), single_asset_cap, budget,
+    )
+    if eth_target > eth_cap + 1e-12:
+        eth_target = eth_cap
+        reasons.append(
+            f"ETH core target is capped at {eth_cap:.2%} by the core sleeve cap"
+        )
+    if budget <= 0:
+        return {}, 0.0, tuple(reasons)
+    btc_target = 0.0 if btc_blocked else min(budget - eth_target, single_asset_cap)
+    if btc_blocked is False and budget - eth_target > single_asset_cap + 1e-12:
+        reasons.append(
+            f"BTC baseline reaches the single-asset cap {single_asset_cap:.2%}; the "
+            "remaining core budget cannot bypass the cap"
+        )
+    if eth_state == "INELIGIBLE_DISABLED":
+        reasons.append("ETH is disabled in policy: no ETH position can be created")
+    weights: dict[str, float] = {}
+    if btc_target > 1e-12:
+        weights["BTC"] = btc_target
+    if eth_target > 1e-12:
+        weights["ETH"] = eth_target
+    residual = max(0.0, budget - btc_target - eth_target)
+    return weights, residual, tuple(reasons)
+
+
 def _allocate_core(
     policy: Policy,
     budget: float,
@@ -212,10 +355,27 @@ def _allocate_core(
     single_asset_cap: float,
     chain_liveness: Mapping[str, Any] | None = None,
     structural_risk: Mapping[str, Any] | None = None,
+    risk_mode: str = "legacy_drawdown",
+    eth_alpha_state: str | None = None,
 ) -> tuple[dict[str, float], float, tuple[str, ...]]:
     config = policy.core_allocation
+    # Core-mode precedence (Strategy V2.2 Phase A): the BTC-baseline core is
+    # the volatility-budget strategy's allocation model. The legacy drawdown
+    # engine (the live pipeline) keeps the legacy 70/30 anchor core until the
+    # live strategy itself switches engines, so this change cannot silently
+    # rewrite live ETH exposure.
+    effective_mode = (
+        config["mode"]
+        if risk_mode == "volatility_budget"
+        else "legacy_anchor"
+    )
+    if effective_mode == "btc_baseline_with_active_tilts":
+        return _allocate_core_btc_baseline(
+            policy, budget, assessments, current_weights, single_asset_cap,
+            chain_liveness, structural_risk, eth_alpha_state,
+        )
     confidence_multipliers = config["confidence_multipliers"]
-    anchor = config["anchor"]
+    anchor = config["legacy_anchor"]
     raw: dict[str, float] = {}
     states: dict[str, str] = {}
     for symbol in policy.core_symbols:
@@ -647,6 +807,7 @@ def build_target_allocation(
     market_recovery_streak: int = 0,
     risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
     recovery_state: Mapping[str, Any] | None = None,
+    eth_alpha_state: str | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
     risk_mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
@@ -1064,9 +1225,17 @@ def build_target_allocation(
         limits.single_asset_max,
         chain_liveness,
         structural_risk,
+        risk_mode=risk_mode,
+        eth_alpha_state=eth_alpha_state,
     )
     reasons.extend(core_reasons)
-    constraints.append("v3 core sleeve uses configurable BTC/ETH anchor and ETH gates")
+    if risk_mode == "volatility_budget" and resolved.core_allocation["mode"] == "btc_baseline_with_active_tilts":
+        constraints.append(
+            "core sleeve runs the BTC baseline with optional ETH active tilts "
+            "(no fixed 70/30 anchor)"
+        )
+    else:
+        constraints.append("v3 core sleeve uses the configurable legacy BTC/ETH anchor and ETH gates")
     # Capital hierarchy (Strategy V2.1 Phase D, volatility-budget mode): BTC
     # is the default risky asset. Budget no ETH or satellite alpha case can
     # justify returns to the BTC baseline before it becomes cash, so cash
@@ -1275,6 +1444,7 @@ def allocate(
     market_recovery_streak: int = 0,
     risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
     recovery_state: Mapping[str, Any] | None = None,
+    eth_alpha_state: str | None = None,
 ) -> AllocationResult:
     return build_target_allocation(
         policy, regime, assessments, current_weights,
@@ -1284,6 +1454,7 @@ def allocate(
         market_recovery_streak=market_recovery_streak,
         risk_inputs=risk_inputs,
         recovery_state=recovery_state,
+        eth_alpha_state=eth_alpha_state,
     )
 
 

@@ -427,16 +427,22 @@
     "tactical_fraction": 0.3
   },
   "core_allocation": {
-    "anchor": {
+    "mode": "btc_baseline_with_active_tilts",
+    "default_core_asset": "BTC",
+    "legacy_anchor": {
       "BTC": 0.7,
       "ETH": 0.3
     },
     "eth": {
+      "enabled": true,
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.2,
+      "minimum_core_sleeve_share": 0.0,
+      "max_core_sleeve_share": 0.4,
       "increase_min_score": 55,
       "hold_min_score": 45,
       "relative_increase_min_score": 45,
-      "relative_reduce_below_score": 30,
-      "max_core_sleeve_share": 0.4
+      "relative_reduce_below_score": 30
     },
     "confidence_multipliers": {
       "HIGH": 1.0,

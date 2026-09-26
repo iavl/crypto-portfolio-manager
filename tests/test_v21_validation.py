@@ -60,7 +60,9 @@ class AblationLadderTests(unittest.TestCase):
         ladder = {entry["rung"]: entry for entry in v21_ablation_ladder(_policy())}
         a = policy_from_mapping(ladder["A"]["policy"])
         self.assertEqual(a.satellite_symbols, ())
-        self.assertEqual(a.core_allocation["anchor"]["ETH"], 0.0)
+        # The frozen V2.1 ladder pins the legacy anchor core mode.
+        self.assertEqual(a.core_allocation["mode"], "legacy_anchor")
+        self.assertEqual(a.core_allocation["legacy_anchor"]["ETH"], 0.0)
         for regime in ("NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"):
             self.assertEqual(
                 a.risk_engine["regime_risk_scaling"][regime]["target_volatility_multiplier"],

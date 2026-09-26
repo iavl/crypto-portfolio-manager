@@ -219,15 +219,32 @@ _SATELLITE_CURVE_FIELDS = {
     "entry_fraction",
     "full_fraction",
 }
-_CORE_ALLOCATION_FIELDS = {"anchor", "eth", "confidence_multipliers"}
+_CORE_ALLOCATION_FIELDS = {
+    "mode",
+    "default_core_asset",
+    "legacy_anchor",
+    "eth",
+    "confidence_multipliers",
+}
+_CORE_ALLOCATION_MODES = {"legacy_anchor", "btc_baseline_with_active_tilts"}
 _CORE_ANCHOR_FIELDS = {"BTC", "ETH"}
 _CORE_ETH_FIELDS = {
+    "enabled",
+    "tilt_enabled",
+    "tilt_fraction_positive",
+    "minimum_core_sleeve_share",
     "increase_min_score",
     "hold_min_score",
     "relative_increase_min_score",
     "relative_reduce_below_score",
     "max_core_sleeve_share",
 }
+_CORE_ETH_SCORE_FIELDS = (
+    "increase_min_score",
+    "hold_min_score",
+    "relative_increase_min_score",
+    "relative_reduce_below_score",
+)
 _CORE_CONFIDENCE_FIELDS = {"HIGH", "MEDIUM", "LOW"}
 _SCORING_FIELDS = {
     "high_confidence_min_coverage",
@@ -1077,15 +1094,26 @@ def _parse_core_allocation(value: Any) -> dict[str, Any]:
     if set(value) != _CORE_ALLOCATION_FIELDS:
         raise PolicyError("core_allocation fields are incomplete")
 
-    anchor = value["anchor"]
+    mode = str(value["mode"]).strip()
+    if mode not in _CORE_ALLOCATION_MODES:
+        raise PolicyError(
+            "core_allocation.mode must be legacy_anchor or btc_baseline_with_active_tilts"
+        )
+    default_core_asset = str(value["default_core_asset"]).strip().upper()
+    if default_core_asset != "BTC":
+        # The BTC baseline is the strategy's opportunity-cost asset; another
+        # default would silently redefine every relative-alpha comparison.
+        raise PolicyError("core_allocation.default_core_asset must be BTC")
+
+    anchor = value["legacy_anchor"]
     if not isinstance(anchor, dict) or set(anchor) != _CORE_ANCHOR_FIELDS:
-        raise PolicyError("core_allocation.anchor must contain BTC and ETH")
+        raise PolicyError("core_allocation.legacy_anchor must contain BTC and ETH")
     parsed_anchor = {
-        symbol: _fraction(anchor[symbol], f"core_allocation.anchor.{symbol}")
+        symbol: _fraction(anchor[symbol], f"core_allocation.legacy_anchor.{symbol}")
         for symbol in _CORE_ANCHOR_FIELDS
     }
     if not math.isclose(sum(parsed_anchor.values()), 1.0, abs_tol=1e-9):
-        raise PolicyError("core_allocation.anchor weights must sum to 1")
+        raise PolicyError("core_allocation.legacy_anchor weights must sum to 1")
 
     eth = value["eth"]
     if not isinstance(eth, dict):
@@ -1095,7 +1123,7 @@ def _parse_core_allocation(value: Any) -> dict[str, Any]:
         raise PolicyError("core_allocation.eth fields are incomplete")
     parsed_eth = {
         key: _number(eth[key], f"core_allocation.eth.{key}", minimum=0.0, maximum=100.0)
-        for key in _CORE_ETH_FIELDS
+        for key in _CORE_ETH_SCORE_FIELDS
     }
     if not (
         parsed_eth["relative_reduce_below_score"]
@@ -1107,6 +1135,30 @@ def _parse_core_allocation(value: Any) -> dict[str, Any]:
     parsed_eth["max_core_sleeve_share"] = _fraction(
         eth["max_core_sleeve_share"], "core_allocation.eth.max_core_sleeve_share"
     )
+    parsed_eth["minimum_core_sleeve_share"] = _fraction(
+        eth["minimum_core_sleeve_share"],
+        "core_allocation.eth.minimum_core_sleeve_share",
+    )
+    if (
+        parsed_eth["minimum_core_sleeve_share"]
+        > parsed_eth["max_core_sleeve_share"] + 1e-12
+    ):
+        raise PolicyError(
+            "core_allocation.eth.minimum_core_sleeve_share must not exceed max_core_sleeve_share"
+        )
+    for flag in ("enabled", "tilt_enabled"):
+        if not isinstance(eth[flag], bool):
+            raise PolicyError(f"core_allocation.eth.{flag} must be boolean")
+        parsed_eth[flag] = eth[flag]
+    parsed_eth["tilt_fraction_positive"] = _fraction(
+        eth["tilt_fraction_positive"], "core_allocation.eth.tilt_fraction_positive"
+    )
+    if parsed_eth["tilt_fraction_positive"] > parsed_eth["max_core_sleeve_share"] + 1e-12:
+        # A preregistered tilt larger than its own sleeve cap could never be
+        # honored; the conflict must be fixed in policy, not silently clamped.
+        raise PolicyError(
+            "core_allocation.eth.tilt_fraction_positive must not exceed max_core_sleeve_share"
+        )
 
     confidence = value["confidence_multipliers"]
     if not isinstance(confidence, dict) or set(confidence) != _CORE_CONFIDENCE_FIELDS:
@@ -1123,7 +1175,9 @@ def _parse_core_allocation(value: Any) -> dict[str, Any]:
         raise PolicyError("core_allocation confidence multipliers must be monotonic")
 
     return {
-        "anchor": parsed_anchor,
+        "mode": mode,
+        "default_core_asset": default_core_asset,
+        "legacy_anchor": parsed_anchor,
         "eth": parsed_eth,
         "confidence_multipliers": parsed_confidence,
     }

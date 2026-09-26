@@ -382,7 +382,15 @@ def _scenario_returns(policy: Policy, scenario: Mapping[str, float]) -> dict[str
 def _core_anchor_weights(
     policy: Policy, symbols: tuple[str, ...], risky: float
 ) -> Mapping[str, float] | None:
-    anchor = policy.core_allocation.get("anchor")
+    # Strategy V2.2: the static core-composition projection follows the
+    # configured core mode. The btc-baseline core is BTC by definition (the
+    # ETH tilt is state-dependent and never part of a static projection);
+    # the legacy mode keeps its 70/30 anchor.
+    mode = policy.core_allocation.get("mode", "legacy_anchor")
+    if mode == "btc_baseline_with_active_tilts":
+        anchor: Mapping[str, float] | None = {"BTC": 1.0}
+    else:
+        anchor = policy.core_allocation.get("legacy_anchor")
     if not isinstance(anchor, Mapping):
         return None
     usable = {

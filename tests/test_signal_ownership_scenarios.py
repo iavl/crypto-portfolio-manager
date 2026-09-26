@@ -36,6 +36,9 @@ def _factors(**values):
 def _vol_policy():
     data = json.loads(json.dumps(load_policy().as_dict()))
     data["risk_engine"]["mode"] = "volatility_budget"
+    # Frozen V2.1 anchor-core mechanics under test; the V2.2 btc-baseline
+    # core mode has its own test files.
+    data["core_allocation"]["mode"] = "legacy_anchor"
     return policy_from_mapping(data)
 
 
