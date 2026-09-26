@@ -297,6 +297,14 @@ _BULLISH = {"BULLISH", "UP", "STRONG"}
 _FLOW_POSITIVE = {"POSITIVE", "INFLOW"}
 
 
+def _excluded_domains(policy: Policy) -> frozenset[str]:
+    """Ordinary domains the regime deliberately does not own (V2.3 Phase 2)."""
+    model = policy.regime_model if isinstance(policy.regime_model, Mapping) else {}
+    return frozenset(
+        str(domain).strip().lower() for domain in (model.get("excluded_domains") or ())
+    )
+
+
 def _severity_key(domain: str, state: str) -> str | None:
     """Map a raw domain state onto its canonical severity key.
 
@@ -347,6 +355,7 @@ def _weighted_regime_risk_score(
         "flows": _state(inputs.flow_state),
         "breadth": _state(inputs.breadth_state),
     }
+    excluded = _excluded_domains(resolved)
     score = 0.0
     parts: list[str] = []
     unknowns: list[str] = []
@@ -354,6 +363,12 @@ def _weighted_regime_risk_score(
         domain_severity = severity.get(domain, {}) if isinstance(severity, Mapping) else {}
         weight = float(weights.get(domain, 0.0)) if isinstance(weights, Mapping) else 0.0
         key = _severity_key(domain, state)
+        if domain in excluded:
+            # Ownership declaration (V2.3 Phase 2): an excluded domain adds
+            # no severity — its risk class is owned elsewhere (the
+            # volatility-budget engine owns realized volatility).
+            unknowns.append(f"{domain}:excluded")
+            continue
         if key is None:
             unknowns.append(domain)
             continue
@@ -411,15 +426,17 @@ def market_only_regime(
     if mode == "weighted":
         reasons: list[str] = []
         return _weighted_regime(inputs, resolved, reasons)
+    excluded = _excluded_domains(resolved)
     risk_count = 0
-    if _state(inputs.btc_trend) in _BEARISH:
-        risk_count += 1
-    if _state(inputs.volatility_state) in _ELEVATED_VOL:
-        risk_count += 1
-    if _state(inputs.flow_state) in _RISK_OFF:
-        risk_count += 1
-    if _state(inputs.breadth_state) in _RISK_OFF:
-        risk_count += 1
+    votes = (
+        ("trend", _state(inputs.btc_trend) in _BEARISH),
+        ("volatility", _state(inputs.volatility_state) in _ELEVATED_VOL),
+        ("flows", _state(inputs.flow_state) in _RISK_OFF),
+        ("breadth", _state(inputs.breadth_state) in _RISK_OFF),
+    )
+    for domain, risk_off in votes:
+        if risk_off and domain not in excluded:
+            risk_count += 1
     if risk_count >= 3:
         return "CAPITAL_PRESERVATION"
     if risk_count >= 2:
@@ -492,17 +509,31 @@ def determine_regime(
     reasons: list[str] = []
     unknown = 0
 
+    excluded = _excluded_domains(resolved)
     trend = _state(inputs.btc_trend)
     if trend in _BEARISH:
-        risk_count += 1
-        reasons.append(f"BTC trend is {trend}")
+        if "trend" in excluded:
+            reasons.append(
+                f"BTC trend is {trend}; excluded from the regime label "
+                "(ownership declared elsewhere), it adds no risk vote"
+            )
+        else:
+            risk_count += 1
+            reasons.append(f"BTC trend is {trend}")
     elif trend in _UNKNOWN:
         unknown += 1
 
     volatility = _state(inputs.volatility_state)
     if volatility in _ELEVATED_VOL:
-        risk_count += 1
-        reasons.append(f"volatility is {volatility}")
+        if "volatility" in excluded:
+            reasons.append(
+                f"volatility is {volatility}; excluded from the regime label "
+                "(the volatility-budget engine owns realized-volatility risk), "
+                "it adds no risk vote"
+            )
+        else:
+            risk_count += 1
+            reasons.append(f"volatility is {volatility}")
     elif volatility in _UNKNOWN:
         unknown += 1
 
@@ -526,15 +557,27 @@ def determine_regime(
 
     flow = _state(inputs.flow_state)
     if flow in _RISK_OFF:
-        risk_count += 1
-        reasons.append(f"capital flows are {flow}")
+        if "flows" in excluded:
+            reasons.append(
+                f"capital flows are {flow}; excluded from the regime label "
+                "(ownership declared elsewhere), it adds no risk vote"
+            )
+        else:
+            risk_count += 1
+            reasons.append(f"capital flows are {flow}")
     elif flow in _UNKNOWN:
         unknown += 1
 
     breadth = _state(inputs.breadth_state)
     if breadth in _RISK_OFF:
-        risk_count += 1
-        reasons.append(f"market breadth is {breadth}")
+        if "breadth" in excluded:
+            reasons.append(
+                f"market breadth is {breadth}; excluded from the regime label "
+                "(ownership declared elsewhere), it adds no risk vote"
+            )
+        else:
+            risk_count += 1
+            reasons.append(f"market breadth is {breadth}")
     elif breadth in _UNKNOWN:
         unknown += 1
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Mapping, Sequence
 
 from ..models.time import normalize_timestamp, parse_timestamp
@@ -269,6 +269,33 @@ def performance_metrics(values: Sequence[ValuationPoint]) -> dict[str, Any]:
             for key, values in sorted(grouped.items()) if len(values) >= 2
         }
 
+    def _worst_window_return(days: float) -> float | None:
+        """Worst compound return over any trailing ``days``-day window."""
+        worst: float | None = None
+        right = 0
+        for left in range(len(ordered)):
+            horizon = moments[left] + timedelta(days=days)
+            while right + 1 < len(ordered) and moments[right + 1] <= horizon:
+                right += 1
+            if moments[right] <= moments[left]:
+                continue
+            window_return = (
+                ordered[right].total_value_usd / ordered[left].total_value_usd - 1.0
+            )
+            if worst is None or window_return < worst:
+                worst = window_return
+        return worst
+
+    # Tail-risk diagnostics (Strategy V2.3 Phase 2/6): the mean of the worst
+    # 5% of period returns (historical CVaR at 95%, per-period units) and the
+    # worst 30/90-calendar-day compound returns of the realized path.
+    ordered_returns = sorted(returns)
+    tail_count = max(1, math.ceil(0.05 * len(ordered_returns)))
+    cvar_95 = (
+        sum(ordered_returns[:tail_count]) / tail_count
+        if ordered_returns else None
+    )
+
     return {
         "start_at": ordered[0].timestamp, "end_at": ordered[-1].timestamp,
         "elapsed_days": elapsed_days, "initial_value_usd": ordered[0].total_value_usd,
@@ -276,6 +303,9 @@ def performance_metrics(values: Sequence[ValuationPoint]) -> dict[str, Any]:
         "cagr": cagr, "annualized_volatility": volatility, "sharpe_rf_zero": sharpe,
         "sortino_target_zero": sortino, "calmar": calmar,
         "maximum_drawdown": maximum_drawdown, "worst_period_return": worst_return,
+        "cvar_95_period": cvar_95,
+        "worst_30d_return": _worst_window_return(30),
+        "worst_90d_return": _worst_window_return(90),
         "deepest_drawdown_at": ordered[deepest].timestamp,
         "drawdown_duration_days": drawdown_duration_days,
         "recovered_at": recovery, "recovery_days_from_trough": recovery_days,

@@ -83,7 +83,7 @@ _SATELLITE_ALPHA_MODES = {"alpha_admitted", "research_only"}
 _SCORING_V3_FAMILY_NAMES = ("market", "structural")
 _EVIDENCE_CLASSES = ("ACTIONABLE", "LIMITED", "NOT_ACTIONABLE")
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
-_REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity"}
+_REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity", "excluded_domains"}
 _REGIME_MODEL_MODES = {"vote_count", "weighted"}
 _REGIME_MODEL_DOMAINS = ("trend", "volatility", "flows", "breadth")
 _REGIME_SEVERITY_STATES = {
@@ -1160,7 +1160,8 @@ def _parse_scoring_v3(
 def _parse_regime_model(value: Any) -> dict[str, Any]:
     if value is None:
         return {**_DEFAULT_REGIME_MODEL, "domain_weights": dict(_DEFAULT_REGIME_MODEL["domain_weights"]),
-                "severity": {name: dict(states) for name, states in _DEFAULT_REGIME_MODEL["severity"].items()}}
+                "severity": {name: dict(states) for name, states in _DEFAULT_REGIME_MODEL["severity"].items()},
+                "excluded_domains": ()}
     if not isinstance(value, dict):
         raise PolicyError("regime_model must be an object")
     _unknown_fields(value, _REGIME_MODEL_FIELDS, "regime_model")
@@ -1184,6 +1185,27 @@ def _parse_regime_model(value: Any) -> dict[str, Any]:
     severity = value["severity"]
     if not isinstance(severity, dict) or set(severity) != set(_REGIME_MODEL_DOMAINS):
         raise PolicyError("regime_model.severity must contain exactly " + ", ".join(_REGIME_MODEL_DOMAINS))
+    # Strategy V2.3 Phase 2: authority ownership declaration. Excluded
+    # ordinary domains contribute no severity and cast no risk vote (the
+    # volatility-budget engine owns that risk instead); domain weights and
+    # score thresholds stay untouched, so this never re-tunes the model.
+    # Severe systemic events and the drawdown floors live outside the four
+    # ordinary domains and can never be excluded.
+    raw_excluded = value["excluded_domains"]
+    if not isinstance(raw_excluded, list):
+        raise PolicyError("regime_model.excluded_domains must be a list")
+    excluded: list[str] = []
+    for item in raw_excluded:
+        domain = str(item).strip().lower()
+        if domain not in _REGIME_MODEL_DOMAINS:
+            raise PolicyError(
+                "regime_model.excluded_domains entries must be ordinary domains: "
+                + ", ".join(_REGIME_MODEL_DOMAINS)
+            )
+        excluded.append(domain)
+    if len(excluded) != len(set(excluded)):
+        raise PolicyError("regime_model.excluded_domains must not duplicate")
+    parsed["excluded_domains"] = tuple(excluded)
     parsed_severity: dict[str, dict[str, float]] = {}
     for name in _REGIME_MODEL_DOMAINS:
         states = severity[name]

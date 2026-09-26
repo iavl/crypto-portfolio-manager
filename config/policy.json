@@ -362,7 +362,8 @@
         "NEUTRAL": 0.25,
         "WEAK": 1.0
       }
-    }
+    },
+    "excluded_domains": []
   },
   "regime_transitions": {
     "enabled": true,
