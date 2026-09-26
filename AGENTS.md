@@ -462,19 +462,6 @@ otherwise equivalent, choose the one with fewer hidden assumptions, clearer
 ownership, and lower long-term maintenance cost.
 
 
-## Git commits and attribution
-
-- Preserve the repository user's existing Git author and committer identity.
-- Do not modify `git config user.name` or `git config user.email`.
-- Do not use `--author` to change commit authorship to Codex.
-- Every commit created by Codex MUST include the following Git trailer:
-
-  `Co-authored-by: Codex <codex@openai.com>`
-
-- Add the trailer exactly once, separated from the commit body by a blank line.
-- If the commit already contains this Codex co-author trailer, do not add a duplicate.
-- When amending a commit created by Codex, preserve the trailer.
-
 ## Commit message language
 
 - Write every Git commit subject and body in English, regardless of the
