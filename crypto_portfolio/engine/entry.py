@@ -468,12 +468,15 @@ def _build_entry_plan(
         if active
     )
     reserve = approved - planned
+    # ExecutionPlan requires a non-NONE reserve policy to carry strictly more
+    # than 1e-7 USD; dust reserves below that are NONE (fully deployed).
+    has_reserve = reserve > 1e-7
     rationale = (
         f"{mode} entry from {len(selected)} confirmed support zone(s); "
         f"planned {planned:.2f} USD of {approved:.2f} USD approved capacity"
         + (
             f"; conditional reserve {reserve:.2f} USD ({reserve / approved:.0%}) awaits deeper zones"
-            if reserve > 1e-9
+            if has_reserve
             else ""
         )
         + overlay_note
@@ -484,7 +487,7 @@ def _build_entry_plan(
         approved_amount_usd=approved,
         planned_amount_usd=planned,
         reserve_amount_usd=reserve,
-        reserve_policy="PULLBACK_RESERVE" if reserve > 1e-9 else "NONE",
+        reserve_policy="PULLBACK_RESERVE" if has_reserve else "NONE",
         current_price=technical_snapshot.current_spot_price,
         entry_mode=mode,
         technical_confidence=technical_snapshot.data_confidence,
@@ -567,7 +570,11 @@ def _execution_timeout_plan(
         action="INCREASE",
         planned_amount_usd=planned,
         reserve_amount_usd=reserve,
-        reserve_policy="TIMEOUT_RESERVE" if reserve > 1e-9 else "NONE",
+        # ExecutionPlan's contract requires a reserve policy with a
+        # reserve strictly above 1e-7 USD; match that threshold so dust
+        # reserves (1e-9 < reserve <= 1e-7) become NONE instead of an
+        # invalid TIMEOUT_RESERVE.
+        reserve_policy="TIMEOUT_RESERVE" if reserve > 1e-7 else "NONE",
         entry_mode="MARKET_TIMEOUT",
         tranches=(tranche,),
         rationale=(

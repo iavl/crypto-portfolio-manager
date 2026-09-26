@@ -52,6 +52,35 @@ class WaitExpiryTests(unittest.TestCase):
         self.assertEqual(plan.action, "WAIT")
         self.assertEqual(plan.planned_amount_usd, 0.0)
 
+    def test_at_expiry_dust_reserve_is_none_not_an_invalid_policy(self):
+        # Regression (V2.3 comparison run): a deployment fraction within
+        # 1e-7 USD of full approval used to produce TIMEOUT_RESERVE with a
+        # dust reserve the ExecutionPlan contract rejects. The threshold
+        # must match the model's 1e-7, so dust becomes NONE.
+        raw = load_policy().as_dict()
+        raw["execution"]["max_initial_tranche"] = {
+            "NORMAL": 1 - 1e-7, "DEFENSIVE": 0.35, "CAPITAL_PRESERVATION": 0.2,
+        }
+        policy = policy_from_mapping(raw)
+        snapshot = build_technical_snapshot(
+            self.series,
+            SpotPrice(self.series.symbol, float(self.series.candles[-1].close),
+                      "2026-01-01T08:00:00Z", "synthetic", "2026-01-01T08:00:00Z"),
+            policy=policy,
+        )
+        # 0.5 USD x (1 - fraction) leaves a 5e-8 USD dust reserve: below
+        # the model's 1e-7 policy floor, so the plan must round to NONE.
+        plan = build_entry_plan(
+            "SOL", 0.5, snapshot, "NORMAL", "HIGH",
+            wait_streak=int(policy.execution_overlay["wait"]["expiry_reviews"]),
+            policy=policy,
+        )
+        self.assertEqual(plan.action, "INCREASE")
+        self.assertEqual(plan.entry_mode, "MARKET_TIMEOUT")
+        self.assertEqual(plan.reserve_policy, "NONE")
+        self.assertLessEqual(plan.reserve_amount_usd, 1e-7)
+        validate_execution_plan(plan)
+
     def test_at_expiry_deploys_partially_at_market(self):
         plan = build_entry_plan(
             "SOL", 4000, self.snapshot, "NORMAL", "HIGH", wait_streak=5,
