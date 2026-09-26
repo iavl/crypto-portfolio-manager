@@ -63,6 +63,7 @@ def v22_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
     # A: BTC-only volatility targeting.
     data = _copy(base)
     data["universe"]["satellites"] = []
+    data["satellite_alpha"] = {}
     data["risk_engine"]["regime_risk_scaling"] = {
         regime: {"target_volatility_multiplier": 1.0}
         for regime in ("NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION")
@@ -94,6 +95,9 @@ def v22_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
     data = _copy(ladder[-1]["policy"])
     data["universe"]["satellites"] = json.loads(json.dumps(
         policy.as_dict()["universe"]["satellites"]
+    ))
+    data["satellite_alpha"] = json.loads(json.dumps(
+        policy.as_dict()["satellite_alpha"]
     ))
     rung("D", "satellite_tactical_only",
          "satellites deploy market-driven at the tactical fraction", data)

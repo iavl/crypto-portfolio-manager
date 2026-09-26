@@ -466,6 +466,9 @@ def ablation_policy(
         }
     if disable_satellites:
         data["universe"]["satellites"] = []
+        # The satellite-alpha classification tracks the satellite universe:
+        # a policy without satellites has no alpha authority to classify.
+        data["satellite_alpha"] = {}
     if disable_emergency_overlay:
         data["risk"]["drawdown_budget_overlay"]["enabled"] = False
     if disable_execution_overlay:

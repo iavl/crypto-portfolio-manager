@@ -29,6 +29,7 @@ _TARGET_AUTHORITY_LAYERS = {
 _PRIMARY_OWNERS: dict[str, str] = {
     "trend_momentum": "asset_score",
     "relative_strength": "asset_selection",
+    "asset_relative_alpha": "asset_selection",
     "fundamentals": "asset_score",
     "valuation": "asset_score",
     "macro_liquidity": "regime",
@@ -82,6 +83,16 @@ def _regime_consumers(policy: Policy) -> dict[str, set[str]]:
     return consumers
 
 
+def _satellite_alpha_consumers(policy: Policy) -> dict[str, set[str]]:
+    # Strategy V2.3 Phase 1: the per-asset BTC-relative alpha ensembles own
+    # satellite deployment selection in volatility-budget mode; the generic
+    # composite score no longer carries that authority there.
+    consumers: dict[str, set[str]] = {}
+    if (policy.risk_engine or {}).get("mode") == "volatility_budget":
+        consumers.setdefault("asset_relative_alpha", set()).add("asset_selection")
+    return consumers
+
+
 def _risk_engine_consumers(policy: Policy) -> dict[str, set[str]]:
     consumers: dict[str, set[str]] = {}
     engine = policy.risk_engine or {}
@@ -130,6 +141,7 @@ def signal_ownership_report(policy: Policy | None = None) -> dict[str, Any]:
     consumers: dict[str, set[str]] = {}
     for source in (
         _scoring_consumers(resolved),
+        _satellite_alpha_consumers(resolved),
         _regime_consumers(resolved),
         _risk_engine_consumers(resolved),
         _execution_consumers(resolved),

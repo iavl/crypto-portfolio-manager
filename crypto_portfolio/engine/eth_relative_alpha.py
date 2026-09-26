@@ -12,19 +12,30 @@ admission) is research-only diagnostics and never feeds back into the
 allocation engines. An unadmitted signal can never control a position: the
 canonical policy keeps ``tilt_enabled=false`` until the admission rule
 passes on both validation windows.
+
+Strategy V2.3 Phase 1 moved the shared machinery (ratio series, price
+signals, observations, statistics, admission rule) into
+``relative_alpha_core``; this module keeps only the ETH-specific contract.
 """
 
 from __future__ import annotations
 
-import math
-import random
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from ..models.market import OHLCVSeries
 from ..models.policy import Policy, resolve_policy
-from ..models.time import parse_timestamp
+from .relative_alpha_core import (
+    RatioPoint,
+    bootstrap_mean_ci,
+    evaluate_signal_admission as _core_admission,
+    evaluate_signals as _core_evaluate,
+    pearson,
+    price_relative_signals,
+    ratio_series,
+    signal_observations as _core_observations,
+    spearman,
+)
 
 ETH_ALPHA_POSITIVE = "ETH_ALPHA_POSITIVE"
 ETH_ALPHA_NEUTRAL = "ETH_ALPHA_NEUTRAL"
@@ -46,11 +57,8 @@ SIGNAL_NAMES = (
 
 # State-rule thresholds (preregistered; do not tune to a window).
 TREND_COMPOSITE_THRESHOLD = 0.03
-MA_WINDOWS = (20, 50, 100)
 
-_BOOTSTRAP_RESAMPLES = 1000
-_BOOTSTRAP_SEED = 0
-_MIN_INDEPENDENT_BLOCKS = 10
+_LABEL_KEY = "forward_ethbtc_return"
 
 
 # ---------------------------------------------------------------------------
@@ -58,57 +66,11 @@ _MIN_INDEPENDENT_BLOCKS = 10
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class RatioPoint:
-    timestamp: datetime
-    ratio: float
-
-
 def ethbtc_ratio_series(
     eth_daily: OHLCVSeries, btc_daily: OHLCVSeries
 ) -> tuple[RatioPoint, ...]:
-    """Daily ETH/BTC close ratio over the shared completed-candle dates.
-
-    The two daily series are joined on their candle timestamps, so a ratio
-    point only exists where both candles completed. Prices are strictly
-    positive by the candle contract, so every ratio is finite and positive.
-    """
-    if eth_daily.timeframe != btc_daily.timeframe:
-        raise ValueError("ETH and BTC series must share a timeframe")
-    btc_by_date = {
-        parse_timestamp(candle.timestamp): candle.close
-        for candle in btc_daily.completed_candles()
-    }
-    points: list[RatioPoint] = []
-    for candle in eth_daily.completed_candles():
-        moment = parse_timestamp(candle.timestamp)
-        btc_close = btc_by_date.get(moment)
-        if btc_close is not None:
-            points.append(RatioPoint(moment, candle.close / btc_close))
-    points.sort(key=lambda item: item.timestamp)
-    return tuple(points)
-
-
-def _closes_as_of(points: Sequence[RatioPoint], as_of: datetime) -> list[tuple[datetime, float]]:
-    return [(item.timestamp, item.ratio) for item in points if item.timestamp <= as_of]
-
-
-def _window_return(closes: Sequence[tuple[datetime, float]], days: int) -> float | None:
-    if len(closes) < 2:
-        return None
-    horizon = timedelta(days=days)
-    latest_moment, latest = closes[-1]
-    target = latest_moment - horizon
-    prior = next((value for moment, value in reversed(closes) if moment <= target), None)
-    if prior is None:
-        return None
-    return latest / prior - 1.0
-
-
-def _moving_average(closes: Sequence[float], window: int) -> float | None:
-    if len(closes) < window:
-        return None
-    return sum(closes[-window:]) / window
+    """Daily ETH/BTC close ratio over the shared completed-candle dates."""
+    return ratio_series(eth_daily, btc_daily)
 
 
 def relative_signals(
@@ -116,43 +78,12 @@ def relative_signals(
 ) -> dict[str, float | None]:
     """Every preregistered signal at ``as_of`` from completed data only.
 
-    Candles after ``as_of`` are invisible; a signal whose lookback window is
-    not fully available is ``MISSING`` (None), never partially computed.
+    The ETF flow differential defaults to MISSING (None): only the
+    observation builder with a caller-supplied series can ever fill it.
     """
-    moment = parse_timestamp(as_of) if not isinstance(as_of, datetime) else as_of
-    closes = _closes_as_of(ratio_points, moment)
-    values = [value for _, value in closes]
-    result: dict[str, float | None] = {name: None for name in SIGNAL_NAMES}
-    if len(closes) < 2:
-        return result
-    for days in (30, 90, 180):
-        result[f"rel_return_{days}d"] = _window_return(closes, days)
-    above = 0
-    known = 0
-    for window in MA_WINDOWS:
-        average = _moving_average(values, window)
-        if average is not None:
-            known += 1
-            if values[-1] > average:
-                above += 1
-    if known == len(MA_WINDOWS):
-        # Net MA position in [-1, 1]: all windows above is +1, all below -1.
-        result["ma_structure"] = (above - (len(MA_WINDOWS) - above)) / len(MA_WINDOWS)
-    window = [value for _, value in closes[-90:]]
-    if len(window) >= 60:
-        changes = [later / earlier - 1.0 for earlier, later in zip(window, window[1:])]
-        positive = sum(1 for change in changes if change > 0)
-        result["momentum_persistence_90d"] = positive / len(changes)
-        mean = sum(changes) / len(changes)
-        variance = sum((change - mean) ** 2 for change in changes) / max(len(changes) - 1, 1)
-        deviation = math.sqrt(variance)
-        if deviation > 0:
-            result["risk_adjusted_momentum_90d"] = mean / deviation * math.sqrt(365.25)
-    if len(values) >= 2:
-        high = max(values[-180:]) if len(values) >= 180 else max(values)
-        if high > 0:
-            result["relative_drawdown_180d"] = values[-1] / high - 1.0
-    return result
+    signals = price_relative_signals(ratio_points, as_of)
+    signals.setdefault("etf_flow_differential_30d", None)
+    return signals
 
 
 def etf_flow_differential(
@@ -215,41 +146,6 @@ def eth_tilt_fraction(alpha_state: str, policy: Policy | None = None) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _ranks(values: Sequence[float]) -> list[float]:
-    ordered = sorted(enumerate(values), key=lambda item: item[1])
-    result = [0.0] * len(values)
-    index = 0
-    while index < len(ordered):
-        end = index + 1
-        while end < len(ordered) and ordered[end][1] == ordered[index][1]:
-            end += 1
-        rank = (index + 1 + end) / 2.0
-        for original, _ in ordered[index:end]:
-            result[original] = rank
-        index = end
-    return result
-
-
-def _correlation(left: Sequence[float], right: Sequence[float]) -> float | None:
-    if len(left) != len(right) or len(left) < 3 or len(set(left)) < 2 or len(set(right)) < 2:
-        return None
-    mean_left, mean_right = sum(left) / len(left), sum(right) / len(right)
-    numerator = sum((a - mean_left) * (b - mean_right) for a, b in zip(left, right))
-    denominator = math.sqrt(
-        sum((a - mean_left) ** 2 for a in left)
-        * sum((b - mean_right) ** 2 for b in right)
-    )
-    return numerator / denominator if denominator > 0 else None
-
-
-def spearman(left: Sequence[float], right: Sequence[float]) -> float | None:
-    return _correlation(_ranks(list(left)), _ranks(list(right)))
-
-
-def pearson(left: Sequence[float], right: Sequence[float]) -> float | None:
-    return _correlation(list(left), list(right))
-
-
 def relative_signal_observations(
     ratio_points: Sequence[RatioPoint],
     moments: Sequence[str | datetime],
@@ -261,100 +157,23 @@ def relative_signal_observations(
 
     ``etf_differential_by_moment`` carries a caller-computed point-in-time
     ETF flow differential keyed by the normalized moment string; the engine
-    stays free of data-source glue.
+    stays free of data-source glue. Labels exist only where the future
+    actually provides data; PENDING otherwise. Nothing here is visible to
+    the decision path.
     """
-    """Signal snapshots with forward ETH/BTC labels (evaluation ground truth).
 
-    The forward label at horizon H is the ratio return between the first
-    ratio point at or after ``moment + H days`` and the base point at or
-    after ``moment``. Labels exist only where the future actually provides
-    data; PENDING otherwise. Nothing here is visible to the decision path.
-    """
-    rows: list[dict[str, Any]] = []
-    for raw_moment in moments:
-        moment = parse_timestamp(raw_moment) if not isinstance(raw_moment, datetime) else raw_moment
+    def signals_at(moment: datetime) -> dict[str, float | None]:
         signals = relative_signals(ratio_points, moment)
         if etf_differential_by_moment is not None:
             key = moment.isoformat().replace("+00:00", "Z")
             if key in etf_differential_by_moment:
                 signals["etf_flow_differential_30d"] = etf_differential_by_moment[key]
-        row: dict[str, Any] = {
-            "timestamp": moment.isoformat().replace("+00:00", "Z"),
-            "signals": signals,
-            "labels": {},
-        }
-        for raw_horizon in horizons:
-            horizon = int(raw_horizon)
-            target = moment + timedelta(days=horizon)
-            base = next((item for item in ratio_points if item.timestamp >= moment), None)
-            endpoint = next((item for item in ratio_points if item.timestamp >= target), None)
-            if base is None or endpoint is None:
-                row["labels"][str(horizon)] = {"status": "PENDING"}
-            else:
-                row["labels"][str(horizon)] = {
-                    "status": "AVAILABLE",
-                    "forward_ethbtc_return": endpoint.ratio / base.ratio - 1.0,
-                }
-        rows.append(row)
-    return rows
+        return signals
 
-
-def _independent_blocks(
-    rows: Sequence[Mapping[str, Any]], horizon: int
-) -> list[Mapping[str, Any]]:
-    ordered = sorted(rows, key=lambda item: parse_timestamp(item["timestamp"]))
-    blocks: list[Mapping[str, Any]] = []
-    last: datetime | None = None
-    for row in ordered:
-        moment = parse_timestamp(row["timestamp"])
-        if last is None or moment >= last + timedelta(days=horizon):
-            blocks.append(row)
-            last = moment
-    return blocks
-
-
-def _bucket_means(
-    pairs: Sequence[tuple[float, float]], buckets: int = 3
-) -> list[float | None]:
-    ordered = sorted(pairs, key=lambda item: item[0])
-    if not ordered:
-        return [None] * buckets
-    means: list[float | None] = []
-    size = len(ordered) / buckets
-    for index in range(buckets):
-        start = int(round(index * size))
-        end = int(round((index + 1) * size))
-        members = ordered[start:end]
-        means.append(
-            sum(value for _, value in members) / len(members) if members else None
-        )
-    return means
-
-
-def bootstrap_mean_ci(values: Sequence[float]) -> dict[str, float | None]:
-    """Seeded block-bootstrap CI of the mean; deterministic across runs."""
-    return _bootstrap_ci(values)
-
-
-def _bootstrap_ci(values: Sequence[float]) -> dict[str, float | None]:
-    if not values:
-        return {"lower": None, "upper": None, "mean": None}
-    generator = random.Random(_BOOTSTRAP_SEED)
-    means: list[float] = []
-    for _ in range(_BOOTSTRAP_RESAMPLES):
-        sample = [values[generator.randrange(len(values))] for _ in values]
-        means.append(sum(sample) / len(sample))
-    means.sort()
-    def percentile(fraction: float) -> float:
-        position = fraction * (len(means) - 1)
-        lower = int(math.floor(position))
-        upper = min(lower + 1, len(means) - 1)
-        return means[lower] + (means[upper] - means[lower]) * (position - lower)
-    return {
-        "lower": percentile(0.025),
-        "upper": percentile(0.975),
-        "mean": sum(values) / len(values),
-    }
+    return _core_observations(
+        ratio_points, moments, horizons=horizons,
+        label_key=_LABEL_KEY, signals_at=signals_at,
+    )
 
 
 def evaluate_relative_signals(
@@ -362,141 +181,21 @@ def evaluate_relative_signals(
     *,
     horizons: Sequence[int] = (30, 90, 180),
 ) -> dict[str, Any]:
-    """Per-signal ranking power against forward ETH/BTC returns.
-
-    For every signal and horizon: Spearman IC, Pearson correlation, tercile
-    bucket mean returns, sign hit rate, independent block count, and a
-    seeded bootstrap confidence interval over block ICs.
-    """
-    signals_report: dict[str, Any] = {}
-    for name in SIGNAL_NAMES:
-        horizon_report: dict[str, Any] = {}
-        for raw_horizon in horizons:
-            horizon = int(raw_horizon)
-            def _label(row: Mapping[str, Any]) -> Mapping[str, Any]:
-                return row["labels"].get(str(horizon)) or {"status": "PENDING"}
-
-            available = [
-                row for row in observations
-                if _label(row)["status"] == "AVAILABLE"
-                and row["signals"].get(name) is not None
-            ]
-            pairs = [
-                (float(row["signals"][name]), _label(row)["forward_ethbtc_return"])
-                for row in available
-            ]
-            blocks = _independent_blocks(available, horizon)
-            block_pairs = [
-                (float(row["signals"][name]), _label(row)["forward_ethbtc_return"])
-                for row in blocks
-            ]
-            block_ics = [
-                value for value in (
-                    spearman(
-                        [pair[0] for pair in block_pairs[i:i + max(4, len(block_pairs) // 4)]],
-                        [pair[1] for pair in block_pairs[i:i + max(4, len(block_pairs) // 4)]],
-                    )
-                    for i in range(0, len(block_pairs), max(4, len(block_pairs) // 4))
-                )
-                if value is not None
-            ] if len(block_pairs) >= 8 else []
-            xs = [pair[0] for pair in pairs]
-            ys = [pair[1] for pair in pairs]
-            buckets = _bucket_means(pairs)
-            hits = sum(
-                1
-                for signal_value, forward in pairs
-                if (signal_value > 0 and forward > 0) or (signal_value < 0 and forward < 0)
-            )
-            horizon_report[str(horizon)] = {
-                "samples": len(pairs),
-                "independent_blocks": len(blocks),
-                "spearman_ic": spearman(xs, ys),
-                "pearson": pearson(xs, ys),
-                "bucket_mean_forward_returns": buckets,
-                "bucket_monotonic": (
-                    all(
-                        later is not None and earlier is not None and later >= earlier - 1e-12
-                        for earlier, later in zip(buckets, buckets[1:])
-                    )
-                    if len(buckets) >= 3 and all(value is not None for value in buckets)
-                    else None
-                ),
-                "sign_hit_rate": hits / len(pairs) if pairs else None,
-                "block_ic_bootstrap": _bootstrap_ci(block_ics) if block_ics else None,
-            }
-        signals_report[name] = horizon_report
-    return {
-        "contract": "STRICT_POINT_IN_TIME_INPUTS",
-        "signals": signals_report,
-        "observations": len(observations),
-    }
+    """Per-signal ranking power against forward ETH/BTC returns."""
+    return _core_evaluate(
+        observations, signal_names=SIGNAL_NAMES,
+        horizons=horizons, label_key=_LABEL_KEY,
+    )
 
 
 def evaluate_signal_admission(
     window_evaluations: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Admission rule (plan 5.5) across the two validation windows.
-
-    The 90D horizon is the decision horizon — it matches the strategy's
-    3-6 month active-allocation horizon, and a window of a few years
-    structurally cannot supply ten independent 180D blocks. A signal is
-    admitted when both windows agree on the 90D direction, the 90D IC is
-    positive in both windows, the 90D tercile means are not inverted, and
-    each window supplies at least ten independent 90D blocks. The 180D
-    horizon is reported as confirmation only. This is a research verdict:
-    it never changes an allocation by itself, it only unlocks (or keeps
-    locked) the ETH tilt mechanism.
-    """
-    window_names = sorted(window_evaluations)
-    report: dict[str, Any] = {}
-    for name in SIGNAL_NAMES:
-        reasons: list[str] = []
-        directions: list[int] = []
-        for window in window_names:
-            horizons = (window_evaluations[window].get("signals") or {}).get(name) or {}
-            primary = horizons.get("90", {})
-            ic_90 = primary.get("spearman_ic")
-            blocks = primary.get("independent_blocks", 0)
-            if ic_90 is None:
-                reasons.append(f"{window}: no 90D IC available")
-                directions.append(0)
-                continue
-            directions.append(1 if ic_90 > 0 else -1 if ic_90 < 0 else 0)
-            if ic_90 <= 0:
-                reasons.append(f"{window}: 90D IC is not positive")
-            if blocks < _MIN_INDEPENDENT_BLOCKS:
-                reasons.append(
-                    f"{window}: only {blocks} independent 90D blocks"
-                )
-            buckets = primary.get("bucket_mean_forward_returns")
-            if (
-                buckets
-                and buckets[0] is not None and buckets[-1] is not None
-                and buckets[-1] < buckets[0]
-            ):
-                reasons.append(f"{window}: 90D top tercile below bottom tercile")
-        consistent = len(directions) >= 2 and directions[0] == directions[1] and directions[0] != 0
-        if not consistent:
-            reasons.append("window 90D directions disagree or are flat")
-        report[name] = {
-            "admitted": bool(consistent and not reasons),
-            "direction": directions[0] if directions else 0,
-            "reasons": reasons,
-        }
-    return {
-        "admission_rule": (
-            "both windows: positive 90D IC, same 90D direction, terciles not "
-            "inverted, >=10 independent 90D blocks; 180D reported as confirmation"
-        ),
-        "signals": report,
-        "eth_tilt_admitted": bool(
-            any(
-                entry["admitted"] and entry["direction"] > 0
-                for entry in report.values()
-            )
-        ),
-    }
+    """Admission rule across the two validation windows (plan 5.5)."""
+    return _core_admission(
+        window_evaluations, signal_names=SIGNAL_NAMES,
+        admitted_flag_key="eth_tilt_admitted",
+    )
 
 
 def eth_tilt_attribution(

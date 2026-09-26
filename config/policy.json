@@ -454,6 +454,26 @@
     "default_risky_asset": "BTC",
     "btc_baseline_enabled": true
   },
+  "satellite_alpha": {
+    "BNB": {
+      "mode": "alpha_admitted",
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.1,
+      "admitted_signals": []
+    },
+    "SOL": {
+      "mode": "research_only",
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.1,
+      "admitted_signals": []
+    },
+    "AAVE": {
+      "mode": "alpha_admitted",
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.1,
+      "admitted_signals": []
+    }
+  },
   "volume_profile": {
     "enabled": true,
     "preferred_timeframe": "4H",

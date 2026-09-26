@@ -75,8 +75,11 @@ _TOP_LEVEL_FIELDS = {
     "scoring_families",
     "scoring_v3",
     "capital_hierarchy",
+    "satellite_alpha",
 }
 _CAPITAL_HIERARCHY_FIELDS = {"default_risky_asset", "btc_baseline_enabled"}
+_SATELLITE_ALPHA_FIELDS = {"mode", "tilt_enabled", "tilt_fraction_positive", "admitted_signals"}
+_SATELLITE_ALPHA_MODES = {"alpha_admitted", "research_only"}
 _SCORING_V3_FAMILY_NAMES = ("market", "structural")
 _EVIDENCE_CLASSES = ("ACTIONABLE", "LIMITED", "NOT_ACTIONABLE")
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
@@ -677,6 +680,86 @@ def _parse_capital_hierarchy(value: Any) -> dict[str, Any]:
     return {"default_risky_asset": "BTC", "btc_baseline_enabled": enabled}
 
 
+def _parse_satellite_alpha(
+    value: Any,
+    satellites: tuple[str, ...],
+) -> dict[str, dict[str, Any]]:
+    """Strategy V2.3 Phase 1: per-satellite BTC-relative alpha authority.
+
+    Every satellite must declare its alpha mode explicitly:
+    ``alpha_admitted`` assets may earn the preregistered tilt once
+    ``tilt_enabled`` unlocks and their asset-specific ensemble is POSITIVE;
+    ``research_only`` assets (SOL until its BTC-relative case passes
+    admission) can never earn production authority. Signal names are
+    syntactically validated here; membership in an asset's preregistered
+    signal set is validated by the engine module that consumes them.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("satellite_alpha must be an object keyed by satellite symbol")
+    known = set(satellites)
+    unknown = sorted(set(value) - known)
+    if unknown:
+        raise PolicyError(
+            "satellite_alpha names assets outside the satellite universe: "
+            + ", ".join(unknown)
+        )
+    missing = sorted(known - set(value))
+    if missing:
+        raise PolicyError(
+            "satellite_alpha must classify every satellite: missing " + ", ".join(missing)
+        )
+    parsed: dict[str, dict[str, Any]] = {}
+    for raw_symbol, raw_entry in value.items():
+        symbol = str(raw_symbol).strip().upper()
+        entry = raw_entry
+        if not isinstance(entry, dict):
+            raise PolicyError(f"satellite_alpha.{symbol} must be an object")
+        _unknown_fields(entry, _SATELLITE_ALPHA_FIELDS, f"satellite_alpha.{symbol}")
+        if set(entry) != _SATELLITE_ALPHA_FIELDS:
+            raise PolicyError(f"satellite_alpha.{symbol} fields are incomplete")
+        mode = str(entry["mode"]).strip().lower()
+        if mode not in _SATELLITE_ALPHA_MODES:
+            raise PolicyError(
+                f"satellite_alpha.{symbol}.mode must be alpha_admitted or research_only"
+            )
+        tilt_enabled = entry["tilt_enabled"]
+        if not isinstance(tilt_enabled, bool):
+            raise PolicyError(f"satellite_alpha.{symbol}.tilt_enabled must be boolean")
+        tilt_fraction = _fraction(
+            entry["tilt_fraction_positive"],
+            f"satellite_alpha.{symbol}.tilt_fraction_positive",
+            exclusive_minimum=True,
+        )
+        raw_admitted = entry["admitted_signals"]
+        if not isinstance(raw_admitted, list):
+            raise PolicyError(f"satellite_alpha.{symbol}.admitted_signals must be a list")
+        admitted: list[str] = []
+        for item in raw_admitted:
+            name = str(item).strip().lower()
+            if not name or not all(
+                character.isalnum() or character == "_" for character in name
+            ):
+                raise PolicyError(
+                    f"satellite_alpha.{symbol}.admitted_signals entries must be "
+                    "snake_case signal identifiers"
+                )
+            admitted.append(name)
+        if len(admitted) != len(set(admitted)):
+            raise PolicyError(f"satellite_alpha.{symbol}.admitted_signals must not duplicate")
+        if mode == "research_only" and (tilt_enabled or admitted):
+            raise PolicyError(
+                f"satellite_alpha.{symbol} is research_only: tilt_enabled must be "
+                "false and admitted_signals empty"
+            )
+        parsed[symbol] = {
+            "mode": mode,
+            "tilt_enabled": tilt_enabled,
+            "tilt_fraction_positive": tilt_fraction,
+            "admitted_signals": tuple(admitted),
+        }
+    return parsed
+
+
 def _parse_risk_engine(value: Any) -> dict[str, Any]:
     """Parse the ``risk_engine`` block selecting the sizing mechanism.
 
@@ -1265,6 +1348,7 @@ class Policy:
     scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
     scoring_v3: Mapping[str, Any] = dataclass_field(default_factory=dict)
     capital_hierarchy: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    satellite_alpha: Mapping[str, Mapping[str, Any]] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -1394,6 +1478,10 @@ class Policy:
         result["scoring_families"] = _copy_mapping(self.scoring_families)
         result["scoring_v3"] = _copy_mapping(self.scoring_v3)
         result["capital_hierarchy"] = _copy_mapping(self.capital_hierarchy)
+        result["satellite_alpha"] = {
+            symbol: {**entry, "admitted_signals": list(entry["admitted_signals"])}
+            for symbol, entry in self.satellite_alpha.items()
+        }
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -2754,6 +2842,9 @@ def _parse_policy(
     parsed_scoring_families = _parse_scoring_families(data.get("scoring_families"), parsed_profiles)
     parsed_scoring_v3 = _parse_scoring_v3(data.get("scoring_v3"), parsed_profiles)
     parsed_capital_hierarchy = _parse_capital_hierarchy(data.get("capital_hierarchy"))
+    parsed_satellite_alpha = _parse_satellite_alpha(
+        data.get("satellite_alpha"), satellites
+    )
     parsed_asset_profiles = _parse_asset_scoring_profiles(
         data.get("asset_scoring_profiles"), parsed_profiles
     )
@@ -3008,6 +3099,7 @@ def _parse_policy(
         scoring_families=parsed_scoring_families,
         scoring_v3=parsed_scoring_v3,
         capital_hierarchy=parsed_capital_hierarchy,
+        satellite_alpha=parsed_satellite_alpha,
     )
     return policy
 

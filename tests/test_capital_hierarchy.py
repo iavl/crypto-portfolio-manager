@@ -26,13 +26,25 @@ def _policy(**hierarchy):
 
 def _inputs():
     return PortfolioRiskInputs(
-        asset_volatility={"BTC": 0.25, "ETH": 0.30, "SOL": 0.55},
+        asset_volatility={"BTC": 0.25, "ETH": 0.30, "SOL": 0.55, "BNB": 0.45},
         correlations={
-            "BTC": {"ETH": 0.85, "SOL": 0.8},
-            "ETH": {"BTC": 0.85, "SOL": 0.8},
-            "SOL": {"BTC": 0.8, "ETH": 0.8},
+            "BTC": {"ETH": 0.85, "SOL": 0.8, "BNB": 0.8},
+            "ETH": {"BTC": 0.85, "SOL": 0.8, "BNB": 0.8},
+            "SOL": {"BTC": 0.8, "ETH": 0.8, "BNB": 0.8},
+            "BNB": {"BTC": 0.8, "ETH": 0.8, "SOL": 0.8},
         },
     )
+
+
+def _bnb_tilt_policy(**hierarchy):
+    # Fixture-only tilt sizing (not the canonical 10%): large enough that the
+    # satellite visibly takes budget from the BTC baseline so case D's
+    # competes-with-BTC mechanism stays observable under the V2.3 alpha gate.
+    policy = _policy(**hierarchy)
+    data = json.loads(json.dumps(policy.as_dict()))
+    data["satellite_alpha"]["BNB"]["tilt_enabled"] = True
+    data["satellite_alpha"]["BNB"]["tilt_fraction_positive"] = 0.3
+    return policy_from_mapping(data)
 
 
 _CORE = {
@@ -110,12 +122,16 @@ class HierarchyBehaviorTests(unittest.TestCase):
         without = build_target_allocation(
             policy=policy, regime="NORMAL", assessments=_CORE, risk_inputs=_inputs(),
         )
+        # Strategy V2.3: satellite deployment routes through the asset's
+        # admitted BTC-relative alpha, so case D runs with the BNB tilt
+        # unlocked and its ensemble POSITIVE.
         with_satellite = build_target_allocation(
-            policy=policy, regime="NORMAL",
-            assessments={**_CORE, "SOL": _satellite()},
+            policy=_bnb_tilt_policy(), regime="NORMAL",
+            assessments={**_CORE, "BNB": _satellite()},
             risk_inputs=_inputs(),
+            satellite_alpha_states={"BNB": "BNB_ALPHA_POSITIVE"},
         )
-        satellite_weight = with_satellite.target_weights.get("SOL", 0.0)
+        satellite_weight = with_satellite.target_weights.get("BNB", 0.0)
         self.assertGreater(satellite_weight, 0)
         # The satellite's dollars come out of BTC's baseline: the core budget
         # shrinks by exactly the satellite's envelope share, and cash is

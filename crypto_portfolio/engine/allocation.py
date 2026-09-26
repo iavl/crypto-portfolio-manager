@@ -808,9 +808,28 @@ def build_target_allocation(
     risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
     recovery_state: Mapping[str, Any] | None = None,
     eth_alpha_state: str | None = None,
+    satellite_alpha_states: Mapping[str, str] | None = None,
 ) -> AllocationResult:
     resolved = policy or resolve_policy()
     risk_mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
+    # Strategy V2.3 Phase 1: asset-specific BTC-relative alpha states gate
+    # satellite NEW risk in volatility-budget mode. Each state must use the
+    # canonical per-asset names; anything else is a caller contract error.
+    from .relative_alpha_core import asset_alpha_state_names
+    normalized_alpha_states: dict[str, str] = {}
+    for raw_symbol, raw_state in (satellite_alpha_states or {}).items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol:
+            raise ValueError("satellite_alpha_states contains an empty symbol")
+        if symbol in normalized_alpha_states:
+            raise ValueError(f"satellite_alpha_states contains duplicate symbol {symbol}")
+        positive, neutral, negative = asset_alpha_state_names(symbol)
+        state_text = str(raw_state).strip().upper()
+        if state_text not in {positive, neutral, negative}:
+            raise ValueError(
+                f"satellite_alpha_states.{symbol} must be {positive}, {neutral}, or {negative}"
+            )
+        normalized_alpha_states[symbol] = state_text
     risk_metrics: PortfolioRiskInputs | None = None
     if risk_inputs is not None:
         risk_metrics = (
@@ -1004,10 +1023,26 @@ def build_target_allocation(
                 comparison_score = None
                 score_authority = "NONE"
             tactical_fraction = float(resolved.allocation["tactical_fraction"])
-            if conviction_name == "TACTICAL_ONLY" and state == "ELIGIBLE_INCREASE":
-                # The plan's key behavior: a strong market case without
-                # structural evidence earns a small tactical slice of the
-                # envelope instead of a zero-eligibility dead end.
+            # Strategy V2.3 Phase 1 alpha authority. In volatility-budget
+            # mode, satellite NEW risk requires the asset's OWN admitted
+            # BTC-relative alpha ensemble to be POSITIVE and unlocked by
+            # policy; the generic market-score conviction (including
+            # TACTICAL_ONLY) is a diagnostic label without position
+            # authority. Legacy mode keeps the frozen V2.2 behavior for
+            # A/B replay comparability until the Phase 7 migration.
+            alpha_config = (resolved.satellite_alpha or {}).get(symbol) or {}
+            alpha_mode = str(alpha_config.get("mode", "research_only"))
+            alpha_positive, _, _ = asset_alpha_state_names(symbol)
+            alpha_state_value = normalized_alpha_states.get(symbol)
+            alpha_granted = (
+                risk_mode == "volatility_budget"
+                and alpha_mode == "alpha_admitted"
+                and bool(alpha_config.get("tilt_enabled", False))
+                and alpha_state_value == alpha_positive
+            )
+            if conviction_name == "TACTICAL_ONLY" and state == "ELIGIBLE_INCREASE" \
+                    and risk_mode != "volatility_budget":
+                # The tactical slice is the frozen legacy path only (see above).
                 curve_fraction = tactical_fraction
                 score_authority = "TACTICAL_FRACTION"
             elif comparison_score is not None:
@@ -1037,7 +1072,17 @@ def build_target_allocation(
             hard_exposure_cap = min(
                 1.0, risk_envelope_weight + hard_cap_buffer_pp / 100.0
             )
-            requested_strategic_weight = risk_envelope_weight * curve_fraction
+            if alpha_granted:
+                # Preregistered tilt: the admitted ensemble's POSITIVE state
+                # earns a fixed fraction of the approved risky budget (the
+                # risk envelope and caps still bound it). No grid search.
+                requested_strategic_weight = min(
+                    float(alpha_config["tilt_fraction_positive"]) * risky_budget,
+                    risk_envelope_weight,
+                )
+                score_authority = "ADMITTED_ALPHA_TILT"
+            else:
+                requested_strategic_weight = risk_envelope_weight * curve_fraction
             # Evidence permission is keyed on the low-evidence contract
             # classes, not on the data-confidence band: LIMITED evidence
             # scales deployment by its own factor instead of inheriting the
@@ -1097,6 +1142,16 @@ def build_target_allocation(
                 "confidence_deployment_factor": asset_confidence_factor,
                 "evidence_deployment_factor": evidence_permission_factor,
                 "conviction_state": conviction_name,
+                "alpha_state": alpha_state_value,
+                "alpha_authority": (
+                    "ADMITTED_TILT" if alpha_granted
+                    else "LEGACY_PATH" if risk_mode != "volatility_budget"
+                    else "RESEARCH_ONLY" if alpha_mode == "research_only"
+                    else "LOCKED"
+                ),
+                "alpha_tilt_fraction": (
+                    float(alpha_config["tilt_fraction_positive"]) if alpha_granted else None
+                ),
                 "market_score": conviction["market_score"] if conviction is not None else None,
                 "market_coverage": conviction["market_coverage"] if conviction is not None else None,
                 "normalized_market_score": (
@@ -1119,18 +1174,48 @@ def build_target_allocation(
                 "deployment_factor": deployment_factor,
                 "requested_strategic_weight": requested_strategic_weight,
             }
-            if state == "INELIGIBLE":
+            if state == "ELIGIBLE_INCREASE" and risk_mode == "volatility_budget" \
+                    and not alpha_granted:
+                # Strategy V2.3 Phase 1: without the asset's OWN admitted
+                # POSITIVE BTC-relative alpha there is no new-risk authority —
+                # the generic market score cannot create a satellite position.
+                # A held position is preserved and may still be reduced along
+                # the score curve; an unheld one gains no target at all.
+                if held_weight > 1e-12:
+                    satellite_hold[symbol] = min(
+                        held_weight, requested_strategic_weight
+                    )
+                    deployment_allowances[symbol]["preserve_existing"] = True
+                    reasons.append(
+                        f"{symbol} has no admitted positive BTC-relative alpha this review "
+                        "(Strategy V2.3 alpha gate); the existing position is preserved and "
+                        "reduced only"
+                    )
+                else:
+                    reasons.append(
+                        f"{symbol} receives 0% satellite target: without admitted "
+                        "BTC-relative alpha the market score alone cannot create a "
+                        "satellite position (Strategy V2.3 alpha gate)"
+                    )
+            elif state == "INELIGIBLE":
                 reasons.append(
                     f"{symbol} receives 0% satellite target because hard eligibility failed "
                     "(score floor, broken thesis, severe event, or confirmed severe BTC-relative weakness)"
                 )
             elif state == "ELIGIBLE_INCREASE":
                 strategic_satellite_raw[symbol] = requested_strategic_weight
-                if score_authority == "TACTICAL_FRACTION":
+                if score_authority == "ADMITTED_ALPHA_TILT":
+                    reasons.append(
+                        f"{symbol} admitted BTC-relative alpha is POSITIVE: the strategic "
+                        f"target rides the preregistered {float(alpha_config['tilt_fraction_positive']):.0%} "
+                        "alpha tilt of the approved risky budget (bounded by the risk envelope)"
+                    )
+                elif score_authority == "TACTICAL_FRACTION":
                     reasons.append(
                         f"{symbol} is TACTICAL_ONLY: market score {conviction['normalized_market_score']:.1f} "
                         f"is strong without usable structural evidence, so the strategic target rides "
-                        f"{tactical_fraction:.0%} of the risk envelope instead of the score curve"
+                        f"{tactical_fraction:.0%} of the risk envelope instead of the score curve "
+                        "(frozen legacy path; volatility-budget mode gates this behind admitted alpha)"
                     )
                 else:
                     reasons.append(
@@ -1445,6 +1530,7 @@ def allocate(
     risk_inputs: PortfolioRiskInputs | Mapping[str, Any] | None = None,
     recovery_state: Mapping[str, Any] | None = None,
     eth_alpha_state: str | None = None,
+    satellite_alpha_states: Mapping[str, str] | None = None,
 ) -> AllocationResult:
     return build_target_allocation(
         policy, regime, assessments, current_weights,
@@ -1455,6 +1541,7 @@ def allocate(
         risk_inputs=risk_inputs,
         recovery_state=recovery_state,
         eth_alpha_state=eth_alpha_state,
+        satellite_alpha_states=satellite_alpha_states,
     )
 
 

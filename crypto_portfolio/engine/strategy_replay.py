@@ -102,6 +102,7 @@ class FrozenReviewView:
     overlays: Mapping[str, Any] | None = None
     chain_liveness: Mapping[str, Any] | None = None
     eth_alpha_state: str | None = None
+    satellite_alpha_states: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,7 @@ class ReplayReview:
     chain_liveness: Mapping[str, Any] | None = None
     current_prices: Mapping[str, float] = field(default_factory=dict)
     eth_alpha_state: str | None = None
+    satellite_alpha_states: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         moment = _parse_as_of(self.as_of)
@@ -197,6 +199,22 @@ class ReplayReview:
             if state not in {ETH_ALPHA_POSITIVE, ETH_ALPHA_NEUTRAL, ETH_ALPHA_NEGATIVE}:
                 raise ValueError("eth_alpha_state is unsupported")
             object.__setattr__(self, "eth_alpha_state", state)
+        if self.satellite_alpha_states is not None:
+            from .relative_alpha_core import asset_alpha_state_names
+            normalized_states: dict[str, str] = {}
+            for raw_symbol, raw_state in self.satellite_alpha_states.items():
+                symbol = str(raw_symbol).strip().upper()
+                if not symbol or symbol in normalized_states:
+                    raise ValueError("satellite_alpha_states must use unique non-empty symbols")
+                positive, neutral, negative = asset_alpha_state_names(symbol)
+                state_text = str(raw_state).strip().upper()
+                if state_text not in {positive, neutral, negative}:
+                    raise ValueError(
+                        f"satellite_alpha_states.{symbol} must be {positive}, "
+                        f"{neutral}, or {negative}"
+                    )
+                normalized_states[symbol] = state_text
+            object.__setattr__(self, "satellite_alpha_states", normalized_states)
         if isinstance(self.thesis_broken, str):
             raise ValueError("thesis_broken must be a sequence of symbols")
         broken = tuple(str(item).strip().upper() for item in self.thesis_broken if str(item).strip())
@@ -231,6 +249,9 @@ class ReplayReview:
             overlays=dict(self.overlays) if self.overlays is not None else None,
             chain_liveness=dict(self.chain_liveness) if self.chain_liveness is not None else None,
             eth_alpha_state=self.eth_alpha_state,
+            satellite_alpha_states=(
+                dict(self.satellite_alpha_states) if self.satellite_alpha_states is not None else None
+            ),
         )
 
     @classmethod
@@ -242,7 +263,7 @@ class ReplayReview:
             "execution_plans",
             "execution_bars",
             "overlays", "chain_liveness",
-            "current_prices", "eth_alpha_state",
+            "current_prices", "eth_alpha_state", "satellite_alpha_states",
         }
         unknown = sorted(set(value) - known)
         if unknown:
@@ -268,6 +289,7 @@ class ReplayReview:
             chain_liveness=value.get("chain_liveness"),
             current_prices=value.get("current_prices", {}),
             eth_alpha_state=value.get("eth_alpha_state"),
+            satellite_alpha_states=value.get("satellite_alpha_states"),
         )
 
 
@@ -406,6 +428,7 @@ def replay_strategy(
             portfolio_drawdown=replay_drawdown,
             market_recovery_streak=market_recovery_streak,
             eth_alpha_state=view.eth_alpha_state,
+            satellite_alpha_states=view.satellite_alpha_states,
         )
         from .risk import run_risk_gate
         risk = run_risk_gate(

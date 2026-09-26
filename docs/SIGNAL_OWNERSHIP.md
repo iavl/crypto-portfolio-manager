@@ -72,3 +72,21 @@ Each layer answers exactly one question:
 - `portfolio_drawdown` owns the emergency brake in both risk-engine modes
   and additionally owns normal sizing while `risk_engine.mode` is
   `legacy_drawdown` — the frozen V1 behavior kept for A/B replay.
+
+## Strategy V2.3 Phase 1 — satellite alpha authority
+
+- A new signal family `asset_relative_alpha` (per-asset BTC-relative
+  ensembles: ETH/BTC, BNB/BTC, AAVE/BTC) owns satellite and core-tilt
+  deployment selection in `volatility_budget` mode. A satellite can only
+  receive NEW risk when its own policy-unlocked (`satellite_alpha.*.
+  tilt_enabled`) admitted ensemble is POSITIVE; the generic composite
+  score and its conviction states (including `TACTICAL_ONLY`) remain
+  diagnostics without position authority.
+- `satellite_alpha.SOL.mode = research_only`: SOL cannot earn production
+  authority until a SOL/BTC admission passes.
+- Legacy carry-over: while `risk_engine.mode = legacy_drawdown`, the V2.2
+  `TACTICAL_FRACTION` slice stays frozen for A/B replay comparability; the
+  Phase 7 canonical migration removes it.
+- The preregistered alpha tilt is 10% of the approved risky budget
+  (`satellite_alpha.*.tilt_fraction_positive = 0.10`), never a grid-searched
+  value.

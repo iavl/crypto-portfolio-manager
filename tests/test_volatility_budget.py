@@ -33,6 +33,14 @@ def _vol_policy(mode: str = "volatility_budget", **overrides):
     return policy_from_mapping(data)
 
 
+def _vol_policy_with_bnb_tilt():
+    data = json.loads(json.dumps(load_policy().as_dict()))
+    data["risk_engine"]["mode"] = "volatility_budget"
+    data["core_allocation"]["mode"] = "btc_baseline_with_active_tilts"
+    data["satellite_alpha"]["BNB"]["tilt_enabled"] = True
+    return policy_from_mapping(data)
+
+
 def _synthetic_inputs(vol_btc=0.6, vol_eth=0.7, rho=0.85):
     return PortfolioRiskInputs(
         asset_volatility={"BTC": vol_btc, "ETH": vol_eth},
@@ -179,15 +187,17 @@ class RiskEngineModeTests(unittest.TestCase):
         self.assertLess(budget_risky, legacy_risky)
 
     def test_missing_covariance_for_allocated_asset_fails_closed(self):
-        policy = _vol_policy()
-        # SOL is satellite-eligible on a strong score but has no covariance row.
+        # Strategy V2.3: only an ADMITTED positive alpha creates the satellite
+        # position, so the fail-closed covariance contract is exercised with
+        # the tilt unlocked and the ensemble POSITIVE.
+        policy = _vol_policy_with_bnb_tilt()
         assessments = {
             "BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"},
             "ETH": {
                 "weighted_score": 60, "normalized_score": 60, "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             },
-            "SOL": {
+            "BNB": {
                 "weighted_score": 90, "normalized_score": 90, "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             },
@@ -196,6 +206,7 @@ class RiskEngineModeTests(unittest.TestCase):
             build_target_allocation(
                 policy=policy, regime="NORMAL", assessments=assessments,
                 risk_inputs=_synthetic_inputs(),
+                satellite_alpha_states={"BNB": "BNB_ALPHA_POSITIVE"},
             )
 
     def test_volatility_mode_passes_the_risk_gate(self):

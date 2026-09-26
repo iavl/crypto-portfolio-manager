@@ -20,6 +20,8 @@ from ..engine.risk_tier import estimate_risk_tiers
 from ..engine.scoring import score_assessment
 from ..engine.strategy_replay import ReplayReview
 from ..engine.technical import build_technical_snapshot, moving_average
+from ..engine.aave_relative_alpha import aave_alpha_state, aave_relative_signals, aavebtc_ratio_series
+from ..engine.bnb_relative_alpha import bnb_alpha_state, bnb_relative_signals, bnbbtc_ratio_series
 from ..engine.eth_relative_alpha import eth_alpha_state, ethbtc_ratio_series, relative_signals
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.market import Candle, OHLCVSeries, SpotPrice
@@ -245,6 +247,20 @@ def build_historical_reviews(
         ethbtc_ratio_series(daily_by_symbol["ETH"], daily_by_symbol["BTC"])
         if "ETH" in daily_by_symbol else ()
     )
+    # Strategy V2.3 Phase 1: per-satellite BTC-relative alpha ratio series,
+    # computed once from completed daily candles and evaluated point-in-time
+    # at every boundary. The state is a diagnostic here; only the policy's
+    # tilt_enabled + admitted_signals gate lets it influence allocation.
+    satellite_ratio_points = {
+        "BNB": (
+            bnbbtc_ratio_series(daily_by_symbol["BNB"], daily_by_symbol["BTC"])
+            if "BNB" in daily_by_symbol else ()
+        ),
+        "AAVE": (
+            aavebtc_ratio_series(daily_by_symbol["AAVE"], daily_by_symbol["BTC"])
+            if "AAVE" in daily_by_symbol else ()
+        ),
+    }
     tier_config = policy.risk_tier_estimation or {}
     tier_history = int(tier_config.get("minimum_history_days", 100)) if tier_config else 100
     previous_tiers: dict[str, str] = {}
@@ -406,6 +422,32 @@ def build_historical_reviews(
         eth_signals = (
             relative_signals(eth_ratio_points, as_of_moment) if eth_ratio_points else {}
         )
+        satellite_alpha_states: dict[str, str] = {}
+        for alpha_symbol, alpha_points in satellite_ratio_points.items():
+            alpha_entry = (policy.satellite_alpha or {}).get(alpha_symbol) or {}
+            if alpha_entry.get("mode") != "alpha_admitted" or not alpha_points:
+                continue
+            structural = {}
+            if evidence is not None and evidence.structural:
+                structural = evidence.structural.get(alpha_symbol) or {}
+            if alpha_symbol == "BNB":
+                alpha_signals = bnb_relative_signals(alpha_points, as_of_moment, {
+                    "chain_tvl": structural.get("chain_tvl"),
+                    "stablecoins": structural.get("stablecoins"),
+                    "fees": structural.get("fees"),
+                })
+                satellite_alpha_states[alpha_symbol] = bnb_alpha_state(
+                    alpha_signals, alpha_entry.get("admitted_signals", ())
+                )
+            else:
+                alpha_signals = aave_relative_signals(alpha_points, as_of_moment, {
+                    "tvl": structural.get("tvl"),
+                    "borrowed": structural.get("borrowed"),
+                    "fees": structural.get("fees"),
+                })
+                satellite_alpha_states[alpha_symbol] = aave_alpha_state(
+                    alpha_signals, alpha_entry.get("admitted_signals", ())
+                )
         market_flow = evidence.market_flow_state(as_of) if evidence is not None else None
         regime_inputs = build_regime_inputs(
             btc_snapshot, portfolio_drawdown=0.0, breadth=breadth_above_ma(completed_by_symbol),
@@ -420,6 +462,7 @@ def build_historical_reviews(
             next_returns=next_returns, technical_inputs=snapshots,
             execution_bars=execution_bars, current_prices=current_prices,
             eth_alpha_state=eth_alpha_state(eth_signals) if eth_signals else None,
+            satellite_alpha_states=satellite_alpha_states or None,
         ))
     if not reviews:
         raise ValueError("historical dataset produced no complete review periods")
