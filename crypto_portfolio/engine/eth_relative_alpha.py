@@ -255,7 +255,14 @@ def relative_signal_observations(
     moments: Sequence[str | datetime],
     *,
     horizons: Sequence[int] = (30, 90, 180),
+    etf_differential_by_moment: Mapping[str, float] | None = None,
 ) -> list[dict[str, Any]]:
+    """Signal snapshots with forward ETH/BTC labels (evaluation truth).
+
+    ``etf_differential_by_moment`` carries a caller-computed point-in-time
+    ETF flow differential keyed by the normalized moment string; the engine
+    stays free of data-source glue.
+    """
     """Signal snapshots with forward ETH/BTC labels (evaluation ground truth).
 
     The forward label at horizon H is the ratio return between the first
@@ -266,9 +273,14 @@ def relative_signal_observations(
     rows: list[dict[str, Any]] = []
     for raw_moment in moments:
         moment = parse_timestamp(raw_moment) if not isinstance(raw_moment, datetime) else raw_moment
+        signals = relative_signals(ratio_points, moment)
+        if etf_differential_by_moment is not None:
+            key = moment.isoformat().replace("+00:00", "Z")
+            if key in etf_differential_by_moment:
+                signals["etf_flow_differential_30d"] = etf_differential_by_moment[key]
         row: dict[str, Any] = {
             "timestamp": moment.isoformat().replace("+00:00", "Z"),
-            "signals": relative_signals(ratio_points, moment),
+            "signals": signals,
             "labels": {},
         }
         for raw_horizon in horizons:
@@ -426,56 +438,56 @@ def evaluate_signal_admission(
 ) -> dict[str, Any]:
     """Admission rule (plan 5.5) across the two validation windows.
 
-    A signal is admitted only when both windows agree on direction, at least
-    one of the 90D/180D horizons carries a positive IC in both windows, the
-    tercile bucket means are not clearly inverted, and each window supplies
-    at least 10 independent blocks. This is a research verdict: it never
-    changes an allocation by itself, it only unlocks (or keeps locked) the
-    ETH tilt mechanism.
+    The 90D horizon is the decision horizon — it matches the strategy's
+    3-6 month active-allocation horizon, and a window of a few years
+    structurally cannot supply ten independent 180D blocks. A signal is
+    admitted when both windows agree on the 90D direction, the 90D IC is
+    positive in both windows, the 90D tercile means are not inverted, and
+    each window supplies at least ten independent 90D blocks. The 180D
+    horizon is reported as confirmation only. This is a research verdict:
+    it never changes an allocation by itself, it only unlocks (or keeps
+    locked) the ETH tilt mechanism.
     """
     window_names = sorted(window_evaluations)
     report: dict[str, Any] = {}
     for name in SIGNAL_NAMES:
         reasons: list[str] = []
         directions: list[int] = []
-        blocks_ok = True
         for window in window_names:
             horizons = (window_evaluations[window].get("signals") or {}).get(name) or {}
-            ic_90 = horizons.get("90", {}).get("spearman_ic")
-            ic_180 = horizons.get("180", {}).get("spearman_ic")
-            candidates = [value for value in (ic_90, ic_180) if value is not None]
-            if not candidates:
-                reasons.append(f"{window}: no 90D/180D IC available")
+            primary = horizons.get("90", {})
+            ic_90 = primary.get("spearman_ic")
+            blocks = primary.get("independent_blocks", 0)
+            if ic_90 is None:
+                reasons.append(f"{window}: no 90D IC available")
                 directions.append(0)
                 continue
-            best = max(candidates, key=abs)
-            directions.append(1 if best > 0 else -1 if best < 0 else 0)
-            positive_ic = any(value > 0 for value in candidates)
-            if not positive_ic:
-                reasons.append(f"{window}: no positive IC at 90D/180D")
-            for horizon, key in (("90", "90"), ("180", "180")):
-                blocks = horizons.get(key, {}).get("independent_blocks", 0)
-                if blocks < _MIN_INDEPENDENT_BLOCKS:
-                    blocks_ok = False
-                    reasons.append(f"{window}: only {blocks} independent blocks at {horizon}D")
-            for horizon in ("90", "180"):
-                buckets = horizons.get(horizon, {}).get("bucket_mean_forward_returns")
-                if buckets and all(value is not None for value in buckets):
-                    if buckets[0] is not None and buckets[-1] is not None and buckets[-1] < buckets[0]:
-                        reasons.append(f"{window}: top tercile below bottom tercile at {horizon}D")
-                        break
+            directions.append(1 if ic_90 > 0 else -1 if ic_90 < 0 else 0)
+            if ic_90 <= 0:
+                reasons.append(f"{window}: 90D IC is not positive")
+            if blocks < _MIN_INDEPENDENT_BLOCKS:
+                reasons.append(
+                    f"{window}: only {blocks} independent 90D blocks"
+                )
+            buckets = primary.get("bucket_mean_forward_returns")
+            if (
+                buckets
+                and buckets[0] is not None and buckets[-1] is not None
+                and buckets[-1] < buckets[0]
+            ):
+                reasons.append(f"{window}: 90D top tercile below bottom tercile")
         consistent = len(directions) >= 2 and directions[0] == directions[1] and directions[0] != 0
         if not consistent:
-            reasons.append("window directions disagree or are flat")
+            reasons.append("window 90D directions disagree or are flat")
         report[name] = {
-            "admitted": bool(consistent and all("no positive IC" not in r for r in reasons) and blocks_ok and not any("top tercile below" in r for r in reasons)),
+            "admitted": bool(consistent and not reasons),
             "direction": directions[0] if directions else 0,
             "reasons": reasons,
         }
     return {
         "admission_rule": (
-            "both windows same direction; positive IC at 90D or 180D in both; "
-            "terciles not inverted; >=10 independent blocks per window"
+            "both windows: positive 90D IC, same 90D direction, terciles not "
+            "inverted, >=10 independent 90D blocks; 180D reported as confirmation"
         ),
         "signals": report,
         "eth_tilt_admitted": bool(

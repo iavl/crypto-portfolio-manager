@@ -403,6 +403,32 @@ def command_v21(args):
     }, ensure_ascii=False, indent=2))
 
 
+def _etf_differentials(harvested, moments):
+    """Point-in-time ETH-minus-BTC ETF net-flow/AUM differential per moment."""
+    if not harvested:
+        return None
+    from crypto_portfolio.research.evidence_series import etf_net_to_aum
+
+    flows = {
+        asset: harvested.get(f"sosovalue:etf:{asset}:netflow")
+        for asset in ("ETH", "BTC")
+    }
+    aum = {
+        asset: harvested.get(f"sosovalue:etf:{asset}:aum")
+        for asset in ("ETH", "BTC")
+    }
+    if any(series is None for series in (*flows.values(), *aum.values())):
+        return None
+    result = {}
+    for moment in moments:
+        eth_ratio = etf_net_to_aum(flows["ETH"], aum["ETH"], str(moment))
+        btc_ratio = etf_net_to_aum(flows["BTC"], aum["BTC"], str(moment))
+        if eth_ratio is None or btc_ratio is None:
+            continue
+        result[str(moment)] = eth_ratio - btc_ratio
+    return result or None
+
+
 def command_v22(args):
     """Strategy V2.2 alpha validation: preregistered ladder + attribution.
 
@@ -487,8 +513,11 @@ def command_v22(args):
             structural_reviews = build(evidence_structural)
             moments = [review.as_of for review in reviews]
         ratio = ethbtc_ratio_series(daily["ETH"], daily["BTC"])
+        etf_differential = _etf_differentials(harvested, moments)
         eth_eval = evaluate_relative_signals(
-            relative_signal_observations(ratio, moments),
+            relative_signal_observations(
+                ratio, moments, etf_differential_by_moment=etf_differential,
+            ),
         )
         structural_eval = structural_ranking_power(
             evidence_structural, moments, prices=daily,

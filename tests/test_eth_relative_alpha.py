@@ -228,6 +228,46 @@ class EvaluationTests(unittest.TestCase):
         report = evaluate_signal_admission({"bear": window(), "recent": window()})
         self.assertFalse(report["signals"]["rel_return_90d"]["admitted"])
 
+    def test_admission_uses_the_90d_decision_horizon(self):
+        # A positive 90D IC admits even when the 180D IC flips sign: the
+        # decision horizon matches the strategy's 3-6 month horizon and a
+        # few-year window cannot supply ten independent 180D blocks.
+        def window():
+            return {"signals": {"rel_return_90d": {
+                "90": {"spearman_ic": 0.25, "independent_blocks": 12,
+                       "bucket_mean_forward_returns": [0.1, 0.2, 0.3]},
+                "180": {"spearman_ic": -0.4, "independent_blocks": 5,
+                        "bucket_mean_forward_returns": [0.3, 0.2, 0.1]},
+            }}}
+        report = evaluate_signal_admission({"bear": window(), "recent": window()})
+        self.assertTrue(report["signals"]["rel_return_90d"]["admitted"])
+        # The reverse — negative 90D, positive 180D — never admits.
+        def flipped():
+            return {"signals": {"rel_return_90d": {
+                "90": {"spearman_ic": -0.25, "independent_blocks": 12,
+                       "bucket_mean_forward_returns": [0.3, 0.2, 0.1]},
+                "180": {"spearman_ic": 0.4, "independent_blocks": 5,
+                        "bucket_mean_forward_returns": [0.1, 0.2, 0.3]},
+            }}}
+        report = evaluate_signal_admission({"bear": flipped(), "recent": flipped()})
+        self.assertFalse(report["signals"]["rel_return_90d"]["admitted"])
+
+    def test_observations_carry_the_caller_etf_differential(self):
+        start = datetime(2023, 1, 1, tzinfo=UTC)
+        closes = [1.0 + 0.001 * index for index in range(200)]
+        points = ethbtc_ratio_series(
+            _daily_series("ETH", closes, start), _daily_series("BTC", [1.0] * 200, start),
+        )
+        moments = [points[150].timestamp, points[151].timestamp]
+        rows = relative_signal_observations(
+            points, moments,
+            etf_differential_by_moment={
+                moments[0].isoformat().replace("+00:00", "Z"): 0.02,
+            },
+        )
+        self.assertAlmostEqual(rows[0]["signals"]["etf_flow_differential_30d"], 0.02)
+        self.assertIsNone(rows[1]["signals"]["etf_flow_differential_30d"])
+
 
 if __name__ == "__main__":
     unittest.main()
