@@ -319,6 +319,11 @@ def _bucket_means(
     return means
 
 
+def bootstrap_mean_ci(values: Sequence[float]) -> dict[str, float | None]:
+    """Seeded block-bootstrap CI of the mean; deterministic across runs."""
+    return _bootstrap_ci(values)
+
+
 def _bootstrap_ci(values: Sequence[float]) -> dict[str, float | None]:
     if not values:
         return {"lower": None, "upper": None, "mean": None}
@@ -545,6 +550,7 @@ __all__ = [
     "ETH_ALPHA_NEGATIVE",
     "ETH_ALPHA_NEUTRAL",
     "ETH_ALPHA_POSITIVE",
+    "bootstrap_mean_ci",
     "SIGNAL_NAMES",
     "TREND_COMPOSITE_THRESHOLD",
     "eth_alpha_state",

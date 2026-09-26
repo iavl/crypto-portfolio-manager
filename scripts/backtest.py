@@ -403,6 +403,160 @@ def command_v21(args):
     }, ensure_ascii=False, indent=2))
 
 
+def command_v22(args):
+    """Strategy V2.2 alpha validation: preregistered ladder + attribution.
+
+    Runs the frozen V2.2 A-H ladder (plan 8.2) over one dataset scope, the
+    ETH/BTC signal evaluation and admission, the structural ranking-power
+    diagnostic that gates rung F, satellite opportunity-cost attribution,
+    and the policy decision matrix — all stamped with the frozen validation
+    manifest. With --sister-dataset the sister window's ladder and
+    evaluations join the admission and decision steps.
+    """
+    from crypto_portfolio.engine.eth_relative_alpha import (
+        ethbtc_ratio_series,
+        evaluate_relative_signals,
+        relative_signal_observations,
+    )
+    from crypto_portfolio.models.policy import load_policy, policy_from_mapping
+    from crypto_portfolio.research.evidence_series import EvidenceContext, load_evidence_series
+    from crypto_portfolio.research.historical_builder import (
+        build_historical_reviews,
+        rebind_initial_weights,
+    )
+    from crypto_portfolio.research.orchestrator import build_risk_inputs_for_reviews
+    from crypto_portfolio.research.v22_validation import (
+        assemble_v22_validation,
+        ethbtc_forward_excess_summary,
+        evaluate_signal_admission,
+        run_v22_ablation,
+        structural_ranking_admission,
+        structural_ranking_power,
+    )
+
+    def window(root: Path, build_reviews: bool):
+        spec, manifest, series = load_dataset(root)
+        daily, hourly = _series_maps(series, prefer_normalized=manifest.strict_ready)
+        execution_series = daily if spec.execution_timeframe == "1D" else hourly
+        harvested = load_evidence_series(root)
+        scope_name, portfolio_name = args.scope.split("/")
+        symbols = spec.asset_scopes[scope_name]
+        policy = _core_policy() if scope_name == "core" else load_policy()
+        policy = policy_from_mapping({
+            **policy.as_dict(),
+            "risk_engine": {**policy.as_dict()["risk_engine"], "mode": "volatility_budget"},
+        })
+        evidence_structural = (
+            EvidenceContext.from_series(harvested, include_structural=True)
+            if harvested else None
+        )
+        evidence_plain = (
+            EvidenceContext.from_series(harvested)
+            if harvested else None
+        )
+        if not build_reviews:
+            from crypto_portfolio.research.historical_builder import _candidate_boundaries
+            from crypto_portfolio.models.time import parse_timestamp
+            btc_candles = daily["BTC"].completed_candles()
+            moments = [
+                as_of.isoformat().replace("+00:00", "Z")
+                for as_of, _ in _candidate_boundaries(
+                    btc_candles,
+                    start=parse_timestamp(spec.start_at),
+                    end=parse_timestamp(spec.end_at),
+                )
+            ]
+            reviews = None
+        else:
+            def build(evidence):
+                built = build_historical_reviews(
+                    daily_by_symbol=daily, execution_by_symbol=execution_series,
+                    hourly_by_symbol=execution_series,
+                    execution_timeframe=spec.execution_timeframe,
+                    symbols=symbols,
+                    initial_weights=next(iter(spec.initial_portfolios.values())),
+                    initial_value=spec.initial_value_usd, start_at=spec.start_at,
+                    end_at=spec.end_at, policy=policy, semantic_score=None,
+                    evidence=evidence,
+                )
+                return rebind_initial_weights(
+                    built, spec.initial_portfolios[portfolio_name], spec.initial_value_usd,
+                )
+
+            reviews = build(evidence_plain)
+            structural_reviews = build(evidence_structural)
+            moments = [review.as_of for review in reviews]
+        ratio = ethbtc_ratio_series(daily["ETH"], daily["BTC"])
+        eth_eval = evaluate_relative_signals(
+            relative_signal_observations(ratio, moments),
+        )
+        structural_eval = structural_ranking_power(
+            evidence_structural, moments, prices=daily,
+        )
+        return {
+            "spec": spec, "policy": policy, "reviews": reviews,
+            "structural_reviews": None if not build_reviews else structural_reviews,
+            "daily": daily,
+            "risk_inputs": (
+                build_risk_inputs_for_reviews(reviews, daily_by_symbol=daily, policy=policy)
+                if reviews is not None else None
+            ),
+            "eth_eval": eth_eval, "structural_eval": structural_eval,
+            "moments": moments, "ratio": ratio,
+        }
+
+    primary = window(Path(args.dataset), build_reviews=True)
+    sister = window(Path(args.sister_dataset), build_reviews=False) if args.sister_dataset else None
+    eth_admission = evaluate_signal_admission({
+        "primary": primary["eth_eval"],
+        **({"sister": sister["eth_eval"]} if sister else {}),
+    })
+    structural_admission = structural_ranking_admission({
+        "primary": primary["structural_eval"],
+        **({"sister": sister["structural_eval"]} if sister else {}),
+    })
+    ladder = run_v22_ablation(
+        primary["reviews"], policy=primary["policy"],
+        daily_by_symbol=primary["daily"],
+        risk_inputs_by_review=primary["risk_inputs"],
+        structural_reviews=primary["structural_reviews"],
+        fee_bps=primary["spec"].fee_bps, slippage_bps=primary["spec"].slippage_bps,
+        git_sha=_git_sha(),
+        eth_tilt_admitted=bool(eth_admission["eth_tilt_admitted"]),
+        structural_admitted=bool(structural_admission["structural_admitted"]),
+    )
+    sister_ladder = None
+    if sister is not None and sister["reviews"] is None:
+        # The sister window only contributes evaluations here; the decision
+        # matrix records the single-window limitation honestly.
+        sister_ladder = None
+    result = assemble_v22_validation(
+        ladder, policy=primary["policy"], daily_by_symbol=primary["daily"],
+        eth_signal_evaluation=primary["eth_eval"],
+        eth_signal_admission=eth_admission,
+        structural_evaluation=primary["structural_eval"],
+        structural_admission=structural_admission,
+        sister_ladder_result=sister_ladder,
+        ethbtc_excess=ethbtc_forward_excess_summary(primary["ratio"], primary["moments"]),
+    )
+    result["window"] = {"start_at": primary["spec"].start_at, "end_at": primary["spec"].end_at}
+    result["run_id"] = primary["spec"].run_id
+    result["experiment"] = f"{args.scope}/strict"
+    path = Path(args.output) if args.output else Path(args.dataset) / "v22-validation.json"
+    from crypto_portfolio.research.v21_validation import validation_manifest
+    result["manifest"] = validation_manifest(
+        primary["policy"], git_sha=_git_sha(),
+        data_manifest=None,
+    )
+    _write(path, result)
+    print(json.dumps({
+        "status": "COMPLETED", "output": str(path),
+        "rungs": [rung.get("rung") for rung in result["rungs"]],
+        "eth_tilt_admitted": eth_admission["eth_tilt_admitted"],
+        "structural_admitted": structural_admission["structural_admitted"],
+    }, ensure_ascii=False, indent=2))
+
+
 def command_budget_sensitivity(args):
     from crypto_portfolio.research.sensitivity import drawdown_budget_sensitivity
     budgets = tuple(float(item) for item in str(args.budgets).split(",") if item.strip())
@@ -730,6 +884,14 @@ def parse_args(argv=None):
     v21.add_argument("--scope", default="full/core_existing")
     v21.add_argument("--output")
     v21.set_defaults(handler=command_v21)
+
+    v22 = sub.add_parser("v22")
+    v22.add_argument("dataset")
+    v22.add_argument("--scope", default="full/core_existing")
+    v22.add_argument("--sister-dataset", default=None,
+                     help="second validation window dataset for cross-window admission")
+    v22.add_argument("--output")
+    v22.set_defaults(handler=command_v22)
 
     sensitivity = sub.add_parser("budget-sensitivity")
     sensitivity.add_argument("dataset")
