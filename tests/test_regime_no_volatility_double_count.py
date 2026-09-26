@@ -184,6 +184,19 @@ class EfficiencyMetricTests(unittest.TestCase):
             ),
         )
 
+    def test_accepts_both_drawdown_key_spellings(self):
+        # Research metric tables use "max_drawdown"; performance_metrics
+        # uses "maximum_drawdown". Both must price identically.
+        research_keys = {"cagr": 0.20, "max_drawdown": -0.28}
+        performance_keys = {"cagr": 0.20, "maximum_drawdown": -0.28}
+        variant = {"cagr": 0.15, "max_drawdown": -0.23}
+        self.assertAlmostEqual(
+            cagr_sacrificed_per_maxdd_pp_saved(research_keys, variant), 1.0,
+        )
+        self.assertAlmostEqual(
+            cagr_sacrificed_per_maxdd_pp_saved(performance_keys, variant), 1.0,
+        )
+
 
 class PolicyContractTests(unittest.TestCase):
     def test_canonical_policy_is_r0(self):

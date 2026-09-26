@@ -676,7 +676,7 @@ def command_v23(args):
                 hourly_by_symbol=execution_series,
                 execution_timeframe=spec.execution_timeframe, symbols=symbols,
                 initial_weights=next(iter(spec.initial_portfolios.values())),
-                initial_value_usd=spec.initial_value_usd, start_at=spec.start_at,
+                initial_value=spec.initial_value_usd, start_at=spec.start_at,
                 end_at=spec.end_at, policy=policy, semantic_score=None,
                 evidence=evidence,
             ),
@@ -1168,6 +1168,16 @@ def parse_args(argv=None):
                      help="second validation window dataset for cross-window admission")
     v22.add_argument("--output")
     v22.set_defaults(handler=command_v22)
+
+    v23 = sub.add_parser("v23")
+    v23.add_argument("dataset")
+    v23.add_argument("--scope", default="full/core_existing")
+    v23.add_argument("--sister-dataset", default=None,
+                     help="second validation window dataset for cross-window admission")
+    v23.add_argument("--no-carry", action="store_true",
+                     help="run with the ZERO cash carry convention")
+    v23.add_argument("--output")
+    v23.set_defaults(handler=command_v23)
 
     sensitivity = sub.add_parser("budget-sensitivity")
     sensitivity.add_argument("dataset")

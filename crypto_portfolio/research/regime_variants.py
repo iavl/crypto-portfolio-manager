@@ -100,19 +100,23 @@ def cagr_sacrificed_per_maxdd_pp_saved(
     a variant that sacrificed CAGR AND deepened the drawdown has nothing to
     price and returns None.
     """
-    def value(table: Mapping[str, Any], key: str) -> float | None:
-        raw = table.get(key)
-        if raw is None:
-            return None
-        number = float(raw)
-        if not (number == number) or number in (float("inf"), float("-inf")):
-            return None
-        return number
+    def value(table: Mapping[str, Any], *keys: str) -> float | None:
+        # Metric tables use "max_drawdown" (research tables) or
+        # "maximum_drawdown" (performance_metrics); accept both spellings.
+        for key in keys:
+            raw = table.get(key)
+            if raw is None:
+                continue
+            number = float(raw)
+            if not (number == number) or number in (float("inf"), float("-inf")):
+                return None
+            return number
+        return None
 
     cagr_base = value(baseline, "cagr")
     cagr_variant = value(variant, "cagr")
-    dd_base = value(baseline, "maximum_drawdown")
-    dd_variant = value(variant, "maximum_drawdown")
+    dd_base = value(baseline, "max_drawdown", "maximum_drawdown")
+    dd_variant = value(variant, "max_drawdown", "maximum_drawdown")
     if None in (cagr_base, cagr_variant, dd_base, dd_variant):
         return None
     cagr_sacrificed_pp = (cagr_base - cagr_variant) * 100.0

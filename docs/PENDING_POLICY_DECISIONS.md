@@ -338,3 +338,29 @@ Risk-matched comparison added by this work (context for both items):
   BTC ran at 47.73% volatility and -52.97% maximum drawdown against the
   strategy's ~28% and ~-36%. Reporting it without the risk-matched line is
   what made an unequal-risk comparison look like a strategy verdict.
+
+---
+
+## Strategy V2.3 migration decisions (2026-09-26)
+
+Owner: Albert. Everything below is implemented, validated on both windows
+(`docs/STRATEGY_V23_VALIDATION.md`), and gated — the canonical
+`risk_engine.mode` switch is NOT applied until these are decided.
+
+1. **Drawdown budget mode**: `HARD_TARGET` (15% binds ex-ante crash sizing;
+   costs −3.4pp CAGR in 2024–present, +0.2pp in the bear window, MaxDD
+   −18%/−28% — breaches reduced, not eliminated) vs `WARNING_BAND` (15%
+   becomes a warning; you choose a `hard_stress_loss_limit` > 15%, never
+   derived from backtests).
+2. **Canonical migration to `volatility_budget`**: accept the policy
+   decision matrix (BNB alpha KEEP, stress budget / regime V2 / AAVE / ETH /
+   emergency FSM RESEARCH_ONLY) and stage per `docs/STRATEGY_V23_MIGRATION.md`.
+   Shadow dry-run: `scripts/shadow_allocation.py --risk-closes
+   <dataset>/series` (current book: stress cap binds, ETH/AAVE tilts locked,
+   resting AAVE BUY orders conflict with the V2.3 target).
+3. **Regime authority**: R1 (remove the volatility vote) dominates R0 in
+   the bull window and is roughly neutral in bear; accepting it means
+   flipping `regime_model.excluded_domains` to `["volatility"]`.
+4. **BNB tilt activation**: `rel_return_30d` is the only admitted signal on
+   both windows (single-signal ensemble — thin evidence; consider waiting
+   for a second admitting signal before enabling production authority).
