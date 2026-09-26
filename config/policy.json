@@ -820,6 +820,10 @@
     "provisional_cap": 0.79
   },
   "scoring_v3": {
+    "conviction": {
+      "market_entry_threshold": 67,
+      "structural_conviction_threshold": 67
+    },
     "families": {
       "default": {
         "market": {

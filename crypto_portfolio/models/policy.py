@@ -995,6 +995,34 @@ def _parse_scoring_v3_family_block(
     return parsed
 
 
+def _parse_scoring_v3_conviction(value: Any) -> dict[str, float]:
+    """Strategy V2.3 Phase 0 conviction thresholds.
+
+    FULL_CONVICTION requires BOTH families strong: the market family at or
+    above ``market_entry_threshold`` and the structural family at or above
+    ``structural_conviction_threshold`` (structural availability alone is not
+    bullishness). First round preregisters both at the existing satellite
+    entry threshold; they are not tuned.
+    """
+    if not isinstance(value, dict) or set(value) != {
+        "market_entry_threshold", "structural_conviction_threshold",
+    }:
+        raise PolicyError(
+            "scoring_v3.conviction must be an object with market_entry_threshold "
+            "and structural_conviction_threshold"
+        )
+    return {
+        "market_entry_threshold": _number(
+            value["market_entry_threshold"],
+            "scoring_v3.conviction.market_entry_threshold", minimum=0.0, maximum=100.0,
+        ),
+        "structural_conviction_threshold": _number(
+            value["structural_conviction_threshold"],
+            "scoring_v3.conviction.structural_conviction_threshold", minimum=0.0, maximum=100.0,
+        ),
+    }
+
+
 def _parse_scoring_v3(
     value: Any,
     profiles: Mapping[str, Mapping[str, float]],
@@ -1005,12 +1033,16 @@ def _parse_scoring_v3(
     whole profiles per asset symbol. Family weights are attribution-level
     only: the composite score keeps its canonical profile weights, and the
     families reuse the composite's reliability/coverage/normalization
-    semantics exactly.
+    semantics exactly. ``conviction`` carries the V2.3 Phase 0 dual-threshold
+    semantics for the conviction state.
     """
     if value is None:
         raise PolicyError("scoring_v3 is required")
-    if not isinstance(value, dict) or set(value) != {"families", "asset_families"}:
-        raise PolicyError("scoring_v3 must be an object with families and asset_families")
+    if not isinstance(value, dict) or set(value) != {"families", "asset_families", "conviction"}:
+        raise PolicyError(
+            "scoring_v3 must be an object with families, asset_families, and conviction"
+        )
+    conviction = _parse_scoring_v3_conviction(value["conviction"])
     raw_families = value["families"]
     if not isinstance(raw_families, dict) or not raw_families:
         raise PolicyError("scoring_v3.families must be a non-empty object")
@@ -1039,7 +1071,7 @@ def _parse_scoring_v3(
         asset_families[symbol] = _parse_scoring_v3_family_block(
             block, f"scoring_v3.asset_families.{symbol}"
         )
-    return {"families": families, "asset_families": asset_families}
+    return {"families": families, "asset_families": asset_families, "conviction": conviction}
 
 
 def _parse_regime_model(value: Any) -> dict[str, Any]:

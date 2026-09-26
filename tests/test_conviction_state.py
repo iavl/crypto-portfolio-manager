@@ -54,7 +54,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=self.MARKET, structural=self.NO_STRUCTURAL,
-                evidence_class="ACTIONABLE", hard_risk=False, entry_score=67,
+                evidence_class="ACTIONABLE", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "TACTICAL_ONLY",
         )
@@ -63,7 +64,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=self.MARKET, structural=self.STRUCTURAL,
-                evidence_class="ACTIONABLE", hard_risk=False, entry_score=67,
+                evidence_class="ACTIONABLE", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "FULL_CONVICTION",
         )
@@ -72,7 +74,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=self.NO_MARKET, structural=self.STRUCTURAL,
-                evidence_class="ACTIONABLE", hard_risk=False, entry_score=67,
+                evidence_class="ACTIONABLE", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "WATCH_ONLY",
         )
@@ -81,7 +84,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=self.MARKET, structural=self.STRUCTURAL,
-                evidence_class="NOT_ACTIONABLE", hard_risk=False, entry_score=67,
+                evidence_class="NOT_ACTIONABLE", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "NO_NEW_RISK",
         )
@@ -90,7 +94,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=self.MARKET, structural=self.STRUCTURAL,
-                evidence_class="ACTIONABLE", hard_risk=True, entry_score=67,
+                evidence_class="ACTIONABLE", hard_risk=True,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "HARD_EXIT",
         )
@@ -100,7 +105,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=self.MARKET, structural=self.STRUCTURAL,
-                evidence_class="LIMITED", hard_risk=False, entry_score=67,
+                evidence_class="LIMITED", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "FULL_CONVICTION",
         )
@@ -110,7 +116,8 @@ class PureConvictionStateTests(unittest.TestCase):
         self.assertEqual(
             conviction_state(
                 market=boundary, structural=self.STRUCTURAL,
-                evidence_class="ACTIONABLE", hard_risk=False, entry_score=67,
+                evidence_class="ACTIONABLE", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             ),
             "FULL_CONVICTION",
         )
@@ -119,7 +126,8 @@ class PureConvictionStateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "evidence_class"):
             conviction_state(
                 market=self.MARKET, structural=self.STRUCTURAL,
-                evidence_class="LOW", hard_risk=False, entry_score=67,
+                evidence_class="LOW", hard_risk=False,
+                market_entry_score=67, structural_conviction_score=67,
             )
 
 
