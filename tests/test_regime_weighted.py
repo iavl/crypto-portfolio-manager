@@ -125,8 +125,8 @@ class WeightedRegimeTests(unittest.TestCase):
         build_target_allocation(
             regime=first.regime,
             assessments={
-                "BTC": {"weighted_score": 50, "confidence": "HIGH", "capital_flows": 10},
-                "ETH": {"weighted_score": 60, "confidence": "HIGH", "relative_strength_vs_btc": 60},
+                "BTC": {"weighted_score": 50, "normalized_score": 50, "confidence": "HIGH", "capital_flows": 10},
+                "ETH": {"weighted_score": 60, "normalized_score": 60, "confidence": "HIGH", "relative_strength_vs_btc": 60},
             },
             current_weights={"BTC": 0.5, "ETH": 0.3, "USDT": 0.2},
         )

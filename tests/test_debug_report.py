@@ -18,7 +18,7 @@ def decision_packet():
         market_regime="NORMAL",
         current_weights={"ETH": 1},
         target_weights={"ETH": 1},
-        assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
+        assessments={"ETH": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
     )
 
 

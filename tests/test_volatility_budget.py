@@ -38,9 +38,9 @@ def _synthetic_inputs(vol_btc=0.6, vol_eth=0.7, rho=0.85):
 
 
 _ASSESSMENTS = {
-    "BTC": {"weighted_score": 70, "confidence": "HIGH"},
+    "BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"},
     "ETH": {
-        "weighted_score": 60, "confidence": "HIGH",
+        "weighted_score": 60, "normalized_score": 60, "confidence": "HIGH",
         "relative_strength_vs_btc": "OUTPERFORM",
     },
 }
@@ -179,13 +179,13 @@ class RiskEngineModeTests(unittest.TestCase):
         policy = _vol_policy()
         # SOL is satellite-eligible on a strong score but has no covariance row.
         assessments = {
-            "BTC": {"weighted_score": 70, "confidence": "HIGH"},
+            "BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"},
             "ETH": {
-                "weighted_score": 60, "confidence": "HIGH",
+                "weighted_score": 60, "normalized_score": 60, "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             },
             "SOL": {
-                "weighted_score": 90, "confidence": "HIGH",
+                "weighted_score": 90, "normalized_score": 90, "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             },
         }

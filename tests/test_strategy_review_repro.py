@@ -29,8 +29,8 @@ from crypto_portfolio.engine.regime import RegimeInputs, determine_regime
 from crypto_portfolio.engine.scoring import score_factors
 
 CORE = {
-    "BTC": {"weighted_score": 80, "confidence": "HIGH"},
-    "ETH": {"weighted_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+    "BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"},
+    "ETH": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
 }
 CURRENT = {"BTC": 0.5, "ETH": 0.2, "USDT": 0.2, "SOL": 0.1}
 ALL_FACTORS = {
@@ -44,7 +44,7 @@ def _sol_target(score: float) -> float:
         regime="NORMAL",
         assessments={
             **CORE,
-            "SOL": {"weighted_score": score, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"},
+            "SOL": {"weighted_score": score, "normalized_score": score, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"},
         },
         current_weights=CURRENT,
     )
@@ -79,6 +79,7 @@ class F2MissingDataExitTests(unittest.TestCase):
     def test_confirmed_negative_evidence_still_ineligible(self):
         assessment = {
             "weighted_score": 50,
+            "normalized_score": 50,
             "confidence": "HIGH",
             "critical_data_complete": True,
             "relative_strength_vs_btc": "UNDERPERFORM",
@@ -102,7 +103,7 @@ class F2MissingDataExitTests(unittest.TestCase):
             assessments={
                 **CORE,
                 "SOL": {
-                    "weighted_score": 50, "confidence": "LOW",
+                    "weighted_score": 50, "normalized_score": 50, "confidence": "LOW",
                     "critical_data_complete": False, "relative_strength_vs_btc": None,
                 },
             },
@@ -152,7 +153,7 @@ class F4DoubleDeploymentCapTests(unittest.TestCase):
             regime="NORMAL",
             assessments={
                 **CORE,
-                "SOL": {"weighted_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"},
+                "SOL": {"weighted_score": 85, "normalized_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"},
             },
             current_weights=CURRENT,
             decision_confidence={"score": 0.7},
@@ -236,7 +237,7 @@ class F5RelativeStrengthUnitTests(unittest.TestCase):
                     relative_strength_score({"relative_strength_vs_btc": invalid})
 
     def test_satellite_numeric_score_interpretation(self):
-        common = {"weighted_score": 85, "confidence": "HIGH", "critical_data_complete": True}
+        common = {"weighted_score": 85, "normalized_score": 85, "confidence": "HIGH", "critical_data_complete": True}
         self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 30}), "INELIGIBLE")
         self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 0.5}), "INELIGIBLE")
         self.assertEqual(satellite_eligibility({**common, "relative_strength_vs_btc": 50}), "ELIGIBLE_INCREASE")
@@ -443,7 +444,7 @@ class A3ScopeMismatchTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.1, "USDT": 0.2},
             target_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.0, "USDT": 0.3},
-            assessments={"AAVE": {"weighted_score": 60, "confidence": "MEDIUM"}},
+            assessments={"AAVE": {"weighted_score": 60, "normalized_score": 60, "confidence": "MEDIUM"}},
             actions=[{
                 "symbol": "AAVE", "action": "REDUCE", "amount_usd": 1000.0,
                 "current_weight": 0.1, "target_weight": 0.0,
@@ -501,7 +502,7 @@ class A3ScopeMismatchTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.1, "USDT": 0.2},
             target_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.0, "USDT": 0.3},
-            assessments={"AAVE": {"weighted_score": 60, "confidence": "MEDIUM"}},
+            assessments={"AAVE": {"weighted_score": 60, "normalized_score": 60, "confidence": "MEDIUM"}},
             actions=[{
                 "symbol": "AAVE", "action": "REDUCE", "amount_usd": 1000.0,
                 "current_weight": 0.1, "target_weight": 0.0,
@@ -527,7 +528,7 @@ class A3ScopeMismatchTests(unittest.TestCase):
                 market_regime="NORMAL",
                 current_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.1, "USDT": 0.2},
                 target_weights={"BTC": 0.5, "ETH": 0.2, "AAVE": 0.0, "USDT": 0.3},
-                assessments={"AAVE": {"weighted_score": 60, "confidence": "MEDIUM"}},
+                assessments={"AAVE": {"weighted_score": 60, "normalized_score": 60, "confidence": "MEDIUM"}},
                 actions=[{
                     "symbol": "AAVE", "action": "REDUCE", "amount_usd": 1000.0,
                     "current_weight": 0.1, "target_weight": 0.0,
@@ -586,7 +587,7 @@ class ReviewRound2Regressions(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"BTC": 0.5, "SOL": 0.1, "USDT": 0.4},
             target_weights={"BTC": 0.5, "SOL": 0.05, "USDT": 0.45},
-            assessments={"SOL": {"weighted_score": 60, "confidence": "MEDIUM"}},
+            assessments={"SOL": {"weighted_score": 60, "normalized_score": 60, "confidence": "MEDIUM"}},
             actions=[
                 {"symbol": "SOL", "action": "REDUCE", "amount_usd": 500.0, "current_weight": 0.1, "target_weight": 0.05},
                 {"symbol": "USDT", "action": "INCREASE", "amount_usd": 500.0, "current_weight": 0.4, "target_weight": 0.45},
@@ -617,7 +618,7 @@ class ReviewRound2Regressions(unittest.TestCase):
     def test_risk_tier_source_is_representation_independent(self):
         from crypto_portfolio.models.evidence import AssetAssessment
 
-        common = {"weighted_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
+        common = {"weighted_score": 85, "normalized_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         mapping_result = build_target_allocation(
             assessments={"SOL": {**common, "risk_tier": "normal"}})
         typed_result = build_target_allocation(

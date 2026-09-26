@@ -220,7 +220,7 @@ class PacketExplainabilityTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights=current,
             target_weights=target,
-            assessments={"AAVE": {"weighted_score": 74, "confidence": "HIGH"}},
+            assessments={"AAVE": {"weighted_score": 74, "normalized_score": 74, "confidence": "HIGH"}},
             actions=[action.as_dict() for action in result.actions],
         )
 
@@ -245,8 +245,8 @@ class PacketExplainabilityTests(unittest.TestCase):
         # leftover 1pp is constraint residual cash, not strategic stable.
         result = build_target_allocation(
             assessments={
-                "BTC": {"weighted_score": 65.52, "confidence": "HIGH"},
-                "ETH": {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "BTC": {"weighted_score": 65.52, "normalized_score": 65.52, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 83.78, "normalized_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
             },
             current_weights={"BTC": 0.40, "ETH": 0.30, "USDT": 0.30},
         )

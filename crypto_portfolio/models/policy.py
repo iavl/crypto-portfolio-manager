@@ -73,7 +73,10 @@ _TOP_LEVEL_FIELDS = {
     "regime_transitions",
     "regime_model",
     "scoring_families",
+    "scoring_v3",
 }
+_SCORING_V3_FAMILY_NAMES = ("market", "structural")
+_EVIDENCE_CLASSES = ("ACTIONABLE", "LIMITED", "NOT_ACTIONABLE")
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
 _REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity"}
 _REGIME_MODEL_MODES = {"vote_count", "weighted"}
@@ -201,6 +204,7 @@ _ALLOCATION_FIELDS = {
     "satellite_target_curve",
     "risk_tier_caps",
     "relative_strength",
+    "tactical_fraction",
 }
 _RELATIVE_STRENGTH_FIELDS = {"increase_min_score", "hard_block_below_score"}
 _RISK_TIER_CAP_FIELDS = {
@@ -279,6 +283,7 @@ _EXECUTION_FIELDS = {
     "zone_quality",
     "volatility_atr_percent",
     "confidence_deployment_factor",
+    "evidence_deployment_factor",
     "deployment_factor_composition",
     "max_initial_tranche",
     "tranche_templates",
@@ -921,6 +926,81 @@ def _parse_scoring_families(
     return parsed
 
 
+def _parse_scoring_v3_family_block(
+    block: Any, label: str
+) -> dict[str, dict[str, float]]:
+    if not isinstance(block, dict) or set(block) != set(_SCORING_V3_FAMILY_NAMES):
+        raise PolicyError(f"{label} must define exactly market and structural families")
+    parsed: dict[str, dict[str, float]] = {}
+    for raw_family, raw_factors in block.items():
+        family = str(raw_family).strip().lower()
+        if not isinstance(raw_factors, dict) or not raw_factors:
+            raise PolicyError(f"{label}.{family} must be a non-empty object")
+        weights: dict[str, float] = {}
+        for raw_factor, raw_weight in raw_factors.items():
+            factor = str(raw_factor).strip().lower()
+            if factor not in SCORING_FACTORS:
+                raise PolicyError(f"{label}.{family} references unknown factor {factor}")
+            if factor == "event_risk":
+                raise PolicyError(f"{label}.{family} cannot weight event_risk")
+            if factor in weights:
+                raise PolicyError(f"{label}.{family} contains duplicate factor {factor}")
+            weights[factor] = _fraction(
+                raw_weight, f"{label}.{family}.{factor}", exclusive_minimum=True
+            )
+        if not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+            raise PolicyError(f"{label}.{family} weights must sum to 1")
+        parsed[family] = weights
+    return parsed
+
+
+def _parse_scoring_v3(
+    value: Any,
+    profiles: Mapping[str, Mapping[str, float]],
+) -> dict[str, Any]:
+    """Strategy V2.1 Phase C market/structural scoring families.
+
+    ``families`` is keyed by scoring-profile name; ``asset_families`` overrides
+    whole profiles per asset symbol. Family weights are attribution-level
+    only: the composite score keeps its canonical profile weights, and the
+    families reuse the composite's reliability/coverage/normalization
+    semantics exactly.
+    """
+    if value is None:
+        raise PolicyError("scoring_v3 is required")
+    if not isinstance(value, dict) or set(value) != {"families", "asset_families"}:
+        raise PolicyError("scoring_v3 must be an object with families and asset_families")
+    raw_families = value["families"]
+    if not isinstance(raw_families, dict) or not raw_families:
+        raise PolicyError("scoring_v3.families must be a non-empty object")
+    families: dict[str, Any] = {}
+    for raw_name, block in raw_families.items():
+        name = str(raw_name).strip().lower()
+        if not name:
+            raise PolicyError("scoring_v3.families profile names must be non-empty")
+        if name in families:
+            raise PolicyError(f"scoring_v3.families contains duplicate profile {name}")
+        if name not in profiles:
+            raise PolicyError(f"scoring_v3.families references unknown scoring profile {name}")
+        families[name] = _parse_scoring_v3_family_block(
+            block, f"scoring_v3.families.{name}"
+        )
+    raw_asset_families = value["asset_families"]
+    if not isinstance(raw_asset_families, dict):
+        raise PolicyError("scoring_v3.asset_families must be an object")
+    asset_families: dict[str, Any] = {}
+    for raw_symbol, block in raw_asset_families.items():
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol or not all(character.isalnum() or character == "_" for character in symbol):
+            raise PolicyError("scoring_v3.asset_families keys must be asset symbols")
+        if symbol in asset_families:
+            raise PolicyError(f"scoring_v3.asset_families contains duplicate symbol {symbol}")
+        asset_families[symbol] = _parse_scoring_v3_family_block(
+            block, f"scoring_v3.asset_families.{symbol}"
+        )
+    return {"families": families, "asset_families": asset_families}
+
+
 def _parse_regime_model(value: Any) -> dict[str, Any]:
     if value is None:
         return {**_DEFAULT_REGIME_MODEL, "domain_weights": dict(_DEFAULT_REGIME_MODEL["domain_weights"]),
@@ -1073,6 +1153,7 @@ class Policy:
     regime_model: Mapping[str, Any] = dataclass_field(default_factory=dict)
     drawdown_budget_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
+    scoring_v3: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -1200,6 +1281,7 @@ class Policy:
         # Required top-level field: serialize even when empty so canonical
         # policy records round-trip through as_dict()/policy_from_mapping.
         result["scoring_families"] = _copy_mapping(self.scoring_families)
+        result["scoring_v3"] = _copy_mapping(self.scoring_v3)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -1440,6 +1522,31 @@ def _parse_execution(value: Any) -> dict[str, Any]:
         key: _fraction(item, f"execution.confidence_deployment_factor.{key}")
         for key, item in confidence_factor.items()
     }
+    # Evidence-permission deployment factors are keyed on the low-evidence
+    # contract classes, NOT on data-confidence bands: data confidence and
+    # deployment permission are distinct concepts, and LIMITED evidence
+    # (investable but below the high gate) must scale deployment rather than
+    # silently inheriting the LOW-band zero (Strategy V2.1 Phase C).
+    evidence_factor = value["evidence_deployment_factor"]
+    if not isinstance(evidence_factor, dict) or set(evidence_factor) != {
+        "ACTIONABLE", "LIMITED", "NOT_ACTIONABLE"
+    }:
+        raise PolicyError(
+            "execution.evidence_deployment_factor must contain ACTIONABLE, LIMITED, and NOT_ACTIONABLE"
+        )
+    parsed_evidence_factor = {
+        key: _fraction(item, f"execution.evidence_deployment_factor.{key}")
+        for key, item in evidence_factor.items()
+    }
+    if not (
+        parsed_evidence_factor["ACTIONABLE"]
+        >= parsed_evidence_factor["LIMITED"]
+        >= parsed_evidence_factor["NOT_ACTIONABLE"]
+    ):
+        raise PolicyError(
+            "execution.evidence_deployment_factor must be monotonic "
+            "ACTIONABLE >= LIMITED >= NOT_ACTIONABLE"
+        )
     composition_mode = str(value["deployment_factor_composition"]).strip().lower()
     if composition_mode not in _DEPLOYMENT_COMPOSITION_MODES:
         raise PolicyError(
@@ -1550,6 +1657,7 @@ def _parse_execution(value: Any) -> dict[str, Any]:
         "zone_quality": parsed_zone_quality,
         "volatility_atr_percent": volatility_limits,
         "confidence_deployment_factor": parsed_confidence_factor,
+        "evidence_deployment_factor": parsed_evidence_factor,
         "deployment_factor_composition": composition_mode,
         "max_initial_tranche": max_initial_parsed,
         "tranche_templates": parsed_templates,
@@ -2532,6 +2640,7 @@ def _parse_policy(
 
     parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
     parsed_scoring_families = _parse_scoring_families(data.get("scoring_families"), parsed_profiles)
+    parsed_scoring_v3 = _parse_scoring_v3(data.get("scoring_v3"), parsed_profiles)
     parsed_asset_profiles = _parse_asset_scoring_profiles(
         data.get("asset_scoring_profiles"), parsed_profiles
     )
@@ -2606,6 +2715,7 @@ def _parse_policy(
     _unknown_fields(allocation, _ALLOCATION_FIELDS, "allocation")
     common_allocation_fields = {
         "satellite_full_score", "risk_tier_caps", "satellite_target_curve", "relative_strength",
+        "tactical_fraction",
     }
     score_fields = {
         "satellite_entry_score",
@@ -2646,6 +2756,12 @@ def _parse_policy(
             allocation["satellite_full_score"], "allocation.satellite_full_score", minimum=0, maximum=100
         ),
         "risk_tier_caps": parsed_risk_tier_caps,
+        # TACTICAL_ONLY satellites ride the envelope at this fixed preregistered
+        # fraction instead of the score curve (Strategy V2.1 Phase C).
+        "tactical_fraction": _fraction(
+            allocation["tactical_fraction"], "allocation.tactical_fraction",
+            exclusive_minimum=True,
+        ),
     }
     parsed_allocation["satellite_entry_score"] = _number(
         allocation["satellite_entry_score"],
@@ -2777,6 +2893,7 @@ def _parse_policy(
         regime_model=parsed_regime_model,
         drawdown_budget_overlay=parsed_overlay,
         scoring_families=parsed_scoring_families,
+        scoring_v3=parsed_scoring_v3,
     )
     return policy
 

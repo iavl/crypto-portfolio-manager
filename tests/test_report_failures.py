@@ -56,7 +56,7 @@ def report_decision(asset="ETH", review_type="SNAPSHOT_REVIEW"):
         market_regime="NORMAL",
         current_weights={asset: 1},
         target_weights={asset: 1},
-        assessments={asset: {"weighted_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
+        assessments={asset: {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
     )
 
 

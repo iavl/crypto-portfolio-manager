@@ -117,7 +117,7 @@ class AaveRefactorTests(unittest.TestCase):
         self.assertEqual(restored.factor_scores["trend"].source_quality, 0.5)
 
     def test_medium_confidence_and_elevated_event_keep_the_same_target(self):
-        common = {"weighted_score": 85, "relative_strength_vs_btc": "OUTPERFORM"}
+        common = {"weighted_score": 85, "normalized_score": 85, "relative_strength_vs_btc": "OUTPERFORM"}
         high = build_target_allocation(assessments={"AAVE": {**common, "confidence": "HIGH"}})
         medium = build_target_allocation(assessments={"AAVE": {**common, "confidence": "MEDIUM"}})
         elevated = build_target_allocation(assessments={
@@ -138,7 +138,13 @@ class AaveRefactorTests(unittest.TestCase):
         # curve fills it; a full-score manual tier reaches exactly 12.5%.
         self.assertAlmostEqual(manual.deployment_allowances["AAVE"]["risk_envelope_weight"], 0.125)
         self.assertAlmostEqual(manual.target_weights["AAVE"], 0.125)
-        self.assertLess(medium.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
+        # Phase C: the confidence band no longer gates deployment; the
+        # evidence class does (LIMITED coverage halves it, events cap it).
+        self.assertEqual(medium.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
+        limited = build_target_allocation(assessments={
+            "AAVE": {**common, "score_coverage": 0.75}
+        })
+        self.assertLess(limited.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
         self.assertLess(elevated.deployment_factors["AAVE"], high.deployment_factors["AAVE"])
 
     def test_deployment_restriction_cannot_create_reduce(self):
@@ -156,18 +162,21 @@ class AaveRefactorTests(unittest.TestCase):
         self.assertEqual(action.action_reason, "CONFIDENCE_LIMIT")
         self.assertAlmostEqual(action.execution_target_weight, 0.05)
 
-    def test_low_confidence_position_has_zero_immediate_allowance(self):
+    def test_not_actionable_evidence_has_zero_immediate_allowance(self):
+        # Phase C: the evidence class, not the confidence label, gates
+        # deployment — coverage below the investable floor blocks new risk.
         result = build_target_allocation(assessments={
-            "AAVE": {"weighted_score": 85, "confidence": "LOW", "relative_strength_vs_btc": "OUTPERFORM"}
+            "AAVE": {"weighted_score": 85, "normalized_score": 85, "confidence": "LOW", "score_coverage": 0.5, "relative_strength_vs_btc": "OUTPERFORM"}
         })
-        self.assertGreater(result.target_weights["AAVE"], 0)
+        self.assertEqual(result.target_weights.get("AAVE", 0), 0)
+        self.assertEqual(result.deployment_allowances["AAVE"]["evidence_class"], "NOT_ACTIONABLE")
         self.assertEqual(result.deployment_allowances["AAVE"]["max_immediate_increase_weight"], 0)
 
     def test_decision_confidence_keeps_portfolio_data_independent_from_asset_evidence(self):
         packet = build_decision_review_packet(
             current_weights={"BTC": 0.8, "USDT": 0.2},
             target_weights={"BTC": 0.8, "USDT": 0.2},
-            assessments={"BTC": {"weighted_score": 70, "confidence": "LOW", "confidence_score": 0.2}},
+            assessments={"BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "LOW", "confidence_score": 0.2}},
         )
         components = packet.decision_confidence.components
         self.assertEqual(components["portfolio_data"]["score"], 1.0)

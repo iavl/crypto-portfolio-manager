@@ -30,7 +30,7 @@ class ProvenanceTests(unittest.TestCase):
     def test_measured_tier_keeps_its_source_through_allocation(self):
         policy = load_policy()
         assessment = {
-            "weighted_score": 90, "confidence": "HIGH",
+            "weighted_score": 90, "normalized_score": 90, "confidence": "HIGH",
             "relative_strength_vs_btc": "OUTPERFORM",
             "risk_tier": "high_beta",
             "risk_tier_source": "DETERMINISTIC_ESTIMATE",
@@ -67,7 +67,7 @@ class SecondaryConstraintTests(unittest.TestCase):
     def test_measured_high_beta_competes_for_the_full_envelope_under_vol_budget(self):
         policy = _vol_policy()
         base = {
-            "weighted_score": 90, "confidence": "HIGH",
+            "weighted_score": 90, "normalized_score": 90, "confidence": "HIGH",
             "relative_strength_vs_btc": "OUTPERFORM",
         }
         measured = {

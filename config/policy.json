@@ -423,7 +423,8 @@
     "relative_strength": {
       "increase_min_score": 50,
       "hard_block_below_score": 30
-    }
+    },
+    "tactical_fraction": 0.3
   },
   "core_allocation": {
     "anchor": {
@@ -641,7 +642,12 @@
     },
     "resting_order_match_tolerance": 0.02,
     "resting_order_full_fraction": 0.95,
-    "resting_order_partial_fraction": 0.05
+    "resting_order_partial_fraction": 0.05,
+    "evidence_deployment_factor": {
+      "ACTIONABLE": 1.0,
+      "LIMITED": 0.5,
+      "NOT_ACTIONABLE": 0.0
+    }
   },
   "confidence": {
     "band_thresholds": {
@@ -802,5 +808,58 @@
   "nav_history": {
     "unresolved_flow_cap": 0.79,
     "provisional_cap": 0.79
+  },
+  "scoring_v3": {
+    "families": {
+      "default": {
+        "market": {
+          "trend": 0.45,
+          "relative_strength_btc": 0.3,
+          "capital_flows": 0.25
+        },
+        "structural": {
+          "valuation": 0.3,
+          "fundamentals": 0.45,
+          "onchain": 0.25
+        }
+      },
+      "btc": {
+        "market": {
+          "trend": 0.6,
+          "capital_flows": 0.4
+        },
+        "structural": {
+          "btc_valuation": 0.55,
+          "macro_liquidity": 0.45
+        }
+      },
+      "defi_protocol": {
+        "market": {
+          "trend": 0.55,
+          "relative_strength_btc": 0.3,
+          "capital_flows": 0.15
+        },
+        "structural": {
+          "fundamentals": 0.55,
+          "valuation": 0.25,
+          "onchain": 0.2
+        }
+      }
+    },
+    "asset_families": {
+      "ETH": {
+        "market": {
+          "trend": 0.4,
+          "relative_strength_btc": 0.25,
+          "capital_flows": 0.2,
+          "onchain": 0.15
+        },
+        "structural": {
+          "valuation": 0.3,
+          "fundamentals": 0.45,
+          "onchain": 0.25
+        }
+      }
+    }
   }
 }

@@ -10,8 +10,8 @@ import unittest
 
 from crypto_portfolio.engine.allocation import build_target_allocation
 
-BTC = {"weighted_score": 65.52, "confidence": "HIGH"}
-ETH = {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70}
+BTC = {"weighted_score": 65.52, "normalized_score": 65.52, "confidence": "HIGH"}
+ETH = {"weighted_score": 83.78, "normalized_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70}
 
 
 class CoreWaterFillTests(unittest.TestCase):
@@ -25,10 +25,10 @@ class CoreWaterFillTests(unittest.TestCase):
         result = build_target_allocation(
             regime="NORMAL",
             assessments={
-                "BTC": {"weighted_score": 80, "confidence": "HIGH"},
-                "ETH": {"weighted_score": 60, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 60, "normalized_score": 60, "confidence": "HIGH", "relative_strength_vs_btc": 70},
                 "SOL": {
-                    "weighted_score": 50, "confidence": "LOW",
+                    "weighted_score": 50, "normalized_score": 50, "confidence": "LOW",
                     "critical_data_complete": False, "relative_strength_vs_btc": None,
                 },
             },
@@ -68,9 +68,11 @@ class CoreWaterFillTests(unittest.TestCase):
         )
         weights = result.target_weights
         self.assertAlmostEqual(weights["BTC"], 0.50, places=6)
-        self.assertAlmostEqual(weights["ETH"], 0.093825, places=5)
+        # ETH raw share uses the narrowed [0.85, 1.15] core quality
+        # multiplier (Strategy V2.1 Phase C): 83.78 -> 1.1013.
+        self.assertAlmostEqual(weights["ETH"], 0.086127, places=5)
         stable = sum(weight for symbol, weight in weights.items() if symbol not in {"BTC", "ETH"})
-        self.assertAlmostEqual(stable, 0.406175, places=5)
+        self.assertAlmostEqual(stable, 0.413873, places=5)
 
 
 if __name__ == "__main__":

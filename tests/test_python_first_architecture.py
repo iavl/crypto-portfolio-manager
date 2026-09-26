@@ -272,7 +272,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"ETH": 0.9, "USD": 0.1},
             target_weights={"ETH": 0.9, "USD": 0.1},
-            assessments={"ETH": {"weighted_score": 75, "confidence": "HIGH", "factor_scores": {"trend": 75}}},
+            assessments={"ETH": {"weighted_score": 75, "normalized_score": 75, "confidence": "HIGH", "factor_scores": {"trend": 75}}},
             factor_packets={"ETH": factor_packet},
         )
         report = build_report_packet(packet)
@@ -303,7 +303,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"ETH": 1},
             target_weights={"ETH": 1},
-            assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
+            assessments={"ETH": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
         )
         report = build_report_packet(packet)
         output = build_final_review_output(report)
@@ -321,7 +321,7 @@ class PythonFirstArchitectureTests(unittest.TestCase):
             current_weights={"ETH": 1},
             target_weights={"ETH": 1},
             previous_target_weights={"ETH": 0.8, "USD": 0.2},
-            assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
+            assessments={"ETH": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "factor_scores": {"trend": 70}}},
             factor_packets={"ETH": factor_packet},
         )
         self.assertTrue(should_run_high_impact_review(packet))

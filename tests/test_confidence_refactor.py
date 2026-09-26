@@ -113,9 +113,9 @@ class ConfidenceRefactorTests(unittest.TestCase):
             current_weights={"BTC": 0.60, "ETH": 0.25, "USDT": 0.15},
             target_weights={"BTC": 0.60, "ETH": 0.25, "USDT": 0.15},
             assessments={
-                "BTC": {"weighted_score": 70, "confidence": "HIGH", "confidence_score": 0.90},
-                "ETH": {"weighted_score": 68, "confidence": "HIGH", "confidence_score": 0.85},
-                "AAVE": {"weighted_score": 70, "confidence": "LOW", "confidence_score": 0.25},
+                "BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "confidence_score": 0.90},
+                "ETH": {"weighted_score": 68, "normalized_score": 68, "confidence": "HIGH", "confidence_score": 0.85},
+                "AAVE": {"weighted_score": 70, "normalized_score": 70, "confidence": "LOW", "confidence_score": 0.25},
             },
         )
         self.assertGreaterEqual(packet.decision_confidence.score, 0.60)
@@ -148,7 +148,7 @@ class ConfidenceRefactorTests(unittest.TestCase):
         packet = build_decision_review_packet(
             current_weights={"BTC": 1.0},
             target_weights={"BTC": 1.0},
-            assessments={"BTC": {"weighted_score": 70, "confidence": "HIGH", "confidence_score": 0.9}},
+            assessments={"BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "confidence_score": 0.9}},
             manual_asset_contexts=(context,),
         )
         self.assertEqual(packet.manual_asset_contexts[0].source, "MANUAL_USER_INPUT")
@@ -157,7 +157,7 @@ class ConfidenceRefactorTests(unittest.TestCase):
         without_context = build_decision_review_packet(
             current_weights={"BTC": 1.0},
             target_weights={"BTC": 1.0},
-            assessments={"BTC": {"weighted_score": 70, "confidence": "HIGH", "confidence_score": 0.9}},
+            assessments={"BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH", "confidence_score": 0.9}},
         )
         self.assertEqual(packet.decision_confidence.score, without_context.decision_confidence.score)
 

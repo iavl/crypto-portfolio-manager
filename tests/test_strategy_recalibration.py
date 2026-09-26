@@ -123,7 +123,7 @@ class StrategyRecalibrationTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"BTC": 0.49, "USDT": 0.51},
             target_weights={"BTC": 0.50, "USDT": 0.50},
-            assessments={"BTC": {"weighted_score": 90, "confidence": "HIGH"}},
+            assessments={"BTC": {"weighted_score": 90, "normalized_score": 90, "confidence": "HIGH"}},
             no_trade_attribution=explicit,
         )
         self.assertEqual(packet.no_trade_attribution, explicit)
@@ -150,13 +150,20 @@ class StrategyRecalibrationTests(unittest.TestCase):
     def test_confidence_event_and_drawdown_safety_scenarios(self):
         common = {
             "weighted_score": 100,
+            "normalized_score": 100,
             "relative_strength_vs_btc": "OUTPERFORM",
         }
         low_confidence = build_target_allocation(
             assessments={"SOL": {**common, "confidence": "LOW"}}
         )
         self.assertGreater(low_confidence.target_weights.get("SOL", 0), 0)
-        self.assertEqual(low_confidence.deployment_factors["SOL"], 0)
+        # Phase C: a LOW confidence label with complete evidence no longer
+        # zeroes deployment; not-actionable evidence does.
+        self.assertGreater(low_confidence.deployment_factors["SOL"], 0)
+        not_actionable = build_target_allocation(
+            assessments={"SOL": {**common, "confidence": "LOW", "score_coverage": 0.5}}
+        )
+        self.assertEqual(not_actionable.deployment_factors["SOL"], 0)
         self.assertEqual(
             build_target_allocation(
                 assessments={"SOL": {**common, "confidence": "HIGH", "event_risk": {"state": "SEVERE"}}}

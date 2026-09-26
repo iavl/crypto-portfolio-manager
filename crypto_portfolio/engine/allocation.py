@@ -23,6 +23,7 @@ from .portfolio_risk import (
 from .risk import risk_overlay_floor
 from .risk_tier import tier_strategic_fraction
 from .scoring import low_evidence_contract, score_assessment
+from .scoring_v3 import asset_conviction_state, comparison_score_space
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,13 @@ def _relative_eligibility(value: Any, policy: Policy | None = None) -> str:
 
 
 def _core_quality_multiplier(score: float) -> float:
-    return min(1.5, max(0.5, 0.5 + score / 100.0))
+    """Unvalidated scores get narrow sizing authority (Strategy V2.1 Phase C).
+
+    The composite score's ranking power is not yet demonstrated, so the core
+    quality multiplier is preregistered to [0.85, 1.15] instead of the earlier
+    [0.5, 1.5]: an unproven alpha signal must not double or halve core sizing.
+    """
+    return min(1.15, max(0.85, 0.85 + 0.30 * score / 100.0))
 
 
 def _btc_core_state(assessment: Any) -> str:
@@ -427,6 +434,7 @@ def satellite_eligibility(
     policy: Policy | None = None,
     *,
     current_weight: float = 0.0,
+    conviction: Mapping[str, Any] | None = None,
 ) -> str:
     """Classify whether a satellite may receive new risk this review.
 
@@ -438,11 +446,32 @@ def satellite_eligibility(
     rules).  Eligibility gates deployment, never the shape of the target
     curve, so a state transition at the entry score cannot collapse target
     sizing.
+
+    Score thresholds are compared in the NORMALIZED space only (Strategy
+    V2.1 Phase C): when the normalized score is unavailable the effective
+    diagnostic score never substitutes for it — the conviction state decides
+    between a conviction-driven entry and the fail-defensive preserve path.
     """
     resolved = policy or resolve_policy()
     if isinstance(assessment, AssetAssessment) and assessment.weighted_score is None:
         assessment, _ = score_assessment(assessment, policy=resolved)
-    score = _score(assessment, "satellite") if assessment is not None else 50.0
+    if conviction is None and assessment is not None:
+        # Direct callers may pass a scored assessment without the
+        # pre-computed conviction block; derive it when the symbol is known
+        # so the missing-market guard works on every call path.
+        symbol = (
+            assessment.symbol if isinstance(assessment, AssetAssessment)
+            else assessment.get("symbol") if isinstance(assessment, Mapping) else None
+        )
+        if symbol:
+            conviction = asset_conviction_state(assessment, policy=resolved, symbol=symbol)
+    normalized = _field(assessment, "normalized_score") if assessment is not None else None
+    held = current_weight > 0
+    conviction_state_value = (
+        str(conviction.get("conviction_state")) if conviction is not None else None
+    )
+    if conviction_state_value == "HARD_EXIT":
+        return "INELIGIBLE"
     relative = _field(assessment, "relative_strength_vs_btc") if assessment is not None else None
     if isinstance(current_weight, bool) or not isinstance(current_weight, (int, float)):
         raise ValueError("current_weight must be numeric")
@@ -451,7 +480,6 @@ def satellite_eligibility(
     entry_score = resolved.allocation["satellite_entry_score"]
     exit_score = resolved.allocation.get("satellite_exit_score", entry_score)
     soft_exit_score = resolved.allocation.get("satellite_soft_exit_score", exit_score)
-    held = current_weight > 0
     # Confirmed hard risk first: a broken thesis or severe event is never
     # masked by data availability in either direction.
     if _event_risk_state(assessment) in {"SEVERE", "CRITICAL"} or _flag(
@@ -463,11 +491,40 @@ def satellite_eligibility(
     # score; missing evidence is the opposite signal and handled below.
     if relative_status == "INELIGIBLE":
         return "INELIGIBLE"
-    if _incomplete_evidence(assessment, resolved) or _unresolved_event(assessment):
-        # Missing factors shrink the score toward neutral; the neutral score
-        # alone must not manufacture an exit for a held position, and an
-        # unheld one receives no target at all.
+    # Entry-critical evidence gates every new-risk path: the BTC-relative
+    # comparison itself, the critical-data flag, and unresolved events.
+    # Missing STRUCTURAL factors no longer land here — they route through
+    # the conviction state instead (TACTICAL_ONLY earns a small tactical
+    # slice; FULL_CONVICTION needs the structural case evidenced).
+    if (
+        _relative_missing(relative)
+        or not _flag(_field(assessment, "critical_data_complete", True), "critical_data_complete")
+        or _unresolved_event(assessment)
+    ):
         return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+    missing_market = (
+        tuple(conviction.get("missing_market_factors") or ())
+        if conviction is not None and conviction.get("factor_detail_present") else ()
+    )
+    if missing_market:
+        # A missing MARKET factor makes the tactical case itself unevidenced:
+        # preserve a held position, never let the shrunk neutral score
+        # manufacture a soft exit. Missing structural factors do not land
+        # here — they cap conviction instead (TACTICAL_ONLY).
+        return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+    if conviction_state_value == "NO_NEW_RISK":
+        return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+    if normalized is None:
+        # No normalized comparison score exists: the effective score is a
+        # diagnostic and never enters threshold comparison. A conviction
+        # strong enough to justify risk (FULL_CONVICTION/TACTICAL_ONLY) may
+        # still enter; everything else is fail-defensive.
+        if conviction_state_value in {"FULL_CONVICTION", "TACTICAL_ONLY"}:
+            if relative_status == "HOLD_ONLY":
+                return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+            return "ELIGIBLE_INCREASE"
+        return "HOLD_OR_REDUCE" if held else "INELIGIBLE"
+    score = float(normalized)
     if score < soft_exit_score:
         # Evidence-complete hard score floor: the exit is supported by the
         # score itself, not by missing data.
@@ -745,25 +802,69 @@ def build_target_allocation(
                 raise ValueError(
                     "risk_tier_source must be POLICY_DEFAULT, MANUAL_ASSESSMENT, or DETERMINISTIC_ESTIMATE"
                 )
-            # Phase 4: a measured tier is a secondary constraint under the
-            # volatility-budget engine (full envelope, hard caps still bound);
-            # manual and policy-default tiers keep their configured fraction.
-            risk_tier_cap_fraction = tier_strategic_fraction(
-                risk_tier, source=risk_tier_source, policy=resolved,
+            # Scoring V3 attribution (Strategy V2.1 Phase C): market and
+            # structural family scores, the conviction state, and which score
+            # space the threshold comparison is allowed to run in.
+            conviction = (
+                asset_conviction_state(assessment, policy=resolved, symbol=symbol)
+                if assessment is not None else None
+            )
+            conviction_name = (
+                str(conviction["conviction_state"]) if conviction is not None else "WATCH_ONLY"
+            )
+            score_space = (
+                str(conviction["comparison_score_space"]) if conviction is not None
+                else comparison_score_space(None, None)
+            )
+            evidence_class = (
+                str(conviction["evidence_class"]) if conviction is not None else "ACTIONABLE"
             )
             held_weight = normalized_current_weights.get(symbol, 0.0)
             state = satellite_eligibility(
                 assessment,
                 resolved,
                 current_weight=held_weight,
+                conviction=conviction,
             )
-            curve_fraction = satellite_target_fraction(
-                score,
-                soft_exit_score=resolved.allocation["satellite_soft_exit_score"],
-                exit_score=resolved.allocation["satellite_exit_score"],
-                entry_score=resolved.allocation["satellite_entry_score"],
-                full_score=resolved.allocation["satellite_full_score"],
-                curve=resolved.allocation["satellite_target_curve"],
+            # Threshold comparisons run in the NORMALIZED space only. The
+            # composite normalized score is the comparison score; when it is
+            # unavailable but both families support full conviction, the
+            # normalized market score (same normalized space) substitutes.
+            normalized_value = (
+                _field(assessment, "normalized_score") if assessment is not None else None
+            )
+            if normalized_value is not None:
+                comparison_score = float(normalized_value)
+                score_authority = "COMPOSITE_NORMALIZED"
+            elif conviction_name == "FULL_CONVICTION" and conviction is not None and conviction["normalized_market_score"] is not None:
+                comparison_score = float(conviction["normalized_market_score"])
+                score_authority = "MARKET_NORMALIZED"
+            else:
+                comparison_score = None
+                score_authority = "NONE"
+            tactical_fraction = float(resolved.allocation["tactical_fraction"])
+            if conviction_name == "TACTICAL_ONLY" and state == "ELIGIBLE_INCREASE":
+                # The plan's key behavior: a strong market case without
+                # structural evidence earns a small tactical slice of the
+                # envelope instead of a zero-eligibility dead end.
+                curve_fraction = tactical_fraction
+                score_authority = "TACTICAL_FRACTION"
+            elif comparison_score is not None:
+                curve_fraction = satellite_target_fraction(
+                    comparison_score,
+                    soft_exit_score=resolved.allocation["satellite_soft_exit_score"],
+                    exit_score=resolved.allocation["satellite_exit_score"],
+                    entry_score=resolved.allocation["satellite_entry_score"],
+                    full_score=resolved.allocation["satellite_full_score"],
+                    curve=resolved.allocation["satellite_target_curve"],
+                )
+            else:
+                curve_fraction = 0.0
+            # A measured tier is a secondary constraint under the
+            # volatility-budget engine (full envelope, hard caps still bound);
+            # manual and policy-default tiers keep their configured fraction.
+            risk_tier_cap_fraction = tier_strategic_fraction(
+                risk_tier, source=risk_tier_source, policy=resolved,
             )
             # The risk tier defines the asset's risk envelope: the strategic
             # target is the score curve evaluated INSIDE that envelope (a
@@ -776,10 +877,17 @@ def build_target_allocation(
                 1.0, risk_envelope_weight + hard_cap_buffer_pp / 100.0
             )
             requested_strategic_weight = risk_envelope_weight * curve_fraction
+            # Evidence permission is keyed on the low-evidence contract
+            # classes, not on the data-confidence band: LIMITED evidence
+            # scales deployment by its own factor instead of inheriting the
+            # LOW-band zero (Phase C). The band label stays for attribution.
+            evidence_permission_factor = float(
+                resolved.execution["evidence_deployment_factor"][evidence_class]
+            )
             deployment_factor = (
                 compose_deployment_factors(
                     {
-                        "asset_confidence": asset_confidence_factor,
+                        "evidence_permission": evidence_permission_factor,
                         "event_risk": event_multiplier,
                         "decision_confidence": decision_confidence_factor,
                         "execution_overlay": execution_overlay_factor,
@@ -826,6 +934,23 @@ def build_target_allocation(
                 "hard_exposure_cap": hard_exposure_cap,
                 "asset_confidence": confidence,
                 "confidence_deployment_factor": asset_confidence_factor,
+                "evidence_deployment_factor": evidence_permission_factor,
+                "conviction_state": conviction_name,
+                "market_score": conviction["market_score"] if conviction is not None else None,
+                "market_coverage": conviction["market_coverage"] if conviction is not None else None,
+                "normalized_market_score": (
+                    conviction["normalized_market_score"] if conviction is not None else None
+                ),
+                "structural_score": conviction["structural_score"] if conviction is not None else None,
+                "structural_coverage": conviction["structural_coverage"] if conviction is not None else None,
+                "normalized_structural_score": (
+                    conviction["normalized_structural_score"] if conviction is not None else None
+                ),
+                "comparison_score_space": score_space,
+                "final_score_authority": score_authority,
+                "tactical_fraction": (
+                    tactical_fraction if score_authority == "TACTICAL_FRACTION" else None
+                ),
                 "event_risk": event_risk,
                 "event_risk_deployment_factor": event_multiplier,
                 "decision_confidence_factor": decision_confidence_factor,
@@ -838,9 +963,36 @@ def build_target_allocation(
                     f"{symbol} receives 0% satellite target because hard eligibility failed "
                     "(score floor, broken thesis, severe event, or confirmed severe BTC-relative weakness)"
                 )
+            elif state == "ELIGIBLE_INCREASE":
+                strategic_satellite_raw[symbol] = requested_strategic_weight
+                if score_authority == "TACTICAL_FRACTION":
+                    reasons.append(
+                        f"{symbol} is TACTICAL_ONLY: market score {conviction['normalized_market_score']:.1f} "
+                        f"is strong without usable structural evidence, so the strategic target rides "
+                        f"{tactical_fraction:.0%} of the risk envelope instead of the score curve"
+                    )
+                else:
+                    reasons.append(
+                        f"{symbol} risk tier {risk_tier} bounds the strategic target by the "
+                        f"{risk_envelope_weight:.2%} risk envelope; the score curve fills up to it "
+                        f"(full score {resolved.allocation['satellite_full_score']:.0f} reaches the envelope)"
+                    )
+                if event_multiplier < 1.0:
+                    reasons.append(
+                        f"{symbol} event-risk state {event_risk} limits immediate deployment to {event_multiplier:.0%}"
+                    )
+                if evidence_permission_factor < 1.0:
+                    reasons.append(
+                        f"{symbol} immediate deployment is capped by {evidence_class} evidence at "
+                        f"{evidence_permission_factor:.0%}"
+                    )
+                if decision_confidence_factor < 1.0:
+                    reasons.append(f"{symbol} new deployment is capped by portfolio decision confidence at {decision_confidence_factor:.0%}")
             elif _incomplete_evidence(assessment, resolved) or _unresolved_event(assessment):
                 # Fail-defensive preserve bucket: missing evidence blocks new
                 # risk and never manufactures an exit for a held position.
+                # A conviction-driven entry never lands here: its
+                # entry-critical evidence was checked inside eligibility.
                 if held_weight > 0:
                     satellite_hold[symbol] = held_weight
                     deployment_allowances[symbol]["preserve_existing"] = True
@@ -852,22 +1004,7 @@ def build_target_allocation(
                     reasons.append(
                         f"{symbol} has incomplete evidence and no position; no satellite target is created"
                     )
-            elif state == "ELIGIBLE_INCREASE":
-                strategic_satellite_raw[symbol] = requested_strategic_weight
-                reasons.append(
-                    f"{symbol} risk tier {risk_tier} bounds the strategic target by the "
-                    f"{risk_envelope_weight:.2%} risk envelope; the score curve fills up to it "
-                    f"(full score {resolved.allocation['satellite_full_score']:.0f} reaches the envelope)"
-                )
-                if event_multiplier < 1.0:
-                    reasons.append(
-                        f"{symbol} event-risk state {event_risk} limits immediate deployment to {event_multiplier:.0%}"
-                    )
-                if asset_confidence_factor < 1.0:
-                    reasons.append(f"{symbol} immediate deployment is capped by asset confidence at {asset_confidence_factor:.0%}")
-                if decision_confidence_factor < 1.0:
-                    reasons.append(f"{symbol} new deployment is capped by portfolio decision confidence at {decision_confidence_factor:.0%}")
-            elif held_weight > 0:
+            elif held_weight > 0 and comparison_score is not None:
                 # Evidence-complete sub-entry band: the strategic target rides
                 # the same score curve, so crossing the entry score later
                 # cannot jump the target, and deployment stays blocked.
@@ -876,6 +1013,17 @@ def build_target_allocation(
                 reasons.append(
                     f"{symbol} is {state}: the strategic target follows the score curve through "
                     f"{band} and no new risk may be added this review"
+                )
+            elif held_weight > 0:
+                # Held without a normalized comparison score: the effective
+                # score is diagnostic-only, so no curve position exists. The
+                # fail-defensive preserve bucket keeps the position without
+                # adding risk and without manufacturing an exit.
+                satellite_hold[symbol] = held_weight
+                deployment_allowances[symbol]["preserve_existing"] = True
+                reasons.append(
+                    f"{symbol} has no normalized comparison score this review; the existing "
+                    "position is preserved without adding risk"
                 )
             else:
                 reasons.append(

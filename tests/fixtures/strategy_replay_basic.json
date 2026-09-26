@@ -14,23 +14,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 72,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 72
         },
         "ETH": {
           "weighted_score": 78,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 56
+          "relative_strength_vs_btc": 56,
+          "normalized_score": 78
         },
         "AAVE": {
           "weighted_score": 71,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 51
+          "relative_strength_vs_btc": 51,
+          "normalized_score": 71
         },
         "SOL": {
           "weighted_score": 74,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 53
+          "relative_strength_vs_btc": 53,
+          "normalized_score": 74
         }
       },
       "regime_inputs": {
@@ -63,23 +67,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 74,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 74
         },
         "ETH": {
           "weighted_score": 80,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 56
+          "relative_strength_vs_btc": 56,
+          "normalized_score": 80
         },
         "AAVE": {
           "weighted_score": 73,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 51
+          "relative_strength_vs_btc": 51,
+          "normalized_score": 73
         },
         "SOL": {
           "weighted_score": 76,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 53
+          "relative_strength_vs_btc": 53,
+          "normalized_score": 76
         }
       },
       "regime_inputs": {
@@ -112,23 +120,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 70,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 70
         },
         "ETH": {
           "weighted_score": 76,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 56
+          "relative_strength_vs_btc": 56,
+          "normalized_score": 76
         },
         "AAVE": {
           "weighted_score": 69,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 51
+          "relative_strength_vs_btc": 51,
+          "normalized_score": 69
         },
         "SOL": {
           "weighted_score": 72,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 53
+          "relative_strength_vs_btc": 53,
+          "normalized_score": 72
         }
       },
       "regime_inputs": {
@@ -161,23 +173,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 66,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 66
         },
         "ETH": {
           "weighted_score": 71,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 55
+          "relative_strength_vs_btc": 55,
+          "normalized_score": 71
         },
         "AAVE": {
           "weighted_score": 63,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 49
+          "relative_strength_vs_btc": 49,
+          "normalized_score": 63
         },
         "SOL": {
           "weighted_score": 66,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 51
+          "relative_strength_vs_btc": 51,
+          "normalized_score": 66
         }
       },
       "regime_inputs": {
@@ -210,23 +226,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 65,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 65
         },
         "ETH": {
           "weighted_score": 69,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 54
+          "relative_strength_vs_btc": 54,
+          "normalized_score": 69
         },
         "AAVE": {
           "weighted_score": 60,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 47
+          "relative_strength_vs_btc": 47,
+          "normalized_score": 60
         },
         "SOL": {
           "weighted_score": 62,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 48
+          "relative_strength_vs_btc": 48,
+          "normalized_score": 62
         }
       },
       "regime_inputs": {
@@ -259,23 +279,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 69,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 69
         },
         "ETH": {
           "weighted_score": 74,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 55
+          "relative_strength_vs_btc": 55,
+          "normalized_score": 74
         },
         "AAVE": {
           "weighted_score": 66,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 49
+          "relative_strength_vs_btc": 49,
+          "normalized_score": 66
         },
         "SOL": {
           "weighted_score": 69,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 51
+          "relative_strength_vs_btc": 51,
+          "normalized_score": 69
         }
       },
       "regime_inputs": {
@@ -308,23 +332,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 72,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 72
         },
         "ETH": {
           "weighted_score": 78,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 56
+          "relative_strength_vs_btc": 56,
+          "normalized_score": 78
         },
         "AAVE": {
           "weighted_score": 70,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 50
+          "relative_strength_vs_btc": 50,
+          "normalized_score": 70
         },
         "SOL": {
           "weighted_score": 73,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 52
+          "relative_strength_vs_btc": 52,
+          "normalized_score": 73
         }
       },
       "regime_inputs": {
@@ -357,23 +385,27 @@
       "assessments": {
         "BTC": {
           "weighted_score": 74,
-          "confidence": "HIGH"
+          "confidence": "HIGH",
+          "normalized_score": 74
         },
         "ETH": {
           "weighted_score": 81,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 57
+          "relative_strength_vs_btc": 57,
+          "normalized_score": 81
         },
         "AAVE": {
           "weighted_score": 74,
           "confidence": "HIGH",
           "risk_tier": "high_beta",
-          "relative_strength_vs_btc": 52
+          "relative_strength_vs_btc": 52,
+          "normalized_score": 74
         },
         "SOL": {
           "weighted_score": 77,
           "confidence": "HIGH",
-          "relative_strength_vs_btc": 54
+          "relative_strength_vs_btc": 54,
+          "normalized_score": 77
         }
       },
       "regime_inputs": {

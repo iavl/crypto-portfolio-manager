@@ -337,7 +337,7 @@ class EventScannerTests(unittest.TestCase):
             market_regime="NORMAL",
             current_weights={"ETH": 1.0},
             target_weights={"ETH": 1.0},
-            assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH"}},
+            assessments={"ETH": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"}},
         )
         with self.assertRaisesRegex(RuntimeError, "external resolution"):
             build_report_packet(packet, acquisition=first)

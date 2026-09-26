@@ -38,9 +38,9 @@ _MARKET_CALM = {
 }
 
 _ASSESSMENTS = {
-    "BTC": {"weighted_score": 70, "confidence": "HIGH"},
+    "BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"},
     "ETH": {
-        "weighted_score": 60, "confidence": "HIGH",
+        "weighted_score": 60, "normalized_score": 60, "confidence": "HIGH",
         "relative_strength_vs_btc": "OUTPERFORM",
     },
 }

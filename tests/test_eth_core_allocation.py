@@ -28,7 +28,7 @@ class EthCoreAllocationTests(unittest.TestCase):
             if event_risk:
                 assessment["event_risk"] = {"state": event_risk}
             result = build_target_allocation(
-                assessments={"BTC": {"weighted_score": 80, "confidence": "HIGH"}, "ETH": assessment}
+                assessments={"BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"}, "ETH": assessment}
             )
             return result.target_weights.get("ETH", 0)
 
@@ -42,13 +42,13 @@ class EthCoreAllocationTests(unittest.TestCase):
     def test_hold_only_does_not_increase_existing_eth(self):
         result = build_target_allocation(
             current_weights={"BTC": 0.6, "ETH": 0.1, "USDT": 0.3},
-            assessments={"BTC": {"weighted_score": 80, "confidence": "HIGH"}, "ETH": self.assessment(relative=None)},
+            assessments={"BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"}, "ETH": self.assessment(relative=None)},
         )
         self.assertLessEqual(result.target_weights.get("ETH", 0), 0.1 + 1e-9)
 
     def test_allocation_accepts_chain_liveness_gate(self):
         result = build_target_allocation(
-            assessments={"BTC": {"weighted_score": 80, "confidence": "HIGH"}, "ETH": self.assessment()},
+            assessments={"BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"}, "ETH": self.assessment()},
             chain_liveness={"ETH": "HALTED"},
         )
         self.assertEqual(result.target_weights.get("ETH", 0), 0)
@@ -56,7 +56,7 @@ class EthCoreAllocationTests(unittest.TestCase):
     def test_equal_quality_uses_configured_anchor_when_caps_allow(self):
         result = build_target_allocation(
             assessments={
-                "BTC": {"weighted_score": 50, "confidence": "HIGH"},
+                "BTC": {"weighted_score": 50, "normalized_score": 50, "confidence": "HIGH"},
                 "ETH": self.assessment(score=55, confidence="HIGH", relative=50),
             },
         )
@@ -66,7 +66,7 @@ class EthCoreAllocationTests(unittest.TestCase):
     def test_both_core_assets_blocked_leave_residual_stable(self):
         result = build_target_allocation(
             assessments={
-                "BTC": {"weighted_score": 80, "confidence": "LOW"},
+                "BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "LOW"},
                 "ETH": self.assessment(confidence="LOW", relative=None),
             },
         )

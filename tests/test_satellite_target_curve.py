@@ -20,8 +20,8 @@ from crypto_portfolio.engine.allocation import (
 from crypto_portfolio.models.policy import load_policy
 
 CORE = {
-    "BTC": {"weighted_score": 80, "confidence": "HIGH"},
-    "ETH": {"weighted_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+    "BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"},
+    "ETH": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
 }
 CURRENT = {"BTC": 0.5, "ETH": 0.2, "USDT": 0.2, "SOL": 0.1}
 
@@ -31,6 +31,7 @@ def _sol_target(score: float, *, held: bool = True, risk_tier: str | None = None
     weights = dict(CURRENT if held else {"BTC": 0.5, "ETH": 0.3, "USDT": 0.2})
     assessment = {
         "weighted_score": score,
+        "normalized_score": score,
         "confidence": "HIGH",
         "relative_strength_vs_btc": "OUTPERFORM",
     }
@@ -179,10 +180,10 @@ class RiskTierCapTests(unittest.TestCase):
         return build_target_allocation(
             regime="NORMAL",
             assessments={
-                "BTC": {"weighted_score": 65.52, "confidence": "HIGH"},
-                "ETH": {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "BTC": {"weighted_score": 65.52, "normalized_score": 65.52, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 83.78, "normalized_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
                 "AAVE": {
-                    "weighted_score": score, "confidence": "HIGH",
+                    "weighted_score": score, "normalized_score": score, "confidence": "HIGH",
                     "risk_tier": "high_beta", "relative_strength_vs_btc": "OUTPERFORM",
                 },
             },
@@ -231,10 +232,10 @@ class RiskTierCapTests(unittest.TestCase):
         result_normal = build_target_allocation(
             regime="NORMAL",
             assessments={
-                "BTC": {"weighted_score": 65.52, "confidence": "HIGH"},
-                "ETH": {"weighted_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "BTC": {"weighted_score": 65.52, "normalized_score": 65.52, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 83.78, "normalized_score": 83.78, "confidence": "HIGH", "relative_strength_vs_btc": 70},
                 "AAVE": {
-                    "weighted_score": 73.88, "confidence": "HIGH",
+                    "weighted_score": 73.88, "normalized_score": 73.88, "confidence": "HIGH",
                     "risk_tier": "normal", "relative_strength_vs_btc": "OUTPERFORM",
                 },
             },
@@ -250,7 +251,7 @@ class RiskTierCapTests(unittest.TestCase):
 class RelativeStrengthGateTests(unittest.TestCase):
     """Two-threshold BTC-relative gate: moderate weakness is not a hard block."""
 
-    COMMON = {"weighted_score": 85, "confidence": "HIGH", "critical_data_complete": True}
+    COMMON = {"weighted_score": 85, "normalized_score": 85, "confidence": "HIGH", "critical_data_complete": True}
 
     def test_numeric_threshold_split(self):
         cases = {
@@ -316,8 +317,8 @@ class RelativeStrengthGateTests(unittest.TestCase):
             result = build_target_allocation(
                 regime="NORMAL",
                 assessments={
-                    "BTC": {"weighted_score": 80, "confidence": "HIGH"},
-                    "ETH": {"weighted_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                    "BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"},
+                    "ETH": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
                     "SOL": {**self.COMMON, "relative_strength_vs_btc": relative},
                 },
                 current_weights=weights,
@@ -336,8 +337,8 @@ class RelativeStrengthGateTests(unittest.TestCase):
         result = build_target_allocation(
             regime="NORMAL",
             assessments={
-                "BTC": {"weighted_score": 80, "confidence": "HIGH"},
-                "ETH": {"weighted_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
+                "BTC": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH"},
+                "ETH": {"weighted_score": 80, "normalized_score": 80, "confidence": "HIGH", "relative_strength_vs_btc": 70},
                 "SOL": {**self.COMMON, "relative_strength_vs_btc": 20},
             },
             current_weights={"BTC": 0.5, "ETH": 0.3, "SOL": 0.1, "USDT": 0.1},

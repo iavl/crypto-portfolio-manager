@@ -184,8 +184,8 @@ class OverlayAllocationTests(unittest.TestCase):
     def setUp(self):
         self.policy = load_policy()
         self.assessments = {
-            "BTC": {"weighted_score": 60.0, "confidence": "MEDIUM"},
-            "ETH": {"weighted_score": 55.0, "confidence": "MEDIUM"},
+            "BTC": {"weighted_score": 60.0, "normalized_score": 60.0, "confidence": "MEDIUM"},
+            "ETH": {"weighted_score": 55.0, "normalized_score": 55.0, "confidence": "MEDIUM"},
         }
         self.current = {"BTC": 0.39, "ETH": 0.16, "USDT": 0.45}
 
@@ -270,8 +270,8 @@ class OverlayRebalanceTests(unittest.TestCase):
     def setUp(self):
         self.policy = load_policy()
         self.assessments = {
-            "BTC": {"weighted_score": 60.0, "confidence": "MEDIUM"},
-            "ETH": {"weighted_score": 55.0, "confidence": "MEDIUM"},
+            "BTC": {"weighted_score": 60.0, "normalized_score": 60.0, "confidence": "MEDIUM"},
+            "ETH": {"weighted_score": 55.0, "normalized_score": 55.0, "confidence": "MEDIUM"},
         }
         self.current = {"BTC": 0.39, "ETH": 0.16, "USDT": 0.45}
 

@@ -12,8 +12,8 @@ from crypto_portfolio.engine.scoring import score_factors
 class AllocationRiskRebalanceTests(unittest.TestCase):
     def test_allocation_is_bounded_and_deterministic(self):
         assessments = {
-            "SOL": {"weighted_score": 90, "confidence": "HIGH"},
-            "AAVE": {"weighted_score": 75, "confidence": "MEDIUM"},
+            "SOL": {"weighted_score": 90, "normalized_score": 90, "confidence": "HIGH"},
+            "AAVE": {"weighted_score": 75, "normalized_score": 75, "confidence": "MEDIUM"},
         }
         first = build_target_allocation(regime="NORMAL", assessments=assessments)
         second = build_target_allocation(regime="NORMAL", assessments=assessments)
@@ -23,20 +23,34 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         satellite_weight = sum(first.target_weights.get(symbol, 0) for symbol in ("SOL", "AAVE", "BNB"))
         self.assertLessEqual(satellite_weight, 0.25)
 
-    def test_low_confidence_satellite_has_no_immediate_deployment(self):
-        result = build_target_allocation(
-            assessments={"SOL": {"weighted_score": 95, "confidence": "LOW", "relative_strength_vs_btc": "OUTPERFORM"}}
+    def test_evidence_permission_replaces_the_confidence_label(self):
+        # Phase C: data confidence and deployment permission are distinct. A
+        # LOW confidence label with complete, high-coverage evidence deploys
+        # normally; the evidence class alone decides permission.
+        complete = build_target_allocation(
+            assessments={"SOL": {"weighted_score": 95, "normalized_score": 95, "confidence": "LOW", "relative_strength_vs_btc": "OUTPERFORM"}}
         )
-        self.assertGreater(result.target_weights.get("SOL", 0), 0)
-        self.assertEqual(result.deployment_factors["SOL"], 0)
-        self.assertEqual(result.deployment_allowances["SOL"]["max_immediate_increase_weight"], 0)
+        self.assertGreater(complete.target_weights.get("SOL", 0), 0)
+        self.assertGreater(complete.deployment_factors["SOL"], 0)
+        not_actionable = build_target_allocation(
+            assessments={"SOL": {"weighted_score": 95, "normalized_score": 95, "confidence": "HIGH", "score_coverage": 0.5, "relative_strength_vs_btc": "OUTPERFORM"}}
+        )
+        # Below the investable coverage floor an unheld satellite receives no
+        # target at all, and deployment is zero.
+        self.assertEqual(not_actionable.target_weights.get("SOL", 0), 0)
+        self.assertEqual(not_actionable.deployment_factors["SOL"], 0)
+        self.assertEqual(not_actionable.deployment_allowances["SOL"]["max_immediate_increase_weight"], 0)
+        limited = build_target_allocation(
+            assessments={"SOL": {"weighted_score": 95, "normalized_score": 95, "confidence": "HIGH", "score_coverage": 0.75, "relative_strength_vs_btc": "OUTPERFORM"}}
+        )
+        self.assertAlmostEqual(limited.deployment_factors["SOL"], 0.5)
 
     def test_capital_preservation_reduces_risky_exposure(self):
         normal = build_target_allocation(
-            regime="NORMAL", assessments={"SOL": {"weighted_score": 90, "confidence": "HIGH"}}
+            regime="NORMAL", assessments={"SOL": {"weighted_score": 90, "normalized_score": 90, "confidence": "HIGH"}}
         )
         capital = build_target_allocation(
-            regime="CAPITAL_PRESERVATION", assessments={"SOL": {"weighted_score": 90, "confidence": "HIGH"}}
+            regime="CAPITAL_PRESERVATION", assessments={"SOL": {"weighted_score": 90, "normalized_score": 90, "confidence": "HIGH"}}
         )
         normal_stable = sum(normal.target_weights.get(symbol, 0) for symbol in ("USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"))
         capital_stable = sum(capital.target_weights.get(symbol, 0) for symbol in ("USDT", "USDC", "DAI", "FDUSD", "TUSD", "USD", "CASH"))
@@ -67,7 +81,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         policy = resolve_policy()
         allocation = build_target_allocation(
             policy=policy,
-            assessments={"LUNC": {"weighted_score": 100, "confidence": "HIGH"}},
+            assessments={"LUNC": {"weighted_score": 100, "normalized_score": 100, "confidence": "HIGH"}},
             current_weights={"BTC": 0.7, "USDT": 0.1, "LUNC": 0.2},
         )
         self.assertNotIn("LUNC", allocation.target_weights)
@@ -175,6 +189,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
                 assessments={
                     "SOL": {
                         "weighted_score": score,
+                        "normalized_score": score,
                         "confidence": confidence,
                         "risk_tier": risk_tier,
                         "relative_strength_vs_btc": "OUTPERFORM",
@@ -183,15 +198,17 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
             )
 
         self.assertEqual(weight(score=66).target_weights.get("SOL", 0), 0)
-        self.assertEqual(satellite_eligibility({"weighted_score": 67, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}), "ELIGIBLE_INCREASE")
+        self.assertEqual(satellite_eligibility({"weighted_score": 67, "normalized_score": 67, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}), "ELIGIBLE_INCREASE")
         self.assertLess(weight(score=70).target_weights["SOL"], weight(score=80).target_weights["SOL"])
         self.assertEqual(weight(confidence="MEDIUM").target_weights["SOL"], weight(confidence="HIGH").target_weights["SOL"])
-        self.assertLess(weight(confidence="MEDIUM").deployment_factors["SOL"], weight(confidence="HIGH").deployment_factors["SOL"])
+        # Phase C: the confidence band no longer scales deployment; evidence
+        # coverage does.
+        self.assertEqual(weight(confidence="MEDIUM").deployment_factors["SOL"], weight(confidence="HIGH").deployment_factors["SOL"])
         self.assertLess(weight(risk_tier="high_beta").target_weights["SOL"], weight(risk_tier="normal").target_weights["SOL"])
         self.assertLessEqual(weight().target_weights["SOL"], 0.25)
 
     def test_event_deployment_restriction_does_not_change_strategic_target(self):
-        common = {"weighted_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
+        common = {"weighted_score": 85, "normalized_score": 85, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         normal = build_target_allocation(assessments={"AAVE": common})
         elevated = build_target_allocation(
             assessments={"AAVE": {**common, "event_risk": {"state": "ELEVATED"}}}
@@ -200,10 +217,10 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         self.assertLess(elevated.deployment_factors["AAVE"], normal.deployment_factors["AAVE"])
 
     def test_satellite_score_hysteresis(self):
-        assessment = {"weighted_score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
+        assessment = {"weighted_score": 66, "normalized_score": 66, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}
         self.assertEqual(satellite_eligibility(assessment), "INELIGIBLE")
         self.assertEqual(satellite_eligibility(assessment, current_weight=0.05), "HOLD_OR_REDUCE")
-        soft_band = {**assessment, "weighted_score": 61}
+        soft_band = {**assessment, "weighted_score": 61, "normalized_score": 61}
         self.assertEqual(satellite_eligibility(soft_band, current_weight=0.05), "SOFT_EXIT")
         self.assertEqual(satellite_eligibility(soft_band), "INELIGIBLE")
         result = build_target_allocation(assessments={"SOL": assessment}, current_weights={"SOL": 0.05, "USDT": 0.1, "BTC": 0.85})
@@ -217,17 +234,17 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         # at score 59) instead of facing the full-exit cliff one point
         # below the exit floor.
         soft = build_target_allocation(
-            assessments={"SOL": {**common, "weighted_score": 59}},
+            assessments={"SOL": {**common, "weighted_score": 59, "normalized_score": 59}},
             current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
         )
         self.assertAlmostEqual(soft.target_weights["SOL"], 0.02)
         below_band = build_target_allocation(
-            assessments={"SOL": {**common, "weighted_score": 50}},
+            assessments={"SOL": {**common, "weighted_score": 50, "normalized_score": 50}},
             current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
         )
         self.assertAlmostEqual(below_band.target_weights.get("SOL", 0), 0.0)
         broken_relative = build_target_allocation(
-            assessments={"SOL": {**common, "weighted_score": 59, "relative_strength_vs_btc": "MATERIALLY_WEAK"}},
+            assessments={"SOL": {**common, "weighted_score": 59, "normalized_score": 59, "relative_strength_vs_btc": "MATERIALLY_WEAK"}},
             current_weights={"SOL": 0.10, "USDT": 0.15, "BTC": 0.75},
         )
         # Materially weak BTC-relative evidence overrides the soft band.
@@ -238,21 +255,21 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
 
     def test_missing_relative_strength_is_hold_only(self):
         new_risk = build_target_allocation(
-            assessments={"SOL": {"weighted_score": 90, "confidence": "HIGH"}}
+            assessments={"SOL": {"weighted_score": 90, "normalized_score": 90, "confidence": "HIGH"}}
         )
         existing = build_target_allocation(
             current_weights={"SOL": 0.05, "USDT": 0.1, "BTC": 0.85},
-            assessments={"SOL": {"weighted_score": 90, "confidence": "HIGH"}},
+            assessments={"SOL": {"weighted_score": 90, "normalized_score": 90, "confidence": "HIGH"}},
         )
         self.assertEqual(new_risk.target_weights.get("SOL", 0), 0)
         self.assertAlmostEqual(existing.target_weights.get("SOL", 0), 0.05)
 
     def test_event_risk_is_independent_from_base_score(self):
         normal = build_target_allocation(
-            assessments={"SOL": {"weighted_score": 100, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}}
+            assessments={"SOL": {"weighted_score": 100, "normalized_score": 100, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM"}}
         )
         critical = build_target_allocation(
-            assessments={"SOL": {"weighted_score": 100, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM", "event_risk": {"state": "CRITICAL"}}}
+            assessments={"SOL": {"weighted_score": 100, "normalized_score": 100, "confidence": "HIGH", "relative_strength_vs_btc": "OUTPERFORM", "event_risk": {"state": "CRITICAL"}}}
         )
         self.assertGreater(normal.target_weights.get("SOL", 0), 0)
         self.assertEqual(critical.target_weights.get("SOL", 0), 0)
@@ -273,6 +290,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
                     "SOL",
                     {},
                     weighted_score=90,
+                    normalized_score=90,
                     confidence="HIGH",
                     asset_type="satellite",
                     relative_strength_vs_btc="OUTPERFORM",
@@ -283,7 +301,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
         mapped = build_target_allocation(
             assessments={
                 "SOL": {
-                    "weighted_score": 90,
+                    "weighted_score": 90, "normalized_score": 90,
                     "confidence": "HIGH",
                     "relative_strength_vs_btc": "OUTPERFORM",
                     "thesis_broken": True,
@@ -295,7 +313,7 @@ class AllocationRiskRebalanceTests(unittest.TestCase):
     def test_worse_regimes_reduce_satellite_capacity_and_risk(self):
         assessment = {
             "SOL": {
-                "weighted_score": 85,
+                "weighted_score": 85, "normalized_score": 85,
                 "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             }

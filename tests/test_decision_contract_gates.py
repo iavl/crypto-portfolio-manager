@@ -170,7 +170,7 @@ class DecisionContractGateTests(unittest.TestCase):
         packet = build_decision_review_packet(
             current_weights={"ETH": 0.9, "USDT": 0.1},
             target_weights={"ETH": 0.9, "USDT": 0.1},
-            assessments={"ETH": {"weighted_score": 70, "confidence": "HIGH"}},
+            assessments={"ETH": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"}},
             execution_plans={"ETH": plan.as_dict()},
         )
         self.assertEqual(packet.execution_plans["ETH"]["symbol"], "ETH")
@@ -181,7 +181,7 @@ class DecisionContractGateTests(unittest.TestCase):
         packet = build_decision_review_packet(
             current_weights={"BTC": 0.5, "USDT": 0.5},
             target_weights={"BTC": 0.6, "USDT": 0.4},
-            assessments={"BTC": {"weighted_score": 70, "confidence": "HIGH"}},
+            assessments={"BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"}},
         )
         self.assertEqual(packet.review_diagnostics["availability"], "UNAVAILABLE")
         self.assertEqual(packet.target_attribution["availability"], "UNAVAILABLE")
