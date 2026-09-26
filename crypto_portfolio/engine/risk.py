@@ -462,9 +462,16 @@ def run_risk_gate(
     overlay_floor, _overlay_reason, _overlay_state = risk_overlay_floor(
         resolved, current_drawdown, market_recovery_streak
     )
-    required_stable = max(
-        resolved.min_stablecoin_weight, limits.stablecoin_target, overlay_floor
-    )
+    # Legacy mode stacks the regime stable target on the global floor. The
+    # volatility-budget engine gives the regime its sizing authority through
+    # the target-volatility multiplier instead, so only the policy minimum
+    # and the emergency overlay floor bind here.
+    if (resolved.risk_engine or {}).get("mode", "legacy_drawdown") == "volatility_budget":
+        required_stable = max(resolved.min_stablecoin_weight, overlay_floor)
+    else:
+        required_stable = max(
+            resolved.min_stablecoin_weight, limits.stablecoin_target, overlay_floor
+        )
     if stable_weight + 1e-9 < required_stable:
         violations.append(
             RiskViolation(

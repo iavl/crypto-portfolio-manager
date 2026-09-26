@@ -313,6 +313,8 @@ def run_historical_backtest(
     replayed_decisions: list[dict[str, Any]] = []
     review_rows: list[dict[str, Any]] = []
     regime_counts: Counter[str] = Counter()
+    market_regime_counts: Counter[str] = Counter()
+    effective_target_volatilities: list[float] = []
     constraint_violations: Counter[str] = Counter()
     plan_counts: Counter[str] = Counter()
     market_recovery_streak = 0
@@ -350,9 +352,16 @@ def run_historical_backtest(
             if market_only_regime(market_streak_inputs, policy=resolved) == "NORMAL"
             else 0
         )
-        regime = determine_regime(RegimeInputs(**regime_values), policy=resolved, previous=previous_regime)
+        # Volatility-budget mode removes the portfolio's own drawdown from the
+        # regime label; drawdown risk acts only through the emergency overlay.
+        risk_mode = (resolved.risk_engine or {}).get("mode", "legacy_drawdown")
+        regime = determine_regime(
+            RegimeInputs(**regime_values), policy=resolved, previous=previous_regime,
+            include_portfolio_drawdown=risk_mode != "volatility_budget",
+        )
         previous_regime = regime
         regime_counts[regime.regime] += 1
+        market_regime_counts[market_only_regime(market_streak_inputs, policy=resolved)] += 1
         # Deterministic diagnostics: the exposure the strategy carried into
         # the period, whether the regime label sat on its own-drawdown floor,
         # and whether the drawdown budget overlay raised the stable floor
@@ -518,6 +527,9 @@ def run_historical_backtest(
             volatility = engine_block.get("portfolio_volatility")
             if isinstance(volatility, (int, float)) and volatility > 0:
                 risk_engine_volatilities.append(float(volatility))
+            effective_target = engine_block.get("effective_target_volatility")
+            if isinstance(effective_target, (int, float)):
+                effective_target_volatilities.append(float(effective_target))
             emergency = engine_block.get("emergency_overlay_state") or {}
             if isinstance(emergency, Mapping) and emergency.get("state") is not None:
                 risk_engine_states[str(emergency["state"])] += 1
@@ -653,6 +665,22 @@ def run_historical_backtest(
         "total_cost_usd": sum(row["cost_usd"] for row in review_rows),
         "average_cash_weight": sum(item.weights.get("USD", 0.0) for item in ledger.valuations) / len(ledger.valuations),
         "regime_counts": dict(regime_counts), "plan_status_counts": dict(plan_counts),
+        "risk_authority_separation": {
+            # In volatility-budget mode the regime label must never move with
+            # the portfolio's own drawdown; the market-only distribution and
+            # the YES/NO flag make the separation auditable per report.
+            "drawdown_influenced_regime": "NO" if risk_engine_mode == "volatility_budget" else "YES",
+            "market_only_regime_counts": dict(sorted(market_regime_counts.items())),
+            "effective_target_volatility": {
+                "reviews": len(effective_target_volatilities),
+                "average": (
+                    sum(effective_target_volatilities) / len(effective_target_volatilities)
+                    if effective_target_volatilities else None
+                ),
+                "min": min(effective_target_volatilities) if effective_target_volatilities else None,
+                "max": max(effective_target_volatilities) if effective_target_volatilities else None,
+            },
+        },
         "risk_engine_diagnostics": {
             "mode": risk_engine_mode,
             "average_estimated_portfolio_volatility": (

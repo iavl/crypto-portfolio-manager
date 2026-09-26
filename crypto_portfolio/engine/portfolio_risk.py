@@ -310,6 +310,51 @@ def _risky_weights(value: Mapping[str, Any]) -> dict[str, float]:
     return result
 
 
+def regime_target_volatility_multiplier(
+    regime: str,
+    scaling: Mapping[str, Mapping[str, float]],
+) -> float:
+    """Configured target-volatility multiplier for one regime label.
+
+    ``scaling`` is ``risk_engine.regime_risk_scaling`` as resolved by the
+    policy model: every regime label must be present, so an unknown label is
+    an error rather than a silent 1.0.
+    """
+    name = str(regime).strip().upper()
+    entry = scaling.get(name) if isinstance(scaling, Mapping) else None
+    if not isinstance(entry, Mapping):
+        raise ValueError(f"regime_risk_scaling has no entry for regime {name}")
+    multiplier = _finite_float(
+        entry.get("target_volatility_multiplier"),
+        f"regime_risk_scaling.{name}.target_volatility_multiplier",
+    )
+    if not 0 < multiplier <= 1:
+        raise ValueError(
+            f"regime_risk_scaling.{name}.target_volatility_multiplier must be in (0, 1]"
+        )
+    return multiplier
+
+
+def effective_target_volatility(
+    base_target_volatility: float,
+    regime_volatility_multiplier: float,
+) -> float:
+    """``base_target_volatility x regime_volatility_multiplier``.
+
+    The regime scales the target-volatility band instead of the stable sleeve:
+    NORMAL keeps the full band, defensive regimes shrink it. The result can
+    never exceed the configured base target, so the max-volatility ceiling
+    stays intact without re-validation here.
+    """
+    base = _finite_float(base_target_volatility, "base_target_volatility")
+    multiplier = _finite_float(regime_volatility_multiplier, "regime_volatility_multiplier")
+    if base <= 0 or not 0 < multiplier <= 1:
+        raise ValueError(
+            "base_target_volatility must be positive and the multiplier in (0, 1]"
+        )
+    return base * multiplier
+
+
 def volatility_budget_scale(
     portfolio_volatility_value: float,
     *,
@@ -622,10 +667,12 @@ __all__ = [
     "combined_risk_cap",
     "correlation_matrix",
     "daily_returns",
+    "effective_target_volatility",
     "emergency_drawdown_state",
     "marginal_risk_contributions",
     "pearson_correlation",
     "portfolio_volatility",
     "realized_volatility",
+    "regime_target_volatility_multiplier",
     "volatility_budget_scale",
 ]

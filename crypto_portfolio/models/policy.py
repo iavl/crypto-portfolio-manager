@@ -111,7 +111,8 @@ _STRESS_SCENARIO_NAMES = {
     "stablecoin_depeg",
 }
 _RISK_ENGINE_MODES = {"legacy_drawdown", "volatility_budget"}
-_RISK_ENGINE_FIELDS = {"mode", "portfolio_risk", "emergency_overlay"}
+_RISK_ENGINE_FIELDS = {"mode", "portfolio_risk", "emergency_overlay", "regime_risk_scaling"}
+_REGIME_RISK_SCALING_REGIMES = {"NORMAL", "DEFENSIVE", "CAPITAL_PRESERVATION"}
 _RISK_ENGINE_PORTFOLIO_FIELDS = {
     "target_volatility",
     "max_volatility",
@@ -709,6 +710,33 @@ def _parse_risk_engine(value: Any) -> dict[str, Any]:
         raise PolicyError(
             "risk_engine.emergency_overlay risky caps must satisfy caution > emergency > breach"
         )
+    scaling = value["regime_risk_scaling"]
+    if not isinstance(scaling, dict):
+        raise PolicyError("risk_engine.regime_risk_scaling must be an object")
+    if set(scaling) != _REGIME_RISK_SCALING_REGIMES:
+        raise PolicyError(
+            "risk_engine.regime_risk_scaling must define exactly "
+            + ", ".join(sorted(_REGIME_RISK_SCALING_REGIMES))
+        )
+    multipliers: dict[str, float] = {}
+    for name in sorted(scaling):
+        entry = scaling[name]
+        if not isinstance(entry, dict) or set(entry) != {"target_volatility_multiplier"}:
+            raise PolicyError(
+                f"risk_engine.regime_risk_scaling.{name} must be an object with "
+                "exactly target_volatility_multiplier"
+            )
+        multipliers[name] = _fraction(
+            entry["target_volatility_multiplier"],
+            f"risk_engine.regime_risk_scaling.{name}.target_volatility_multiplier",
+        )
+    if not (
+        multipliers["NORMAL"] >= multipliers["DEFENSIVE"] >= multipliers["CAPITAL_PRESERVATION"] > 0
+    ):
+        raise PolicyError(
+            "risk_engine.regime_risk_scaling multipliers must satisfy "
+            "NORMAL >= DEFENSIVE >= CAPITAL_PRESERVATION > 0"
+        )
     return {
         "mode": mode,
         "portfolio_risk": {
@@ -724,6 +752,10 @@ def _parse_risk_engine(value: Any) -> dict[str, Any]:
             "caution_risky_cap": caution_cap,
             "emergency_risky_cap": emergency_cap,
             "breach_risky_cap": breach_cap,
+        },
+        "regime_risk_scaling": {
+            name: {"target_volatility_multiplier": multipliers[name]}
+            for name in sorted(multipliers)
         },
     }
 

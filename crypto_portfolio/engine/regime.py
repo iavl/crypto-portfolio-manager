@@ -432,6 +432,7 @@ def determine_regime(
     *,
     policy: Policy | None = None,
     previous: RegimeResult | Mapping[str, Any] | str | None = None,
+    include_portfolio_drawdown: bool = True,
 ) -> RegimeResult:
     """Deterministic market-regime classification from structured inputs.
 
@@ -440,12 +441,22 @@ def determine_regime(
     transition policy is enabled, the result moves at most
     ``max_notches_per_review`` notches away from it; severe systemic events and
     the mandatory drawdown floors are never delayed by the cap.
+
+    ``include_portfolio_drawdown=False`` (volatility-budget risk engine)
+    removes the portfolio's own drawdown from the label entirely: it adds no
+    risk vote and cannot raise the regime through the mandatory floor. The
+    regime then reflects market/systemic conditions only, and portfolio
+    drawdown keeps its authority solely through the emergency overlay and the
+    confidence block (which still scores the drawdown domain). Legacy drawdown
+    mode keeps the full floor behavior unchanged.
     """
     resolved = policy or resolve_policy()
     if isinstance(inputs, Mapping):
         inputs = RegimeInputs(**inputs)
     if not isinstance(inputs, RegimeInputs):
         raise ValueError("inputs must be RegimeInputs or a mapping")
+    if not isinstance(include_portfolio_drawdown, bool):
+        raise ValueError("include_portfolio_drawdown must be boolean")
 
     event = inputs.systemic_event_risk
     event_state = _state(event)
@@ -498,11 +509,18 @@ def determine_regime(
     drawdown_risk, drawdown_severe, drawdown_reason = _drawdown_level(
         inputs.portfolio_drawdown_band, resolved
     )
-    if drawdown_risk:
-        risk_count += 1
-        reasons.append(drawdown_reason)
-    if drawdown_severe:
-        severe_count += 1
+    if include_portfolio_drawdown:
+        if drawdown_risk:
+            risk_count += 1
+            reasons.append(drawdown_reason)
+        if drawdown_severe:
+            severe_count += 1
+    elif drawdown_risk:
+        reasons.append(
+            drawdown_reason
+            + "; excluded from the regime label (volatility-budget mode), the "
+            "emergency overlay owns portfolio-drawdown risk"
+        )
     if _state(inputs.portfolio_drawdown_band) in _UNKNOWN:
         unknown += 1
 
@@ -534,7 +552,11 @@ def determine_regime(
     else:
         regime = "NORMAL"
     floors = {"NORMAL": 0, "DEFENSIVE": 1, "CAPITAL_PRESERVATION": 2}
-    floor_regime = _drawdown_floor(inputs.portfolio_drawdown_band, resolved)
+    floor_regime = (
+        _drawdown_floor(inputs.portfolio_drawdown_band, resolved)
+        if include_portfolio_drawdown
+        else "NORMAL"
+    )
     regime = max((regime, floor_regime), key=lambda name: floors[name])
     regime = _cap_regime_transition(regime, floor_regime, previous, resolved, reasons)
     confidence_result = _regime_confidence(inputs, resolved)
@@ -559,8 +581,12 @@ def regime_engine(
     *,
     policy: Policy | None = None,
     previous: RegimeResult | Mapping[str, Any] | str | None = None,
+    include_portfolio_drawdown: bool = True,
 ) -> RegimeResult:
-    return determine_regime(inputs, policy=policy, previous=previous)
+    return determine_regime(
+        inputs, policy=policy, previous=previous,
+        include_portfolio_drawdown=include_portfolio_drawdown,
+    )
 
 
 __all__ = ["RegimeInputs", "RegimeResult", "determine_regime", "market_only_regime", "regime_engine"]

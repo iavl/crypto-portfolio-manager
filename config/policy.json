@@ -110,6 +110,17 @@
       "caution_risky_cap": 0.9,
       "emergency_risky_cap": 0.6,
       "breach_risky_cap": 0.25
+    },
+    "regime_risk_scaling": {
+      "NORMAL": {
+        "target_volatility_multiplier": 1.0
+      },
+      "DEFENSIVE": {
+        "target_volatility_multiplier": 0.8
+      },
+      "CAPITAL_PRESERVATION": {
+        "target_volatility_multiplier": 0.6
+      }
     }
   },
   "risk_tier_estimation": {

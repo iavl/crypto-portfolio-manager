@@ -14,8 +14,10 @@ from .core_eligibility import eth_core_eligibility
 from .portfolio_risk import (
     PortfolioRiskInputs,
     combined_risk_cap,
+    effective_target_volatility,
     marginal_risk_contributions,
     portfolio_volatility,
+    regime_target_volatility_multiplier,
     volatility_budget_scale,
 )
 from .risk import risk_overlay_floor
@@ -641,13 +643,19 @@ def build_target_allocation(
         resolved, portfolio_drawdown, market_recovery_streak
     )
     strategic_stable_only = max(resolved.min_stablecoin_weight, limits.stablecoin_target)
+    # Regime authority over sizing differs by engine mode. Legacy keeps the
+    # regime stable target as the primary dynamic risk control. The
+    # volatility-budget engine lets the regime act on risk through the target
+    # volatility multiplier only: the stable floor is the policy minimum and
+    # drawdown keeps its authority solely in the emergency overlay.
+    vol_multiplier = 1.0
     if risk_mode == "volatility_budget":
-        # Drawdown is only the emergency brake in this mode. The base stable
-        # floor stays the policy/regime one; the emergency cap joins the
-        # combined risk-cap minimum after the strategic allocation is built.
         emergency_floor = overlay_floor
-        base_stable = strategic_stable_only
+        base_stable = resolved.min_stablecoin_weight
         stable_target = base_stable
+        vol_multiplier = regime_target_volatility_multiplier(
+            regime_name, resolved.risk_engine["regime_risk_scaling"]
+        )
     else:
         emergency_floor = 0.0
         base_stable = strategic_stable_only
@@ -658,7 +666,13 @@ def build_target_allocation(
     normalized_assessments = {
         str(symbol).strip().upper(): value for symbol, value in assessments.items()
     }
-    reasons = [f"{regime_name} reserves {stable_target:.2%} for stablecoin/cash"]
+    if risk_mode == "volatility_budget":
+        reasons = [
+            f"{regime_name} market regime scales the target volatility by {vol_multiplier:.2f}; "
+            f"the stable floor is the policy minimum {base_stable:.2%}"
+        ]
+    else:
+        reasons = [f"{regime_name} reserves {stable_target:.2%} for stablecoin/cash"]
     if overlay_reason is not None:
         reasons.append(overlay_reason)
     constraints = [
@@ -918,6 +932,8 @@ def build_target_allocation(
         assert risk_metrics is not None  # guarded at function entry
         covariance = risk_metrics.covariance()
         portfolio_cfg = resolved.risk_engine["portfolio_risk"]
+        base_target_volatility = float(portfolio_cfg["target_volatility"])
+        effective_target = effective_target_volatility(base_target_volatility, vol_multiplier)
         risky_raw = {**core_weights, **satellite_weights}
         raw_risky_total = sum(risky_raw.values())
         scale_info: Mapping[str, Any] = {"risk_scaling_factor": 1.0, "binding": "none", "max_volatility_exceeded": False}
@@ -926,7 +942,7 @@ def build_target_allocation(
             sigma_raw = portfolio_volatility(risky_raw, covariance)
             scale_info = volatility_budget_scale(
                 sigma_raw,
-                target_volatility=float(portfolio_cfg["target_volatility"]),
+                target_volatility=effective_target,
                 max_volatility=float(portfolio_cfg["max_volatility"]),
             )
         cap_candidates: dict[str, float | None] = {
@@ -959,8 +975,13 @@ def build_target_allocation(
         )
         risk_engine_block = {
             "mode": risk_mode,
+            "market_regime": regime_name,
+            "drawdown_influenced_regime": False,
             "portfolio_volatility": sigma_raw,
-            "target_volatility": float(portfolio_cfg["target_volatility"]),
+            "target_volatility": effective_target,
+            "base_target_volatility": base_target_volatility,
+            "regime_volatility_multiplier": vol_multiplier,
+            "effective_target_volatility": effective_target,
             "max_volatility": float(portfolio_cfg["max_volatility"]),
             "max_volatility_exceeded": bool(scale_info["max_volatility_exceeded"]),
             "risk_scaling_factor": final_scale,
@@ -988,6 +1009,7 @@ def build_target_allocation(
         stable_target += residual_core
         risk_engine_block = {
             "mode": risk_mode,
+            "drawdown_influenced_regime": True,
             "emergency_overlay_state": dict(overlay_state),
         }
 
@@ -1016,7 +1038,7 @@ def build_target_allocation(
         reasons.append("current weights are inputs for later rebalance decisions, not allocation entitlement")
     return AllocationResult(
         target, tuple(reasons), tuple(constraints), stable_target, deployment_allowances,
-        strategic_stable_target=strategic_stable_only,
+        strategic_stable_target=base_stable,
         risk_engine=risk_engine_block,
     )
 

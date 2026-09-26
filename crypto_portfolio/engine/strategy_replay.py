@@ -374,8 +374,13 @@ def replay_strategy(
             if market_only_regime(RegimeInputs(**regime_values), policy=resolved) == "NORMAL"
             else 0
         )
+        # Volatility-budget mode: the portfolio's own drawdown never shapes
+        # the regime label; it acts only through the emergency overlay.
         regime = determine_regime(
-            RegimeInputs(**regime_values), policy=resolved, previous=previous_regime
+            RegimeInputs(**regime_values), policy=resolved, previous=previous_regime,
+            include_portfolio_drawdown=(
+                (resolved.risk_engine or {}).get("mode", "legacy_drawdown") != "volatility_budget"
+            ),
         )
         previous_regime = regime
         regime_counts[regime.regime] = regime_counts.get(regime.regime, 0) + 1
