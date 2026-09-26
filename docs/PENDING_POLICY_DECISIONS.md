@@ -19,6 +19,7 @@ are unchanged in `config/policy.json`.
 | 8E | Sub-threshold risk-repair trades and friction | DECIDED: no repair trades; staged execution (phase 4/5) replaces one-review corrections, unresolved constraints stay explicit |
 | 8F | Score-threshold recalibration after the trend neutral-point fix | PENDING: thresholds left unchanged; requires a frozen point-in-time score panel |
 | 8G | Deterministic `risk_tier` estimate from volatility/beta | PENDING: tier stays an assessment input; requires out-of-sample calibration evidence |
+| 8H | V2.2 alpha modules after validation (ETH tilt, satellite tactical path, structural deployment) | PENDING: 2026-09-26 Strategy V2.2 validation keeps all three research-only (see docs/STRATEGY_V2_2_VALIDATION.md); ETH tilt admission failed, satellite deltas window-inconsistent, structural ranking power admitted for a TVL-growth subset but deployment deltas flat — enabling any of them in canonical policy requires Albert's decision plus a fresh admission pass |
 
 ## 8A — Satellite hysteresis across the entry boundary
 
