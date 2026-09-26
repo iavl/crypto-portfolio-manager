@@ -522,6 +522,7 @@ def run_historical_backtest(
                 else None
             ),
             recovery_state=emergency_block,
+            eth_alpha_state=review.eth_alpha_state,
         )
         risk = run_risk_gate(
             allocation, policy=resolved, regime=regime.regime, assessments=assessments,
@@ -677,6 +678,7 @@ def run_historical_backtest(
             })
         review_rows.append({
             "as_of": review.as_of, "period_end": review.period_end,
+            "eth_alpha_state": review.eth_alpha_state,
             "regime": regime.as_dict(), "drawdown_input": point.drawdown,
             "assessments": {symbol: value.as_dict() for symbol, value in assessments.items()},
             "allocation": allocation.as_dict(), "risk_gate": risk.as_dict(),

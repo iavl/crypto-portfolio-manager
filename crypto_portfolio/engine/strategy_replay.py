@@ -101,6 +101,7 @@ class FrozenReviewView:
     technical_inputs: Mapping[str, Any] = field(default_factory=dict)
     overlays: Mapping[str, Any] | None = None
     chain_liveness: Mapping[str, Any] | None = None
+    eth_alpha_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ class ReplayReview:
     overlays: Mapping[str, Any] | None = None
     chain_liveness: Mapping[str, Any] | None = None
     current_prices: Mapping[str, float] = field(default_factory=dict)
+    eth_alpha_state: str | None = None
 
     def __post_init__(self) -> None:
         moment = _parse_as_of(self.as_of)
@@ -185,6 +187,16 @@ class ReplayReview:
                 raise ValueError("current_prices values must be finite and positive")
             normalized_prices[symbol] = price
         object.__setattr__(self, "current_prices", normalized_prices)
+        if self.eth_alpha_state is not None:
+            from .eth_relative_alpha import (
+                ETH_ALPHA_NEGATIVE,
+                ETH_ALPHA_NEUTRAL,
+                ETH_ALPHA_POSITIVE,
+            )
+            state = str(self.eth_alpha_state).strip().upper()
+            if state not in {ETH_ALPHA_POSITIVE, ETH_ALPHA_NEUTRAL, ETH_ALPHA_NEGATIVE}:
+                raise ValueError("eth_alpha_state is unsupported")
+            object.__setattr__(self, "eth_alpha_state", state)
         if isinstance(self.thesis_broken, str):
             raise ValueError("thesis_broken must be a sequence of symbols")
         broken = tuple(str(item).strip().upper() for item in self.thesis_broken if str(item).strip())
@@ -218,6 +230,7 @@ class ReplayReview:
             hard_action_reasons=dict(self.hard_action_reasons) if self.hard_action_reasons else None,
             overlays=dict(self.overlays) if self.overlays is not None else None,
             chain_liveness=dict(self.chain_liveness) if self.chain_liveness is not None else None,
+            eth_alpha_state=self.eth_alpha_state,
         )
 
     @classmethod
@@ -229,7 +242,7 @@ class ReplayReview:
             "execution_plans",
             "execution_bars",
             "overlays", "chain_liveness",
-            "current_prices",
+            "current_prices", "eth_alpha_state",
         }
         unknown = sorted(set(value) - known)
         if unknown:
@@ -254,6 +267,7 @@ class ReplayReview:
             overlays=value.get("overlays"),
             chain_liveness=value.get("chain_liveness"),
             current_prices=value.get("current_prices", {}),
+            eth_alpha_state=value.get("eth_alpha_state"),
         )
 
 
@@ -391,6 +405,7 @@ def replay_strategy(
             current_weights=view.current_weights,
             portfolio_drawdown=replay_drawdown,
             market_recovery_streak=market_recovery_streak,
+            eth_alpha_state=view.eth_alpha_state,
         )
         from .risk import run_risk_gate
         risk = run_risk_gate(

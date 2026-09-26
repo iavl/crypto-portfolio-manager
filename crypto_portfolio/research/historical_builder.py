@@ -20,6 +20,7 @@ from ..engine.risk_tier import estimate_risk_tiers
 from ..engine.scoring import score_assessment
 from ..engine.strategy_replay import ReplayReview
 from ..engine.technical import build_technical_snapshot, moving_average
+from ..engine.eth_relative_alpha import eth_alpha_state, ethbtc_ratio_series, relative_signals
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.market import Candle, OHLCVSeries, SpotPrice
 from ..models.policy import Policy, SCORING_FACTORS
@@ -236,6 +237,14 @@ def build_historical_reviews(
     execution_times = {symbol: tuple(parse_timestamp(item.timestamp) for item in candles)
                        for symbol, candles in execution_cache.items()}
     btc_candles = daily_cache["BTC"]
+    # ETH/BTC relative-alpha series (Strategy V2.2 Phase B): computed once
+    # from completed daily candles, then evaluated point-in-time at every
+    # boundary. The state is a research diagnostic here; only the policy's
+    # tilt_enabled gate lets it influence allocation.
+    eth_ratio_points = (
+        ethbtc_ratio_series(daily_by_symbol["ETH"], daily_by_symbol["BTC"])
+        if "ETH" in daily_by_symbol else ()
+    )
     tier_config = policy.risk_tier_estimation or {}
     tier_history = int(tier_config.get("minimum_history_days", 100)) if tier_config else 100
     previous_tiers: dict[str, str] = {}
@@ -394,6 +403,9 @@ def build_historical_reviews(
         if not usable:
             continue
         btc_snapshot = snapshots["BTC"][-1]
+        eth_signals = (
+            relative_signals(eth_ratio_points, as_of_moment) if eth_ratio_points else {}
+        )
         market_flow = evidence.market_flow_state(as_of) if evidence is not None else None
         regime_inputs = build_regime_inputs(
             btc_snapshot, portfolio_drawdown=0.0, breadth=breadth_above_ma(completed_by_symbol),
@@ -407,6 +419,7 @@ def build_historical_reviews(
             assessments=assessments, regime_inputs=regime_inputs,
             next_returns=next_returns, technical_inputs=snapshots,
             execution_bars=execution_bars, current_prices=current_prices,
+            eth_alpha_state=eth_alpha_state(eth_signals) if eth_signals else None,
         ))
     if not reviews:
         raise ValueError("historical dataset produced no complete review periods")
