@@ -126,6 +126,41 @@ def evaluate_scores(
             selected = [row["labels"][str(horizon)]["forward_return"] for row in available if row["decile"] == decile]
             if selected:
                 deciles[str(decile)] = {"samples": len(selected), "mean_forward_return": sum(selected) / len(selected)}
+        # Strategy V2.1 Phase E (plan 8.6): six preregistered bands and the
+        # monotonicity check on BTC-relative forward returns. Only the
+        # normalized score participates; observations without one are excluded
+        # from buckets so the two score spaces never mix.
+        bucket_edges = (0, 40, 50, 60, 70, 80, 100)
+        buckets: dict[str, Any] = {}
+        bucket_pairs: list[tuple[float, float]] = []
+        for lower, upper in zip(bucket_edges, bucket_edges[1:]):
+            members = [
+                row for row in available
+                if row.get("normalized_score") is not None
+                and lower <= float(row["normalized_score"]) <= upper
+            ]
+            if not members:
+                continue
+            relatives = [
+                row["labels"][str(horizon)]["relative_return_vs_btc"]
+                for row in members
+                if row["labels"][str(horizon)]["relative_return_vs_btc"] is not None
+            ]
+            buckets[f"{lower}-{upper}"] = {
+                "samples": len(members),
+                "mean_relative_return_vs_btc": (
+                    sum(relatives) / len(relatives) if relatives else None
+                ),
+            }
+            if relatives:
+                bucket_pairs.append((lower, sum(relatives) / len(relatives)))
+        monotonic = (
+            all(
+                later[1] >= earlier[1] - 1e-12
+                for earlier, later in zip(bucket_pairs, bucket_pairs[1:])
+            )
+            if len(bucket_pairs) >= 3 else None
+        )
         summaries[str(horizon)] = {
             "available_samples": len(available), "pending_samples": len(rows) - len(available),
             "non_overlapping_samples": len(non_overlapping),
@@ -135,6 +170,8 @@ def evaluate_scores(
                 if relative_pairs else None
             ),
             "deciles": deciles,
+            "buckets": buckets,
+            "bucket_relative_return_monotonic": monotonic,
             "status": "AVAILABLE" if len(non_overlapping) >= 10 else "INSUFFICIENT_EVIDENCE",
         }
     return {"synthetic_scores_excluded": True, "rows": rows, "horizons": summaries}

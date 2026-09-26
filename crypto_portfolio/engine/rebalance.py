@@ -765,6 +765,7 @@ def recommend_rebalance(
     direction_history: Mapping[str, Any] | None = None,
     portfolio_drawdown: float | None = None,
     market_recovery_streak: int = 0,
+    recovery_state: Mapping[str, Any] | None = None,
 ) -> RebalanceResult:
     resolved = policy or resolve_policy()
     current = _weights(current_weights, "current_weights")
@@ -874,13 +875,20 @@ def recommend_rebalance(
     if regime_name not in _REGIMES:
         raise ValueError(f"regime must be one of {sorted(_REGIMES)}")
     overlay_floor, _overlay_reason, _overlay_state = risk_overlay_floor(
-        resolved, portfolio_drawdown, market_recovery_streak
+        resolved, portfolio_drawdown, market_recovery_streak,
+        recovery_state=recovery_state,
     )
-    required_stable = max(
-        resolved.min_stablecoin_weight,
-        resolved.regime(regime_name).stablecoin_target,
-        overlay_floor,
-    )
+    # Same authority split as allocation and the risk gate: in
+    # volatility-budget mode the regime stable target has no floor authority
+    # and the recovery FSM block owns the emergency floor.
+    if (resolved.risk_engine or {}).get("mode", "legacy_drawdown") == "volatility_budget":
+        required_stable = max(resolved.min_stablecoin_weight, overlay_floor)
+    else:
+        required_stable = max(
+            resolved.min_stablecoin_weight,
+            resolved.regime(regime_name).stablecoin_target,
+            overlay_floor,
+        )
     target_stable_total = sum(target.get(symbol, 0.0) for symbol in stable_symbols)
     if target_stable_total + 1e-9 < required_stable:
         raise ValueError(

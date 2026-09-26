@@ -162,10 +162,26 @@ def _assessment(
     # An asset whose entire positive-weight profile is AVAILABLE from frozen
     # point-in-time inputs has complete critical data for replay purposes:
     # the judgment layer is explicitly ablated, not silently ignored.
-    missing_critical = any(
-        profile[factor] > 0 and factors[factor].availability == "MISSING"
-        for factor in SCORING_FACTORS
-    )
+    # Strategy V2.1 (volatility-budget mode): the entry-critical evidence is
+    # the MARKET family — missing structural factors cap conviction
+    # (TACTICAL_ONLY) instead of classifying the asset as having incomplete
+    # critical data, which previously made satellites permanently
+    # NOT_ACTIONABLE in strict replay. Legacy mode keeps the full-profile
+    # definition unchanged.
+    if (policy.risk_engine or {}).get("mode", "legacy_drawdown") == "volatility_budget":
+        from ..engine.scoring_v3 import scoring_v3_families
+        market_factors = set(scoring_v3_families(symbol, policy))
+        missing_critical = any(
+            profile[factor] > 0
+            and factor in market_factors
+            and factors[factor].availability == "MISSING"
+            for factor in SCORING_FACTORS
+        )
+    else:
+        missing_critical = any(
+            profile[factor] > 0 and factors[factor].availability == "MISSING"
+            for factor in SCORING_FACTORS
+        )
     raw = AssetAssessment(
         symbol=symbol,
         factor_scores=factors,

@@ -322,6 +322,87 @@ def command_report(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def command_v21(args):
+    """Strategy V2.1 validation: preregistered A-H ladder + attribution.
+
+    Runs the frozen A-H mechanism ladder (plan 8.4) over one dataset scope
+    plus the market/structural score ranking evaluation (plan 8.5) and the
+    stall/cash attribution summaries, all stamped with the frozen validation
+    manifest (plan 8.2).
+    """
+    from crypto_portfolio.models.policy import load_policy
+    from crypto_portfolio.research.historical_builder import (
+        build_historical_reviews,
+        rebind_initial_weights,
+    )
+    from crypto_portfolio.research.orchestrator import build_risk_inputs_for_reviews
+    from crypto_portfolio.research.v21_validation import (
+        evaluate_v3_family_scores,
+        run_v21_ablation,
+        validation_manifest,
+    )
+
+    spec, manifest, series = load_dataset(args.dataset)
+    daily, hourly = _series_maps(series, prefer_normalized=manifest.strict_ready)
+    execution_series = daily if spec.execution_timeframe == "1D" else hourly
+    harvested = load_evidence_series(Path(args.dataset))
+    evidence = EvidenceContext.from_series(harvested) if harvested else None
+    scope_name, portfolio_name = args.scope.split("/")
+    symbols = spec.asset_scopes[scope_name]
+    policy = _core_policy() if scope_name == "core" else load_policy()
+    policy = policy_from_mapping({
+        **policy.as_dict(),
+        "risk_engine": {**policy.as_dict()["risk_engine"], "mode": "volatility_budget"},
+    })
+    reviews = build_historical_reviews(
+        daily_by_symbol=daily, execution_by_symbol=execution_series,
+        hourly_by_symbol=execution_series, execution_timeframe=spec.execution_timeframe,
+        symbols=symbols, initial_weights=next(iter(spec.initial_portfolios.values())),
+        initial_value=spec.initial_value_usd, start_at=spec.start_at,
+        end_at=spec.end_at, policy=policy, semantic_score=None, evidence=evidence,
+    )
+    reviews = rebind_initial_weights(
+        reviews, spec.initial_portfolios[portfolio_name], spec.initial_value_usd,
+    )
+    risk_inputs = build_risk_inputs_for_reviews(reviews, daily_by_symbol=daily, policy=policy)
+    ladder = run_v21_ablation(
+        reviews, policy=policy, daily_by_symbol=daily,
+        risk_inputs_by_review=risk_inputs,
+        fee_bps=spec.fee_bps, slippage_bps=spec.slippage_bps,
+        git_sha=_git_sha(),
+    )
+    observations = []
+    for review in reviews:
+        for symbol, raw in review.assessments.items():
+            observations.append({
+                "timestamp": review.as_of, "symbol": symbol,
+                "score": raw["weighted_score"],
+                "normalized_score": raw.get("normalized_score"),
+                "coverage": raw.get("score_coverage") or 0.0,
+                "factor_scores": raw.get("factor_scores", {}),
+                "synthetic": False,
+            })
+    result = {
+        "run_id": spec.run_id,
+        "experiment": f"{scope_name}/{portfolio_name}/strict",
+        "manifest": validation_manifest(
+            policy, git_sha=_git_sha(), data_manifest=manifest.as_dict(),
+        ),
+        "window": {"start_at": spec.start_at, "end_at": spec.end_at},
+        "ablation_ladder": ladder,
+        "family_score_evaluation": evaluate_v3_family_scores(
+            observations, _price_rows({k: v for k, v in series.items()}),
+            policy=policy,
+        ),
+    }
+    path = Path(args.output) if args.output else Path(args.dataset) / "v21-validation.json"
+    _write(path, result)
+    print(json.dumps({
+        "status": "COMPLETED", "output": str(path),
+        "rungs": [rung["rung"] for rung in ladder["rungs"]],
+    }, ensure_ascii=False, indent=2))
+
+
 def command_budget_sensitivity(args):
     from crypto_portfolio.research.sensitivity import drawdown_budget_sensitivity
     budgets = tuple(float(item) for item in str(args.budgets).split(",") if item.strip())
@@ -643,6 +724,12 @@ def parse_args(argv=None):
     ablation.add_argument("--only", default=None, help="run a single variant by name")
     ablation.add_argument("--output")
     ablation.set_defaults(handler=command_ablation)
+
+    v21 = sub.add_parser("v21")
+    v21.add_argument("dataset")
+    v21.add_argument("--scope", default="full/core_existing")
+    v21.add_argument("--output")
+    v21.set_defaults(handler=command_v21)
 
     sensitivity = sub.add_parser("budget-sensitivity")
     sensitivity.add_argument("dataset")

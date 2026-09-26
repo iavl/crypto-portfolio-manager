@@ -546,6 +546,7 @@ def run_historical_backtest(
             direction_history=direction_history_from_decisions(replayed_decisions),
             portfolio_drawdown=point.drawdown,
             market_recovery_streak=market_recovery_streak,
+            recovery_state=emergency_block,
         )
         actions = [action for action in rebalance.actions
                    if action.symbol not in resolved.stable_symbols
@@ -687,6 +688,11 @@ def run_historical_backtest(
             "end_drawdown": ledger.valuations[-1].drawdown,
         })
 
+    # Strategy V2.1 Phase E: root-cause attribution for reviews that executed
+    # nothing, computed from the replay record alone.
+    from .v21_validation import classify_stall, stall_attribution
+    for row in review_rows:
+        row["stall_reason"] = classify_stall(row)
     metrics = performance_metrics(ledger.valuations)
     aligned_prices = [(reviews[0].as_of, dict(reviews[0].current_prices))]
     for review in reviews:
@@ -835,6 +841,7 @@ def run_historical_backtest(
         "emergency_recovery_diagnostics": _emergency_recovery_diagnostics(
             emergency_rows, resolved
         ),
+        "stall_attribution": stall_attribution(review_rows),
         "constraint_violation_counts": dict(constraint_violations),
         "regime_floor_diagnostics": {
             "reviews": len(review_rows),

@@ -103,10 +103,10 @@ def family_score(
                 raise ValueError(
                     "BTC market family must not weight relative_strength_btc"
                 )
-        if state == "NOT_APPLICABLE":
-            raise ValueError(
-                f"factor {factor} is NOT_APPLICABLE but carries family weight"
-            )
+        # A factor the composite profile marks NOT_APPLICABLE (zero weight,
+        # never harvested) still carries family weight when the family wants
+        # it: it shrinks toward neutral exactly like MISSING data, so a family
+        # can anticipate evidence the composite does not yet collect.
         availability[factor] = state
         reliability[factor] = factor_reliability
         effective[factor] = (
