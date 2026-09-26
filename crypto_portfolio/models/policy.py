@@ -106,6 +106,8 @@ _DEFAULT_REGIME_MODEL: dict[str, Any] = {
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown", "drawdown_budget_overlay"}
+_DRAWDOWN_BUDGET_MODES = {"HARD_TARGET", "WARNING_BAND"}
+_STRESS_LOSS_BUDGET_FIELDS = {"enabled"}
 # Canonical multi-scenario stress framework. Scenario returns are mechanism
 # placeholders pending Strategy V2 Phase 6 walk-forward calibration; only
 # ``moderate`` preserves the Strategy V1 single-scenario values exactly.
@@ -760,6 +762,25 @@ def _parse_satellite_alpha(
     return parsed
 
 
+def _parse_stress_loss_budget(value: Any) -> dict[str, Any]:
+    """Parse the ``risk.stress_loss_budget`` switch (Strategy V2.3 Phase 3).
+
+    ``enabled`` alone: the budget VALUE comes from the drawdown-budget mode
+    (HARD_TARGET reuses max_portfolio_drawdown; WARNING_BAND uses the
+    human-decided hard_stress_loss_limit). The switch exists so ablation
+    rungs can isolate the stress layer; it never changes the budget's
+    meaning.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("risk.stress_loss_budget must be an object")
+    _unknown_fields(value, _STRESS_LOSS_BUDGET_FIELDS, "risk.stress_loss_budget")
+    if set(value) != _STRESS_LOSS_BUDGET_FIELDS:
+        raise PolicyError("risk.stress_loss_budget fields are incomplete")
+    if not isinstance(value["enabled"], bool):
+        raise PolicyError("risk.stress_loss_budget.enabled must be boolean")
+    return {"enabled": value["enabled"]}
+
+
 def _parse_risk_engine(value: Any) -> dict[str, Any]:
     """Parse the ``risk_engine`` block selecting the sizing mechanism.
 
@@ -1367,6 +1388,9 @@ class Policy:
     regime_transitions: Mapping[str, Any] = dataclass_field(default_factory=dict)
     regime_model: Mapping[str, Any] = dataclass_field(default_factory=dict)
     drawdown_budget_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    drawdown_budget_mode: str = "HARD_TARGET"
+    stress_loss_budget: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    hard_stress_loss_limit: float | None = None
     scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
     scoring_v3: Mapping[str, Any] = dataclass_field(default_factory=dict)
     capital_hierarchy: Mapping[str, Any] = dataclass_field(default_factory=dict)
@@ -1428,6 +1452,12 @@ class Policy:
                 "min_stablecoin_weight": self.min_stablecoin_weight,
                 "max_portfolio_drawdown": self.max_portfolio_drawdown,
                 "drawdown_budget_overlay": _copy_mapping(self.drawdown_budget_overlay),
+                "drawdown_budget_mode": self.drawdown_budget_mode,
+                "stress_loss_budget": _copy_mapping(self.stress_loss_budget),
+                **(
+                    {"hard_stress_loss_limit": self.hard_stress_loss_limit}
+                    if self.hard_stress_loss_limit is not None else {}
+                ),
             },
             "benchmarks": {name: dict(weights) for name, weights in self.benchmarks.items()},
             "rebalance": _copy_mapping(self.rebalance),
@@ -2729,12 +2759,38 @@ def _parse_policy(
     risk = data["risk"]
     if not isinstance(risk, dict):
         raise PolicyError("risk must be an object")
-    _unknown_fields(risk, _RISK_FIELDS, "risk")
-    if set(risk) != _RISK_FIELDS:
+    _unknown_fields(risk, _RISK_FIELDS | {"drawdown_budget_mode", "stress_loss_budget", "hard_stress_loss_limit"}, "risk")
+    expected_risk = _RISK_FIELDS | {"drawdown_budget_mode", "stress_loss_budget"}
+    # Strategy V2.3 Phase 3: the drawdown budget gets an explicit policy
+    # semantic. HARD_TARGET makes max_portfolio_drawdown the stress-loss
+    # budget that binds ex-ante sizing; WARNING_BAND demotes it to a warning
+    # and REQUIRES a separate human-decided hard_stress_loss_limit.
+    drawdown_budget_mode = str(risk["drawdown_budget_mode"]).strip().upper()
+    if drawdown_budget_mode not in _DRAWDOWN_BUDGET_MODES:
         raise PolicyError(
-            "risk must contain min_stablecoin_weight, max_portfolio_drawdown, "
-            "and drawdown_budget_overlay"
+            "risk.drawdown_budget_mode must be HARD_TARGET or WARNING_BAND"
         )
+    if drawdown_budget_mode == "WARNING_BAND":
+        expected_risk.add("hard_stress_loss_limit")
+    if set(risk) != expected_risk:
+        raise PolicyError(
+            "risk fields do not match drawdown_budget_mode="
+            + drawdown_budget_mode
+        )
+    hard_stress_loss_limit = None
+    if drawdown_budget_mode == "WARNING_BAND":
+        hard_stress_loss_limit = _fraction(
+            risk["hard_stress_loss_limit"], "risk.hard_stress_loss_limit",
+            exclusive_minimum=True,
+        )
+        if hard_stress_loss_limit <= _fraction(
+            risk["max_portfolio_drawdown"], "risk.max_portfolio_drawdown"
+        ):
+            raise PolicyError(
+                "risk.hard_stress_loss_limit must exceed the warning-level "
+                "max_portfolio_drawdown, not restate it"
+            )
+    parsed_stress_loss_budget = _parse_stress_loss_budget(risk["stress_loss_budget"])
     parsed_overlay = _parse_drawdown_budget_overlay(risk["drawdown_budget_overlay"])
 
     benchmarks = data["benchmarks"]
@@ -3118,6 +3174,9 @@ def _parse_policy(
         regime_transitions=parsed_regime_transitions,
         regime_model=parsed_regime_model,
         drawdown_budget_overlay=parsed_overlay,
+        drawdown_budget_mode=drawdown_budget_mode,
+        stress_loss_budget=parsed_stress_loss_budget,
+        hard_stress_loss_limit=hard_stress_loss_limit,
         scoring_families=parsed_scoring_families,
         scoring_v3=parsed_scoring_v3,
         capital_hierarchy=parsed_capital_hierarchy,

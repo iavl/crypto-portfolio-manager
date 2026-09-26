@@ -19,6 +19,9 @@ def _policy():
     # Frozen V2.1 anchor-core mechanics under test; the V2.2 btc-baseline
     # core mode has its own test files.
     data["core_allocation"]["mode"] = "legacy_anchor"
+    # V2.3 stress-loss budget disabled: these files pin the emergency/
+    # recovery mechanics in isolation; the combined caps have their own tests.
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     return policy_from_mapping(data)
 
 

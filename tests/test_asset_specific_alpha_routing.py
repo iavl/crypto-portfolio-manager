@@ -76,10 +76,18 @@ class AssetSpecificRoutingTests(unittest.TestCase):
         self.assertEqual(allowance["eligibility_state"], "ELIGIBLE_INCREASE")
         self.assertEqual(allowance["alpha_authority"], "ADMITTED_TILT")
         self.assertEqual(allowance["final_score_authority"], "ADMITTED_ALPHA_TILT")
-        # Preregistered tilt: 10% of the approved risky budget (85% in NORMAL
-        # under the volatility-budget engine), bounded by the envelope.
+        # Preregistered tilt REQUEST: 10% of the approved risky budget (85%
+        # in NORMAL). The V2.3 stress-loss budget then scales the whole
+        # sleeve (crash loss participates in ex-ante sizing), so the final
+        # target is the request times the engine's uniform scale factor.
+        self.assertAlmostEqual(allowance["requested_strategic_weight"], 0.10 * 0.85, places=6)
+        scale = result.risk_engine["risk_scaling_factor"]
+        self.assertLess(scale, 1.0)
+        self.assertEqual(
+            result.risk_engine["binding_risk_constraint"], "stress_loss_budget",
+        )
         self.assertAlmostEqual(
-            result.target_weights["BNB"], 0.10 * 0.85, places=4,
+            result.target_weights["BNB"], 0.10 * 0.85 * scale, places=6,
         )
 
     def test_neutral_alpha_never_tilts_even_when_unlocked(self):

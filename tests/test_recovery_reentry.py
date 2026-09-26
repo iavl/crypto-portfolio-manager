@@ -29,6 +29,9 @@ from crypto_portfolio.research.orchestrator import (
 def _policy():
     data = json.loads(json.dumps(load_policy().as_dict()))
     data["risk_engine"]["mode"] = "volatility_budget"
+    # V2.3 stress-loss budget disabled: these files pin the emergency/
+    # recovery mechanics in isolation; the combined caps have their own tests.
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     return policy_from_mapping(data)
 
 

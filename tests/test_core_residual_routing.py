@@ -19,6 +19,9 @@ def _policy(**core):
     data = json.loads(json.dumps(load_policy().as_dict()))
     data["risk_engine"]["mode"] = "volatility_budget"
     data["core_allocation"]["mode"] = "btc_baseline_with_active_tilts"
+    # V2.3 stress-loss budget disabled: this file pins its own mechanics
+    # in isolation; the combined caps are pinned in test_stress_cap_integration.
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     for key, value in core.items():
         if key == "eth":
             data["core_allocation"]["eth"].update(value)

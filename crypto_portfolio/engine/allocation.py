@@ -24,6 +24,7 @@ from .risk import risk_overlay_floor
 from .risk_tier import tier_strategic_fraction
 from .scoring import low_evidence_contract, score_assessment
 from .scoring_v3 import asset_conviction_state, comparison_score_space
+from .stress_budget import stress_budget_diagnostics
 
 
 @dataclass(frozen=True)
@@ -793,6 +794,25 @@ def _assessment_symbols(
     return symbols
 
 
+def _stress_budget_value(resolved: Policy) -> float | None:
+    """Stress-loss budget in effect, or None when the layer is disabled.
+
+    HARD_TARGET reuses ``max_portfolio_drawdown`` as the ex-ante crash budget
+    that binds sizing; WARNING_BAND uses the separately configured
+    ``hard_stress_loss_limit``. Fail-closed: WARNING_BAND without the limit
+    is a contract error, never an implicit budget.
+    """
+    if not (resolved.stress_loss_budget or {}).get("enabled", False):
+        return None
+    if resolved.drawdown_budget_mode == "HARD_TARGET":
+        return float(resolved.max_portfolio_drawdown)
+    if resolved.hard_stress_loss_limit is not None:
+        return float(resolved.hard_stress_loss_limit)
+    raise ValueError(
+        "risk.drawdown_budget_mode=WARNING_BAND requires hard_stress_loss_limit"
+    )
+
+
 def build_target_allocation(
     policy: Policy | None = None,
     regime: str = "NORMAL",
@@ -1386,6 +1406,13 @@ def build_target_allocation(
                 target_volatility=effective_target,
                 max_volatility=float(portfolio_cfg["max_volatility"]),
             )
+        # Stress-loss budget (Strategy V2.3 Phase 3): the worst configured
+        # crash scenario's portfolio loss must fit the drawdown policy's
+        # budget at the FINAL sleeve size, so crash loss participates in
+        # ex-ante sizing alongside (never multiplied with) the volatility
+        # budget and the emergency brake.
+        stress_budget_value = _stress_budget_value(resolved)
+        stress_diagnostics: Mapping[str, Any] | None = None
         cap_candidates: dict[str, float | None] = {
             "base_stable_floor": 1.0 - base_stable if raw_risky_total > 0 else None,
             "emergency_overlay": 1.0 - emergency_floor if emergency_floor > 0 else None,
@@ -1394,6 +1421,15 @@ def build_target_allocation(
                 if raw_risky_total > 0 else None
             ),
         }
+        if raw_risky_total > 1e-12 and stress_budget_value is not None:
+            stress_diagnostics = stress_budget_diagnostics(
+                risky_raw, resolved.stress_scenarios, stress_budget_value,
+            )
+            stress_cap = stress_diagnostics["stress_cap"]
+            cap_candidates["stress_loss_budget"] = (
+                raw_risky_total * float(stress_cap)
+                if stress_cap is not None else None
+            )
         combined = combined_risk_cap(cap_candidates)
         final_risky_total = min(raw_risky_total, float(combined["cap"]))
         if final_risky_total < raw_risky_total - 1e-12:
@@ -1435,6 +1471,11 @@ def build_target_allocation(
                 for symbol, details in contributions.items()
             },
             "emergency_overlay_state": dict(overlay_state),
+            "drawdown_budget_mode": resolved.drawdown_budget_mode,
+            "stress_budget": (
+                dict(stress_diagnostics)
+                if stress_diagnostics is not None else None
+            ),
             "binding_risk_constraint": binding,
             "risk_caps": {
                 name: (value if value is None else min(value, raw_risky_total if raw_risky_total > 0 else value))
@@ -1459,15 +1500,22 @@ def build_target_allocation(
         scale_loss = max(0.0, raw_risky_total - final_risky_total)
         volatility_cash = scale_loss if binding == "volatility_budget" else 0.0
         emergency_cash = scale_loss if binding == "emergency_overlay" else 0.0
+        # The stress budget is a third, distinct de-risking authority: cash it
+        # removes from the sleeve is crash-budget reserve, never unexplained.
+        stress_cash = scale_loss if binding == "stress_loss_budget" else 0.0
         minimum_reserve = min(base_stable, final_stable)
         no_alpha_cash = max(0.0, risky_budget - raw_risky_total)
-        named = minimum_reserve + volatility_cash + emergency_cash + no_alpha_cash
+        named = (
+            minimum_reserve + volatility_cash + emergency_cash + stress_cash
+            + no_alpha_cash
+        )
         risk_engine_block["cash_attribution"] = {
             # Execution-pending cash is unknowable at the allocation layer;
             # the replay layer owns that category.
             "MINIMUM_RESERVE_CASH": minimum_reserve,
             "VOLATILITY_BUDGET_CASH": volatility_cash,
             "EMERGENCY_CASH": emergency_cash,
+            "STRESS_BUDGET_CASH": stress_cash,
             "NO_ALPHA_CASH": no_alpha_cash,
             "EXECUTION_PENDING_CASH": 0.0,
             "UNALLOCATED_RESIDUAL": max(0.0, final_stable - named),

@@ -25,8 +25,11 @@ def _vol_policy(mode: str = "volatility_budget", **overrides):
     engine = data["risk_engine"]
     engine["mode"] = mode
     # These tests document the frozen V2.1 anchor-core mechanics; the
-    # canonical V2.2 btc-baseline core has its own test files.
+    # canonical V2.2 btc-baseline core has its own test files. The V2.3
+    # stress-loss budget is disabled here so the volatility-budget scaling
+    # mechanics stay isolated (its own test files pin the combined caps).
     data["core_allocation"]["mode"] = "legacy_anchor"
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     for key, value in overrides.items():
         if key in engine["portfolio_risk"]:
             engine["portfolio_risk"][key] = value

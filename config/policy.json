@@ -150,6 +150,10 @@
       "enabled": true,
       "recovery_reviews": 5,
       "recovery_risky_floor": 0.25
+    },
+    "drawdown_budget_mode": "HARD_TARGET",
+    "stress_loss_budget": {
+      "enabled": true
     }
   },
   "chain_liveness": {
