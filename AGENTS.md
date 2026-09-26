@@ -245,7 +245,11 @@ derived deterministically from decision history, status events, and persisted
 exchange trade records — never silently dropped. Fill attribution prefers
 read-only exchange trade history (`myTrades`, persisted append-only with
 dedup); snapshot quantity deltas are only the fallback when no trade history
-was fetched for the symbol.
+was fetched for the symbol. Resting-order disposition also reconciles the
+read-only open-order book (`openOrders`, point-in-time current state) against
+the current plan zones: tranches already covered by a matching resting limit
+order are rendered as already-placed reminders, not re-proposed, and the
+system never places, cancels, or modifies orders itself.
 
 ## History, evidence, and persistence
 

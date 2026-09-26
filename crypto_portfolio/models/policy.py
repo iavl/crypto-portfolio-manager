@@ -274,6 +274,9 @@ _EXECUTION_FIELDS = {
     "max_initial_tranche",
     "tranche_templates",
     "breakout",
+    "resting_order_match_tolerance",
+    "resting_order_full_fraction",
+    "resting_order_partial_fraction",
 }
 _DEPLOYMENT_COMPOSITION_MODES = {"minimum_cap", "multiplicative"}
 _VOLATILITY_FIELDS = {"low_max", "normal_max", "high_max"}
@@ -1398,6 +1401,26 @@ def _parse_execution(value: Any) -> dict[str, Any]:
         raise PolicyError("execution breakout thresholds must be > 0")
     if parsed_breakout["max_initial_tranche"] > max_initial_parsed["NORMAL"]:
         raise PolicyError("execution.breakout.max_initial_tranche must not exceed NORMAL max_initial_tranche")
+    resting_tolerance = _number(
+        value["resting_order_match_tolerance"],
+        "execution.resting_order_match_tolerance",
+        minimum=0.0,
+        maximum=0.1,
+    )
+    if resting_tolerance <= 0:
+        raise PolicyError("execution.resting_order_match_tolerance must be > 0")
+    resting_full = _fraction(
+        value["resting_order_full_fraction"],
+        "execution.resting_order_full_fraction",
+        exclusive_minimum=True,
+    )
+    resting_partial = _fraction(
+        value["resting_order_partial_fraction"],
+        "execution.resting_order_partial_fraction",
+        exclusive_minimum=True,
+    )
+    if resting_partial >= resting_full:
+        raise PolicyError("execution resting-order fractions must satisfy partial < full")
     zone_quality = value["zone_quality"]
     if not isinstance(zone_quality, dict):
         raise PolicyError("execution.zone_quality must be an object")
@@ -1445,6 +1468,9 @@ def _parse_execution(value: Any) -> dict[str, Any]:
         "max_initial_tranche": max_initial_parsed,
         "tranche_templates": parsed_templates,
         "breakout": parsed_breakout,
+        "resting_order_match_tolerance": resting_tolerance,
+        "resting_order_full_fraction": resting_full,
+        "resting_order_partial_fraction": resting_partial,
     }
 
 

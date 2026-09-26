@@ -165,6 +165,53 @@ class AccountTrade:
         object.__setattr__(self, "is_maker", bool(self.is_maker))
 
 
+@dataclass(frozen=True)
+class OpenOrder:
+    """One currently resting spot order from the account's order book."""
+
+    symbol: str
+    order_id: int
+    side: str
+    order_type: str
+    time_in_force: str
+    price: float
+    orig_quantity: float
+    executed_quantity: float
+    status: str
+    timestamp_ms: int
+    client_order_id: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbol", str(self.symbol).strip().upper())
+        if isinstance(self.order_id, bool) or not isinstance(self.order_id, int):
+            raise ProviderDataError("order id must be an integer")
+        if self.side not in {"BUY", "SELL"}:
+            raise ProviderDataError("order side is unsupported")
+        object.__setattr__(self, "order_type", str(self.order_type).strip().upper())
+        object.__setattr__(self, "time_in_force", str(self.time_in_force).strip().upper())
+        object.__setattr__(self, "status", str(self.status).strip().upper())
+        if not self.order_type or not self.status:
+            raise ProviderDataError("order type and status must be non-empty")
+        object.__setattr__(
+            self, "price", _decimal_string(self.price, f"{self.symbol}.order price", minimum=0.0)
+        )
+        object.__setattr__(
+            self, "orig_quantity", _decimal_string(self.orig_quantity, f"{self.symbol}.order quantity")
+        )
+        object.__setattr__(
+            self,
+            "executed_quantity",
+            _decimal_string(self.executed_quantity, f"{self.symbol}.order executed quantity", minimum=0.0),
+        )
+        if self.price <= 0 or self.orig_quantity <= 0:
+            raise ProviderDataError("order price and quantity must be > 0")
+        if self.executed_quantity > self.orig_quantity:
+            raise ProviderDataError("order executed quantity must not exceed orig quantity")
+        if isinstance(self.timestamp_ms, bool) or not isinstance(self.timestamp_ms, int):
+            raise ProviderDataError("order timestamp_ms must be an integer")
+        object.__setattr__(self, "client_order_id", str(self.client_order_id))
+
+
 def _error_codes(exception: Exception) -> set[int]:
     detail = str(exception)
     diagnostic = getattr(exception, "diagnostic", None)
@@ -433,6 +480,22 @@ class BinanceAccountClient:
             chunk_start = chunk_end
         return tuple(trades)
 
+    def open_orders(self, symbol: str) -> tuple[OpenOrder, ...]:
+        """Currently resting spot orders of one base asset against the USDT quote.
+
+        Queried per symbol (a symbol-less request costs far more weight) from
+        ``/api/v3/openOrders``. The exchange only returns orders still on the
+        book, so partially filled orders arrive with their cumulative
+        ``executed_quantity`` and the remainder is the resting part.
+        """
+        pair = f"{symbol.strip().upper()}USDT"
+        if len(pair) <= 4:
+            raise ProviderDataError("order symbol must be non-empty")
+        payload = self._signed_get("/api/v3/openOrders", {"symbol": pair})
+        if not isinstance(payload, list):
+            raise ProviderDataError(f"binance openOrders response for {pair} is invalid")
+        return tuple(_open_order(entry, pair) for entry in payload)
+
     def _flow_history(
         self,
         path: str,
@@ -530,10 +593,32 @@ def _account_trade(entry: Any, pair: str) -> AccountTrade:
         raise ProviderDataError(f"binance myTrades entry for {pair} misses {exc.args[0]}") from exc
 
 
+def _open_order(entry: Any, pair: str) -> OpenOrder:
+    if not isinstance(entry, Mapping):
+        raise ProviderDataError(f"binance openOrders entry for {pair} is invalid")
+    try:
+        return OpenOrder(
+            symbol=pair[:-4],
+            order_id=entry["orderId"],
+            side=entry["side"],
+            order_type=entry["type"],
+            time_in_force=entry.get("timeInForce", ""),
+            price=entry["price"],
+            orig_quantity=entry["origQty"],
+            executed_quantity=entry.get("executedQty", 0.0),
+            status=entry["status"],
+            timestamp_ms=entry["time"],
+            client_order_id=str(entry.get("clientOrderId", "")),
+        )
+    except KeyError as exc:
+        raise ProviderDataError(f"binance openOrders entry for {pair} misses {exc.args[0]}") from exc
+
+
 __all__ = [
     "AccountTrade",
     "BinanceAccountClient",
     "DEFAULT_BASE_URL",
     "FlowEvent",
+    "OpenOrder",
     "WalletBalance",
 ]

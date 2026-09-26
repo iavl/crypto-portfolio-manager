@@ -24,7 +24,7 @@ def main():
         artifact_root=args.artifact_root, history=value.get('history', ()), new_cash=value.get('new_cash', 0),
         persist=args.persist, decision_path=args.decision_path,
         status_events=value.get('status_events', ()), snapshots=value.get('snapshots', ()),
-        fills=value.get('fills'))
+        fills=value.get('fills'), open_orders=value.get('open_orders'))
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
     print(result['operation']['decision'])
 

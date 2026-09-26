@@ -167,23 +167,27 @@ def _attribution_window(snapshots, prior, decision):
     return prior_ts, current_ts
 
 
-def _supplied_fills(fills, symbol):
-    """Normalized trade records for a symbol, or None when not fetched.
+def _supplied_records(supplied_map, symbol, record_cls):
+    """Normalized exchange records for a symbol, or None when not fetched.
 
-    Key presence in the supplied mapping means the exchange trade history was
-    fetched for that symbol — an empty sequence is a confident zero, not a gap.
+    Key presence in the supplied mapping means the exchange view was fetched
+    for that symbol — an empty sequence is a confident zero, not a gap.
     """
-    if not isinstance(fills, Mapping):
+    if not isinstance(supplied_map, Mapping):
         return None
-    supplied = fills.get(symbol)
+    supplied = supplied_map.get(symbol)
     if supplied is None:
         return None
+    return tuple(
+        record if isinstance(record, record_cls) else record_cls.from_mapping(record)
+        for record in supplied
+    )
+
+
+def _supplied_fills(fills, symbol):
     from ..models.fill import TradeFill
 
-    return tuple(
-        fill if isinstance(fill, TradeFill) else TradeFill.from_mapping(fill)
-        for fill in supplied
-    )
+    return _supplied_records(fills, symbol, TradeFill)
 
 
 def _fills_attribution(records, tranches, plan_action, effective_status, window):
@@ -258,7 +262,49 @@ def _fills_attribution(records, tranches, plan_action, effective_status, window)
     }
 
 
-def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fills=None):
+def _resting_match_kwargs(policy):
+    execution = dict(getattr(policy, "execution", {}) or {})
+    return {
+        "tolerance": float(execution.get("resting_order_match_tolerance", 0.02)),
+        "full_fraction": float(execution.get("resting_order_full_fraction", 0.95)),
+        "partial_fraction": float(execution.get("resting_order_partial_fraction", 0.05)),
+    }
+
+
+def resting_order_coverage(decision, open_orders, *, policy=None):
+    """Resting exchange orders already covering the current decision's plans.
+
+    For every executable plan symbol whose open-order book was supplied (key
+    presence means fetched; an empty sequence is a confident zero), match the
+    resting limit orders to the plan's tranche zones. Purely informational:
+    coverage marks tranches as already resting so the report stops re-listing
+    them as to-place; it never alters approved or planned amounts.
+    """
+    from ..engine.resting_orders import match_plan_resting_orders
+    from ..models.order import OpenOrderRecord
+
+    if not isinstance(open_orders, Mapping):
+        return {}
+    resolved = policy or resolve_policy()
+    match_kwargs = _resting_match_kwargs(resolved)
+    plans = _field(decision, 'execution_plans') or {}
+    if not isinstance(plans, Mapping):
+        plans = {p.symbol: p for p in plans}
+    coverage = {}
+    for symbol, plan in sorted(plans.items()):
+        action = str(_field(plan, "action", "")).strip().upper()
+        if action not in _EXECUTABLE_PLAN_ACTIONS or not _plan_tranches(plan):
+            continue
+        key = str(symbol).strip().upper()
+        supplied = _supplied_records(open_orders, key, OpenOrderRecord)
+        if supplied is None:
+            continue
+        coverage[key] = match_plan_resting_orders(plan, supplied, **match_kwargs)
+    return coverage
+
+
+def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fills=None,
+                           open_orders=None, policy=None):
     """State what the current review does with resting orders from prior plans.
 
     For every asset whose most recent prior decision planned executable
@@ -272,7 +318,15 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fi
     empty sequence is a confident zero). Records are matched to tranche zones
     by executed price inside the attribution window. Without records for a
     symbol, fills are inferred from snapshot quantity deltas in tranche order,
-    guarded against external flows and status-event contradictions. The system
+    guarded against external flows and status-event contradictions.
+
+    When ``open_orders`` (symbol -> resting-order records, same presence
+    semantics) is supplied for a symbol the current decision re-plans, the
+    resting orders are matched against the CURRENT plan's zones: if they
+    already rest inside (or within the configured tolerance of) those zones,
+    the instruction is ``KEEP_EQUIVALENT_ORDERS`` regardless of the prior
+    terminal status, and tranches left uncovered stay to-place. Resting orders
+    outside every current zone surface as stale for manual review. The system
     never places or cancels real orders; these are deterministic instructions
     for the human's manually rested exchange orders.
     """
@@ -386,9 +440,47 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fi
         resting = any(t["fill_state"] in ("UNFILLED", "PARTIAL", "UNKNOWN") for t in tranche_states)
         current_plan = current_plans.get(symbol)
         current_action = str(_field(current_plan, "action", "")).strip().upper() if current_plan is not None else ""
+
+        # Live resting orders against the CURRENT plan's zones: when the
+        # exchange order book was fetched, it outranks the zone-equality and
+        # terminal-status heuristics below — an order already resting in the
+        # new zones needs no action whatever the prior decision's status.
+        live_coverage = None
+        if open_orders is not None and current_plan is not None \
+                and current_action in _EXECUTABLE_PLAN_ACTIONS:
+            from ..engine.resting_orders import match_plan_resting_orders
+            from ..models.order import OpenOrderRecord
+
+            supplied_orders = _supplied_records(open_orders, symbol, OpenOrderRecord)
+            if supplied_orders is not None:
+                live_coverage = match_plan_resting_orders(
+                    current_plan, supplied_orders,
+                    **_resting_match_kwargs(policy or resolve_policy()))
+        stale_orders = (live_coverage or {}).get("unmatched_orders") or []
+
         if not resting:
             instruction = "NOTHING_RESTING"
             reason = "every planned tranche is filled; no resting order remains from this plan"
+        elif live_coverage is not None and live_coverage["resting_state"] != "NOT_RESTING":
+            instruction = "KEEP_EQUIVALENT_ORDERS"
+            reason = (
+                f"read-only open orders already rest inside the current plan's zones "
+                f"({live_coverage['covered_fraction'] * 100:.0f}% of the planned amount covered): "
+                "keep the equivalent resting orders; the current decision is the "
+                "authoritative plan record and only uncovered tranches remain to place"
+            )
+            near = [
+                matched for tranche in live_coverage["tranches"]
+                for matched in tranche["matched_orders"]
+                if str(matched.get("match_kind", "")).startswith("NEAR_ZONE")
+            ]
+            if near:
+                prices = ", ".join(f"{matched['price']}" for matched in near)
+                reason += (
+                    f"; resting order(s) at {prices} sit just outside a zone edge but within "
+                    "the configured tolerance — no re-placement required, adjust only if you "
+                    "want exact zone alignment"
+                )
         elif effective_status == "NOT_EXECUTED":
             instruction = "CANCEL_RESTING"
             reason = ("terminal NOT_EXECUTED with an unfilled remainder: no order should rest "
@@ -423,6 +515,13 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fi
                                f"{bucket['quantity']:.8f} / ${bucket['notional']:.2f} were not attributed")
         if caveat:
             reason += f"; {caveat}"
+        if stale_orders:
+            stale_value = sum(order["remaining_notional_usd"] for order in stale_orders)
+            reason += (
+                f"; {len(stale_orders)} resting order(s) on this symbol lie outside every "
+                f"current plan zone (remaining ${stale_value:.2f}) — review and cancel them "
+                "manually if stale"
+            )
 
         record = {
             "decision_id": prior["decision_id"],
@@ -438,13 +537,15 @@ def prior_plan_disposition(decision, history, snapshots=(), status_events=(), fi
         }
         if unmatched is not None:
             record["unmatched_trades"] = unmatched
+        if live_coverage is not None:
+            record["resting_order_coverage"] = live_coverage
         disposition[symbol] = record
     return disposition
 
 
 def finalize_review(decision, snapshot, *, acquisition, artifact_root=None, history=(),
                     new_cash=0.0, persist=False, decision_path=None,
-                    status_events=(), snapshots=(), fills=None):
+                    status_events=(), snapshots=(), fills=None, open_orders=None):
     """Validate frozen inputs, calculate diagnostics, publish a single operation view.
 
     The caller supplies the already authorized allocation/rebalance and confidence.
@@ -502,7 +603,9 @@ def finalize_review(decision, snapshot, *, acquisition, artifact_root=None, hist
     output['wait_history'] = wait_history(model, history)
     output['superseded_status_events_to_append'] = superseded_status_events(model, history)
     output['prior_plan_disposition'] = prior_plan_disposition(
-        model, history, snapshots=snapshots, status_events=status_events, fills=fills)
+        model, history, snapshots=snapshots, status_events=status_events, fills=fills,
+        open_orders=open_orders, policy=policy)
+    output['resting_order_coverage'] = resting_order_coverage(model, open_orders, policy=policy)
     if output['operation'] != record['operation']:
         raise ValueError('report and persisted operation differ')
     if persist:

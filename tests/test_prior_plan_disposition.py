@@ -256,6 +256,25 @@ class PriorPlanDispositionTests(unittest.TestCase):
                                      history=[prior])
             self.assertEqual(result['prior_plan_disposition']['BTC']['order_instruction'], 'CANCEL_RESTING')
 
+    def test_finalize_review_output_carries_resting_order_coverage(self):
+        # Coverage computation itself is covered by the direct matcher and
+        # disposition tests; here we pin the finalize boundary wiring: the
+        # output exposes the key, supplied open orders flow through, and an
+        # unfetched book yields an empty section without errors.
+        decision = Decision('2026-01-01T01:00:00Z', 'NORMAL', {'BTC': .6, 'USDT': .4}, {'BTC': .6, 'USDT': .4},
+                            based_on_snapshot_id='synthetic-snapshot',
+                            nav_performance={'status': 'AVAILABLE', 'current_drawdown': -.01})
+        snap = {'snapshot_id': 'synthetic-snapshot', 'timestamp': '2026-01-01T00:00:00Z',
+                'positions': [{'symbol': 'BTC', 'value_usd': 600}, {'symbol': 'USDT', 'value_usd': 400}]}
+        with tempfile.TemporaryDirectory() as directory:
+            plain = finalize_review(decision, snap, acquisition={'finalized': True}, artifact_root=directory)
+            self.assertEqual(plain['resting_order_coverage'], {})
+            supplied = finalize_review(
+                decision, snap, acquisition={'finalized': True}, artifact_root=directory,
+                open_orders={'BTC': []},
+            )
+            self.assertEqual(supplied['resting_order_coverage'], {})
+
 
 def fill(symbol="BTC", side="BUY", quantity=0.023914551, price=84400.0, fill_id="9001",
          executed_at="2026-09-23T15:00:00Z"):

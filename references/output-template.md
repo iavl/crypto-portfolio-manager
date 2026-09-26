@@ -27,6 +27,11 @@ fixed strings as follows. Headings not listed here keep their English text
   `无未成交挂单`; attribution labels `交易所成交记录` / `交易所数量差分` /
   `仅状态事件` / `外部资金流阻断` / `状态事件矛盾`; fill states `足额成交` /
   `部分成交` / `未成交` / `无法归因`.
+- Resting-order coverage (when open orders were fetched): tranche states
+  `已挂单·足额` / `已挂单·部分` / `未挂单`; match kinds `区间内` /
+  `近似挂单（区间边缘外，容差内）`; the no-action reminder reads
+  `已挂单，无需操作`, and an order outside every zone is flagged
+  `区间外挂单，请人工核对是否撤销`.
 - Position P&L table headers: `资产 | 数量 | 当前价 | 平均成本 | 当前价值 |
   持仓成本 | 未实现盈亏 | 持仓收益率 | 仓位占比`; coverage bullet
   `成本数据覆盖率`; never label it `总收益`.
@@ -95,7 +100,9 @@ with its deterministic reason:
   additive) or terminally unexecuted; cancel the manually rested orders.
 - `REPLACE_WITH_NEW_PLAN` — the current review re-plans the asset at different
   zones; cancel the old orders and rest the new plan's zones.
-- `KEEP_EQUIVALENT_ORDERS` — the current review re-issues identical zones;
+- `KEEP_EQUIVALENT_ORDERS` — the current review re-issues identical zones, or
+  (when open orders were fetched) resting limit orders already sit inside the
+  current plan's zones within tolerance, whatever the prior terminal status;
   equivalent resting orders may remain, with the current decision as the
   authoritative record.
 - `NOTHING_RESTING` — every planned tranche is filled.
@@ -105,6 +112,17 @@ warnings: `UNRESOLVED_EXTERNAL_FLOW` (an external flow between the reference
 snapshots blocks quantity attribution) and `STATUS_EVENT_CONFLICT` (the
 quantity delta and the terminal status event disagree). Instructions are
 advisory for manually rested exchange orders; the system cancels nothing.
+
+When the finalized output provides `resting_order_coverage` (the open-order
+book was fetched), render the coverage beside the current staged plan: one
+line per tranche with its resting state (`RESTING_FULL` / `RESTING_PARTIAL` /
+`NOT_RESTING`), the matched order prices and match kinds (`IN_ZONE` /
+`NEAR_ZONE_BELOW` / `NEAR_ZONE_ABOVE`), and the covered fraction. Tranches
+with coverage render as an already-placed reminder — do not re-list them as
+orders to place; only uncovered tranches remain to-place, and near-zone
+matches state the deviation so the user can decide whether to adjust. Resting
+orders outside every current zone surface as stale with a manual-review
+warning. Coverage changes no approved or planned amount.
 
 ### Decision basis
 

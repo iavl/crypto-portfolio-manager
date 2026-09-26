@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from crypto_portfolio.providers.base import (
     ProviderAuthenticationError,
+    ProviderDataError,
     ProviderDiagnostic,
     ProviderResponseError,
 )
@@ -193,6 +194,74 @@ class AccountEndpointParsingTests(unittest.TestCase):
         self.assertEqual(len(positions), 101)
         self.assertEqual(positions[0], WalletBalance("ETH", 1.25, "earn_locked"))
         self.assertEqual(positions[-1], WalletBalance("USDT", 50.0, "earn_locked"))
+
+class OpenOrdersTests(unittest.TestCase):
+    def test_open_orders_parse_and_validate(self):
+        transport = FakeTransport(
+            {
+                "/api/v3/time": [{"serverTime": 0}],
+                "/api/v3/openOrders": [
+                    [
+                        {
+                            "symbol": "AAVEUSDT",
+                            "orderId": 5738465275,
+                            "clientOrderId": "web_abc",
+                            "side": "BUY",
+                            "type": "LIMIT",
+                            "timeInForce": "GTC",
+                            "price": "132.0",
+                            "origQty": "9.5",
+                            "executedQty": "0",
+                            "status": "NEW",
+                            "time": 1785896112000,
+                        },
+                        {
+                            "symbol": "AAVEUSDT",
+                            "orderId": 5738467151,
+                            "side": "BUY",
+                            "type": "LIMIT",
+                            "timeInForce": "GTC",
+                            "price": "107.0",
+                            "origQty": "13.71",
+                            "executedQty": "1.21",
+                            "status": "PARTIALLY_FILLED",
+                            "time": 1785896124000,
+                        },
+                    ]
+                ],
+            }
+        )
+        orders = _client(transport).open_orders("AAVE")
+        self.assertEqual(len(orders), 2)
+        self.assertEqual(orders[0].symbol, "AAVE")
+        self.assertEqual(orders[0].order_id, 5738465275)
+        self.assertEqual(orders[0].side, "BUY")
+        self.assertEqual(orders[0].order_type, "LIMIT")
+        self.assertEqual(orders[0].price, 132.0)
+        self.assertEqual(orders[0].executed_quantity, 0.0)
+        self.assertEqual(orders[1].executed_quantity, 1.21)
+        path, params, _ = transport.requests[-1]
+        self.assertEqual(path, "/api/v3/openOrders")
+        self.assertEqual(params["symbol"], "AAVEUSDT")
+
+    def test_open_orders_reject_invalid_payloads(self):
+        transport = FakeTransport(
+            {
+                "/api/v3/time": [{"serverTime": 0}],
+                "/api/v3/openOrders": [[{"symbol": "AAVEUSDT", "orderId": 1, "side": "BUY"}]],
+            }
+        )
+        with self.assertRaises(ProviderDataError):
+            _client(transport).open_orders("AAVE")
+        non_list = FakeTransport(
+            {
+                "/api/v3/time": [{"serverTime": 0}],
+                "/api/v3/openOrders": [{"unexpected": "shape"}],
+            }
+        )
+        with self.assertRaises(ProviderDataError):
+            _client(non_list).open_orders("AAVE")
+
 
 class FlowHistoryTests(unittest.TestCase):
     def test_completed_deposit_and_withdrawal_records_normalize(self):

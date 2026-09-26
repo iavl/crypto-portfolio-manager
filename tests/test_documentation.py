@@ -479,6 +479,19 @@ class DocumentationTests(unittest.TestCase):
                 with self.subTest(path=relative_path, horizon=horizon):
                     self.assertIn(horizon.upper(), content)
 
+    def test_resting_order_reconciliation_is_documented(self):
+        skill = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("scripts/binance_open_orders.py --persist", skill)
+        self.assertIn("orders/open-orders.json", skill)
+        self.assertIn("resting_order_coverage", skill)
+        self.assertIn("open_orders", skill)
+        template = (ROOT / "references" / "output-template.md").read_text(encoding="utf-8")
+        self.assertIn("已挂单，无需操作", template)
+        self.assertIn("RESTING_FULL", template)
+        self.assertIn("NEAR_ZONE_ABOVE", template)
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("openOrders", agents)
+
 
 if __name__ == "__main__":
     unittest.main()

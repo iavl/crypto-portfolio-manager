@@ -98,6 +98,25 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(PolicyError):
                 load_policy(path)
 
+    def test_execution_resting_order_keys_are_canonical_and_bounded(self):
+        policy = load_policy()
+        self.assertEqual(policy.execution["resting_order_match_tolerance"], 0.02)
+        self.assertEqual(policy.execution["resting_order_full_fraction"], 0.95)
+        self.assertEqual(policy.execution["resting_order_partial_fraction"], 0.05)
+        for mutation in (
+            {"resting_order_match_tolerance": 0.0},
+            {"resting_order_match_tolerance": 0.5},
+            {"resting_order_full_fraction": 0.04},
+            {"resting_order_partial_fraction": 0.96},
+        ):
+            invalid = json.loads(json.dumps(policy.as_dict()))
+            invalid["execution"].update(mutation)
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "policy.json"
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaises(PolicyError):
+                    load_policy(path)
+
     def test_volume_profile_policy_is_canonical_and_bounded(self):
         policy = load_policy()
         self.assertEqual(policy.volume_profile["preferred_timeframe"], "4H")

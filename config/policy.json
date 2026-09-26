@@ -619,7 +619,10 @@
       "minimum_relative_volume": 1.2,
       "max_atr_extension": 2.0,
       "max_initial_tranche": 0.2
-    }
+    },
+    "resting_order_match_tolerance": 0.02,
+    "resting_order_full_fraction": 0.95,
+    "resting_order_partial_fraction": 0.05
   },
   "confidence": {
     "band_thresholds": {

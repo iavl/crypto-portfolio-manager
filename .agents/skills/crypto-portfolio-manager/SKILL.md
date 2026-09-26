@@ -137,6 +137,23 @@ symbols over the attribution window, appends only new records
 is read-only. Fetch coverage matters: a symbol absent from the fetched
 set falls back to snapshot-delta attribution.
 
+Also refresh the resting-order snapshot so the report can tell already
+resting exchange orders from tranches that still need placing:
+
+```bash
+python3 scripts/binance_open_orders.py --persist
+```
+
+It fetches `openOrders` per symbol (same default symbol derivation as the
+fill store, read-only GET) and atomically replaces the current-state file
+`orders/open-orders.json` — open orders are a point-in-time observation,
+not append-only history. Presence of a symbol key means fetched (an empty
+list is a confident zero); an absent key means not fetched, in which case
+resting-order coverage and the open-order disposition rules stay advisory
+as before. Matched coverage is informational only: it marks tranches as
+already resting and never changes approved or planned amounts, and the
+system still never places, cancels, or modifies orders.
+
 ### Binance screenshot intake (fallback)
 
 When the user provides the standard Binance wallet-overview screenshot, do
@@ -332,7 +349,15 @@ display data, so the engine uses value ÷ quantity and records a note.
     funding to the final planned buys while preserving independent risk exits.
     `planned_amount_usd` means conditional limit proposals, not a market order
     or confirmed fill.
-    When the snapshot has `funding_availability`, show the separate funding
+    When open orders were fetched, render the resting-order coverage
+    (`finalize_review` output `resting_order_coverage`) with the staged plan:
+    mark every tranche whose zone (widened by the configured tolerance)
+    already holds a matching resting limit order as already placed — a single
+    no-action reminder, never a repeated re-placement proposal — and list
+    only uncovered tranches as still to place. Near-zone matches (just
+    outside a zone edge, inside the tolerance) count as placed with the
+    deviation stated so the user can decide whether to adjust the order.
+    Approved and planned amounts never change because orders rest. When the snapshot has `funding_availability`, show the separate funding
     readiness result. Only same-snapshot verified spot-free value is immediately
     available; locked, Earn, redeeming, or otherwise restricted value remains
     in NAV but requires a release condition. Missing availability is UNKNOWN.
@@ -351,7 +376,12 @@ display data, so the engine uses value ÷ quantity and records a note.
     advisory instructions for manually rested exchange orders; the system
     cancels nothing itself. A `STATUS_EVENT_CONFLICT` or
     `UNRESOLVED_EXTERNAL_FLOW` attribution must be surfaced as a
-    verify-before-acting warning.
+    verify-before-acting warning. When the open-order book was fetched for a
+    re-planned symbol, the instruction prefers live evidence over the
+    heuristics: resting limit orders already inside the current plan's zones
+    (within tolerance) yield `KEEP_EQUIVALENT_ORDERS` even after a terminal
+    `NOT_EXECUTED`, and resting orders outside every current zone must be
+    surfaced as stale for manual review.
     For `NO_TRADE`/`WAIT`, include the finalized `NoTradeAttribution` gate
     states and its deterministic `primary_reason`/`secondary_reasons`.
     When the report uses a potentially ambiguous term, add a short
@@ -579,7 +609,9 @@ public market/profile artifacts use
 `volume-profiles/sha256/<profile_hash>.json`. Provider acquisition artifacts
 use `provider-cache/responses/` and `provider-cache/series/`. Exchange-confirmed
 executions are appended to `fills/trades.jsonl` (deduplicated by symbol and
-trade id) by `scripts/binance_fills.py`.
+trade id) by `scripts/binance_fills.py`; the resting-order snapshot is the
+replaced-in-place current-state file `orders/open-orders.json` written by
+`scripts/binance_open_orders.py`.
 
 Only the current internal runtime contract is supported. If a breaking change
 makes generated local state incompatible, report it clearly and regenerate the
@@ -618,7 +650,10 @@ orders, and optionally appends only after every gate passes. The bundle may
 carry `status_events`, `snapshots`, and `fills` (symbol -> trade records; a
 present symbol key means fetched, an empty list means confidently zero trades)
 so the disposition attributes fills from exchange trade records first and
-falls back to snapshot quantity deltas only for symbols without records.
+falls back to snapshot quantity deltas only for symbols without records. It
+may also carry `open_orders` (symbol -> resting-order records, same presence
+semantics) so the disposition and the `resting_order_coverage` output
+reconcile already-resting exchange orders with the current plan zones.
 
 ## Current acquisition contracts
 
