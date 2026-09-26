@@ -21,6 +21,7 @@ from ..engine.rebalance import direction_history_from_decisions, recommend_rebal
 from ..engine.regime import RegimeInputs, determine_regime, market_only_regime
 from ..engine.risk import risk_overlay_floor, run_risk_gate
 from ..engine.risk_recovery import RecoveryState, advance_emergency_recovery
+from ..engine.satellite_alpha_states import satellite_alpha_states
 from ..engine.strategy_replay import ReplayReview
 from ..models.evidence import AssetAssessment
 from ..models.market import TechnicalSnapshot
@@ -535,7 +536,9 @@ def run_historical_backtest(
             ),
             recovery_state=emergency_block,
             eth_alpha_state=review.eth_alpha_state,
-            satellite_alpha_states=review.satellite_alpha_states,
+            satellite_alpha_states=satellite_alpha_states(
+                resolved.satellite_alpha, review.satellite_alpha_signals,
+            ),
         )
         risk = run_risk_gate(
             allocation, policy=resolved, regime=regime.regime, assessments=assessments,
@@ -692,9 +695,6 @@ def run_historical_backtest(
         review_rows.append({
             "as_of": review.as_of, "period_end": review.period_end,
             "eth_alpha_state": review.eth_alpha_state,
-            "satellite_alpha_states": (
-                dict(review.satellite_alpha_states) if review.satellite_alpha_states is not None else None
-            ),
             "regime": regime.as_dict(), "drawdown_input": point.drawdown,
             "assessments": {symbol: value.as_dict() for symbol, value in assessments.items()},
             "allocation": allocation.as_dict(), "risk_gate": risk.as_dict(),

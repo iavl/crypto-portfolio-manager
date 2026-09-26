@@ -586,6 +586,253 @@ def command_v22(args):
     }, ensure_ascii=False, indent=2))
 
 
+
+
+def command_v23(args):
+    """Strategy V2.3 validation: ladder, registry, regime variants, decisions.
+
+    Runs the frozen V2.3 A-I ladder (plan 10.2) over one dataset scope on
+    structural point-in-time reviews, evaluates the ETH/BNB/AAVE
+    BTC-relative signals and the unified admission across both windows,
+    freezes the alpha registry, compares the regime authority variants,
+    attributes risk and alpha, and derives the policy decision matrix — all
+    stamped with the full V2.3 experiment identity (git SHA, policy hash,
+    dataset manifest, registry hash, risk budget mode, carry convention).
+    """
+    from crypto_portfolio.engine.aave_relative_alpha import (
+        aave_signal_observations,
+        aavebtc_ratio_series,
+        evaluate_aave_admission,
+        evaluate_aave_signals,
+    )
+    from crypto_portfolio.engine.bnb_relative_alpha import (
+        bnb_signal_observations,
+        bnbbtc_ratio_series,
+        evaluate_bnb_admission,
+        evaluate_bnb_signals,
+    )
+    from crypto_portfolio.engine.eth_relative_alpha import (
+        ethbtc_ratio_series,
+        evaluate_relative_signals,
+        evaluate_signal_admission,
+        relative_signal_observations,
+    )
+    from crypto_portfolio.research.alpha_registry import (
+        admitted_signals_for_asset,
+        asset_admission_summary,
+        build_registry,
+    )
+    from crypto_portfolio.research.cash_carry import (
+        CashCarryConvention,
+        rate_points_from_percent_series,
+    )
+    from crypto_portfolio.research.regime_variants import run_regime_variant_comparison
+    from crypto_portfolio.research.v23_validation import (
+        V23_STRATEGY_VERSION,
+        alpha_attribution_report,
+        run_v23_ablation,
+        v23_manifest,
+        v23_policy_decision_matrix,
+    )
+
+    def growth_maps(evidence, moments):
+        bnb_growth = {
+            moment: {
+                "chain_tvl": ((evidence.structural or {}).get("BNB") or {}).get("chain_tvl"),
+                "stablecoins": ((evidence.structural or {}).get("BNB") or {}).get("stablecoins"),
+                "fees": ((evidence.structural or {}).get("BNB") or {}).get("fees"),
+            }
+            for moment in moments
+        }
+        aave_growth = {
+            moment: {
+                "tvl": ((evidence.structural or {}).get("AAVE") or {}).get("tvl"),
+                "borrowed": ((evidence.structural or {}).get("AAVE") or {}).get("borrowed"),
+                "fees": ((evidence.structural or {}).get("AAVE") or {}).get("fees"),
+            }
+            for moment in moments
+        }
+        return bnb_growth, aave_growth
+
+    def window(root: Path):
+        spec, manifest, series = load_dataset(root)
+        daily, hourly = _series_maps(series, prefer_normalized=manifest.strict_ready)
+        execution_series = daily if spec.execution_timeframe == "1D" else hourly
+        harvested = load_evidence_series(root)
+        evidence = (
+            EvidenceContext.from_series(harvested, include_structural=True)
+            if harvested else None
+        )
+        scope_name, portfolio_name = args.scope.split("/")
+        symbols = spec.asset_scopes[scope_name]
+        policy = _core_policy() if scope_name == "core" else load_policy()
+        policy = policy_from_mapping({
+            **policy.as_dict(),
+            "risk_engine": {**policy.as_dict()["risk_engine"], "mode": "volatility_budget"},
+        })
+        reviews = rebind_initial_weights(
+            build_historical_reviews(
+                daily_by_symbol=daily, execution_by_symbol=execution_series,
+                hourly_by_symbol=execution_series,
+                execution_timeframe=spec.execution_timeframe, symbols=symbols,
+                initial_weights=next(iter(spec.initial_portfolios.values())),
+                initial_value_usd=spec.initial_value_usd, start_at=spec.start_at,
+                end_at=spec.end_at, policy=policy, semantic_score=None,
+                evidence=evidence,
+            ),
+            spec.initial_portfolios[portfolio_name], spec.initial_value_usd,
+        )
+        risk_inputs = build_risk_inputs_for_reviews(
+            reviews, daily_by_symbol=daily, policy=policy,
+        )
+        moments = [review.as_of for review in reviews]
+        bnb_growth, aave_growth = growth_maps(evidence, moments)
+        evaluations = {}
+        if "ETH" in daily:
+            ratio = ethbtc_ratio_series(daily["ETH"], daily["BTC"])
+            evaluations["ETH"] = evaluate_relative_signals(
+                relative_signal_observations(
+                    ratio, moments, horizons=(30, 90, 180),
+                    etf_differential_by_moment=_etf_differentials(harvested, moments),
+                ), horizons=(30, 90, 180),
+            )
+        if "BNB" in daily:
+            evaluations["BNB"] = evaluate_bnb_signals(
+                bnb_signal_observations(
+                    bnbbtc_ratio_series(daily["BNB"], daily["BTC"]), moments,
+                    horizons=(30, 90, 180), growth_series_by_moment=bnb_growth,
+                ), horizons=(30, 90, 180),
+            )
+        if "AAVE" in daily:
+            evaluations["AAVE"] = evaluate_aave_signals(
+                aave_signal_observations(
+                    aavebtc_ratio_series(daily["AAVE"], daily["BTC"]), moments,
+                    horizons=(30, 90, 180), growth_series_by_moment=aave_growth,
+                ), horizons=(30, 90, 180),
+            )
+        carry_points = ()
+        if harvested and "fred:DFF" in harvested:
+            carry_points = rate_points_from_percent_series(harvested["fred:DFF"])
+        return {
+            "spec": spec, "manifest": manifest, "policy": policy,
+            "reviews": reviews, "risk_inputs": risk_inputs,
+            "evaluations": evaluations, "carry_points": carry_points,
+        }
+
+    primary = window(Path(args.dataset))
+    sister = window(Path(args.sister_dataset)) if args.sister_dataset else None
+    eth_admission = evaluate_signal_admission({
+        "primary": primary["evaluations"]["ETH"],
+        **({"sister": sister["evaluations"]["ETH"]} if sister else {}),
+    })
+    bnb_admission = evaluate_bnb_admission({
+        "primary": primary["evaluations"]["BNB"],
+        **({"sister": sister["evaluations"]["BNB"]} if sister else {}),
+    })
+    aave_admission = evaluate_aave_admission({
+        "primary": primary["evaluations"]["AAVE"],
+        **({"sister": sister["evaluations"]["AAVE"]} if sister else {}),
+    })
+    registry = build_registry({
+        "ETH": eth_admission, "BNB": bnb_admission, "AAVE": aave_admission,
+    })
+    registry_summary = asset_admission_summary(registry)
+    bnb_admitted = admitted_signals_for_asset(registry, "BNB")
+    aave_admitted = admitted_signals_for_asset(registry, "AAVE")
+    eth_admitted = bool(eth_admission["eth_tilt_admitted"])
+
+    carry_mode = "ZERO" if args.no_carry else "RISK_FREE_PROXY"
+    carry = (
+        CashCarryConvention("ZERO")
+        if carry_mode == "ZERO"
+        else CashCarryConvention("RISK_FREE_PROXY", primary["carry_points"])
+    )
+
+    def ladder(source):
+        return run_v23_ablation(
+            source["reviews"], policy=source["policy"],
+            risk_inputs_by_review=source["risk_inputs"],
+            fee_bps=source["spec"].fee_bps, slippage_bps=source["spec"].slippage_bps,
+            git_sha=_git_sha(), data_manifest=source["manifest"].as_dict(),
+            alpha_registry_hash=registry["registry_hash"],
+            cash_carry=carry, cash_carry_name=carry_mode,
+            bnb_admitted_signals=bnb_admitted,
+            aave_admitted_signals=aave_admitted,
+            eth_tilt_admitted=eth_admitted,
+        )
+
+    primary_ladder = ladder(primary)
+    sister_ladder = ladder(sister) if sister else None
+    regime_variants = run_regime_variant_comparison(
+        primary["reviews"], policy=primary["policy"],
+        risk_inputs_by_review=primary["risk_inputs"],
+        fee_bps=primary["spec"].fee_bps, slippage_bps=primary["spec"].slippage_bps,
+        git_sha=_git_sha(),
+    )
+
+    def slim(ladder_result):
+        return {
+            "rungs": [
+                {key: value for key, value in rung.items() if key != "result"}
+                for rung in ladder_result["rungs"]
+            ],
+            "alpha_attribution": alpha_attribution_report(ladder_result["rungs"]),
+            "note": ladder_result["note"],
+        }
+
+    result = {
+        "strategy_version": V23_STRATEGY_VERSION,
+        "run_id": primary["spec"].run_id,
+        "experiment": f"{args.scope}/strict",
+        "window": {"start_at": primary["spec"].start_at, "end_at": primary["spec"].end_at},
+        "manifest": v23_manifest(
+            primary["policy"], git_sha=_git_sha(),
+            data_manifest=primary["manifest"].as_dict(),
+            alpha_registry_hash=registry["registry_hash"],
+            cash_carry_convention=carry_mode,
+        ),
+        "carry_convention": carry_mode,
+        "alpha_registry": registry,
+        "alpha_registry_summary": registry_summary,
+        "signal_evaluations": {
+            "primary": primary["evaluations"],
+            **({"sister": sister["evaluations"]} if sister else {}),
+        },
+        "admissions": {
+            "ETH": eth_admission, "BNB": bnb_admission, "AAVE": aave_admission,
+        },
+        "ladder": slim(primary_ladder),
+        **({"sister_ladder": slim(sister_ladder)} if sister_ladder else {}),
+        "regime_variants": {
+            "ownership": regime_variants["ownership"],
+            "variants": [
+                {key: value for key, value in row.items() if key != "manifest"}
+                for row in regime_variants["variants"]
+            ],
+        },
+        "policy_decision": v23_policy_decision_matrix(
+            primary_ladder, sister_ladder,
+            bnb_admitted=bool(bnb_admitted),
+            aave_admitted=bool(aave_admitted),
+            eth_admitted=eth_admitted,
+        ),
+    }
+    path = Path(args.output) if args.output else Path(args.dataset) / "v23-validation.json"
+    _write(path, result)
+    print(json.dumps({
+        "status": "COMPLETED", "output": str(path),
+        "carry": carry_mode,
+        "rungs": [rung["rung"] for rung in primary_ladder["rungs"]],
+        "admitted": {
+            "BNB": list(bnb_admitted), "AAVE": list(aave_admitted), "ETH": eth_admitted,
+        },
+        "registry_hash": registry["registry_hash"][:16],
+        "policy_decision": {
+            module: verdict["decision"]
+            for module, verdict in result["policy_decision"]["modules"].items()
+        },
+    }, ensure_ascii=False, indent=2))
+
 def command_budget_sensitivity(args):
     from crypto_portfolio.research.sensitivity import drawdown_budget_sensitivity
     budgets = tuple(float(item) for item in str(args.budgets).split(",") if item.strip())

@@ -20,8 +20,8 @@ from ..engine.risk_tier import estimate_risk_tiers
 from ..engine.scoring import score_assessment
 from ..engine.strategy_replay import ReplayReview
 from ..engine.technical import build_technical_snapshot, moving_average
-from ..engine.aave_relative_alpha import aave_alpha_state, aave_relative_signals, aavebtc_ratio_series
-from ..engine.bnb_relative_alpha import bnb_alpha_state, bnb_relative_signals, bnbbtc_ratio_series
+from ..engine.aave_relative_alpha import aave_relative_signals, aavebtc_ratio_series
+from ..engine.bnb_relative_alpha import bnb_relative_signals, bnbbtc_ratio_series
 from ..engine.eth_relative_alpha import eth_alpha_state, ethbtc_ratio_series, relative_signals
 from ..models.evidence import AssetAssessment, EventRiskAssessment, FactorScore
 from ..models.market import Candle, OHLCVSeries, SpotPrice
@@ -422,31 +422,31 @@ def build_historical_reviews(
         eth_signals = (
             relative_signals(eth_ratio_points, as_of_moment) if eth_ratio_points else {}
         )
-        satellite_alpha_states: dict[str, str] = {}
+        # Strategy V2.3: freeze the full signal VALUES per boundary. The
+        # discrete state is derived at run time from the RUNNING policy's
+        # admitted set, so one frozen record serves every ladder rung.
+        satellite_alpha_signals: dict[str, dict[str, float | None]] = {}
         for alpha_symbol, alpha_points in satellite_ratio_points.items():
-            alpha_entry = (policy.satellite_alpha or {}).get(alpha_symbol) or {}
-            if alpha_entry.get("mode") != "alpha_admitted" or not alpha_points:
+            if not alpha_points or alpha_symbol not in ("BNB", "AAVE"):
                 continue
             structural = {}
             if evidence is not None and evidence.structural:
                 structural = evidence.structural.get(alpha_symbol) or {}
             if alpha_symbol == "BNB":
-                alpha_signals = bnb_relative_signals(alpha_points, as_of_moment, {
-                    "chain_tvl": structural.get("chain_tvl"),
-                    "stablecoins": structural.get("stablecoins"),
-                    "fees": structural.get("fees"),
-                })
-                satellite_alpha_states[alpha_symbol] = bnb_alpha_state(
-                    alpha_signals, alpha_entry.get("admitted_signals", ())
+                satellite_alpha_signals[alpha_symbol] = bnb_relative_signals(
+                    alpha_points, as_of_moment, {
+                        "chain_tvl": structural.get("chain_tvl"),
+                        "stablecoins": structural.get("stablecoins"),
+                        "fees": structural.get("fees"),
+                    },
                 )
             else:
-                alpha_signals = aave_relative_signals(alpha_points, as_of_moment, {
-                    "tvl": structural.get("tvl"),
-                    "borrowed": structural.get("borrowed"),
-                    "fees": structural.get("fees"),
-                })
-                satellite_alpha_states[alpha_symbol] = aave_alpha_state(
-                    alpha_signals, alpha_entry.get("admitted_signals", ())
+                satellite_alpha_signals[alpha_symbol] = aave_relative_signals(
+                    alpha_points, as_of_moment, {
+                        "tvl": structural.get("tvl"),
+                        "borrowed": structural.get("borrowed"),
+                        "fees": structural.get("fees"),
+                    },
                 )
         market_flow = evidence.market_flow_state(as_of) if evidence is not None else None
         regime_inputs = build_regime_inputs(
@@ -462,7 +462,7 @@ def build_historical_reviews(
             next_returns=next_returns, technical_inputs=snapshots,
             execution_bars=execution_bars, current_prices=current_prices,
             eth_alpha_state=eth_alpha_state(eth_signals) if eth_signals else None,
-            satellite_alpha_states=satellite_alpha_states or None,
+            satellite_alpha_signals=satellite_alpha_signals or None,
         ))
     if not reviews:
         raise ValueError("historical dataset produced no complete review periods")

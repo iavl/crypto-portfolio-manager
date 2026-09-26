@@ -102,7 +102,7 @@ class FrozenReviewView:
     overlays: Mapping[str, Any] | None = None
     chain_liveness: Mapping[str, Any] | None = None
     eth_alpha_state: str | None = None
-    satellite_alpha_states: Mapping[str, str] | None = None
+    satellite_alpha_signals: Mapping[str, Mapping[str, float | None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,11 @@ class ReplayReview:
     chain_liveness: Mapping[str, Any] | None = None
     current_prices: Mapping[str, float] = field(default_factory=dict)
     eth_alpha_state: str | None = None
-    satellite_alpha_states: Mapping[str, str] | None = None
+    # Strategy V2.3: frozen per-boundary BTC-relative signal VALUES. The
+    # discrete alpha state is derived at run time from these signals plus
+    # the RUNNING policy's admitted set, so one frozen record serves every
+    # ladder rung without leaking policy into the evidence.
+    satellite_alpha_signals: Mapping[str, Mapping[str, float | None]] | None = None
 
     def __post_init__(self) -> None:
         moment = _parse_as_of(self.as_of)
@@ -199,22 +203,30 @@ class ReplayReview:
             if state not in {ETH_ALPHA_POSITIVE, ETH_ALPHA_NEUTRAL, ETH_ALPHA_NEGATIVE}:
                 raise ValueError("eth_alpha_state is unsupported")
             object.__setattr__(self, "eth_alpha_state", state)
-        if self.satellite_alpha_states is not None:
-            from .relative_alpha_core import asset_alpha_state_names
-            normalized_states: dict[str, str] = {}
-            for raw_symbol, raw_state in self.satellite_alpha_states.items():
+        if self.satellite_alpha_signals is not None:
+            import math as _math
+            if not isinstance(self.satellite_alpha_signals, Mapping):
+                raise ValueError("satellite_alpha_signals must be an object")
+            normalized_signals: dict[str, dict[str, float | None]] = {}
+            for raw_symbol, raw_values in self.satellite_alpha_signals.items():
                 symbol = str(raw_symbol).strip().upper()
-                if not symbol or symbol in normalized_states:
-                    raise ValueError("satellite_alpha_states must use unique non-empty symbols")
-                positive, neutral, negative = asset_alpha_state_names(symbol)
-                state_text = str(raw_state).strip().upper()
-                if state_text not in {positive, neutral, negative}:
-                    raise ValueError(
-                        f"satellite_alpha_states.{symbol} must be {positive}, "
-                        f"{neutral}, or {negative}"
-                    )
-                normalized_states[symbol] = state_text
-            object.__setattr__(self, "satellite_alpha_states", normalized_states)
+                if not symbol or symbol in normalized_signals:
+                    raise ValueError("satellite_alpha_signals must use unique non-empty symbols")
+                if not isinstance(raw_values, Mapping):
+                    raise ValueError(f"satellite_alpha_signals.{symbol} must be an object")
+                parsed: dict[str, float | None] = {}
+                for name, value in raw_values.items():
+                    if value is None:
+                        parsed[str(name)] = None
+                        continue
+                    if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                            or not _math.isfinite(float(value)):
+                        raise ValueError(
+                            f"satellite_alpha_signals.{symbol}.{name} must be a finite number or null"
+                        )
+                    parsed[str(name)] = float(value)
+                normalized_signals[symbol] = parsed
+            object.__setattr__(self, "satellite_alpha_signals", normalized_signals)
         if isinstance(self.thesis_broken, str):
             raise ValueError("thesis_broken must be a sequence of symbols")
         broken = tuple(str(item).strip().upper() for item in self.thesis_broken if str(item).strip())
@@ -249,8 +261,9 @@ class ReplayReview:
             overlays=dict(self.overlays) if self.overlays is not None else None,
             chain_liveness=dict(self.chain_liveness) if self.chain_liveness is not None else None,
             eth_alpha_state=self.eth_alpha_state,
-            satellite_alpha_states=(
-                dict(self.satellite_alpha_states) if self.satellite_alpha_states is not None else None
+            satellite_alpha_signals=(
+                {symbol: dict(values) for symbol, values in self.satellite_alpha_signals.items()}
+                if self.satellite_alpha_signals is not None else None
             ),
         )
 
@@ -263,7 +276,7 @@ class ReplayReview:
             "execution_plans",
             "execution_bars",
             "overlays", "chain_liveness",
-            "current_prices", "eth_alpha_state", "satellite_alpha_states",
+            "current_prices", "eth_alpha_state", "satellite_alpha_signals",
         }
         unknown = sorted(set(value) - known)
         if unknown:
@@ -289,7 +302,7 @@ class ReplayReview:
             chain_liveness=value.get("chain_liveness"),
             current_prices=value.get("current_prices", {}),
             eth_alpha_state=value.get("eth_alpha_state"),
-            satellite_alpha_states=value.get("satellite_alpha_states"),
+            satellite_alpha_signals=value.get("satellite_alpha_signals"),
         )
 
 
@@ -420,6 +433,7 @@ def replay_strategy(
         )
         previous_regime = regime
         regime_counts[regime.regime] = regime_counts.get(regime.regime, 0) + 1
+        from .satellite_alpha_states import satellite_alpha_states
         allocation = build_target_allocation(
             policy=resolved,
             regime=regime.regime,
@@ -428,7 +442,9 @@ def replay_strategy(
             portfolio_drawdown=replay_drawdown,
             market_recovery_streak=market_recovery_streak,
             eth_alpha_state=view.eth_alpha_state,
-            satellite_alpha_states=view.satellite_alpha_states,
+            satellite_alpha_states=satellite_alpha_states(
+                resolved.satellite_alpha, view.satellite_alpha_signals,
+            ),
         )
         from .risk import run_risk_gate
         risk = run_risk_gate(
