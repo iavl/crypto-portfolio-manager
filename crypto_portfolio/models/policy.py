@@ -74,7 +74,9 @@ _TOP_LEVEL_FIELDS = {
     "regime_model",
     "scoring_families",
     "scoring_v3",
+    "capital_hierarchy",
 }
+_CAPITAL_HIERARCHY_FIELDS = {"default_risky_asset", "btc_baseline_enabled"}
 _SCORING_V3_FAMILY_NAMES = ("market", "structural")
 _EVIDENCE_CLASSES = ("ACTIONABLE", "LIMITED", "NOT_ACTIONABLE")
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
@@ -636,6 +638,28 @@ def _parse_risk_tier_estimation(value: Any) -> dict[str, Any]:
     return {**parsed, "minimum_history_days": history}
 
 
+def _parse_capital_hierarchy(value: Any) -> dict[str, Any]:
+    """Strategy V2.1 Phase D: BTC as the default risky asset.
+
+    The hierarchy only redistributes the INSIDE of the risky sleeve in
+    volatility-budget mode: budget no ETH/satellite alpha case can justify
+    returns to the BTC baseline before it becomes cash, and cash then means
+    unused risk budget rather than failed allocation.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("capital_hierarchy must be an object")
+    _unknown_fields(value, _CAPITAL_HIERARCHY_FIELDS, "capital_hierarchy")
+    if set(value) != _CAPITAL_HIERARCHY_FIELDS:
+        raise PolicyError("capital_hierarchy fields are incomplete")
+    asset = value["default_risky_asset"]
+    if not isinstance(asset, str) or asset.strip().upper() != "BTC":
+        raise PolicyError("capital_hierarchy.default_risky_asset must be BTC")
+    enabled = value["btc_baseline_enabled"]
+    if not isinstance(enabled, bool):
+        raise PolicyError("capital_hierarchy.btc_baseline_enabled must be boolean")
+    return {"default_risky_asset": "BTC", "btc_baseline_enabled": enabled}
+
+
 def _parse_risk_engine(value: Any) -> dict[str, Any]:
     """Parse the ``risk_engine`` block selecting the sizing mechanism.
 
@@ -1154,6 +1178,7 @@ class Policy:
     drawdown_budget_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
     scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
     scoring_v3: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    capital_hierarchy: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -1282,6 +1307,7 @@ class Policy:
         # policy records round-trip through as_dict()/policy_from_mapping.
         result["scoring_families"] = _copy_mapping(self.scoring_families)
         result["scoring_v3"] = _copy_mapping(self.scoring_v3)
+        result["capital_hierarchy"] = _copy_mapping(self.capital_hierarchy)
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -2641,6 +2667,7 @@ def _parse_policy(
     parsed_profiles = _parse_scoring_profiles(data.get("scoring_profiles"))
     parsed_scoring_families = _parse_scoring_families(data.get("scoring_families"), parsed_profiles)
     parsed_scoring_v3 = _parse_scoring_v3(data.get("scoring_v3"), parsed_profiles)
+    parsed_capital_hierarchy = _parse_capital_hierarchy(data.get("capital_hierarchy"))
     parsed_asset_profiles = _parse_asset_scoring_profiles(
         data.get("asset_scoring_profiles"), parsed_profiles
     )
@@ -2894,6 +2921,7 @@ def _parse_policy(
         drawdown_budget_overlay=parsed_overlay,
         scoring_families=parsed_scoring_families,
         scoring_v3=parsed_scoring_v3,
+        capital_hierarchy=parsed_capital_hierarchy,
     )
     return policy
 

@@ -444,6 +444,10 @@
       "LOW": 0.25
     }
   },
+  "capital_hierarchy": {
+    "default_risky_asset": "BTC",
+    "btc_baseline_enabled": true
+  },
   "volume_profile": {
     "enabled": true,
     "preferred_timeframe": "4H",

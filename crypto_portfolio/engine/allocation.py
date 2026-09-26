@@ -1067,6 +1067,43 @@ def build_target_allocation(
     )
     reasons.extend(core_reasons)
     constraints.append("v3 core sleeve uses configurable BTC/ETH anchor and ETH gates")
+    # Capital hierarchy (Strategy V2.1 Phase D, volatility-budget mode): BTC
+    # is the default risky asset. Budget no ETH or satellite alpha case can
+    # justify returns to the BTC baseline before it becomes cash, so cash
+    # means unused risk budget rather than failed allocation. Only a hard
+    # BTC risk block (severe event, broken thesis, critical liveness) stops
+    # the baseline from absorbing; data-quality gates do not — the
+    # volatility budget remains the risk control.
+    btc_residual_allocation = 0.0
+    hierarchy = resolved.capital_hierarchy or {}
+    hierarchy_active = (
+        risk_mode == "volatility_budget"
+        and hierarchy.get("btc_baseline_enabled") is True
+        and str(hierarchy.get("default_risky_asset", "")).upper() == "BTC"
+    )
+    if hierarchy_active and residual_core > 1e-12:
+        btc_assessment = core_assessments.get("BTC")
+        btc_hard_blocked = (
+            _event_risk_state(btc_assessment) in {"SEVERE", "CRITICAL"}
+            or _flag(_field(btc_assessment, "thesis_broken", False), "thesis_broken")
+            if btc_assessment is not None else False
+        )
+        btc_liveness = (chain_liveness or {}).get("BTC") if chain_liveness else None
+        if isinstance(btc_liveness, Mapping):
+            btc_liveness = btc_liveness.get("status")
+        if btc_liveness is not None and str(btc_liveness).strip().upper() in {
+            "HALTED", "UNKNOWN", "FAILED", "CONFLICT",
+        }:
+            btc_hard_blocked = True
+        btc_headroom = max(0.0, limits.single_asset_max - core_weights.get("BTC", 0.0))
+        btc_residual_allocation = 0.0 if btc_hard_blocked else min(residual_core, btc_headroom)
+        if btc_residual_allocation > 1e-12:
+            core_weights["BTC"] = core_weights.get("BTC", 0.0) + btc_residual_allocation
+            residual_core -= btc_residual_allocation
+            reasons.append(
+                f"capital hierarchy routes {btc_residual_allocation:.2%} of unabsorbed core "
+                "budget to the BTC baseline before it can become cash"
+            )
     if residual_core > 1e-12:
         reasons.append(
             f"{residual_core:.2%} of core budget stayed unabsorbed after every core cap; "
@@ -1149,6 +1186,37 @@ def build_target_allocation(
                 name: (value if value is None else min(value, raw_risky_total if raw_risky_total > 0 else value))
                 for name, value in cap_candidates.items()
             },
+        }
+        # Phase D attribution: where every risky dollar went, and why every
+        # cash dollar is cash. The hierarchy block names the default-asset
+        # routing; the cash block splits final stable weight by cause so a
+        # high-cash book is explainable instead of just observed.
+        risk_engine_block["capital_hierarchy"] = {
+            "default_risky_asset": str(hierarchy.get("default_risky_asset", "")),
+            "btc_baseline_enabled": hierarchy_active,
+            "approved_risky_budget": risky_budget,
+            "used_risky_budget": raw_risky_total,
+            "unused_risky_budget": max(0.0, risky_budget - raw_risky_total),
+            "btc_residual_allocation": btc_residual_allocation,
+            "eth_alpha_tilt": core_weights.get("ETH", 0.0),
+            "satellite_alpha_tilt": sum(satellite_weights.values()),
+        }
+        final_stable = 1.0 - sum(final_risky.values())
+        scale_loss = max(0.0, raw_risky_total - final_risky_total)
+        volatility_cash = scale_loss if binding == "volatility_budget" else 0.0
+        emergency_cash = scale_loss if binding == "emergency_overlay" else 0.0
+        minimum_reserve = min(base_stable, final_stable)
+        no_alpha_cash = max(0.0, risky_budget - raw_risky_total)
+        named = minimum_reserve + volatility_cash + emergency_cash + no_alpha_cash
+        risk_engine_block["cash_attribution"] = {
+            # Execution-pending cash is unknowable at the allocation layer;
+            # the replay layer owns that category.
+            "MINIMUM_RESERVE_CASH": minimum_reserve,
+            "VOLATILITY_BUDGET_CASH": volatility_cash,
+            "EMERGENCY_CASH": emergency_cash,
+            "NO_ALPHA_CASH": no_alpha_cash,
+            "EXECUTION_PENDING_CASH": 0.0,
+            "UNALLOCATED_RESIDUAL": max(0.0, final_stable - named),
         }
         stable_target = 1.0 - sum(final_risky.values())
         for symbol, details in deployment_allowances.items():
