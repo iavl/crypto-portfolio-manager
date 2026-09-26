@@ -101,6 +101,7 @@ def v21_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
     # A: BTC volatility targeting only.
     data = _copy(base)
     data["universe"]["satellites"] = []
+    data["satellite_alpha"] = {}
     data["core_allocation"]["legacy_anchor"] = {"BTC": 1.0, "ETH": 0.0}
     data["risk_engine"]["regime_risk_scaling"] = {
         regime: {"target_volatility_multiplier": 1.0}
@@ -129,6 +130,9 @@ def v21_ablation_ladder(policy: Policy) -> list[dict[str, Any]]:
     data = _copy(ladder[-1]["policy"])
     data["universe"]["satellites"] = json.loads(json.dumps(
         policy.as_dict()["universe"]["satellites"]
+    ))
+    data["satellite_alpha"] = json.loads(json.dumps(
+        policy.as_dict()["satellite_alpha"]
     ))
     market_mirror = {"trend": 0.34, "relative_strength_btc": 0.33, "capital_flows": 0.33}
     for families in data["scoring_v3"]["families"].values():

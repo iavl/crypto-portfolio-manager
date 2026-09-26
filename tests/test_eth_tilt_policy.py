@@ -18,6 +18,9 @@ def _policy(**eth):
     data = json.loads(json.dumps(load_policy().as_dict()))
     data["risk_engine"]["mode"] = "volatility_budget"
     data["core_allocation"]["eth"].update(eth)
+    # V2.3 stress-loss budget disabled: this file pins its own mechanics
+    # in isolation; the combined caps are pinned in test_stress_cap_integration.
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     return policy_from_mapping(data)
 
 

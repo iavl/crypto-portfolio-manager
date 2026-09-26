@@ -170,16 +170,18 @@ def conviction_state(
     structural: Mapping[str, Any],
     evidence_class: str,
     hard_risk: bool,
-    entry_score: float,
+    market_entry_score: float,
+    structural_conviction_score: float,
 ) -> str:
     """Conviction state from the two families and the evidence contract.
 
-    ``HARD_EXIT`` (broken thesis / severe event / hard risk) and
-    ``NO_NEW_RISK`` (evidence not actionable) are gates; a strong normalized
-    market score with a usable normalized structural score is
-    ``FULL_CONVICTION``, a strong market score without usable structural
-    evidence is ``TACTICAL_ONLY``, and everything signal-poor is
-    ``WATCH_ONLY``.
+    Strategy V2.3 Phase 0 semantics: ``HARD_EXIT`` (broken thesis / severe
+    event / hard risk) and ``NO_NEW_RISK`` (evidence not actionable) are
+    gates. A strong normalized market score with a STRONG normalized
+    structural score (at or above its own threshold — availability alone is
+    not bullishness) is ``FULL_CONVICTION``; a strong market score with the
+    structural case missing, weak, or neutral is ``TACTICAL_ONLY``; a weak
+    market score is ``WATCH_ONLY`` regardless of structure.
     """
     if str(evidence_class) not in {"ACTIONABLE", "LIMITED", "NOT_ACTIONABLE"}:
         raise ValueError("evidence_class is unsupported")
@@ -189,12 +191,17 @@ def conviction_state(
         return "NO_NEW_RISK"
     market_normalized = market.get("normalized_score")
     market_strong = (
-        market_normalized is not None and float(market_normalized) >= float(entry_score)
+        market_normalized is not None and float(market_normalized) >= float(market_entry_score)
     )
-    structural_usable = bool(structural.get("available"))
-    if market_strong:
-        return "FULL_CONVICTION" if structural_usable else "TACTICAL_ONLY"
-    return "WATCH_ONLY"
+    if not market_strong:
+        return "WATCH_ONLY"
+    structural_normalized = structural.get("normalized_score")
+    structural_strong = (
+        bool(structural.get("available"))
+        and structural_normalized is not None
+        and float(structural_normalized) >= float(structural_conviction_score)
+    )
+    return "FULL_CONVICTION" if structural_strong else "TACTICAL_ONLY"
 
 
 def asset_conviction_state(
@@ -241,16 +248,23 @@ def asset_conviction_state(
     event_state = str(event_risk or "NORMAL").strip().upper()
     thesis_broken = bool(field("thesis_broken", False))
     hard_risk = event_state in {"SEVERE", "CRITICAL"} or thesis_broken
-    entry_score = float(resolved.allocation["satellite_entry_score"])
+    conviction_thresholds = (
+        (resolved.scoring_v3 or {}).get("conviction")
+        if isinstance(resolved.scoring_v3, Mapping) else None
+    ) or {}
+    market_entry_score = float(conviction_thresholds["market_entry_threshold"])
+    structural_conviction_score = float(conviction_thresholds["structural_conviction_threshold"])
     state = conviction_state(
         market=families["market"],
         structural=families["structural"],
         evidence_class=contract["evidence_class"],
         hard_risk=hard_risk,
-        entry_score=entry_score,
+        market_entry_score=market_entry_score,
+        structural_conviction_score=structural_conviction_score,
     )
     normalized = field("normalized_score")
     weighted = field("weighted_score")
+    structural_normalized = families["structural"]["normalized_score"]
     return {
         "conviction_state": state,
         "market_score": families["market"]["score"],
@@ -258,7 +272,14 @@ def asset_conviction_state(
         "normalized_market_score": families["market"]["normalized_score"],
         "structural_score": families["structural"]["score"],
         "structural_coverage": families["structural"]["coverage"],
-        "normalized_structural_score": families["structural"]["normalized_score"],
+        "normalized_structural_score": structural_normalized,
+        # V2.3 Phase 0: structural strength is its own condition — structural
+        # availability is never read as structural bullishness.
+        "structural_strong": (
+            families["structural"]["available"]
+            and structural_normalized is not None
+            and float(structural_normalized) >= structural_conviction_score
+        ),
         # Entry-critical evidence on the market side: a MISSING market factor
         # means the tactical case itself is unevidenced (fail-defensive
         # preserve), while MISSING structural factors only cap conviction.
@@ -269,7 +290,8 @@ def asset_conviction_state(
         "factor_detail_present": factor_detail_present,
         "evidence_class": contract["evidence_class"],
         "comparison_score_space": comparison_score_space(normalized, weighted),
-        "entry_score": entry_score,
+        "market_entry_score": market_entry_score,
+        "structural_conviction_score": structural_conviction_score,
     }
 
 

@@ -19,6 +19,9 @@ def _policy(**core):
     data = json.loads(json.dumps(load_policy().as_dict()))
     data["risk_engine"]["mode"] = "volatility_budget"
     data["core_allocation"]["mode"] = "btc_baseline_with_active_tilts"
+    # V2.3 stress-loss budget disabled: this file pins its own mechanics
+    # in isolation; the combined caps are pinned in test_stress_cap_integration.
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     for key, value in core.items():
         if key == "eth":
             data["core_allocation"]["eth"].update(value)
@@ -94,6 +97,9 @@ class CoreResidualRoutingTests(unittest.TestCase):
 
     def test_satellite_envelope_comes_out_of_unused_btc_budget_first(self):
         policy = _policy()
+        data = json.loads(json.dumps(policy.as_dict()))
+        data["satellite_alpha"]["BNB"]["tilt_enabled"] = True
+        policy = policy_from_mapping(data)
         satellite = {
             "factor_scores": {
                 "trend": {"score": 85, "availability": "AVAILABLE", "reliability": 1.0},
@@ -107,23 +113,26 @@ class CoreResidualRoutingTests(unittest.TestCase):
             "critical_data_complete": True, "score_coverage": 1.0,
             "relative_strength_vs_btc": "OUTPERFORM",
         }
+        # Strategy V2.3: the satellite deploys through its admitted
+        # BTC-relative alpha tilt, not the generic composite score.
         result = build_target_allocation(
             policy=policy, regime="NORMAL",
-            assessments={"BTC": _BTC_STRONG, "ETH": _ETH_ELIGIBLE, "SOL": satellite},
+            assessments={"BTC": _BTC_STRONG, "ETH": _ETH_ELIGIBLE, "BNB": satellite},
             current_weights={"USDT": 1.0},
             risk_inputs=PortfolioRiskInputs(
-                asset_volatility={"BTC": 0.10, "ETH": 0.12, "SOL": 0.15},
+                asset_volatility={"BTC": 0.10, "ETH": 0.12, "BNB": 0.15},
                 correlations={
-                    "BTC": {"ETH": 0.3, "SOL": 0.3},
-                    "ETH": {"BTC": 0.3, "SOL": 0.3},
-                    "SOL": {"BTC": 0.3, "ETH": 0.3},
+                    "BTC": {"ETH": 0.3, "BNB": 0.3},
+                    "ETH": {"BTC": 0.3, "BNB": 0.3},
+                    "BNB": {"BTC": 0.3, "ETH": 0.3},
                 },
             ),
+            satellite_alpha_states={"BNB": "BNB_ALPHA_POSITIVE"},
         )
         # The satellite deploys risk the capped BTC baseline could not use:
         # BTC stays at its cap and the no-alpha cash category shrinks.
         self.assertAlmostEqual(result.target_weights["BTC"], 0.50)
-        self.assertGreater(result.target_weights.get("SOL", 0.0), 0.0)
+        self.assertGreater(result.target_weights.get("BNB", 0.0), 0.0)
         self.assertLess(
             result.risk_engine["cash_attribution"]["NO_ALPHA_CASH"], 0.35 - 1e-9,
         )

@@ -150,6 +150,10 @@
       "enabled": true,
       "recovery_reviews": 5,
       "recovery_risky_floor": 0.25
+    },
+    "drawdown_budget_mode": "HARD_TARGET",
+    "stress_loss_budget": {
+      "enabled": true
     }
   },
   "chain_liveness": {
@@ -362,7 +366,8 @@
         "NEUTRAL": 0.25,
         "WEAK": 1.0
       }
-    }
+    },
+    "excluded_domains": []
   },
   "regime_transitions": {
     "enabled": true,
@@ -453,6 +458,26 @@
   "capital_hierarchy": {
     "default_risky_asset": "BTC",
     "btc_baseline_enabled": true
+  },
+  "satellite_alpha": {
+    "BNB": {
+      "mode": "alpha_admitted",
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.1,
+      "admitted_signals": []
+    },
+    "SOL": {
+      "mode": "research_only",
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.1,
+      "admitted_signals": []
+    },
+    "AAVE": {
+      "mode": "alpha_admitted",
+      "tilt_enabled": false,
+      "tilt_fraction_positive": 0.1,
+      "admitted_signals": []
+    }
   },
   "volume_profile": {
     "enabled": true,
@@ -820,6 +845,10 @@
     "provisional_cap": 0.79
   },
   "scoring_v3": {
+    "conviction": {
+      "market_entry_threshold": 67,
+      "structural_conviction_threshold": 67
+    },
     "families": {
       "default": {
         "market": {

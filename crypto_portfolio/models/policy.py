@@ -75,12 +75,15 @@ _TOP_LEVEL_FIELDS = {
     "scoring_families",
     "scoring_v3",
     "capital_hierarchy",
+    "satellite_alpha",
 }
 _CAPITAL_HIERARCHY_FIELDS = {"default_risky_asset", "btc_baseline_enabled"}
+_SATELLITE_ALPHA_FIELDS = {"mode", "tilt_enabled", "tilt_fraction_positive", "admitted_signals"}
+_SATELLITE_ALPHA_MODES = {"alpha_admitted", "research_only"}
 _SCORING_V3_FAMILY_NAMES = ("market", "structural")
 _EVIDENCE_CLASSES = ("ACTIONABLE", "LIMITED", "NOT_ACTIONABLE")
 _REGIME_TRANSITION_FIELDS = {"enabled", "max_notches_per_review"}
-_REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity"}
+_REGIME_MODEL_FIELDS = {"mode", "normal_max", "defensive_max", "domain_weights", "severity", "excluded_domains"}
 _REGIME_MODEL_MODES = {"vote_count", "weighted"}
 _REGIME_MODEL_DOMAINS = ("trend", "volatility", "flows", "breadth")
 _REGIME_SEVERITY_STATES = {
@@ -103,6 +106,8 @@ _DEFAULT_REGIME_MODEL: dict[str, Any] = {
 }
 _UNIVERSE_FIELDS = {"core", "satellites", "stable", "excluded"}
 _RISK_FIELDS = {"min_stablecoin_weight", "max_portfolio_drawdown", "drawdown_budget_overlay"}
+_DRAWDOWN_BUDGET_MODES = {"HARD_TARGET", "WARNING_BAND"}
+_STRESS_LOSS_BUDGET_FIELDS = {"enabled"}
 # Canonical multi-scenario stress framework. Scenario returns are mechanism
 # placeholders pending Strategy V2 Phase 6 walk-forward calibration; only
 # ``moderate`` preserves the Strategy V1 single-scenario values exactly.
@@ -677,6 +682,105 @@ def _parse_capital_hierarchy(value: Any) -> dict[str, Any]:
     return {"default_risky_asset": "BTC", "btc_baseline_enabled": enabled}
 
 
+def _parse_satellite_alpha(
+    value: Any,
+    satellites: tuple[str, ...],
+) -> dict[str, dict[str, Any]]:
+    """Strategy V2.3 Phase 1: per-satellite BTC-relative alpha authority.
+
+    Every satellite must declare its alpha mode explicitly:
+    ``alpha_admitted`` assets may earn the preregistered tilt once
+    ``tilt_enabled`` unlocks and their asset-specific ensemble is POSITIVE;
+    ``research_only`` assets (SOL until its BTC-relative case passes
+    admission) can never earn production authority. Signal names are
+    syntactically validated here; membership in an asset's preregistered
+    signal set is validated by the engine module that consumes them.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("satellite_alpha must be an object keyed by satellite symbol")
+    known = set(satellites)
+    unknown = sorted(set(value) - known)
+    if unknown:
+        raise PolicyError(
+            "satellite_alpha names assets outside the satellite universe: "
+            + ", ".join(unknown)
+        )
+    missing = sorted(known - set(value))
+    if missing:
+        raise PolicyError(
+            "satellite_alpha must classify every satellite: missing " + ", ".join(missing)
+        )
+    parsed: dict[str, dict[str, Any]] = {}
+    for raw_symbol, raw_entry in value.items():
+        symbol = str(raw_symbol).strip().upper()
+        entry = raw_entry
+        if not isinstance(entry, dict):
+            raise PolicyError(f"satellite_alpha.{symbol} must be an object")
+        _unknown_fields(entry, _SATELLITE_ALPHA_FIELDS, f"satellite_alpha.{symbol}")
+        if set(entry) != _SATELLITE_ALPHA_FIELDS:
+            raise PolicyError(f"satellite_alpha.{symbol} fields are incomplete")
+        mode = str(entry["mode"]).strip().lower()
+        if mode not in _SATELLITE_ALPHA_MODES:
+            raise PolicyError(
+                f"satellite_alpha.{symbol}.mode must be alpha_admitted or research_only"
+            )
+        tilt_enabled = entry["tilt_enabled"]
+        if not isinstance(tilt_enabled, bool):
+            raise PolicyError(f"satellite_alpha.{symbol}.tilt_enabled must be boolean")
+        tilt_fraction = _fraction(
+            entry["tilt_fraction_positive"],
+            f"satellite_alpha.{symbol}.tilt_fraction_positive",
+            exclusive_minimum=True,
+        )
+        raw_admitted = entry["admitted_signals"]
+        if not isinstance(raw_admitted, list):
+            raise PolicyError(f"satellite_alpha.{symbol}.admitted_signals must be a list")
+        admitted: list[str] = []
+        for item in raw_admitted:
+            name = str(item).strip().lower()
+            if not name or not all(
+                character.isalnum() or character == "_" for character in name
+            ):
+                raise PolicyError(
+                    f"satellite_alpha.{symbol}.admitted_signals entries must be "
+                    "snake_case signal identifiers"
+                )
+            admitted.append(name)
+        if len(admitted) != len(set(admitted)):
+            raise PolicyError(f"satellite_alpha.{symbol}.admitted_signals must not duplicate")
+        if mode == "research_only" and (tilt_enabled or admitted):
+            raise PolicyError(
+                f"satellite_alpha.{symbol} is research_only: tilt_enabled must be "
+                "false and admitted_signals empty"
+            )
+        parsed[symbol] = {
+            "mode": mode,
+            "tilt_enabled": tilt_enabled,
+            "tilt_fraction_positive": tilt_fraction,
+            "admitted_signals": tuple(admitted),
+        }
+    return parsed
+
+
+def _parse_stress_loss_budget(value: Any) -> dict[str, Any]:
+    """Parse the ``risk.stress_loss_budget`` switch (Strategy V2.3 Phase 3).
+
+    ``enabled`` alone: the budget VALUE comes from the drawdown-budget mode
+    (HARD_TARGET reuses max_portfolio_drawdown; WARNING_BAND uses the
+    human-decided hard_stress_loss_limit). The switch exists so ablation
+    rungs can isolate the stress layer; it never changes the budget's
+    meaning.
+    """
+    if not isinstance(value, dict):
+        raise PolicyError("risk.stress_loss_budget must be an object")
+    _unknown_fields(value, _STRESS_LOSS_BUDGET_FIELDS, "risk.stress_loss_budget")
+    if set(value) != _STRESS_LOSS_BUDGET_FIELDS:
+        raise PolicyError("risk.stress_loss_budget fields are incomplete")
+    if not isinstance(value["enabled"], bool):
+        raise PolicyError("risk.stress_loss_budget.enabled must be boolean")
+    return {"enabled": value["enabled"]}
+
+
 def _parse_risk_engine(value: Any) -> dict[str, Any]:
     """Parse the ``risk_engine`` block selecting the sizing mechanism.
 
@@ -995,6 +1099,34 @@ def _parse_scoring_v3_family_block(
     return parsed
 
 
+def _parse_scoring_v3_conviction(value: Any) -> dict[str, float]:
+    """Strategy V2.3 Phase 0 conviction thresholds.
+
+    FULL_CONVICTION requires BOTH families strong: the market family at or
+    above ``market_entry_threshold`` and the structural family at or above
+    ``structural_conviction_threshold`` (structural availability alone is not
+    bullishness). First round preregisters both at the existing satellite
+    entry threshold; they are not tuned.
+    """
+    if not isinstance(value, dict) or set(value) != {
+        "market_entry_threshold", "structural_conviction_threshold",
+    }:
+        raise PolicyError(
+            "scoring_v3.conviction must be an object with market_entry_threshold "
+            "and structural_conviction_threshold"
+        )
+    return {
+        "market_entry_threshold": _number(
+            value["market_entry_threshold"],
+            "scoring_v3.conviction.market_entry_threshold", minimum=0.0, maximum=100.0,
+        ),
+        "structural_conviction_threshold": _number(
+            value["structural_conviction_threshold"],
+            "scoring_v3.conviction.structural_conviction_threshold", minimum=0.0, maximum=100.0,
+        ),
+    }
+
+
 def _parse_scoring_v3(
     value: Any,
     profiles: Mapping[str, Mapping[str, float]],
@@ -1005,12 +1137,16 @@ def _parse_scoring_v3(
     whole profiles per asset symbol. Family weights are attribution-level
     only: the composite score keeps its canonical profile weights, and the
     families reuse the composite's reliability/coverage/normalization
-    semantics exactly.
+    semantics exactly. ``conviction`` carries the V2.3 Phase 0 dual-threshold
+    semantics for the conviction state.
     """
     if value is None:
         raise PolicyError("scoring_v3 is required")
-    if not isinstance(value, dict) or set(value) != {"families", "asset_families"}:
-        raise PolicyError("scoring_v3 must be an object with families and asset_families")
+    if not isinstance(value, dict) or set(value) != {"families", "asset_families", "conviction"}:
+        raise PolicyError(
+            "scoring_v3 must be an object with families, asset_families, and conviction"
+        )
+    conviction = _parse_scoring_v3_conviction(value["conviction"])
     raw_families = value["families"]
     if not isinstance(raw_families, dict) or not raw_families:
         raise PolicyError("scoring_v3.families must be a non-empty object")
@@ -1039,13 +1175,14 @@ def _parse_scoring_v3(
         asset_families[symbol] = _parse_scoring_v3_family_block(
             block, f"scoring_v3.asset_families.{symbol}"
         )
-    return {"families": families, "asset_families": asset_families}
+    return {"families": families, "asset_families": asset_families, "conviction": conviction}
 
 
 def _parse_regime_model(value: Any) -> dict[str, Any]:
     if value is None:
         return {**_DEFAULT_REGIME_MODEL, "domain_weights": dict(_DEFAULT_REGIME_MODEL["domain_weights"]),
-                "severity": {name: dict(states) for name, states in _DEFAULT_REGIME_MODEL["severity"].items()}}
+                "severity": {name: dict(states) for name, states in _DEFAULT_REGIME_MODEL["severity"].items()},
+                "excluded_domains": ()}
     if not isinstance(value, dict):
         raise PolicyError("regime_model must be an object")
     _unknown_fields(value, _REGIME_MODEL_FIELDS, "regime_model")
@@ -1069,6 +1206,27 @@ def _parse_regime_model(value: Any) -> dict[str, Any]:
     severity = value["severity"]
     if not isinstance(severity, dict) or set(severity) != set(_REGIME_MODEL_DOMAINS):
         raise PolicyError("regime_model.severity must contain exactly " + ", ".join(_REGIME_MODEL_DOMAINS))
+    # Strategy V2.3 Phase 2: authority ownership declaration. Excluded
+    # ordinary domains contribute no severity and cast no risk vote (the
+    # volatility-budget engine owns that risk instead); domain weights and
+    # score thresholds stay untouched, so this never re-tunes the model.
+    # Severe systemic events and the drawdown floors live outside the four
+    # ordinary domains and can never be excluded.
+    raw_excluded = value["excluded_domains"]
+    if not isinstance(raw_excluded, list):
+        raise PolicyError("regime_model.excluded_domains must be a list")
+    excluded: list[str] = []
+    for item in raw_excluded:
+        domain = str(item).strip().lower()
+        if domain not in _REGIME_MODEL_DOMAINS:
+            raise PolicyError(
+                "regime_model.excluded_domains entries must be ordinary domains: "
+                + ", ".join(_REGIME_MODEL_DOMAINS)
+            )
+        excluded.append(domain)
+    if len(excluded) != len(set(excluded)):
+        raise PolicyError("regime_model.excluded_domains must not duplicate")
+    parsed["excluded_domains"] = tuple(excluded)
     parsed_severity: dict[str, dict[str, float]] = {}
     for name in _REGIME_MODEL_DOMAINS:
         states = severity[name]
@@ -1230,9 +1388,13 @@ class Policy:
     regime_transitions: Mapping[str, Any] = dataclass_field(default_factory=dict)
     regime_model: Mapping[str, Any] = dataclass_field(default_factory=dict)
     drawdown_budget_overlay: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    drawdown_budget_mode: str = "HARD_TARGET"
+    stress_loss_budget: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    hard_stress_loss_limit: float | None = None
     scoring_families: Mapping[str, Mapping[str, Mapping[str, Any]]] = dataclass_field(default_factory=dict)
     scoring_v3: Mapping[str, Any] = dataclass_field(default_factory=dict)
     capital_hierarchy: Mapping[str, Any] = dataclass_field(default_factory=dict)
+    satellite_alpha: Mapping[str, Mapping[str, Any]] = dataclass_field(default_factory=dict)
 
     def scoring_profile_name(self, symbol: str) -> str:
         if not isinstance(symbol, str) or not symbol.strip():
@@ -1290,6 +1452,12 @@ class Policy:
                 "min_stablecoin_weight": self.min_stablecoin_weight,
                 "max_portfolio_drawdown": self.max_portfolio_drawdown,
                 "drawdown_budget_overlay": _copy_mapping(self.drawdown_budget_overlay),
+                "drawdown_budget_mode": self.drawdown_budget_mode,
+                "stress_loss_budget": _copy_mapping(self.stress_loss_budget),
+                **(
+                    {"hard_stress_loss_limit": self.hard_stress_loss_limit}
+                    if self.hard_stress_loss_limit is not None else {}
+                ),
             },
             "benchmarks": {name: dict(weights) for name, weights in self.benchmarks.items()},
             "rebalance": _copy_mapping(self.rebalance),
@@ -1362,6 +1530,10 @@ class Policy:
         result["scoring_families"] = _copy_mapping(self.scoring_families)
         result["scoring_v3"] = _copy_mapping(self.scoring_v3)
         result["capital_hierarchy"] = _copy_mapping(self.capital_hierarchy)
+        result["satellite_alpha"] = {
+            symbol: {**entry, "admitted_signals": list(entry["admitted_signals"])}
+            for symbol, entry in self.satellite_alpha.items()
+        }
         return result
 
     def with_overrides(self, overrides: Mapping[str, Any] | None) -> "Policy":
@@ -2587,12 +2759,38 @@ def _parse_policy(
     risk = data["risk"]
     if not isinstance(risk, dict):
         raise PolicyError("risk must be an object")
-    _unknown_fields(risk, _RISK_FIELDS, "risk")
-    if set(risk) != _RISK_FIELDS:
+    _unknown_fields(risk, _RISK_FIELDS | {"drawdown_budget_mode", "stress_loss_budget", "hard_stress_loss_limit"}, "risk")
+    expected_risk = _RISK_FIELDS | {"drawdown_budget_mode", "stress_loss_budget"}
+    # Strategy V2.3 Phase 3: the drawdown budget gets an explicit policy
+    # semantic. HARD_TARGET makes max_portfolio_drawdown the stress-loss
+    # budget that binds ex-ante sizing; WARNING_BAND demotes it to a warning
+    # and REQUIRES a separate human-decided hard_stress_loss_limit.
+    drawdown_budget_mode = str(risk["drawdown_budget_mode"]).strip().upper()
+    if drawdown_budget_mode not in _DRAWDOWN_BUDGET_MODES:
         raise PolicyError(
-            "risk must contain min_stablecoin_weight, max_portfolio_drawdown, "
-            "and drawdown_budget_overlay"
+            "risk.drawdown_budget_mode must be HARD_TARGET or WARNING_BAND"
         )
+    if drawdown_budget_mode == "WARNING_BAND":
+        expected_risk.add("hard_stress_loss_limit")
+    if set(risk) != expected_risk:
+        raise PolicyError(
+            "risk fields do not match drawdown_budget_mode="
+            + drawdown_budget_mode
+        )
+    hard_stress_loss_limit = None
+    if drawdown_budget_mode == "WARNING_BAND":
+        hard_stress_loss_limit = _fraction(
+            risk["hard_stress_loss_limit"], "risk.hard_stress_loss_limit",
+            exclusive_minimum=True,
+        )
+        if hard_stress_loss_limit <= _fraction(
+            risk["max_portfolio_drawdown"], "risk.max_portfolio_drawdown"
+        ):
+            raise PolicyError(
+                "risk.hard_stress_loss_limit must exceed the warning-level "
+                "max_portfolio_drawdown, not restate it"
+            )
+    parsed_stress_loss_budget = _parse_stress_loss_budget(risk["stress_loss_budget"])
     parsed_overlay = _parse_drawdown_budget_overlay(risk["drawdown_budget_overlay"])
 
     benchmarks = data["benchmarks"]
@@ -2722,6 +2920,9 @@ def _parse_policy(
     parsed_scoring_families = _parse_scoring_families(data.get("scoring_families"), parsed_profiles)
     parsed_scoring_v3 = _parse_scoring_v3(data.get("scoring_v3"), parsed_profiles)
     parsed_capital_hierarchy = _parse_capital_hierarchy(data.get("capital_hierarchy"))
+    parsed_satellite_alpha = _parse_satellite_alpha(
+        data.get("satellite_alpha"), satellites
+    )
     parsed_asset_profiles = _parse_asset_scoring_profiles(
         data.get("asset_scoring_profiles"), parsed_profiles
     )
@@ -2973,9 +3174,13 @@ def _parse_policy(
         regime_transitions=parsed_regime_transitions,
         regime_model=parsed_regime_model,
         drawdown_budget_overlay=parsed_overlay,
+        drawdown_budget_mode=drawdown_budget_mode,
+        stress_loss_budget=parsed_stress_loss_budget,
+        hard_stress_loss_limit=hard_stress_loss_limit,
         scoring_families=parsed_scoring_families,
         scoring_v3=parsed_scoring_v3,
         capital_hierarchy=parsed_capital_hierarchy,
+        satellite_alpha=parsed_satellite_alpha,
     )
     return policy
 

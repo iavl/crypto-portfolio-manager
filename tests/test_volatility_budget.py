@@ -25,11 +25,22 @@ def _vol_policy(mode: str = "volatility_budget", **overrides):
     engine = data["risk_engine"]
     engine["mode"] = mode
     # These tests document the frozen V2.1 anchor-core mechanics; the
-    # canonical V2.2 btc-baseline core has its own test files.
+    # canonical V2.2 btc-baseline core has its own test files. The V2.3
+    # stress-loss budget is disabled here so the volatility-budget scaling
+    # mechanics stay isolated (its own test files pin the combined caps).
     data["core_allocation"]["mode"] = "legacy_anchor"
+    data["risk"]["stress_loss_budget"]["enabled"] = False
     for key, value in overrides.items():
         if key in engine["portfolio_risk"]:
             engine["portfolio_risk"][key] = value
+    return policy_from_mapping(data)
+
+
+def _vol_policy_with_bnb_tilt():
+    data = json.loads(json.dumps(load_policy().as_dict()))
+    data["risk_engine"]["mode"] = "volatility_budget"
+    data["core_allocation"]["mode"] = "btc_baseline_with_active_tilts"
+    data["satellite_alpha"]["BNB"]["tilt_enabled"] = True
     return policy_from_mapping(data)
 
 
@@ -179,15 +190,17 @@ class RiskEngineModeTests(unittest.TestCase):
         self.assertLess(budget_risky, legacy_risky)
 
     def test_missing_covariance_for_allocated_asset_fails_closed(self):
-        policy = _vol_policy()
-        # SOL is satellite-eligible on a strong score but has no covariance row.
+        # Strategy V2.3: only an ADMITTED positive alpha creates the satellite
+        # position, so the fail-closed covariance contract is exercised with
+        # the tilt unlocked and the ensemble POSITIVE.
+        policy = _vol_policy_with_bnb_tilt()
         assessments = {
             "BTC": {"weighted_score": 70, "normalized_score": 70, "confidence": "HIGH"},
             "ETH": {
                 "weighted_score": 60, "normalized_score": 60, "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             },
-            "SOL": {
+            "BNB": {
                 "weighted_score": 90, "normalized_score": 90, "confidence": "HIGH",
                 "relative_strength_vs_btc": "OUTPERFORM",
             },
@@ -196,6 +209,7 @@ class RiskEngineModeTests(unittest.TestCase):
             build_target_allocation(
                 policy=policy, regime="NORMAL", assessments=assessments,
                 risk_inputs=_synthetic_inputs(),
+                satellite_alpha_states={"BNB": "BNB_ALPHA_POSITIVE"},
             )
 
     def test_volatility_mode_passes_the_risk_gate(self):
